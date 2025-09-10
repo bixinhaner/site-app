@@ -1,20 +1,19 @@
 # 站点信息管理系统
 
-现代化的通信站点信息管理解决方案，基于 UniApp + Python FastAPI 架构开发。
+现代化的通信站点信息管理解决方案，基于 UniApp（移动端）+ Python FastAPI（后端）架构开发。
 
 ## 🏗️ 系统架构
 
-### 前端
-- **框架**: UniApp (Vue 3)
-- **状态管理**: Pinia
-- **UI设计**: 现代化橙色主题设计
-- **平台支持**: Android（当前版本）
+### 前端（UniApp 移动端）
+- 框架: UniApp (Vue 3)
+- 状态管理: Pinia
+- 平台: Android/H5（脚手架已包含 H5 构建脚本）
 
 ### 后端
-- **框架**: Python FastAPI
-- **数据库**: SQLite (开发环境) / MySQL (生产环境)
-- **认证**: JWT Token
-- **文档**: 自动生成 OpenAPI 文档
+- 框架: Python FastAPI
+- 数据库: SQLite（开发）/ 可扩展至 MySQL（生产）
+- 认证: JWT
+- 文档: OpenAPI（/docs, /redoc）
 
 ## 🚀 功能特性
 
@@ -51,8 +50,12 @@
 # 克隆项目
 cd site-app
 
-# 运行后端启动脚本
-python start_backend.py
+# 方式A：一键启动（推荐，自动创建 venv/安装依赖/初始化/启动）
+python3 start_backend.py
+
+# 方式B：手动启动（可控）
+python3 -m venv venv && ./venv/bin/pip install -r backend/requirements.txt
+cd backend && ../venv/bin/python -m uvicorn app.main:app --reload --port 8000
 ```
 
 启动脚本会自动：
@@ -63,16 +66,15 @@ python start_backend.py
 - 创建默认用户
 - 启动服务
 
-### 2. 配置前端
+### 2. 启动移动端（UniApp）
 
 ```bash
 # 进入UniApp项目目录
 cd uniapp-site-manager
-
-# 使用HBuilderX打开项目
-# 或者使用命令行构建
 npm install
-npm run dev
+# 需要 @dcloudio/uni-cli 或使用 HBuilderX
+npm run dev               # 本地调试（app-plus/h5）
+npm run build:h5:prod     # 构建 H5 产物
 ```
 
 ### 3. 默认账户
@@ -84,10 +86,10 @@ npm run dev
 - 密码: `admin123`
 - 角色: 系统管理员
 
-**普通用户账户**
-- 用户名: `test_user`
-- 密码: `user123`
-- 角色: 现场工程师
+**其他默认账户**（由 `start_backend.py` 初始化）
+- 检查员: `inspector` / `inspector123`
+- Tom（检查员）: `tom` / `tom123456`
+- 普通用户: `test_user` / `user123`
 
 ## 📖 API文档
 
@@ -107,7 +109,7 @@ npm run dev
 ## 🔧 配置说明
 
 ### 后端配置
-复制 `backend/.env.example` 为 `.env` 并根据需要修改配置：
+复制 `backend/.env.example` 为 `backend/.env` 并根据需要修改配置（执行 `python3 start_backend.py` 会在 backend 目录下自动创建 `.env` 和 `uploads/`）：
 
 ```env
 # 应用配置
@@ -123,7 +125,13 @@ MAX_FILE_SIZE=10485760
 ```
 
 ### 前端配置
-在 `uniapp-site-manager` 中配置后端API地址（stores中的各个文件）。
+在 `uniapp-site-manager/config/api.js` 或 `stores/*` 中配置后端 API 地址；开发环境默认指向 `http://localhost:8000`。
+
+### 测试与验证
+- 后端快捷测试脚本（需后端已运行）：
+  - `python backend/test_login.py`
+  - `python backend/test_task_api.py`
+  说明：仓库仅保留上述两个快速验证脚本，其它冗余测试脚本已移除。
 
 ## 📝 开发说明
 
@@ -131,28 +139,35 @@ MAX_FILE_SIZE=10485760
 
 ```
 site-app/
-├── backend/                 # 后端服务
+├── backend/                    # 后端服务（FastAPI）
 │   ├── app/
-│   │   ├── api/            # API路由
-│   │   ├── core/           # 核心配置
-│   │   ├── models/         # 数据模型
-│   │   └── schemas/        # 数据验证
-│   ├── requirements.txt    # Python依赖
-│   └── .env.example       # 环境配置示例
-├── uniapp-site-manager/    # 前端应用
-│   ├── pages/             # 页面文件
-│   ├── stores/            # 状态管理
-│   ├── static/            # 静态资源
-│   └── package.json       # 前端依赖
-├── start_backend.py       # 后端启动脚本
-└── README.md             # 项目说明
+│   │   ├── api/               # 路由：/api/auth, /api/tasks, /api/sites, ...
+│   │   ├── core/              # 配置/数据库/安全
+│   │   ├── models/            # ORM 模型
+│   │   └── schemas/           # Pydantic 模型
+│   ├── uploads/               # 运行期上传目录（自动创建）
+│   ├── requirements.txt       # Python 依赖
+│   ├── .env.example           # 环境配置示例
+│   └── test_*.py              # 快速验证脚本（仅保留 login/task_api）
+├── uniapp-site-manager/       # 移动端（UniApp）
+│   ├── pages/                 # 页面
+│   ├── stores/                # 状态管理
+│   ├── config/                # API/env 配置
+│   ├── manifest.json          # 应用清单
+│   └── package.json           # 前端依赖与脚本
+├── start_backend.py            # 一键启动后端
+└── README.md                   # 项目说明
 ```
 
 ### 开发流程
-1. 后端API开发 (FastAPI + SQLAlchemy)
-2. 前端页面开发 (UniApp + Vue 3)
-3. 状态管理 (Pinia)
-4. 接口联调和测试
+1. 后端 API 开发（FastAPI + SQLAlchemy）
+2. 移动端页面开发（UniApp + Vue 3 + Pinia）
+3. 接口联调与联测
+4. 验证用例与手工回归（见“测试与验证”）
+
+### 提交与协作
+- 建议使用 Conventional Commits：如 `feat(backend): ...`、`fix(uniapp): ...`
+- 发起 PR 时附带变更说明、动机、测试步骤与必要截图；涉及配置/命令变化时同步更新文档。
 
 ## 🔍 故障排除
 
@@ -165,7 +180,7 @@ site-app/
 
 **2. 前端无法连接后端**
 - 确认后端服务已启动
-- 检查API地址配置是否正确
+- 检查 API 地址配置是否正确（`uniapp-site-manager/config/api.js`）
 - 确认CORS配置
 
 **3. 数据库连接问题**
@@ -174,7 +189,7 @@ site-app/
 
 ## 📄 许可证
 
-本项目仅供学习和开发使用。
+本项目仅供学习和开发使用。请勿提交敏感信息（密钥、生产库地址等），避免提交本地数据库文件（如 `*.db`）。
 
 ## 👥 贡献
 
