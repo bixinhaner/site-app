@@ -1,0 +1,183 @@
+{
+	"pages": [
+		{
+			"path": "pages/login/login",
+			"style": {
+				"navigationBarTitleText": "登录",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/home/home",
+			"style": {
+				"navigationBarTitleText": "首页",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/site/list",
+			"style": {
+				"navigationBarTitleText": "站点列表",
+				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/site/detail",
+			"style": {
+				"navigationBarTitleText": "站点详情",
+				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/inspection/list",
+			"style": {
+				"navigationBarTitleText": "现场检查",
+				"navigationStyle": "custom",
+				"enablePullDownRefresh": true
+			}
+		},
+		{
+			"path": "pages/inspection/camera",
+			"style": {
+				"navigationBarTitleText": "拍照检查",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/inspection/checklist",
+			"style": {
+				"navigationBarTitleText": "检查清单",
+				"navigationBarBackgroundColor": "#667eea",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/inspection/detail",
+			"style": {
+				"navigationBarTitleText": "检查详情",
+				"navigationBarBackgroundColor": "#667eea",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/inspection/review",
+			"style": {
+				"navigationBarTitleText": "检查审核",
+				"navigationBarBackgroundColor": "#667eea",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/inspection/site-select",
+			"style": {
+				"navigationBarTitleText": "选择站点",
+				"navigationBarBackgroundColor": "#667eea",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/profile/profile",
+			"style": {
+				"navigationBarTitleText": "个人中心",
+				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/task/list",
+			"style": {
+				"navigationBarTitleText": "任务管理",
+				"navigationStyle": "custom",
+				"enablePullDownRefresh": true
+			}
+		},
+		{
+			"path": "pages/task/assign",
+			"style": {
+				"navigationBarTitleText": "任务分配",
+				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/task/review",
+			"style": {
+				"navigationBarTitleText": "任务审核",
+				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/task/detail",
+			"style": {
+				"navigationBarTitleText": "任务详情",
+				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/stock/scan-pickup",
+			"style": {
+				"navigationBarTitleText": "扫码领料",
+				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarTextStyle": "white"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "站点管理",
+		"navigationBarBackgroundColor": "#F8F8F8",
+		"backgroundColor": "#F8F8F8"
+	},
+	"tabBar": {
+		"color": "#7A7E83",
+		"selectedColor": "#f97316",
+		"borderStyle": "black",
+		"backgroundColor": "#ffffff",
+		"list": [
+			{
+				"pagePath": "pages/home/home",
+				"iconPath": "static/icons/home.png",
+				"selectedIconPath": "static/icons/home-active.png",
+				"text": "首页"
+			},
+			{
+				"pagePath": "pages/site/list",
+				"iconPath": "static/icons/site.png",
+				"selectedIconPath": "static/icons/site-active.png",
+				"text": "站点"
+			},
+			{
+				"pagePath": "pages/inspection/list",
+				"iconPath": "static/icons/inspection.png",
+				"selectedIconPath": "static/icons/inspection-active.png",
+				"text": "检查"
+			},
+			{
+				"pagePath": "pages/task/list",
+				"iconPath": "static/icons/task.png",
+				"selectedIconPath": "static/icons/task-active.png",
+				"text": "任务"
+			},
+			{
+				"pagePath": "pages/profile/profile",
+				"iconPath": "static/icons/profile.png",
+				"selectedIconPath": "static/icons/profile-active.png",
+				"text": "我的"
+			}
+		]
+	},
+	"condition": {
+		"current": 0,
+		"list": [
+			{
+				"name": "",
+				"path": "",
+				"query": ""
+			}
+		]
+	}
+}

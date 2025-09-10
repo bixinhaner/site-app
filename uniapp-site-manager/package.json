@@ -1,0 +1,33 @@
+{
+  "name": "uniapp-site-manager",
+  "version": "1.0.0",
+  "description": "站点信息管理APP",
+  "main": "main.js",
+  "scripts": {
+    "dev": "uni",
+    "build": "uni build",
+    "serve": "uni serve",
+    "build:dev": "node scripts/build.js --env development --platform app-plus",
+    "build:prod": "node scripts/build.js --env production --platform app-plus",
+    "build:h5:dev": "node scripts/build.js --env development --platform h5",
+    "build:h5:prod": "node scripts/build.js --env production --platform h5",
+    "build:mp:dev": "node scripts/build.js --env development --platform mp-weixin",
+    "build:mp:prod": "node scripts/build.js --env production --platform mp-weixin"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "^3.0.0-alpha-4020020240930001",
+    "@dcloudio/uni-components": "^1.4.20",
+    "@dcloudio/uni-ui": "^1.4.20",
+    "pinia": "^2.1.6",
+    "vue": "^3.2.45"
+  },
+  "devDependencies": {
+    "@dcloudio/uni-cli": "^3.0.0-alpha-4020020240930001",
+    "@dcloudio/vite-plugin-uni": "^3.0.0-alpha-4020020240930001",
+    "vite": "^4.4.9"
+  },
+  "browserslist": [
+    "Android >= 4.4",
+    "ios >= 9"
+  ]
+}

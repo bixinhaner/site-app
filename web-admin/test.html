@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>测试页面</title>
+</head>
+<body>
+  <h1 style="color: #f97316; text-align: center;">测试页面加载成功</h1>
+  <p style="text-align: center;">如果你能看到这个文字，说明静态页面可以正常加载</p>
+  
+  <script>
+    console.log('JavaScript运行正常')
+    alert('页面加载成功!')
+    
+    // 测试API连接
+    fetch('http://localhost:8000/health')
+      .then(response => response.json())
+      .then(data => {
+        console.log('后端连接成功:', data)
+        document.body.innerHTML += '<p style="text-align: center; color: green;">✅ 后端连接成功</p>'
+      })
+      .catch(error => {
+        console.error('后端连接失败:', error)
+        document.body.innerHTML += '<p style="text-align: center; color: red;">❌ 后端连接失败</p>'
+      })
+  </script>
+</body>
+</html>
