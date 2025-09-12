@@ -104,6 +104,10 @@
           <div><b>任务描述：</b></div>
           <div style="white-space: pre-wrap;">{{ currentTask.task_description || '-' }}</div>
         </div>
+        <el-divider />
+        <el-space>
+          <el-button type="primary" @click="duplicateCreate">复制创建</el-button>
+        </el-space>
       </div>
     </el-drawer>
 
@@ -258,8 +262,11 @@ const reload = async () => {
 
 const loadUsers = async () => {
   try {
-    const res = await apiClient.get('/api/users/', { params: { limit: 100 } })
+    const res = await apiClient.get('/api/users/', { params: { limit: 200 } })
     userOptions.value = res || []
+    if (engineerOptions) {
+      engineerOptions.value = userOptions.value.filter(u => u.role === 'inspector')
+    }
   } catch (e) {
     // 权限不足时忽略
   }
@@ -375,15 +382,7 @@ const loadSites = async () => {
     siteOptions.value = Array.isArray(res) ? res : []
   } catch (e) { /* ignore */ }
 }
-// 使用现有的 userOptions 过滤出工程师
-const userOptions = ref([])
-const loadUsers = async () => {
-  try {
-    const res = await apiClient.get('/api/users/', { params: { limit: 200 } })
-    userOptions.value = res || []
-    engineerOptions.value = userOptions.value.filter(u => u.role === 'inspector')
-  } catch (e) { /* ignore */ }
-}
+// 使用现有的 userOptions 过滤出工程师（由上方 loadUsers 统一设置）
 const openCreate = () => { createVisible.value = true; loadSites(); loadUsers() }
 const resetCreate = () => {
   createForm.value = { task_type: 'opening_inspection', priority: 'normal', site_id: null, assigned_to: null, task_title: '', task_description: '', due_date: '', estimated_duration: null }
@@ -415,6 +414,24 @@ const submitCreate = async () => {
   } finally {
     creating.value = false
   }
+}
+
+// 从详情复制创建
+const duplicateCreate = () => {
+  if (!currentTask.value) return
+  // 预填类型/站点/优先级/标题/分配给（可选）
+  createForm.value.task_type = currentTask.value.task_type || 'opening_inspection'
+  createForm.value.priority = currentTask.value.priority || 'normal'
+  createForm.value.site_id = currentTask.value.site_id || null
+  createForm.value.assigned_to = currentTask.value.assigned_to || null
+  createForm.value.task_title = `${currentTask.value.task_title || ''} - 复制`.trim()
+  createForm.value.task_description = currentTask.value.task_description || ''
+  createForm.value.due_date = currentTask.value.due_date || ''
+  createForm.value.estimated_duration = currentTask.value.estimated_duration || null
+  createVisible.value = true
+  // 确保下拉选项可用
+  loadSites()
+  loadUsers()
 }
 </script>
 
