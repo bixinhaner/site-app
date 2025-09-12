@@ -19,12 +19,23 @@ app = FastAPI(
 )
 
 # CORS 中间件
+# 注意：当 allow_credentials=True 时，不应使用通配符 "*"。为开发环境显式允许本地前端来源。
+default_dev_origins = [
+    "http://localhost:3030",
+    "http://127.0.0.1:3030",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+
+# 开发模式下简化为允许任意来源，且不携带凭据（前端使用Bearer Token）。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 开发环境允许所有来源
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
 # 静态文件服务

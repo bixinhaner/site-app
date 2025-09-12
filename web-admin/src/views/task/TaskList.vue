@@ -39,9 +39,36 @@
         <el-table-column prop="due_date" label="截止时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.due_date) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openReview(row)" v-if="['submitted','under_review'].includes(row.status)"><el-icon><Stamp /></el-icon>审核</el-button>
+            <!-- 管理端操作 -->
+            <el-button
+              v-if="(isAdmin || isManager) && ['submitted','under_review'].includes(row.status)"
+              link type="primary" size="small" @click="openReview(row)">
+              <el-icon><Stamp /></el-icon>审核
+            </el-button>
+            <el-button
+              v-if="(isAdmin) && ['pending','assigned','rejected'].includes(row.status)"
+              link type="danger" size="small" @click="deleteTask(row)">
+              <el-icon><Delete /></el-icon>删除
+            </el-button>
+
+            <!-- 执行端（被分配人）快捷状态变更 -->
+            <el-button v-if="isSelf(row) && row.status==='assigned'" link size="small" type="success" @click="changeStatus(row,'accepted')">
+              接受
+            </el-button>
+            <el-button v-if="isSelf(row) && row.status==='accepted'" link size="small" type="primary" @click="changeStatus(row,'in_progress')">
+              开始
+            </el-button>
+            <el-button v-if="isSelf(row) && row.status==='in_progress'" link size="small" type="warning" @click="submitWithComments(row)">
+              提交
+            </el-button>
+            <el-button v-if="isSelf(row) && row.status==='approved'" link size="small" type="success" @click="changeStatus(row,'completed')">
+              标记完成
+            </el-button>
+
+            <!-- 通用：详情 -->
+            <el-button link size="small" @click="openDetails(row)"><el-icon><View /></el-icon>详情</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -64,7 +91,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import apiClient from '../../api/auth'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../../stores/user'
 
@@ -101,7 +128,7 @@ const taskTypes = [
   { label: 'GPS问题', value: 'gps_issue' },
   { label: '信号问题', value: 'signal_issue' }
 ]
-const priorities = [
+  const priorities = [
   { label: '低', value: 'low' },
   { label: '普通', value: 'normal' },
   { label: '高', value: 'high' },
@@ -128,8 +155,17 @@ const reload = async () => {
     tasks.value = Array.isArray(res) ? res : []
     total.value = (currentPage.value - 1) * pageSize.value + tasks.value.length + (tasks.value.length === pageSize.value ? pageSize.value : 0)
   } catch (e) {
-    console.error(e)
-    ElMessage.error('加载任务失败')
+    console.error('加载任务失败:', e?.response?.data || e?.message || e)
+    // 回退：去除所有筛选重试一次，最大限度保证页面可用
+    try {
+      const res2 = await apiClient.get('/api/tasks/', { params: { skip: (currentPage.value - 1) * pageSize.value, limit: pageSize.value } })
+      tasks.value = Array.isArray(res2) ? res2 : []
+      total.value = (currentPage.value - 1) * pageSize.value + tasks.value.length + (tasks.value.length === pageSize.value ? pageSize.value : 0)
+      ElMessage.warning(e?.response?.data?.detail || '筛选条件不被后端接受，已回退为基础列表')
+    } catch (e2) {
+      console.error('回退请求仍失败:', e2?.response?.data || e2?.message || e2)
+      ElMessage.error(e?.response?.data?.detail || '加载任务失败')
+    }
   } finally {
     loading.value = false
   }
@@ -167,6 +203,63 @@ onMounted(() => {
   reload()
   loadUsers()
 })
+
+// 角色判断
+const isAdmin = computed(() => userStore.user?.role === 'admin')
+const isManager = computed(() => userStore.user?.role === 'manager')
+const isInspector = computed(() => userStore.user?.role === 'inspector')
+const isSelf = (row) => userStore.user && row.assigned_to === userStore.user.id
+
+// 详情抽屉
+const detailsVisible = ref(false)
+const currentTask = ref(null)
+const openDetails = async (row) => {
+  try {
+    currentTask.value = await apiClient.get(`/api/tasks/${row.id}`)
+    detailsVisible.value = true
+  } catch (e) {
+    ElMessage.error('加载任务详情失败')
+  }
+}
+
+// 快捷状态变更
+const changeStatus = async (row, newStatus, comments) => {
+  try {
+    await apiClient.post(`/api/tasks/${row.id}/status`, { status: newStatus, comments })
+    ElMessage.success('状态已更新')
+    await reload()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '状态更新失败')
+  }
+}
+
+// 提交时可附备注
+const submitWithComments = async (row) => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入提交备注（可选）', '提交任务', {
+      confirmButtonText: '提交',
+      cancelButtonText: '取消',
+      inputPlaceholder: '本次提交说明...'
+    })
+    await changeStatus(row, 'submitted', value)
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('提交已取消或失败')
+  }
+}
+
+// 删除任务（仅管理员）
+const deleteTask = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确定删除任务“${row.task_title}”吗？`, '删除任务', {
+      type: 'warning'
+    })
+    await apiClient.delete(`/api/tasks/${row.id}`)
+    ElMessage.success('已删除')
+    await reload()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e?.response?.data?.detail || '删除失败')
+  }
+}
 </script>
 
 <style scoped>
@@ -175,3 +268,24 @@ onMounted(() => {
 .header-actions { display:flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pagination { margin-top: 12px; display:flex; justify-content: flex-end; }
 </style>
+
+<template>
+  <el-drawer v-model="detailsVisible" title="任务详情" size="50%">
+    <div v-if="currentTask">
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="标题">{{ currentTask.task_title }}</el-descriptions-item>
+        <el-descriptions-item label="类型">{{ typeText(currentTask.task_type) }}</el-descriptions-item>
+        <el-descriptions-item label="站点">{{ currentTask.site_name }} ({{ currentTask.site_code }})</el-descriptions-item>
+        <el-descriptions-item label="分配给">{{ currentTask.assignee_name }}</el-descriptions-item>
+        <el-descriptions-item label="优先级">{{ priorityText(currentTask.priority) }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ statusText(currentTask.status) }}</el-descriptions-item>
+        <el-descriptions-item label="分配时间">{{ formatDateTime(currentTask.assigned_at) }}</el-descriptions-item>
+        <el-descriptions-item label="截止时间">{{ formatDateTime(currentTask.due_date) }}</el-descriptions-item>
+      </el-descriptions>
+      <div style="margin-top: 12px;">
+        <div><b>任务描述：</b></div>
+        <div style="white-space: pre-wrap;">{{ currentTask.task_description || '-' }}</div>
+      </div>
+    </div>
+  </el-drawer>
+</template>
