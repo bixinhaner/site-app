@@ -70,6 +70,10 @@
 
             <!-- 通用：详情 -->
             <el-button link size="small" @click="openDetails(row)"><el-icon><View /></el-icon>详情</el-button>
+            <!-- 管理端：复制创建 -->
+            <el-button v-if="(isAdmin || isManager)" link size="small" type="primary" @click="duplicateCreateFrom(row)">
+              复制创建
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -430,6 +434,22 @@ const duplicateCreate = () => {
   createForm.value.estimated_duration = currentTask.value.estimated_duration || null
   createVisible.value = true
   // 确保下拉选项可用
+  loadSites()
+  loadUsers()
+}
+
+// 从列表行复制创建
+const duplicateCreateFrom = (row) => {
+  if (!row) return
+  createForm.value.task_type = row.task_type || 'opening_inspection'
+  createForm.value.priority = row.priority || 'normal'
+  createForm.value.site_id = row.site_id || null
+  createForm.value.assigned_to = row.assigned_to || null
+  createForm.value.task_title = `${row.task_title || ''} - 复制`.trim()
+  createForm.value.task_description = row.task_description || ''
+  createForm.value.due_date = row.due_date || ''
+  createForm.value.estimated_duration = row.estimated_duration || null
+  createVisible.value = true
   loadSites()
   loadUsers()
 }
