@@ -13,9 +13,7 @@ __pycache__/
 .env
 .env.*
 
-# Databases and uploads
-*.db
-backend/uploads/
+# Environment config
 backend/.env
 
 # Node
@@ -43,4 +41,3 @@ uniapp-site-manager/.env.local
 .vscode/
 .idea/
 .history/
-

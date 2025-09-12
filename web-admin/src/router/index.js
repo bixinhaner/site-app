@@ -51,6 +51,12 @@ const routes = [
         meta: { title: '出入库记录', icon: 'Document' }
       },
       {
+        path: 'import-history',
+        name: 'ImportHistory',
+        component: () => import('../views/stock/ImportHistory.vue'),
+        meta: { title: 'SN导入记录', icon: 'Tickets' }
+      },
+      {
         path: 'reports',
         name: 'Reports',
         component: () => import('../views/report/Reports.vue'),
