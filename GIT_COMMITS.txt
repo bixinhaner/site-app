@@ -1,0 +1,8 @@
+18cd044 | 2025-09-12 | Like |  (HEAD -> main) | feat(web-admin/sites): site list with filters, pagination and assign dialog; site detail with assign action
+4a17f76 | 2025-09-12 | Like |  | feat(web-admin): restructure nav to two-level; add skeleton pages for sites/tasks/inspections/warehouses/instances; group existing under Inventory
+4bd77c5 | 2025-09-12 | Like |  | feat(web-admin): add SN import history view and navigation
+1ac4b79 | 2025-09-10 | Like |  (origin/main) | docs: update README with setup, structure, quick tests, and defaults
+f85c552 | 2025-09-10 | Like |  | chore(backend): remove redundant test scripts; keep only quick tests
+9c40c53 | 2025-09-10 | cumtjiang |  | Delete daily_sales.py
+d2fd70d | 2025-09-10 | cumtjiang |  | Add files via upload
+13d52cb | 2025-09-10 | Like |  | chore: initial repository setup (docs, ignore, templates)
