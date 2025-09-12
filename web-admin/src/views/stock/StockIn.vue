@@ -636,7 +636,7 @@ const resetImport = () => {
 const viewImportDetails = () => {
   if (importResult.value?.import_record_id) {
     // 跳转到导入记录详情页，并携带importId
-    window.location.href = `/import-history?importId=${importResult.value.import_record_id}`
+    window.location.href = `/inventory/import-history?importId=${importResult.value.import_record_id}`
   } else {
     ElMessage.info('没有可查看的导入记录')
   }
