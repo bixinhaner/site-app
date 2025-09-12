@@ -19,6 +19,7 @@
         <el-date-picker v-model="dateRange" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" style="width: 260px" />
         <el-switch v-model="onlyMine" active-text="只看我的" />
         <el-button type="primary" @click="reload"><el-icon><Search /></el-icon>筛选</el-button>
+        <el-button v-if="isAdmin || isManager" type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新建任务</el-button>
       </div>
     </div>
 
@@ -85,6 +86,90 @@
         />
       </div>
     </el-card>
+
+    <!-- 任务详情抽屉 -->
+    <el-drawer v-model="detailsVisible" title="任务详情" size="50%">
+      <div v-if="currentTask">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="标题">{{ currentTask.task_title }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ typeText(currentTask.task_type) }}</el-descriptions-item>
+          <el-descriptions-item label="站点">{{ currentTask.site_name }} ({{ currentTask.site_code }})</el-descriptions-item>
+          <el-descriptions-item label="分配给">{{ currentTask.assignee_name }}</el-descriptions-item>
+          <el-descriptions-item label="优先级">{{ priorityText(currentTask.priority) }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ statusText(currentTask.status) }}</el-descriptions-item>
+          <el-descriptions-item label="分配时间">{{ formatDateTime(currentTask.assigned_at) }}</el-descriptions-item>
+          <el-descriptions-item label="截止时间">{{ formatDateTime(currentTask.due_date) }}</el-descriptions-item>
+        </el-descriptions>
+        <div style="margin-top: 12px;">
+          <div><b>任务描述：</b></div>
+          <div style="white-space: pre-wrap;">{{ currentTask.task_description || '-' }}</div>
+        </div>
+      </div>
+    </el-drawer>
+
+    <!-- 新建任务弹窗 -->
+    <el-dialog v-model="createVisible" title="新建任务" width="640px" @close="resetCreate">
+      <el-form :model="createForm" :rules="createRules" ref="createFormRef" label-width="100px">
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="任务类型" prop="task_type">
+              <el-select v-model="createForm.task_type" placeholder="选择类型">
+                <el-option v-for="t in taskTypes" :key="t.value" :label="t.label" :value="t.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="优先级" prop="priority">
+              <el-select v-model="createForm.priority">
+                <el-option v-for="p in priorities" :key="p.value" :label="p.label" :value="p.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="站点" prop="site_id">
+              <el-select v-model="createForm.site_id" filterable placeholder="选择站点" @visible-change="v=> v && loadSites()">
+                <el-option v-for="s in siteOptions" :key="s.id" :label="s.site_name" :value="s.id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="分配给" prop="assigned_to">
+              <el-select v-model="createForm.assigned_to" filterable placeholder="选择人员" @visible-change="v=> v && loadUsers()">
+                <el-option v-for="u in engineerOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item label="任务标题" prop="task_title">
+          <el-input v-model="createForm.task_title" placeholder="请输入任务标题" />
+        </el-form-item>
+
+        <el-form-item label="任务描述">
+          <el-input v-model="createForm.task_description" type="textarea" :rows="3" placeholder="描述任务内容..." />
+        </el-form-item>
+
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="截止时间">
+              <el-date-picker v-model="createForm.due_date" type="datetime" placeholder="选择截止时间" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="预计工期">
+              <el-input-number v-model="createForm.estimated_duration" :min="1" :max="240" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <template #footer>
+        <el-button @click="createVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -260,6 +345,77 @@ const deleteTask = async (row) => {
     if (e !== 'cancel') ElMessage.error(e?.response?.data?.detail || '删除失败')
   }
 }
+
+// 创建任务
+const createVisible = ref(false)
+const creating = ref(false)
+const createFormRef = ref()
+const createForm = ref({
+  task_type: 'opening_inspection',
+  priority: 'normal',
+  site_id: null,
+  assigned_to: null,
+  task_title: '',
+  task_description: '',
+  due_date: '',
+  estimated_duration: null
+})
+const createRules = {
+  task_type: [{ required: true, message: '请选择任务类型', trigger: 'change' }],
+  priority: [{ required: true, message: '请选择优先级', trigger: 'change' }],
+  site_id: [{ required: true, message: '请选择站点', trigger: 'change' }],
+  assigned_to: [{ required: true, message: '请选择人员', trigger: 'change' }],
+  task_title: [{ required: true, message: '请输入任务标题', trigger: 'blur' }]
+}
+const siteOptions = ref([])
+const engineerOptions = ref([])
+const loadSites = async () => {
+  try {
+    const res = await apiClient.get('/api/sites/', { params: { limit: 200 } })
+    siteOptions.value = Array.isArray(res) ? res : []
+  } catch (e) { /* ignore */ }
+}
+// 使用现有的 userOptions 过滤出工程师
+const userOptions = ref([])
+const loadUsers = async () => {
+  try {
+    const res = await apiClient.get('/api/users/', { params: { limit: 200 } })
+    userOptions.value = res || []
+    engineerOptions.value = userOptions.value.filter(u => u.role === 'inspector')
+  } catch (e) { /* ignore */ }
+}
+const openCreate = () => { createVisible.value = true; loadSites(); loadUsers() }
+const resetCreate = () => {
+  createForm.value = { task_type: 'opening_inspection', priority: 'normal', site_id: null, assigned_to: null, task_title: '', task_description: '', due_date: '', estimated_duration: null }
+  if (createFormRef.value) createFormRef.value.clearValidate()
+}
+const submitCreate = async () => {
+  try {
+    await createFormRef.value.validate()
+    creating.value = true
+    const payload = {
+      task_title: createForm.value.task_title,
+      task_type: createForm.value.task_type,
+      task_description: createForm.value.task_description || undefined,
+      priority: createForm.value.priority,
+      site_id: createForm.value.site_id,
+      assigned_to: createForm.value.assigned_to,
+      due_date: createForm.value.due_date ? new Date(createForm.value.due_date).toISOString() : undefined,
+      estimated_duration: createForm.value.estimated_duration || undefined
+    }
+    await apiClient.post('/api/tasks/', payload)
+    ElMessage.success('任务创建成功')
+    createVisible.value = false
+    resetCreate()
+    await reload()
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.response?.data?.detail || '创建失败，可能是权限不足或参数错误')
+    }
+  } finally {
+    creating.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -268,24 +424,3 @@ const deleteTask = async (row) => {
 .header-actions { display:flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pagination { margin-top: 12px; display:flex; justify-content: flex-end; }
 </style>
-
-<template>
-  <el-drawer v-model="detailsVisible" title="任务详情" size="50%">
-    <div v-if="currentTask">
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="标题">{{ currentTask.task_title }}</el-descriptions-item>
-        <el-descriptions-item label="类型">{{ typeText(currentTask.task_type) }}</el-descriptions-item>
-        <el-descriptions-item label="站点">{{ currentTask.site_name }} ({{ currentTask.site_code }})</el-descriptions-item>
-        <el-descriptions-item label="分配给">{{ currentTask.assignee_name }}</el-descriptions-item>
-        <el-descriptions-item label="优先级">{{ priorityText(currentTask.priority) }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ statusText(currentTask.status) }}</el-descriptions-item>
-        <el-descriptions-item label="分配时间">{{ formatDateTime(currentTask.assigned_at) }}</el-descriptions-item>
-        <el-descriptions-item label="截止时间">{{ formatDateTime(currentTask.due_date) }}</el-descriptions-item>
-      </el-descriptions>
-      <div style="margin-top: 12px;">
-        <div><b>任务描述：</b></div>
-        <div style="white-space: pre-wrap;">{{ currentTask.task_description || '-' }}</div>
-      </div>
-    </div>
-  </el-drawer>
-</template>
