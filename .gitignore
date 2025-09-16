@@ -41,3 +41,15 @@ uniapp-site-manager/.env.local
 .vscode/
 .idea/
 .history/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime uploads (keep placeholder)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# PID files
+*.pid
