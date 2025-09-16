@@ -35,6 +35,7 @@ class BaseStationStatusEnum(str, enum.Enum):
 
 class TaskTypeEnum(str, enum.Enum):
     OPENING_INSPECTION = "opening_inspection"        # 新站点设备安装任务
+    MAINTENANCE = "maintenance"                      # 维护任务
     POWER_ISSUE = "power_issue"                      # 断电问题
     TRANSMISSION_ISSUE = "transmission_issue"        # 传输问题
     GPS_ISSUE = "gps_issue"                          # GPS问题
@@ -52,19 +53,48 @@ class InspectionTemplate(Base):
     __tablename__ = "inspection_templates"
     
     id = Column(String(32), primary_key=True)
-    site_id = Column(Integer, ForeignKey("sites.id"), nullable=False)
     template_name = Column(String(100), nullable=False)
-    template_version = Column(String(20), default="1.0")
     template_data = Column(JSON, nullable=False)  # 存储完整的检查模板JSON
-    status = Column(Enum(InspectionStatusEnum), default=InspectionStatusEnum.DRAFT)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
     # 关系
-    site = relationship("Site")
     creator = relationship("User", foreign_keys=[created_by])
     inspections = relationship("SiteInspection", back_populates="template")
+    bindings = relationship("TemplateBinding", back_populates="template", cascade="all, delete-orphan")
+
+class TemplateBinding(Base):
+    """模板绑定表"""
+    __tablename__ = "template_bindings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(String(32), ForeignKey("inspection_templates.id"), nullable=False)
+    
+    # 条件维度字段（可空，多维组合）
+    site_id = Column(Integer, ForeignKey("sites.id"), nullable=True)
+    site_type = Column(String(50), nullable=True)  # macro, micro, indoor, etc.
+    task_type = Column(Enum(TaskTypeEnum), nullable=True)
+    region = Column(String(100), nullable=True)
+    customer = Column(String(100), nullable=True)
+    tags = Column(JSON, nullable=True)  # 数组[str]
+    
+    # 绑定配置
+    priority = Column(Integer, default=50)  # 数值越大优先级越高
+    active = Column(Boolean, default=True)
+    valid_from = Column(DateTime, nullable=True)
+    valid_to = Column(DateTime, nullable=True)
+    notes = Column(Text, nullable=True)
+    
+    # 系统字段
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    
+    # 关系
+    template = relationship("InspectionTemplate", back_populates="bindings")
+    site = relationship("Site", foreign_keys=[site_id])
+    creator = relationship("User", foreign_keys=[created_by])
 
 class SiteInspection(Base):
     """站点检查记录表"""

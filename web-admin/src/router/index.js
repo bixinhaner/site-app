@@ -108,7 +108,9 @@ const routes = [
         meta: { title: '检查管理', icon: 'Finished' },
         children: [
           { path: 'list', name: 'InspectionList', component: () => import('../views/inspection/InspectionList.vue'), meta: { title: '检查记录', icon: 'Finished' } },
-          { path: 'review', name: 'InspectionReview', component: () => import('../views/inspection/InspectionReview.vue'), meta: { title: '检查审核台', icon: 'Stamp' } }
+          { path: 'review', name: 'InspectionReview', component: () => import('../views/inspection/InspectionReview.vue'), meta: { title: '检查审核台', icon: 'Stamp' } },
+          { path: 'templates', name: 'InspectionTemplates', component: () => import('../views/inspection/TemplateManagement.vue'), meta: { title: '检查模板', icon: 'Document' } },
+          { path: 'templates/:id', name: 'TemplateEditor', component: () => import('../views/inspection/TemplateEditor.vue'), meta: { title: '模板编辑器', hidden: true } }
         ]
       },
       // 兼容旧路径的重定向

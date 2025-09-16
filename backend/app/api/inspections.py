@@ -30,6 +30,7 @@ from app.schemas.inspection_enhanced import (
 from app.api.auth import get_current_user
 from app.utils.file_handler import save_uploaded_file, generate_watermark
 from app.utils.gps_utils import reverse_geocode, validate_gps_accuracy
+from app.services.template_resolver import create_resolver, ResolveContext
 
 router = APIRouter()
 
@@ -159,7 +160,17 @@ async def create_inspection(
     current_user: User = Depends(get_current_user)
 ):
     """创建站点检查 - 统一接口"""
-    # 获取或创建检查模板
+    template = None
+    
+    # 获取站点信息用于解析上下文
+    site = db.query(Site).filter(Site.id == inspection_data.site_id).first()
+    if not site:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="站点不存在"
+        )
+    
+    # 获取或解析检查模板
     if inspection_data.template_id:
         # 使用指定的模板
         template = db.query(InspectionTemplate).filter(
@@ -172,8 +183,28 @@ async def create_inspection(
                 detail="检查模板不存在"
             )
     else:
-        # 自动创建默认模板
-        template = await create_default_template(db, inspection_data.site_id, inspection_data.inspection_type)
+        # 使用模板解析器自动匹配模板
+        resolver = create_resolver(db)
+        
+        # 创建解析上下文
+        resolve_context = ResolveContext(
+            site_id=inspection_data.site_id,
+            site_type=getattr(site, 'site_type', None),  # 如果站点有类型字段
+            task_id=inspection_data.task_id,
+            task_type=inspection_data.inspection_type,
+            region=getattr(site, 'region', None),  # 如果站点有区域字段
+            customer=getattr(site, 'customer', None),  # 如果站点有客户字段
+            tags=[]  # 可以根据需要添加标签
+        )
+        
+        # 解析最匹配的模板
+        match_result = resolver.resolve_template(resolve_context)
+        
+        if match_result:
+            template = match_result.template
+        else:
+            # 兜底：自动创建默认模板
+            template = await create_default_template(db, inspection_data.site_id, inspection_data.inspection_type)
     
     # 创建检查记录
     inspection = SiteInspection(
@@ -480,22 +511,8 @@ async def upload_inspection_photo(
     
     return photo
 
-@router.get("/templates", response_model=List[InspectionTemplateResponse])
-async def get_inspection_templates(
-    site_id: Optional[int] = None,
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """获取检查模板列表 - 统一接口"""
-    query = db.query(InspectionTemplate)
-    
-    if site_id:
-        query = query.filter(InspectionTemplate.site_id == site_id)
-    
-    templates = query.offset(skip).limit(limit).all()
-    return templates
+# Template endpoints moved to template_binding.py
+# Old template endpoint removed to avoid routing conflicts
 
 @router.get("/statistics/overview", response_model=InspectionStatistics)
 async def get_inspection_statistics(
