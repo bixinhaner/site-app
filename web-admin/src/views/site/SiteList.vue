@@ -13,6 +13,10 @@
         <el-select v-model="assigneeFilter" placeholder="指派给" clearable style="width: 200px" filterable @visible-change="v=> v && loadUsers()" @change="reload">
           <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
         </el-select>
+        <el-button v-if="canManagePlanning" type="success" @click="openBatchPlanning">
+          <el-icon><Operation /></el-icon>
+          规划批量导入
+        </el-button>
         <el-button type="primary" @click="reload">
           <el-icon><Search /></el-icon>
           筛选
@@ -41,6 +45,10 @@
             <el-button link type="primary" size="small" @click="viewDetail(row)">
               <el-icon><View /></el-icon>
               详情
+            </el-button>
+            <el-button link type="success" size="small" @click="viewPlanning(row)">
+              <el-icon><Operation /></el-icon>
+              规划
             </el-button>
             <el-button link type="success" size="small" @click="openAssign(row)">
               <el-icon><User /></el-icon>
@@ -88,6 +96,7 @@ import { useUserStore } from '../../stores/user'
 
 const router = useRouter()
 const userStore = useUserStore()
+const canManagePlanning = computed(() => ['admin', 'manager', 'planner'].includes(userStore.user?.role))
 const loading = ref(false)
 const sites = ref([])
 const total = ref(0)
@@ -128,6 +137,14 @@ const reload = async () => {
 
 const viewDetail = (row) => {
   router.push({ name: 'SiteDetail', params: { id: row.id } })
+}
+
+const viewPlanning = (row) => {
+  router.push({ name: 'SitePlanning', params: { id: row.id } })
+}
+
+const openBatchPlanning = () => {
+  router.push({ name: 'SitePlanningBatch' })
 }
 
 const openAssign = (row) => {

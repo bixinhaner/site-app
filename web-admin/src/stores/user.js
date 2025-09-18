@@ -8,12 +8,15 @@ export const useUserStore = defineStore('user', () => {
 
   const isLoggedIn = computed(() => !!token.value && !!user.value)
   const isAdmin = computed(() => user.value?.role === 'admin')
+  const isManager = computed(() => user.value?.role === 'manager')
+  const isPlanner = computed(() => user.value?.role === 'planner')
   const isWarehouseManager = computed(() => 
     user.value?.role === 'admin' || user.value?.role === 'warehouse_manager'
   )
   const canManageEquipment = computed(() => 
     user.value?.role === 'admin' || user.value?.role === 'warehouse_manager'
   )
+  const canManagePlanning = computed(() => ['admin', 'manager', 'planner'].includes(user.value?.role))
 
   // 登录
   async function login(credentials) {
@@ -67,8 +70,11 @@ export const useUserStore = defineStore('user', () => {
     token,
     isLoggedIn,
     isAdmin,
+    isManager,
+    isPlanner,
     isWarehouseManager,
     canManageEquipment,
+    canManagePlanning,
     login,
     logout,
     fetchUserInfo,

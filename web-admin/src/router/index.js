@@ -86,7 +86,9 @@ const routes = [
         meta: { title: '站点管理', icon: 'Location' },
         children: [
           { path: 'list', name: 'SiteList', component: () => import('../views/site/SiteList.vue'), meta: { title: '站点列表', icon: 'Location' } },
-          { path: 'detail/:id', name: 'SiteDetail', component: () => import('../views/site/SiteDetail.vue'), meta: { title: '站点详情', hidden: true } }
+          { path: 'detail/:id', name: 'SiteDetail', component: () => import('../views/site/SiteDetail.vue'), meta: { title: '站点详情', hidden: true } },
+          { path: 'planning/:id', name: 'SitePlanning', component: () => import('../views/site/SitePlanning.vue'), meta: { title: '站点规划', hidden: true } },
+          { path: 'planning-batch', name: 'SitePlanningBatch', component: () => import('../views/site/SitePlanningBatch.vue'), meta: { title: '规划批量导入', icon: 'Operation' } }
         ]
       },
       // 任务管理（二级菜单）

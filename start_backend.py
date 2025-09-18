@@ -133,12 +133,25 @@ if not admin_user:
     )
     db.add(user)
     
+    # 创建网络规划人员（planner）
+    planner = User(
+        username="planner",
+        email="planner@example.com",
+        full_name="网络规划人员",
+        hashed_password=get_password_hash("planner123"),
+        role="planner",
+        department="网络规划部",
+        position="网络规划人员"
+    )
+    db.add(planner)
+    
     db.commit()
     print("✅ 默认用户创建成功:")
     print("   管理员 - 用户名: admin, 密码: admin123")
     print("   检查员 - 用户名: inspector, 密码: inspector123")
     print("   Tom用户 - 用户名: tom, 密码: tom123456")
     print("   普通用户 - 用户名: test_user, 密码: user123")
+    print("   规划人员 - 用户名: planner, 密码: planner123")
 else:
     print("ℹ️ 管理员用户已存在")
 
