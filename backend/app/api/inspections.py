@@ -24,6 +24,7 @@ from app.schemas.inspection_enhanced import (
     InspectionCheckItemUpdate, InspectionCheckItemResponse,
     InspectionPhotoCreate, InspectionPhotoResponse,
     InspectionReviewRequest, InspectionAuditLogResponse,
+    CheckItemReviewRequest, PhotoReviewRequest, InspectionReviewSummary,
     OfflineInspectionDataCreate, InspectionStatistics,
     InspectionSummary, SiteInspectionProgress
 )
@@ -400,6 +401,21 @@ async def update_inspection(
     # 更新字段
     old_status = inspection.status
     update_fields = inspection_update.dict(exclude_unset=True)
+
+    # 轻量权限与合法迁移校验：通过/驳回必须走审核接口
+    if "status" in update_fields:
+        new_status = update_fields["status"]
+        if new_status in [InspectionStatusEnum.APPROVED, InspectionStatusEnum.REJECTED]:
+            if current_user.role not in ["admin", "manager", "reviewer"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="没有权限进行审核操作，请使用审核接口"
+                )
+            if old_status not in [InspectionStatusEnum.SUBMITTED, InspectionStatusEnum.UNDER_REVIEW]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="只能从已提交/审核中状态变更为通过/驳回"
+                )
     
     for field, value in update_fields.items():
         if field == "gps_info" and value:
@@ -779,3 +795,223 @@ async def reset_inspection_for_rejected_task(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"重置检查记录失败: {str(e)}"
         )
+
+@router.post("/detail/{inspection_id}/review")
+async def review_inspection(
+    inspection_id: str,
+    review: InspectionReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """检查审核：approve/reject，记录审核人与日志"""
+    # 权限：admin/manager/reviewer 才能审核
+    if current_user.role not in ["admin", "manager", "reviewer"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限执行检查审核")
+
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查记录不存在")
+
+    old_status = inspection.status
+    if old_status not in [InspectionStatusEnum.SUBMITTED, InspectionStatusEnum.UNDER_REVIEW]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"当前状态不允许审核：{old_status}")
+
+    try:
+        now = datetime.utcnow()
+        if review.action == "approve":
+            inspection.status = InspectionStatusEnum.APPROVED
+        else:
+            inspection.status = InspectionStatusEnum.REJECTED
+
+        # 回填审核信息
+        inspection.reviewed_by = current_user.id
+        inspection.reviewed_at = now
+        if review.comments:
+            inspection.review_comments = review.comments
+        if review.score is not None:
+            inspection.score = review.score
+
+        db.commit()
+        db.refresh(inspection)
+
+        # 审核日志
+        audit_log = InspectionAuditLog(
+            id=str(uuid.uuid4()),
+            inspection_id=inspection.id,
+            action="approve" if review.action == "approve" else "reject",
+            from_status=old_status.value if old_status else None,
+            to_status=inspection.status.value,
+            operator_id=current_user.id,
+            comments=review.comments
+        )
+        db.add(audit_log)
+        db.commit()
+
+        return {
+            "message": "检查审核成功",
+            "inspection": inspection
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"检查审核失败: {str(e)}")
+
+@router.post("/detail/{inspection_id}/items/{item_id}/review")
+async def review_inspection_item(
+    inspection_id: str,
+    item_id: str,
+    review: CheckItemReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """检查项审核：pass/fail/warning"""
+    if current_user.role not in ["admin", "manager", "reviewer"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限执行检查项审核")
+
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查记录不存在")
+
+    check_item = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.id == item_id,
+        InspectionCheckItem.inspection_id == inspection_id
+    ).first()
+    if not check_item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查项不存在")
+
+    try:
+        now = datetime.utcnow()
+        check_item.review_status = review.action
+        check_item.review_comments = review.comments
+        check_item.reviewed_by = current_user.id
+        check_item.reviewed_at = now
+        check_item.updated_at = now
+        db.commit()
+        db.refresh(check_item)
+
+        # 写审核日志
+        audit_log = InspectionAuditLog(
+            id=str(uuid.uuid4()),
+            inspection_id=inspection_id,
+            action="item_review",
+            from_status=None,
+            to_status=None,
+            operator_id=current_user.id,
+            comments=review.comments,
+            details={"item_id": item_id, "result": review.action}
+        )
+        db.add(audit_log)
+        db.commit()
+
+        # 更新检查结果汇总（pass/fail/warning）
+        _update_inspection_result_from_item_reviews(db, inspection_id)
+
+        return {"message": "检查项审核成功"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"检查项审核失败: {str(e)}")
+
+@router.post("/detail/{inspection_id}/photos/{photo_id}/review")
+async def review_inspection_photo(
+    inspection_id: str,
+    photo_id: str,
+    review: PhotoReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """照片审核：approved/rejected"""
+    if current_user.role not in ["admin", "manager", "reviewer"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限执行照片审核")
+
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查记录不存在")
+
+    photo = db.query(InspectionPhoto).filter(
+        InspectionPhoto.id == photo_id,
+        InspectionPhoto.inspection_id == inspection_id
+    ).first()
+    if not photo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="照片不存在")
+
+    try:
+        photo.review_status = review.action
+        photo.review_comments = review.comments
+        db.commit()
+        db.refresh(photo)
+
+        # 写审核日志
+        audit_log = InspectionAuditLog(
+            id=str(uuid.uuid4()),
+            inspection_id=inspection_id,
+            action="photo_review",
+            from_status=None,
+            to_status=None,
+            operator_id=current_user.id,
+            comments=review.comments,
+            details={"photo_id": photo_id, "result": review.action}
+        )
+        db.add(audit_log)
+        db.commit()
+
+        return {"message": "照片审核成功"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"照片审核失败: {str(e)}")
+
+@router.get("/detail/{inspection_id}/review-summary", response_model=InspectionReviewSummary)
+async def get_inspection_review_summary(
+    inspection_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取检查审核汇总（基于检查项 review_status）"""
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查记录不存在")
+
+    # 权限：检查员仅可看自己，其他角色可看
+    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限访问此检查记录")
+
+    total = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id).count()
+    pass_count = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id, InspectionCheckItem.review_status == "pass").count()
+    fail_count = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id, InspectionCheckItem.review_status == "fail").count()
+    warning_count = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id, InspectionCheckItem.review_status == "warning").count()
+    pending_count = total - pass_count - fail_count - warning_count
+
+    return InspectionReviewSummary(
+        total_items=total,
+        pass_count=pass_count,
+        fail_count=fail_count,
+        warning_count=warning_count,
+        pending_count=pending_count
+    )
+
+# 内部工具：根据检查项审核结果更新检查记录的 result 字段
+def _update_inspection_result_from_item_reviews(db: Session, inspection_id: str) -> None:
+    try:
+        items = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id).all()
+        # 确定结果优先级：fail > warning > pass > pending
+        result = None
+        has_fail = any(i.review_status == "fail" for i in items)
+        has_warning = any(i.review_status == "warning" for i in items)
+        all_pass_or_pending = all(i.review_status in (None, "pass") for i in items)
+        has_pass = any(i.review_status == "pass" for i in items)
+
+        if has_fail:
+            result = "fail"
+        elif has_warning:
+            result = "warning"
+        elif all_pass_or_pending and has_pass:
+            result = "pass"
+        else:
+            result = None
+
+        inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+        if inspection:
+            inspection.result = result
+            inspection.updated_at = datetime.utcnow()
+            db.commit()
+    except Exception:
+        db.rollback()
+        raise

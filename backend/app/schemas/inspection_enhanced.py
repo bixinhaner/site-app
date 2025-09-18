@@ -272,6 +272,25 @@ class OfflineInspectionDataResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# 逐项/照片审核请求
+class CheckItemReviewRequest(BaseModel):
+    """检查项审核请求"""
+    action: str = Field(..., pattern="^(pass|fail|warning)$")
+    comments: Optional[str] = None
+
+class PhotoReviewRequest(BaseModel):
+    """照片审核请求"""
+    action: str = Field(..., pattern="^(approved|rejected)$")
+    comments: Optional[str] = None
+
+class InspectionReviewSummary(BaseModel):
+    """检查审核汇总"""
+    total_items: int
+    pass_count: int
+    fail_count: int
+    warning_count: int
+    pending_count: int
+
 # 数据验证函数
 class DataValidator:
     """数据验证器"""

@@ -26,6 +26,7 @@ from app.schemas.task import (
 from app.crud import task as crud_task
 from app.services.omc_service import omc_service
 from app.models.site import Site
+from app.models.inspection import TaskStatusHistory
 
 router = APIRouter()
 
@@ -624,10 +625,45 @@ async def review_task(
             "message": f"任务审核{result}成功",
             "task": TaskAssignmentResponse(**enriched_task)
         }
-    
+
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"审核任务失败: {str(e)}"
         )
+
+@router.get("/{task_id}/reviews")
+async def get_task_review_history(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取任务审核历史（仅返回通过/驳回记录）"""
+    # 校验任务是否存在和可见性
+    task = crud_task.get_task_assignment(db=db, task_id=task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if current_user.role == "user" and task.assigned_to != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限查看此任务")
+
+    # 查询状态历史，仅筛选审核结果记录
+    histories = db.query(TaskStatusHistory).filter(
+        TaskStatusHistory.task_id == task_id,
+        TaskStatusHistory.to_status.in_(["approved", "rejected"])  # 仅审核终态
+    ).order_by(TaskStatusHistory.changed_at.desc()).all()
+
+    # 组装响应
+    results = []
+    for h in histories:
+        reviewer = db.query(User).filter(User.id == h.changed_by).first()
+        results.append({
+            "id": h.id,
+            "reviewer_id": h.changed_by,
+            "reviewer_name": (reviewer.full_name or reviewer.username) if reviewer else None,
+            "created_at": h.changed_at,
+            "result": h.to_status,
+            "comments": h.change_reason,
+        })
+
+    return results
