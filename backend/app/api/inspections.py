@@ -370,6 +370,46 @@ async def get_inspection(
             detail="没有权限访问此检查记录"
         )
     
+    # 如果检查关联了工单，在照片列表中包含工单照片，并获取驳回意见
+    if inspection.work_order_id:
+        from app.models.work_order import WorkOrder, WorkOrderPhoto
+        
+        # 获取工单信息（包括驳回意见）
+        work_order = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
+        if work_order and work_order.status.value == "REJECTED" and work_order.review_comments:
+            # 如果工单被驳回且有驳回意见，将其添加到检查的review_comments字段
+            inspection.review_comments = work_order.review_comments
+        
+        work_order_photos = db.query(WorkOrderPhoto).filter(
+            WorkOrderPhoto.work_order_id == inspection.work_order_id
+        ).all()
+        
+        # 将工单照片转换为检查照片格式并添加到检查的照片列表中
+        for wo_photo in work_order_photos:
+            # 创建一个临时的检查照片对象用于显示
+            inspection_photo = InspectionPhoto(
+                id=f"wo_{wo_photo.id}",  # 使用前缀标识这是工单照片
+                inspection_id=inspection_id,
+                check_item_id=wo_photo.item_id,
+                original_name=wo_photo.original_name,
+                file_path=wo_photo.file_path,
+                file_size=wo_photo.file_size,
+                mime_type=wo_photo.mime_type,
+                latitude=wo_photo.latitude,
+                longitude=wo_photo.longitude,
+                gps_accuracy=wo_photo.gps_accuracy,
+                address=wo_photo.address,
+                taken_at=wo_photo.taken_at,
+                has_watermark=wo_photo.has_watermark,
+                watermark_data=wo_photo.watermark_data,
+                hash_value=wo_photo.hash_value,
+                uploaded_by=wo_photo.uploaded_by,
+                created_at=wo_photo.created_at,
+                updated_at=wo_photo.updated_at
+            )
+            # 不要添加到数据库，只是临时用于响应
+            inspection.photos.append(inspection_photo)
+    
     return inspection
 
 @router.put("/detail/{inspection_id}", response_model=SiteInspectionResponse)
@@ -401,6 +441,7 @@ async def update_inspection(
     # 更新字段
     old_status = inspection.status
     update_fields = inspection_update.dict(exclude_unset=True)
+    print(f"DEBUG: update_inspection调用 - 检查ID: {inspection.id}, 旧状态: {old_status}, 更新字段: {list(update_fields.keys())}, 请求数据: {inspection_update.dict()}")
 
     # 轻量权限与合法迁移校验：通过/驳回必须走审核接口
     if "status" in update_fields:
@@ -432,12 +473,16 @@ async def update_inspection(
             setattr(inspection, field, value)
     
     inspection.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(inspection)
+    
+    # 如果状态变更为submitted，且没有设置submitted_at，自动设置
+    if "status" in update_fields and inspection.status == InspectionStatusEnum.SUBMITTED:
+        if not inspection.submitted_at:
+            inspection.submitted_at = datetime.utcnow()
     
     # 记录状态变更日志
+    audit_log_to_add = None
     if "status" in update_fields and old_status != inspection.status:
-        audit_log = InspectionAuditLog(
+        audit_log_to_add = InspectionAuditLog(
             id=str(uuid.uuid4()),
             inspection_id=inspection.id,
             action="update_status",
@@ -446,8 +491,31 @@ async def update_inspection(
             operator_id=current_user.id,
             comments="更新检查状态"
         )
-        db.add(audit_log)
-        db.commit()
+        db.add(audit_log_to_add)
+    
+    # 如果检查状态变更为submitted，同步工单状态（在提交前）
+    should_sync = False
+    if "status" in update_fields and inspection.work_order_id:
+        # 检查是否更新为submitted状态
+        status_check = (inspection.status == InspectionStatusEnum.SUBMITTED or 
+                       str(inspection.status).upper() == "SUBMITTED" or
+                       getattr(inspection.status, 'value', None) == 'submitted')
+        should_sync = status_check
+        print(f"DEBUG: 同步检查条件 - status字段存在: True, work_order_id存在: {bool(inspection.work_order_id)}, 状态检查: {status_check}")
+        print(f"DEBUG: 检查状态值: {inspection.status}, 类型: {type(inspection.status)}")
+        
+    if should_sync:
+        print(f"DEBUG: 开始同步工单状态 - 检查ID: {inspection.id}, 工单ID: {inspection.work_order_id}")
+        from app.services.work_order_sync import get_work_order_sync_service
+        sync_service = get_work_order_sync_service(db)
+        sync_service.sync_inspection_to_work_order_status(inspection)
+    else:
+        if "status" in update_fields:
+            print(f"DEBUG: 未触发同步 - 检查状态: {inspection.status}, work_order_id: {inspection.work_order_id}")
+    
+    # 统一提交所有更改
+    db.commit()
+    db.refresh(inspection)
     
     return inspection
 
@@ -701,6 +769,30 @@ async def update_inspection_item(
     inspection.completed_items = completed_items
     inspection.failed_items = failed_items
     inspection.completion_rate = (completed_items / total_items * 100) if total_items > 0 else 0
+    
+    # 检查是否所有项都已完成，如果是则自动更新检查状态并同步工单状态
+    if inspection.completion_rate == 100.0:
+        from app.services.work_order_sync import get_work_order_sync_service
+        from datetime import datetime as dt
+        
+        print(f"DEBUG: 检查项更新完成100% - 检查ID: {inspection.id}, 当前状态: {inspection.status}, submitted_at: {inspection.submitted_at}")
+        
+        # 如果检查状态还是进行中，更新为已提交
+        if inspection.status == InspectionStatusEnum.IN_PROGRESS:
+            inspection.status = InspectionStatusEnum.SUBMITTED
+            inspection.end_time = dt.utcnow()
+            print(f"DEBUG: 状态从IN_PROGRESS更新为SUBMITTED: {inspection.id}")
+        
+        # 如果检查状态是SUBMITTED但没有submitted_at，设置它
+        if inspection.status == InspectionStatusEnum.SUBMITTED and not inspection.submitted_at:
+            inspection.submitted_at = dt.utcnow()
+            print(f"DEBUG: 设置submitted_at时间戳: {inspection.id}, 时间: {inspection.submitted_at}")
+        
+        # 如果检查关联了工单，同步工单状态（无论检查当前状态如何）
+        if inspection.work_order_id:
+            print(f"DEBUG: 开始同步工单状态 - 检查ID: {inspection.id}, 工单ID: {inspection.work_order_id}")
+            sync_service = get_work_order_sync_service(db)
+            sync_service.sync_inspection_to_work_order_status(inspection)
     
     db.commit()
     

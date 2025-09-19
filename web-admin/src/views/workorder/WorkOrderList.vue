@@ -1,0 +1,391 @@
+<template>
+  <div class="page">
+    <div class="page-header">
+      <h1>工单列表</h1>
+      <div class="header-actions">
+        <el-select v-model="statusFilter" clearable placeholder="状态" style="width: 140px">
+          <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
+        </el-select>
+        <el-select v-model="typeFilter" clearable placeholder="类型" style="width: 180px">
+          <el-option v-for="t in types" :key="t.value" :label="t.label" :value="t.value" />
+        </el-select>
+        <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
+        <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新建工单</el-button>
+      </div>
+    </div>
+    <el-card>
+      <el-table :data="items" v-loading="loading" stripe>
+        <el-table-column prop="title" label="标题" min-width="220">
+          <template #default="{ row }">
+            <div>
+              <div>{{ row.title }}</div>
+              <div class="work-order-id">ID: {{ row.id }}</div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="type" label="类型" width="160">
+          <template #default="{ row }">{{ typeText(row.type) }}</template>
+        </el-table-column>
+        <el-table-column prop="site_name" label="站点" width="160">
+          <template #default="{ row }">{{ row.site_name || row.site_id }}</template>
+        </el-table-column>
+        <el-table-column prop="assignee_name" label="分配给" width="140" />
+        <el-table-column prop="priority" label="优先级" width="100">
+          <template #default="{ row }"><el-tag>{{ priorityText(row.priority) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="130">
+          <template #default="{ row }"><el-tag>{{ statusText(row.status) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column prop="assigned_at" label="分配时间" width="180">
+          <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="260" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openEdit(row)" v-if="canEdit(row)">
+              <el-icon><Edit /></el-icon>编辑
+            </el-button>
+            <el-button link type="primary" size="small" @click="openReview(row)">
+              <el-icon><Stamp /></el-icon>审核
+            </el-button>
+            <el-button link type="danger" size="small" @click="confirmDelete(row)" v-if="canDelete(row)">
+              <el-icon><Delete /></el-icon>删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </div>
+
+  <el-dialog v-model="createVisible" title="新建工单" width="560px">
+    <el-form :model="createForm" label-width="96px" :rules="rules" ref="formRef">
+      <el-form-item label="站点" prop="site_id">
+        <el-select v-model="createForm.site_id" filterable placeholder="选择站点" style="width: 100%" @visible-change="v=> v && loadSites()" @change="onTypeOrSiteChange">
+          <el-option v-for="s in siteOptions" :key="s.id" :label="s.site_name + ' ('+ s.site_code +')'" :value="s.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="类型" prop="type">
+        <el-select v-model="createForm.type" placeholder="选择类型" style="width: 100%" @change="onTypeOrSiteChange">
+          <el-option v-for="t in types" :key="t.value" :label="t.label" :value="t.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="分配给" prop="assigned_to">
+        <el-select v-model="createForm.assigned_to" filterable placeholder="选择人员" style="width: 100%" @visible-change="v=> v && loadUsers()">
+          <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="标题" prop="title">
+        <el-input v-model="createForm.title" placeholder="请输入标题" />
+      </el-form-item>
+      <el-form-item label="检查模板">
+        <el-select v-model="createForm.template_id" clearable filterable placeholder="自动推荐(可不选)" style="width: 100%" @visible-change="v => v && loadTemplates()">
+          <el-option v-for="tpl in templateOptions" :key="tpl.id" :label="tpl.template_name" :value="tpl.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="优先级">
+        <el-select v-model="createForm.priority" placeholder="选择优先级" style="width: 100%">
+          <el-option label="低" value="low" />
+          <el-option label="普通" value="normal" />
+          <el-option label="高" value="high" />
+          <el-option label="紧急" value="urgent" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="截止时间">
+        <el-date-picker v-model="createForm.due_date" type="datetime" style="width: 100%" />
+      </el-form-item>
+      <el-form-item label="描述">
+        <el-input v-model="createForm.description" type="textarea" :rows="3" placeholder="可填工单描述" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="createVisible=false">取消</el-button>
+      <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 编辑工单对话框 -->
+  <el-dialog v-model="editVisible" title="编辑工单" width="560px">
+    <el-form :model="editForm" label-width="96px" :rules="rules" ref="editFormRef">
+      <el-form-item label="站点" prop="site_id">
+        <el-select v-model="editForm.site_id" filterable placeholder="选择站点" style="width: 100%" @visible-change="v=> v && loadSites()">
+          <el-option v-for="s in siteOptions" :key="s.id" :label="s.site_name + ' ('+ s.site_code +')'" :value="s.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="类型" prop="type">
+        <el-select v-model="editForm.type" placeholder="选择类型" style="width: 100%">
+          <el-option v-for="t in types" :key="t.value" :label="t.label" :value="t.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="分配给" prop="assigned_to">
+        <el-select v-model="editForm.assigned_to" filterable placeholder="选择人员" style="width: 100%" @visible-change="v=> v && loadUsers()">
+          <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="标题" prop="title">
+        <el-input v-model="editForm.title" placeholder="请输入标题" />
+      </el-form-item>
+      <el-form-item label="优先级">
+        <el-select v-model="editForm.priority" placeholder="选择优先级" style="width: 100%">
+          <el-option label="低" value="low" />
+          <el-option label="普通" value="normal" />
+          <el-option label="高" value="high" />
+          <el-option label="紧急" value="urgent" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="截止时间">
+        <el-date-picker v-model="editForm.due_date" type="datetime" style="width: 100%" />
+      </el-form-item>
+      <el-form-item label="描述">
+        <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="可填工单描述" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="editVisible=false">取消</el-button>
+      <el-button type="primary" :loading="updating" @click="submitUpdate">保存</el-button>
+    </template>
+  </el-dialog>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import apiClient from '../../api/auth'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Edit, Delete } from '@element-plus/icons-vue'
+
+const router = useRouter()
+const loading = ref(false)
+const items = ref([])
+const statusFilter = ref('')
+const typeFilter = ref('')
+
+const statuses = [
+  { label: '待分配', value: 'PENDING' },
+  { label: '已分配', value: 'ACTIVE' },
+  { label: '已提交', value: 'SUBMITTED' },
+  { label: '审核中', value: 'UNDER_REVIEW' },
+  { label: '已通过', value: 'APPROVED' },
+  { label: '已驳回', value: 'REJECTED' },
+  { label: '已完成', value: 'COMPLETED' }
+]
+const types = [
+  { label: '新站点设备安装', value: 'opening_inspection' },
+  { label: '维护检查', value: 'maintenance' },
+  { label: '断电问题', value: 'power_issue' },
+  { label: '传输问题', value: 'transmission_issue' },
+  { label: 'GPS问题', value: 'gps_issue' },
+  { label: '信号问题', value: 'signal_issue' }
+]
+
+const load = async () => {
+  try {
+    loading.value = true
+    const params = {}
+    if (statusFilter.value) params.status_filter = statusFilter.value
+    if (typeFilter.value) params.type_filter = typeFilter.value
+    items.value = await apiClient.get('/api/work-orders', { params })
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('加载工单失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+const openReview = (row) => {
+  router.push({ name: 'WorkOrderReview', query: { id: row.id } })
+}
+
+// Create dialog state
+const createVisible = ref(false)
+const creating = ref(false)
+const createForm = ref({ site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '' })
+const siteOptions = ref([])
+const userOptions = ref([])
+const templateOptions = ref([])
+const formRef = ref()
+
+// Edit dialog state
+const editVisible = ref(false)
+const updating = ref(false)
+const editForm = ref({ id: '', site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '' })
+const editFormRef = ref()
+const rules = {
+  site_id: [{ required: true, message: '请选择站点', trigger: 'change' }],
+  type: [{ required: true, message: '请选择类型', trigger: 'change' }],
+  assigned_to: [{ required: true, message: '请选择分配对象', trigger: 'change' }],
+  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
+}
+
+const openCreate = () => {
+  // reset form
+  createForm.value = { site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '', template_id: null }
+  templateOptions.value = []
+  createVisible.value = true
+}
+
+const loadSites = async () => {
+  try {
+    const res = await apiClient.get('/api/sites/', { params: { limit: 100 } })
+    siteOptions.value = Array.isArray(res) ? res : []
+  } catch (e) {
+    // ignore
+  }
+}
+
+const loadUsers = async () => {
+  try {
+    const res = await apiClient.get('/api/users/', { params: { limit: 100 } })
+    userOptions.value = Array.isArray(res) ? res : []
+  } catch (e) {
+    // ignore (权限不足时隐藏选项)
+  }
+}
+
+const loadTemplates = async () => {
+  if (!createForm.value.type) return
+  try {
+    const params = { task_type: createForm.value.type, limit: 100 }
+    const list = await apiClient.get('/api/inspections/templates', { params })
+    templateOptions.value = Array.isArray(list) ? list : []
+  } catch (e) {
+    // ignore (权限不足等)
+  }
+}
+
+const onTypeOrSiteChange = async () => {
+  // load candidate templates
+  await loadTemplates()
+  // try resolve default
+  if (!createForm.value.site_id || !createForm.value.type) return
+  try {
+    const body = { site_id: createForm.value.site_id, task_type: createForm.value.type }
+    const res = await apiClient.post('/api/inspections/templates/resolve', body)
+    if (res?.success && res?.result?.template_id) {
+      createForm.value.template_id = res.result.template_id
+      // ensure recommended template appears in options for visible label
+      const exists = templateOptions.value.some(t => t.id === res.result.template_id)
+      if (!exists) {
+        templateOptions.value.push({ id: res.result.template_id, template_name: res.result.template_name })
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+const submitCreate = () => {
+  formRef.value.validate(async (valid) => {
+    if (!valid) return
+    try {
+      creating.value = true
+      const payload = { ...createForm.value }
+      if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
+      await apiClient.post('/api/work-orders', payload)
+      ElMessage.success('创建成功')
+      createVisible.value = false
+      await load()
+    } catch (e) {
+      console.error(e)
+      ElMessage.error(e?.response?.data?.detail || '创建失败')
+    } finally {
+      creating.value = false
+    }
+  })
+}
+
+// 权限检查函数
+const canEdit = (row) => {
+  // 只能编辑待分配和已分配状态的工单
+  return ['PENDING', 'ACTIVE'].includes(row.status)
+}
+
+const canDelete = (row) => {
+  // 只能删除待分配和已分配状态的工单
+  return ['PENDING', 'ACTIVE'].includes(row.status)
+}
+
+// 编辑功能
+const openEdit = (row) => {
+  editForm.value = {
+    id: row.id,
+    site_id: row.site_id,
+    type: row.type,
+    assigned_to: row.assigned_to,
+    title: row.title,
+    priority: row.priority,
+    due_date: row.due_date ? new Date(row.due_date) : null,
+    description: row.description || ''
+  }
+  editVisible.value = true
+}
+
+const submitUpdate = () => {
+  editFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    try {
+      updating.value = true
+      const payload = { ...editForm.value }
+      delete payload.id // 移除id字段
+      if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
+      await apiClient.put(`/api/work-orders/${editForm.value.id}`, payload)
+      ElMessage.success('更新成功')
+      editVisible.value = false
+      await load()
+    } catch (e) {
+      console.error(e)
+      ElMessage.error(e?.response?.data?.detail || '更新失败')
+    } finally {
+      updating.value = false
+    }
+  })
+}
+
+// 删除功能
+const confirmDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除工单"${row.title}"吗？删除后无法恢复。`,
+      '确认删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }
+    )
+    await deleteWorkOrder(row.id)
+  } catch (e) {
+    // 用户取消删除
+  }
+}
+
+const deleteWorkOrder = async (id) => {
+  try {
+    await apiClient.delete(`/api/work-orders/${id}`)
+    ElMessage.success('删除成功')
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '删除失败')
+  }
+}
+
+const statusText = (v) => (statuses.find(s => s.value === v)?.label || v)
+const typeText = (v) => (types.find(t => t.value === v)?.label || v)
+const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
+const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
+
+onMounted(load)
+</script>
+
+<style scoped>
+.page { padding: 24px; }
+.page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
+.header-actions { display:flex; gap: 8px; align-items:center; }
+.work-order-id { 
+  font-size: 12px; 
+  color: #909399; 
+  margin-top: 4px; 
+  font-family: 'Courier New', monospace;
+}
+</style>

@@ -158,6 +158,64 @@
                           size="small"
                         />
                       </div>
+
+                      <!-- 字段配置（高级） -->
+                      <el-card class="fields-card" shadow="never">
+                        <template #header>
+                          <div class="card-header">
+                            <span>字段配置（可选）</span>
+                            <el-button size="small" @click="addField(categoryIndex, itemIndex)"><el-icon><Plus /></el-icon> 添加字段</el-button>
+                          </div>
+                        </template>
+                        <div v-if="!item.fields || item.fields.length === 0" class="empty-fields">暂无字段，点击“添加字段”新增</div>
+                        <div v-for="(field, fieldIndex) in (item.fields || (item.fields = []))" :key="field.field_id || fieldIndex" class="field-row">
+                          <div class="field-line">
+                            <el-input v-model="field.field_id" size="small" placeholder="字段ID（英文）" style="width: 180px" />
+                            <el-input v-model="field.label" size="small" placeholder="显示名称" style="width: 180px; margin-left:8px;" />
+                            <el-select v-model="field.type" size="small" placeholder="类型" style="width: 160px; margin-left:8px;">
+                              <el-option label="文本" value="text" />
+                              <el-option label="数字" value="number" />
+                              <el-option label="布尔" value="boolean" />
+                              <el-option label="单选" value="select_single" />
+                              <el-option label="多选" value="select_multi" />
+                              <el-option label="日期" value="date" />
+                              <el-option label="时间" value="time" />
+                              <el-option label="日期时间" value="datetime" />
+                              <el-option label="富文本" value="rich_text" />
+                            </el-select>
+                            <el-checkbox v-model="field.required" style="margin-left:12px;">必填</el-checkbox>
+                            <el-button size="small" type="danger" @click="removeField(categoryIndex, itemIndex, fieldIndex)" style="margin-left:8px;"><el-icon><Delete /></el-icon></el-button>
+                          </div>
+                          <div class="field-advanced">
+                            <!-- 选项配置 -->
+                            <div v-if="['select_single','select_multi'].includes(field.type)" class="options-line">
+                              <el-tag type="info" size="small">选项</el-tag>
+                              <el-input v-model="field._newOptionLabel" size="small" placeholder="标签" style="width: 160px; margin-left:8px;" />
+                              <el-input v-model="field._newOptionValue" size="small" placeholder="值" style="width: 160px; margin-left:8px;" />
+                              <el-button size="small" @click="addOption(field)">添加</el-button>
+                              <div class="option-list" v-if="field.options && field.options.length">
+                                <el-tag 
+                                  v-for="(opt, oi) in field.options" :key="oi" closable @close="removeOption(field, oi)" style="margin:4px;">
+                                  {{ opt.label || opt }} ({{ opt.value || opt }})
+                                </el-tag>
+                              </div>
+                            </div>
+                            <!-- 约束配置 -->
+                            <div class="constraints">
+                              <el-tag type="info" size="small">约束</el-tag>
+                              <template v-if="field.type==='number'">
+                                <el-input-number v-model="(field.constraints || (field.constraints={})).min" :step="1" size="small" placeholder="最小值" style="margin-left:8px;" />
+                                <el-input-number v-model="(field.constraints || (field.constraints={})).max" :step="1" size="small" placeholder="最大值" style="margin-left:8px;" />
+                              </template>
+                              <template v-else-if="field.type==='text' || field.type==='rich_text'">
+                                <el-input-number v-model="(field.constraints || (field.constraints={})).min_length" :step="1" size="small" placeholder="最短" style="margin-left:8px;" />
+                                <el-input-number v-model="(field.constraints || (field.constraints={})).max_length" :step="1" size="small" placeholder="最长" style="margin-left:8px;" />
+                                <el-input v-model="(field.constraints || (field.constraints={})).pattern" size="small" placeholder="正则表达式" style="width: 220px; margin-left:8px;" />
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+                      </el-card>
                     </div>
                     
                     <div v-if="category.items.length === 0" class="no-items">
@@ -385,6 +443,31 @@ const removeItem = async (categoryIndex, itemIndex) => {
   }
 }
 
+// 字段编辑方法
+const addField = (categoryIndex, itemIndex) => {
+  const item = templateData.check_categories[categoryIndex].items[itemIndex]
+  if (!item.fields) item.fields = []
+  item.fields.push({ field_id: `field_${Date.now()}`, label: '新字段', type: 'text', required: false, options: [], constraints: {} })
+}
+
+const removeField = (categoryIndex, itemIndex, fieldIndex) => {
+  const item = templateData.check_categories[categoryIndex].items[itemIndex]
+  if (!item.fields) return
+  item.fields.splice(fieldIndex, 1)
+}
+
+const addOption = (field) => {
+  if (!field._newOptionLabel && !field._newOptionValue) return
+  if (!field.options) field.options = []
+  field.options.push({ label: field._newOptionLabel || String(field._newOptionValue || ''), value: field._newOptionValue || field._newOptionLabel })
+  field._newOptionLabel = ''
+  field._newOptionValue = ''
+}
+
+const removeOption = (field, index) => {
+  field.options.splice(index, 1)
+}
+
 const previewTemplate = () => {
   ElMessageBox.alert(
     JSON.stringify(templateData, null, 2),
@@ -537,6 +620,16 @@ onMounted(() => {
   padding: 12px;
   margin-bottom: 8px;
 }
+
+.fields-card {
+  margin-top: 8px;
+}
+.field-row { border-top: 1px dashed #eee; padding-top: 8px; margin-top: 8px; }
+.field-line { display:flex; align-items:center; }
+.field-advanced { padding-left: 0; margin-top: 8px; }
+.constraints { margin-top: 6px; display:flex; align-items:center; gap:8px; }
+.options-line { margin-top: 6px; display:flex; align-items:center; flex-wrap: wrap; }
+.empty-fields { color:#999; padding: 8px 0; }
 
 .item-basic {
   display: flex;

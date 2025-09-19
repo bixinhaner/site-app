@@ -138,6 +138,21 @@
 				</view>
 			</view>
 			
+			<!-- 驳回意见卡片 -->
+			<view class="detail-card reject-card" v-if="inspectionData.status === 'rejected' && inspectionData.review_comments">
+				<view class="card-header">
+					<text class="card-title reject-title">🚫 驳回意见</text>
+				</view>
+				<view class="card-content">
+					<view class="reject-content">
+						<text class="reject-text">{{ inspectionData.review_comments }}</text>
+					</view>
+					<view class="reject-tip">
+						<text class="tip-text">📝 请根据上述意见修改检查结果后重新提交</text>
+					</view>
+				</view>
+			</view>
+			
 			<!-- 检查项详情 -->
 			<view class="detail-card">
 				<view class="card-header">
@@ -251,7 +266,7 @@
 				v-if="canContinue"
 				@click="continueInspection"
 			>
-				继续检查
+				{{ inspectionData.status === 'rejected' ? '修改检查结果' : '继续检查' }}
 			</button>
 			
 			<button 
@@ -374,6 +389,7 @@
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
+	import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
@@ -408,7 +424,7 @@
 	
 	const canContinue = computed(() => {
 		return inspectionData.value && 
-			   ['draft', 'in_progress'].includes(inspectionData.value.status) &&
+			   ['draft', 'in_progress', 'rejected'].includes(inspectionData.value.status) &&
 			   inspectionData.value.inspector_id === userStore.userInfo?.id
 	})
 	
@@ -435,6 +451,27 @@
 			const inspectionResult = await inspectionStore.getInspectionDetail(inspectionId.value)
 			if (inspectionResult.success) {
 				inspectionData.value = inspectionResult.data
+				
+				// 如果没有site_name，尝试通过site_id获取站点信息
+				if (!inspectionData.value.site_name && inspectionData.value.site_id) {
+					try {
+						const response = await uni.request({
+							url: buildApiUrl(`/api/sites/${inspectionData.value.site_id}`),
+							...createRequestConfig({
+								method: 'GET',
+								headers: getAuthHeaders(userStore.token)
+							})
+						})
+						if (response.statusCode === 200) {
+							inspectionData.value.site_name = response.data.name
+							inspectionData.value.address = response.data.address || inspectionData.value.address
+						}
+					} catch (siteError) {
+						console.warn('获取站点信息失败:', siteError)
+						// 设置默认站点名称
+						inspectionData.value.site_name = `站点 ${inspectionData.value.site_id}`
+					}
+				}
 			}
 			
 			// 加载检查项
@@ -846,6 +883,43 @@
 		margin-bottom: 20rpx;
 		box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.08);
 		overflow: hidden;
+	}
+	
+	/* 驳回意见卡片特殊样式 */
+	.reject-card {
+		border-left: 6rpx solid #dc2626;
+		background: linear-gradient(135deg, #fef2f2, #fff);
+	}
+	
+	.reject-title {
+		color: #dc2626 !important;
+		font-weight: 600;
+	}
+	
+	.reject-content {
+		padding: 20rpx;
+		background: #fef2f2;
+		border-radius: 15rpx;
+		margin-bottom: 20rpx;
+	}
+	
+	.reject-text {
+		font-size: 28rpx;
+		line-height: 1.6;
+		color: #374151;
+	}
+	
+	.reject-tip {
+		padding: 15rpx 20rpx;
+		background: #fffbeb;
+		border-radius: 15rpx;
+		border: 1rpx solid #f59e0b;
+	}
+	
+	.tip-text {
+		font-size: 26rpx;
+		color: #b45309;
+		line-height: 1.5;
 	}
 	
 	.card-header {

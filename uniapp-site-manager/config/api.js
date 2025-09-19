@@ -72,6 +72,20 @@ export const API_ENDPOINTS = {
     PHOTOS: (id) => `/api/inspections/detail/${id}/photos`
   },
   
+  // 工单（统一工作流）
+  WORK_ORDERS: {
+    LIST: '/api/work-orders',
+    DETAIL: (id) => `/api/work-orders/${id}`,
+    CREATE: '/api/work-orders',
+    UPDATE: (id) => `/api/work-orders/${id}`,
+    ACCEPT: (id) => `/api/work-orders/${id}/accept`,
+    COMPLETE: (id) => `/api/work-orders/${id}/complete`,
+    INSPECTION: (id) => `/api/work-orders/${id}/inspection`,
+    ITEMS: (id) => `/api/work-orders/${id}/items`,
+    PHOTOS: (id) => `/api/work-orders/${id}/photos`,
+    ITEM_UPDATE: (id, itemId) => `/api/work-orders/${id}/items/${itemId}`
+  },
+  
   // 设备相关
   EQUIPMENT: {
     LIST: '/api/equipment/',

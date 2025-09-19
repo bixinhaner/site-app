@@ -5,7 +5,9 @@ import os
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api import auth, users, sites, inspections, tasks, equipment, stock, template_binding
+# Ensure new models are imported before creating tables
+from app.models import work_order as _work_order_models  # noqa: F401
+from app.api import auth, users, sites, inspections, tasks, equipment, stock, template_binding, work_orders
 from app.api import site_planning
 
 # 创建数据库表
@@ -56,6 +58,7 @@ app.include_router(tasks.router, prefix="/api/tasks", tags=["任务管理"])
 app.include_router(equipment.router, prefix="/api/equipment", tags=["设备管理"])
 app.include_router(stock.router, prefix="/api/stock", tags=["库存管理"])
 app.include_router(site_planning.router, prefix="/api/sites", tags=["站点规划"])
+app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单管理"])
 
 @app.get("/")
 async def root():

@@ -115,6 +115,17 @@ const routes = [
           { path: 'templates/:id', name: 'TemplateEditor', component: () => import('../views/inspection/TemplateEditor.vue'), meta: { title: '模板编辑器', hidden: true } }
         ]
       },
+      // 工单管理（二级菜单）
+      {
+        path: 'work-orders',
+        name: 'WorkOrders',
+        component: RouterView,
+        meta: { title: '工单管理', icon: 'Tickets' },
+        children: [
+          { path: 'list', name: 'WorkOrderList', component: () => import('../views/workorder/WorkOrderList.vue'), meta: { title: '工单列表', icon: 'List' } },
+          { path: 'review', name: 'WorkOrderReview', component: () => import('../views/workorder/WorkOrderReview.vue'), meta: { title: '工单审核台', icon: 'Stamp' } }
+        ]
+      },
       // 兼容旧路径的重定向
       { path: 'equipment', redirect: { name: 'Equipment' }, meta: { hidden: true } },
       { path: 'packages', redirect: { name: 'Packages' }, meta: { hidden: true } },
