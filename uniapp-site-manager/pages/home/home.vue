@@ -138,11 +138,13 @@
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useWorkOrderStore } from '@/stores/workorder'
+	import { useLoggerStore } from '@/stores/logger'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const workOrderStore = useWorkOrderStore()
+	const logger = useLoggerStore()
 	
 	// 统计数据
 	const siteStats = reactive({

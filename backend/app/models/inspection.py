@@ -17,6 +17,14 @@ class InspectionTypeEnum(str, enum.Enum):
     OPENING = "OPENING"               # 新站点设备安装
     MAINTENANCE = "MAINTENANCE"        # 维护检查
 
+class TaskTypeEnum(str, enum.Enum):
+    OPENING_INSPECTION = "opening_inspection"
+    MAINTENANCE = "maintenance"
+    POWER_ISSUE = "power_issue"
+    TRANSMISSION_ISSUE = "transmission_issue"
+    GPS_ISSUE = "gps_issue"
+    SIGNAL_ISSUE = "signal_issue"
+
 class BaseStationStatusEnum(str, enum.Enum):
     OFFLINE = "offline"               # 未开通
     ONLINE = "online"                 # 开通未激活

@@ -419,7 +419,11 @@ async def list_items(
     if not wo.inspection_id:
         raise HTTPException(status_code=400, detail="工单尚未关联检查实例")
     
-    inspection_items = db.query(InspectionCheckItem).filter(
+    from sqlalchemy.orm import joinedload
+    
+    inspection_items = db.query(InspectionCheckItem).options(
+        joinedload(InspectionCheckItem.photos)
+    ).filter(
         InspectionCheckItem.inspection_id == wo.inspection_id
     ).all()
     
@@ -442,6 +446,7 @@ async def list_items(
             "review_status": item.review_status,
             "review_comments": item.review_comments,
             "reviewed_at": item.reviewed_at if hasattr(item, 'reviewed_at') else None,
+            "photos": item.photos,  # Include photos
             "created_at": item.created_at,
             "updated_at": item.updated_at
         }

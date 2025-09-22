@@ -160,19 +160,28 @@ export const useInspectionStore = defineStore('inspection', () => {
 				...additionalData
 			}
 			
+			const apiUrl = buildApiUrl(API_ENDPOINTS.INSPECTIONS.PHOTOS(inspectionId))
+			console.log('照片上传URL:', apiUrl)
+			console.log('照片上传文件路径:', filePath)
+			console.log('照片上传表单数据:', formData)
+			
 			const response = await uni.uploadFile({
-				url: buildApiUrl(API_ENDPOINTS.INSPECTIONS.PHOTOS(inspectionId)),
+				url: apiUrl,
 				filePath,
 				name: 'file',
 				formData,
 				header: getAuthHeaders(userStore.token)
 			})
 			
+			console.log('照片上传响应:', response)
+			
 			if (response.statusCode === 200) {
 				const data = JSON.parse(response.data)
+				console.log('照片上传成功:', data)
 				return { success: true, data }
 			} else {
-				throw new Error('上传照片失败')
+				console.error('照片上传失败，状态码:', response.statusCode, '响应:', response.data)
+				throw new Error(`上传照片失败，状态码: ${response.statusCode}`)
 			}
 		} catch (error) {
 			console.error('Upload photo error:', error)

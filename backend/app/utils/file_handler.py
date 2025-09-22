@@ -50,7 +50,7 @@ async def generate_watermark(
             
             # 设置字体（如果没有字体文件，使用默认字体）
             try:
-                font = ImageFont.truetype("arial.ttf", 24)
+                font = ImageFont.truetype("arial.ttf", 36)
             except:
                 font = ImageFont.load_default()
             

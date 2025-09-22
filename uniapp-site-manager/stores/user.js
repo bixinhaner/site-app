@@ -20,20 +20,38 @@ export const useUserStore = defineStore('user', () => {
 	// 登录
 	const login = async (username, password) => {
 		try {
-			console.log('开始登录:', { username })
+			console.log('🏪 UserStore: 开始登录:', { username })
 			
-			const response = await uni.request({
-				url: buildApiUrl(API_ENDPOINTS.AUTH.LOGIN),
-				...createRequestConfig({
-					method: 'POST',
-					data: {
-						username,
-						password
+			const loginUrl = buildApiUrl(API_ENDPOINTS.AUTH.LOGIN)
+			const requestConfig = createRequestConfig({
+				method: 'POST',
+				data: {
+					username,
+					password
+				}
+			})
+			
+			console.log('🌐 请求URL:', loginUrl)
+			console.log('⚙️ 请求配置:', requestConfig)
+			
+			// 使用Promise包装uni.request以确保正确的错误处理
+			const response = await new Promise((resolve, reject) => {
+				console.log('📤 发送uni.request...')
+				uni.request({
+					url: loginUrl,
+					...requestConfig,
+					success: (res) => {
+						console.log('✅ uni.request success:', res)
+						resolve(res)
+					},
+					fail: (err) => {
+						console.log('❌ uni.request fail:', err)
+						reject(err)
 					}
 				})
 			})
 			
-			console.log('登录响应:', response)
+			console.log('📋 完整登录响应:', response)
 			
 			if (response.statusCode === 200) {
 				const { access_token, user } = response.data

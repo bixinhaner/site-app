@@ -10,6 +10,8 @@
 import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useOfflineStore } from '@/stores/offline'
+	import { useLoggerStore } from '@/stores/logger'
+	import { initInterceptors } from '@/utils/api-interceptor'
 	
 	const globalLoading = ref(false)
 	const loadingText = ref({
@@ -20,16 +22,25 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	
 	const userStore = useUserStore()
 	const offlineStore = useOfflineStore()
+	const logger = useLoggerStore()
 	
 	onLaunch(async () => {
-		console.log('App Launch')
+		console.log('🚀 App Launch - Start')
+		
+		// 暂时禁用日志功能，专注解决页面加载问题
+		console.log('⚠️ Logger system temporarily disabled for debugging')
+		
+		// 暂时不初始化API拦截器
+		console.log('⚠️ API interceptors temporarily disabled for debugging')
 		
 		try {
 			// 初始化离线存储
 			await offlineStore.initOfflineStorage()
 			console.log('离线存储初始化完成')
+			logger.logAction('OFFLINE_STORAGE_INIT', { status: 'success' })
 		} catch (error) {
 			console.error('离线存储初始化失败:', error)
+			logger.logError(error, { context: 'offline_storage_init' })
 		}
 		
 		// 检查用户登录状态
@@ -37,22 +48,34 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 		
 		// 如果有token，验证其有效性
 		if (userStore.token) {
+			logger.logAction('TOKEN_VALIDATION_START')
 			const isValid = await userStore.validateToken()
 			if (!isValid) {
 				console.log('Token已过期，跳转到登录页')
+				logger.logAction('TOKEN_EXPIRED_REDIRECT_TO_LOGIN')
 				uni.reLaunch({
 					url: '/pages/login/login'
 				})
+			} else {
+				logger.logAction('TOKEN_VALIDATION_SUCCESS')
 			}
 		}
 	})
 	
 	onShow(() => {
 		console.log('App Show')
+		console.log('⚠️ Logger calls temporarily disabled in onShow for debugging')
+		// logger.logAction('APP_SHOW', {
+		// 	timestamp: new Date().toISOString()
+		// })
 	})
 	
 	onHide(() => {
 		console.log('App Hide')
+		console.log('⚠️ Logger calls temporarily disabled in onHide for debugging')
+		// logger.logAction('APP_HIDE', {
+		// 	timestamp: new Date().toISOString()
+		// })
 	})
 </script>
 

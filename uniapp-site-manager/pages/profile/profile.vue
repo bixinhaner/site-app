@@ -106,6 +106,14 @@
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
+				
+				<view class="menu-item" @click="goToLoggingTest" v-if="userInfo?.role === 'admin'">
+					<view class="menu-left">
+						<text class="menu-icon">🔍</text>
+						<text class="menu-text">日志测试</text>
+					</view>
+					<text class="menu-arrow">›</text>
+				</view>
 			</view>
 			
 			<view class="menu-group">
@@ -285,6 +293,13 @@
 			title: '关于应用',
 			content: '站点信息管理系统\n\n版本：v1.0.0\n开发商：技术团队\n\n专业的通信站点管理解决方案',
 			showCancel: false
+		})
+	}
+	
+	// 跳转到日志测试页面
+	const goToLoggingTest = () => {
+		uni.navigateTo({
+			url: '/pages/test/logging-test'
 		})
 	}
 	

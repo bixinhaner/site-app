@@ -8,7 +8,7 @@ import { env, log } from './env.js'
 // API基础配置
 export const API_CONFIG = {
   BASE_URL: env.API_BASE_URL,
-  TIMEOUT: 10000,
+  TIMEOUT: 30000, // 增加到30秒
   
   // 请求头配置
   HEADERS: {
@@ -91,6 +91,16 @@ export const API_ENDPOINTS = {
   SYSTEM: {
     HEALTH: '/health',
     VERSION: '/version'
+  },
+  
+  // 用户日志相关
+  LOGS: {
+    CREATE: '/api/logs',
+    BATCH: '/api/logs/batch',
+    LIST: '/api/logs',
+    STATS: '/api/logs/stats',
+    USER_ACTIVITY: (userId) => `/api/logs/users/${userId}/activity`,
+    CLEANUP: '/api/logs/cleanup'
   }
 }
 

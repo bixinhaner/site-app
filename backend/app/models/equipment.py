@@ -273,7 +273,7 @@ class PickupRecord(Base):
     
     id = Column(String(32), primary_key=True)
     transaction_id = Column(String(32), ForeignKey("stock_transactions.id"), nullable=False)
-    task_id = Column(String(32), ForeignKey("task_assignments.id"), nullable=False)
+    work_order_id = Column(String(32), ForeignKey("work_orders.id"), nullable=False)
     package_id = Column(Integer, ForeignKey("equipment_packages.id"), nullable=False)
     
     # 领料人信息

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
@@ -544,16 +544,52 @@ async def update_inspection(
 
 @router.post("/detail/{inspection_id}/photos", response_model=InspectionPhotoResponse)
 async def upload_inspection_photo(
+    request: Request,
     inspection_id: str,
     file: UploadFile = File(...),
-    check_item_id: Optional[str] = None,
-    gps_latitude: float = 0,
-    gps_longitude: float = 0,
-    gps_accuracy: Optional[float] = None,
+    check_item_id: Optional[str] = Form(None),
+    gps_latitude: float = Form(0),
+    gps_longitude: float = Form(0),
+    gps_accuracy: Optional[float] = Form(None),
+    has_watermark: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """上传检查照片 - 统一接口"""
+    
+    # 详细调试日志
+    print(f"DEBUG: 照片上传接口调用")
+    print(f"  inspection_id: {inspection_id}")
+    print(f"  check_item_id: {check_item_id} (type: {type(check_item_id)})")
+    print(f"  gps_latitude: {gps_latitude} (type: {type(gps_latitude)})")
+    print(f"  gps_longitude: {gps_longitude} (type: {type(gps_longitude)})")
+    print(f"  gps_accuracy: {gps_accuracy} (type: {type(gps_accuracy)})")
+    print(f"  has_watermark: {has_watermark} (type: {type(has_watermark)})")
+    print(f"  file.filename: {file.filename}")
+    print(f"  file.content_type: {file.content_type}")
+    print(f"  current_user: {current_user.username}")
+    
+    # 尝试从request中获取原始表单数据
+    try:
+        form = await request.form()
+        print(f"  原始表单数据: {dict(form)}")
+    except Exception as e:
+        print(f"  无法获取原始表单数据: {e}")
+    
+    # 验证必需参数
+    if not check_item_id or check_item_id.strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="check_item_id 不能为空，照片必须关联到具体的检查项"
+        )
+    
+    # 验证GPS坐标（拍照时必须有有效GPS坐标）
+    if gps_latitude == 0 and gps_longitude == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GPS坐标无效，现场拍照必须包含有效的位置信息"
+        )
+    
     # 验证检查记录存在
     inspection = db.query(SiteInspection).filter(
         SiteInspection.id == inspection_id
@@ -575,16 +611,29 @@ async def upload_inspection_photo(
     # 保存文件
     file_path = await save_uploaded_file(file, "inspections", inspection_id)
     
-    # 生成水印
-    watermark_data = {
-        "gps_coordinates": f"{gps_latitude:.6f}, {gps_longitude:.6f}",
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "inspector": current_user.full_name or current_user.username,
-        "accuracy": f"{gps_accuracy}m" if gps_accuracy else "N/A"
-    }
+    # 根据是否已有水印决定是否添加水印
+    watermarked_path = file_path
+    watermark_data = None
     
-    # 添加水印到照片
-    watermarked_path = await generate_watermark(file_path, watermark_data)
+    if not has_watermark:
+        # 前端没有水印，后端添加水印
+        print(f"DEBUG: 前端无水印，后端添加水印")
+        watermark_data = {
+            "gps_coordinates": f"{gps_latitude:.6f}, {gps_longitude:.6f}",
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "inspector": current_user.full_name or current_user.username,
+            "accuracy": f"{gps_accuracy}m" if gps_accuracy else "N/A"
+        }
+        watermarked_path = await generate_watermark(file_path, watermark_data)
+    else:
+        # 前端已有水印，跳过后端水印处理
+        print(f"DEBUG: 前端已有水印，跳过后端水印处理")
+        watermark_data = {
+            "source": "frontend_watermark",
+            "gps_coordinates": f"{gps_latitude:.6f}, {gps_longitude:.6f}",
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "inspector": current_user.full_name or current_user.username
+        }
     
     # 计算文件哈希
     file_hash = calculate_file_hash(watermarked_path)
@@ -606,7 +655,7 @@ async def upload_inspection_photo(
         gps_accuracy=gps_accuracy,
         address=address,
         taken_at=datetime.utcnow(),
-        has_watermark=True,
+        has_watermark=has_watermark or watermark_data is not None,
         watermark_data=watermark_data,
         hash_value=file_hash,
         uploaded_by=current_user.id
@@ -712,8 +761,12 @@ async def get_inspection_items(
             detail="没有权限访问此检查记录"
         )
     
-    # 获取检查项
-    check_items = db.query(InspectionCheckItem).filter(
+    # 获取检查项，包括照片
+    from sqlalchemy.orm import joinedload
+    
+    check_items = db.query(InspectionCheckItem).options(
+        joinedload(InspectionCheckItem.photos)
+    ).filter(
         InspectionCheckItem.inspection_id == inspection_id
     ).all()
     
@@ -848,13 +901,13 @@ async def reset_inspection_for_rejected_task(
         )
     
     # 检查关联的任务是否被驳回
-    if inspection.task_id:
-        from app.models.inspection import TaskAssignment
-        task = db.query(TaskAssignment).filter(
-            TaskAssignment.id == inspection.task_id
+    if inspection.work_order_id:
+        from app.models.work_order import WorkOrder
+        work_order = db.query(WorkOrder).filter(
+            WorkOrder.id == inspection.work_order_id
         ).first()
         
-        if not task or task.status.value != "rejected":
+        if not work_order or work_order.status.value != "REJECTED":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="只能重置被驳回任务的检查记录"

@@ -80,50 +80,6 @@
           </el-table-column>
         </el-table>
 
-        <el-divider />
-        <div class="section-header">
-          <h3>照片审核</h3>
-        </div>
-        <el-table :data="photos" size="small" stripe v-loading="photosLoading">
-          <el-table-column prop="original_name" label="文件名" min-width="200" />
-          <el-table-column label="预览" width="120">
-            <template #default="{ row }">
-              <el-image 
-                :src="getImageUrl(row.file_path)" 
-                :preview-src-list="[getImageUrl(row.file_path)]"
-                style="width: 80px; height: 60px; border-radius: 4px;"
-                fit="cover"
-                preview-teleported
-              />
-            </template>
-          </el-table-column>
-          <el-table-column prop="taken_at" label="拍摄时间" width="180">
-            <template #default="{ row }">{{ formatDateTime(row.taken_at) }}</template>
-          </el-table-column>
-          <el-table-column label="位置信息" width="160">
-            <template #default="{ row }">
-              <div v-if="row.latitude && row.longitude">
-                <div>{{ row.latitude.toFixed(6) }}</div>
-                <div>{{ row.longitude.toFixed(6) }}</div>
-              </div>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="review_status" label="审核结果" width="120">
-            <template #default="{ row }">
-              <el-tag v-if="row.review_status === 'approved'" type="success">通过</el-tag>
-              <el-tag v-else-if="row.review_status === 'rejected'" type="danger">驳回</el-tag>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="viewPhotoDetail(row)">详情</el-button>
-              <el-button link type="success" size="small" @click="reviewPhoto(row, 'approved')">通过</el-button>
-              <el-button link type="danger" size="small" @click="reviewPhoto(row, 'rejected')">驳回</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
 
         <el-divider />
         <el-form label-width="100px">
@@ -185,16 +141,27 @@
               <div class="photo-card">
                 <el-image 
                   :src="getImageUrl(photo.file_path)" 
-                  :preview-src-list="selectedItem.photos.map(p => getImageUrl(p.file_path))"
-                  style="width: 100%; height: 120px;"
+                  style="width: 100%; height: 120px; cursor: pointer;"
                   fit="cover"
-                  preview-teleported
+                  @click="viewPhotoDetail(photo)"
                 />
                 <div class="photo-info">
                   <div class="photo-name">{{ photo.original_name }}</div>
                   <div class="photo-time">{{ formatDateTime(photo.taken_at) }}</div>
                   <div v-if="photo.latitude && photo.longitude" class="photo-location">
                     {{ photo.latitude.toFixed(6) }}, {{ photo.longitude.toFixed(6) }}
+                  </div>
+                  <div class="photo-status" style="margin-top: 4px;">
+                    <el-tag v-if="photo.review_status === 'approved'" type="success" size="small">已通过</el-tag>
+                    <el-tag v-else-if="photo.review_status === 'rejected'" type="danger" size="small">已驳回</el-tag>
+                    <span v-else style="font-size: 12px; color: #909399;">待审核</span>
+                  </div>
+                  <div class="photo-actions" style="margin-top: 4px;">
+                    <el-button-group>
+                      <el-button type="primary" size="small" @click="viewPhotoDetail(photo)">详情</el-button>
+                      <el-button v-if="!photo.review_status" type="success" size="small" @click="reviewPhoto(photo, 'approved')">通过</el-button>
+                      <el-button v-if="!photo.review_status" type="danger" size="small" @click="reviewPhoto(photo, 'rejected')">驳回</el-button>
+                    </el-button-group>
                   </div>
                 </div>
               </div>
@@ -229,6 +196,9 @@
                   <el-button size="small" @click="toggleFullscreen">
                     <el-icon v-if="!isFullscreen"><FullScreen /></el-icon>
                     <el-icon v-else><Aim /></el-icon>
+                  </el-button>
+                  <el-button size="small" type="primary" @click="downloadPhoto">
+                    <el-icon><Download /></el-icon>下载
                   </el-button>
                 </el-button-group>
                 <span class="zoom-info">{{ Math.round(zoomLevel * 100) }}%</span>
@@ -282,15 +252,13 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import apiClient from '../../api/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ZoomIn, ZoomOut, FullScreen, Aim } from '@element-plus/icons-vue'
+import { ZoomIn, ZoomOut, FullScreen, Aim, Download } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const loading = ref(false)
 const order = ref(null)
 const items = ref([])
-const photos = ref([])
 const itemsLoading = ref(false)
-const photosLoading = ref(false)
 const summary = ref(null)
 const comments = ref('')
 const photoDetailVisible = ref(false)
@@ -334,7 +302,7 @@ const refresh = async () => {
     // 先加载工单信息
     order.value = await apiClient.get(`/api/work-orders/${id}`)
     // 然后基于工单信息加载相关数据
-    await Promise.all([loadItems(), loadPhotos(), loadSummary()])
+    await Promise.all([loadItems(), loadSummary()])
   } catch (e) {
     console.error(e)
     ElMessage.error('加载工单失败')
@@ -363,25 +331,6 @@ const loadItems = async () => {
   }
 }
 
-const loadPhotos = async () => {
-  const id = route.query.id
-  if (!id) return
-  try {
-    photosLoading.value = true
-    // 如果工单有关联的检查，优先加载检查的照片
-    if (order.value && order.value.inspection_id) {
-      const inspection = await apiClient.get(`/api/inspections/detail/${order.value.inspection_id}`)
-      photos.value = inspection.photos || []
-    } else {
-      // 否则加载工单自己的照片
-      photos.value = await apiClient.get(`/api/work-orders/${id}/photos`)
-    }
-  } catch (e) {
-    // ignore
-  } finally {
-    photosLoading.value = false
-  }
-}
 
 const loadSummary = async () => {
   const id = route.query.id
@@ -455,7 +404,8 @@ const reviewPhoto = async (row, action) => {
       await apiClient.post(`/api/work-orders/${id}/photos/${row.id}/review`, { action, comments: value || undefined })
     }
     ElMessage.success('已提交')
-    await loadPhotos()
+    // 刷新检查项数据以更新照片状态
+    await loadItems()
     // 如果在详情弹窗中审核，关闭弹窗
     if (photoDetailVisible.value) {
       photoDetailVisible.value = false
@@ -482,8 +432,10 @@ const viewItemDetail = (item) => {
 }
 
 const viewPhotoDetail = (photo) => {
+  console.log('viewPhotoDetail called with photo:', photo)
   selectedPhoto.value = photo
   photoDetailVisible.value = true
+  console.log('photoDetailVisible set to:', photoDetailVisible.value)
   // 重置查看器状态
   resetZoom()
   isFullscreen.value = false
@@ -505,6 +457,44 @@ const resetZoom = () => {
 
 const toggleFullscreen = () => {
   isFullscreen.value = !isFullscreen.value
+}
+
+const downloadPhoto = async () => {
+  if (!selectedPhoto.value) return
+  
+  try {
+    // 获取图片URL
+    const imageUrl = getImageUrl(selectedPhoto.value.file_path)
+    
+    // 创建一个临时的a标签进行下载
+    const link = document.createElement('a')
+    link.href = imageUrl
+    
+    // 生成文件名：原始文件名 + GPS坐标 + 时间戳
+    const timestamp = selectedPhoto.value.taken_at ? 
+      new Date(selectedPhoto.value.taken_at).toISOString().replace(/[:.]/g, '-').substring(0, 19) : 
+      'unknown-time'
+    
+    const gpsInfo = selectedPhoto.value.latitude && selectedPhoto.value.longitude ? 
+      `_GPS-${selectedPhoto.value.latitude.toFixed(6)}-${selectedPhoto.value.longitude.toFixed(6)}` : 
+      ''
+    
+    const originalName = selectedPhoto.value.original_name || 'photo'
+    const extension = originalName.split('.').pop() || 'jpg'
+    const baseName = originalName.replace(/\.[^/.]+$/, "")
+    
+    link.download = `${baseName}_${timestamp}${gpsInfo}.${extension}`
+    
+    // 触发下载
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    ElMessage.success('照片下载成功')
+  } catch (error) {
+    console.error('下载照片失败:', error)
+    ElMessage.error('下载照片失败')
+  }
 }
 
 const handleWheel = (e) => {

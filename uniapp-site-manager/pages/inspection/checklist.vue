@@ -141,6 +141,13 @@
 			</button>
 		</view>
 		
+		<!-- 隐藏的canvas用于水印处理 -->
+		<canvas 
+			canvas-id="watermarkCanvas" 
+			style="position: absolute; left: -9999px; top: -9999px;" 
+			:style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
+		></canvas>
+		
 		<!-- 检查项详情弹窗 -->
 		<view class="item-modal-overlay" v-if="currentItem" @click="closeItemModal">
 			<view class="item-modal" @click.stop>
@@ -293,6 +300,10 @@
 	const saving = ref(false)
 	const submitting = ref(false)
 	const savingItem = ref(false)
+	
+	// Canvas尺寸（用于水印处理）
+	const canvasWidth = ref(400)
+	const canvasHeight = ref(300)
 	
 	// 计算属性
 	const filteredCheckItems = computed(() => {
@@ -560,38 +571,247 @@
 		currentItem.value = null
 	}
 	
-	const takePhoto = () => {
-		uni.chooseImage({
-			count: 1,
-			sourceType: ['camera'],
-			success: (res) => {
-				// 模拟上传照片
-				const photo = {
-					file_path: res.tempFilePaths[0],
-					taken_at: new Date().toISOString(),
-					latitude: 0,
-					longitude: 0,
-					gps_accuracy: 5.0
-				}
+	const takePhoto = async () => {
+		// 显示操作选择弹窗
+		uni.showActionSheet({
+			itemList: ['拍照', '从相册选择'],
+			success: async function (res) {
+				const sourceType = res.tapIndex === 0 ? ['camera'] : ['album']
+				const isCamera = res.tapIndex === 0
 				
-				if (!currentItem.value.photos) {
-					currentItem.value.photos = []
+				try {
+					// 如果是拍照，先获取GPS坐标
+					let gpsData = { latitude: 0, longitude: 0, accuracy: 0, address: '' }
+					
+					if (isCamera) {
+						uni.showLoading({ title: '获取位置信息...' })
+						
+						try {
+							gpsData = await getHighAccuracyLocation()
+							// 验证GPS坐标的有效性
+							if (gpsData.latitude === 0 && gpsData.longitude === 0) {
+								throw new Error('GPS坐标获取失败，无法获取有效位置信息')
+							}
+						} catch (gpsError) {
+							console.warn('GPS获取失败:', gpsError)
+							uni.hideLoading()
+							uni.showModal({
+								title: 'GPS获取失败',
+								content: 'GPS获取失败，无法添加位置水印。请检查位置权限设置或移动到信号较好的位置后重试。',
+								showCancel: false
+							})
+							return // 直接返回，不继续拍照流程
+						} finally {
+							uni.hideLoading()
+						}
+					}
+					
+					// 选择图片
+					uni.chooseImage({
+						count: 1,
+						sizeType: ['original'],
+						sourceType: sourceType,
+						success: async (chooseRes) => {
+							try {
+								let finalImagePath = chooseRes.tempFilePaths[0]
+								
+								// 如果是拍照，添加水印
+								if (isCamera) {
+									console.log('拍照模式，添加GPS水印')
+									try {
+										const watermarkTool = getWatermarkTool()
+										finalImagePath = await watermarkTool.addWatermark(
+											finalImagePath,
+											gpsData.latitude,
+											gpsData.longitude,
+											gpsData.address,
+											userStore.user?.username || '未知用户',
+											currentItem.value.item_name || '检查项'
+										)
+										console.log('水印添加成功，最终图片路径:', finalImagePath)
+									} catch (watermarkError) {
+										console.warn('水印添加失败，使用原图:', watermarkError)
+									}
+								}
+								
+								// 创建照片对象
+								const photo = {
+									file_path: finalImagePath,
+									taken_at: new Date().toISOString(),
+									latitude: gpsData.latitude,
+									longitude: gpsData.longitude,
+									gps_accuracy: gpsData.accuracy,
+									address: gpsData.address,
+									has_watermark: isCamera,
+									watermark_data: isCamera ? {
+										timestamp: new Date().toISOString(),
+										coordinates: `${gpsData.latitude},${gpsData.longitude}`,
+										accuracy: gpsData.accuracy,
+										inspector: userStore.user?.username || '未知用户',
+										item_name: currentItem.value.item_name || '检查项'
+									} : null
+								}
+								
+								if (!currentItem.value.photos) {
+									currentItem.value.photos = []
+								}
+								currentItem.value.photos.push(photo)
+								
+								uni.showToast({
+									title: '照片已添加',
+									icon: 'success'
+								})
+								
+							} catch (processError) {
+								console.error('照片处理失败:', processError)
+								uni.showToast({
+									title: '照片处理失败',
+									icon: 'error'
+								})
+							}
+						},
+						fail: (chooseError) => {
+							console.error('选择照片失败:', chooseError)
+							uni.showToast({
+								title: '选择照片失败',
+								icon: 'error'
+							})
+						}
+					})
+					
+				} catch (error) {
+					console.error('拍照流程失败:', error)
+					uni.showToast({
+						title: '操作失败',
+						icon: 'error'
+					})
 				}
-				currentItem.value.photos.push(photo)
-				
-				uni.showToast({
-					title: '照片已添加',
-					icon: 'success'
-				})
-			},
-			fail: (error) => {
-				console.error('拍照失败:', error)
-				uni.showToast({
-					title: '拍照失败',
-					icon: 'error'
-				})
 			}
 		})
+	}
+	
+	// GPS高精度定位函数
+	const getHighAccuracyLocation = () => {
+		return new Promise((resolve, reject) => {
+			uni.getLocation({
+				type: 'gcj02',
+				altitude: true,
+				highAccuracyExpireTime: 10000,
+				isHighAccuracy: true,
+				success: async (res) => {
+					try {
+						// 逆地理编码获取地址
+						const address = await getAddressFromCoords(res.latitude, res.longitude)
+						resolve({
+							latitude: res.latitude,
+							longitude: res.longitude,
+							accuracy: res.accuracy || 10,
+							address: address || ''
+						})
+					} catch (addressError) {
+						// 即使地址获取失败，也返回GPS坐标
+						resolve({
+							latitude: res.latitude,
+							longitude: res.longitude,
+							accuracy: res.accuracy || 10,
+							address: ''
+						})
+					}
+				},
+				fail: (error) => {
+					reject(error)
+				}
+			})
+		})
+	}
+	
+	// 逆地理编码函数
+	const getAddressFromCoords = (latitude, longitude) => {
+		return new Promise((resolve) => {
+			// 这里可以调用真实的逆地理编码API
+			// 暂时返回格式化的坐标信息作为地址
+			const formattedAddress = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+			resolve(formattedAddress)
+		})
+	}
+	
+	// 获取水印工具
+	const getWatermarkTool = () => {
+		return {
+			addWatermark: (imagePath, latitude, longitude, address, inspector, itemName) => {
+				return new Promise((resolve, reject) => {
+					// 创建canvas进行水印处理
+					const ctx = uni.createCanvasContext('watermarkCanvas')
+					
+					// 加载图片
+					uni.getImageInfo({
+						src: imagePath,
+						success: (imageInfo) => {
+							const imgWidth = imageInfo.width
+							const imgHeight = imageInfo.height
+							
+							// 更新canvas尺寸
+							canvasWidth.value = imgWidth
+							canvasHeight.value = imgHeight
+							
+							console.log('更新Canvas尺寸:', imgWidth, imgHeight)
+							
+							// 等待DOM更新后再绘制
+							setTimeout(() => {
+								// 重新创建canvas上下文
+								const ctx = uni.createCanvasContext('watermarkCanvas')
+								
+								// 设置canvas尺寸并绘制图片
+								ctx.drawImage(imagePath, 0, 0, imgWidth, imgHeight)
+							
+							// 添加水印文字
+							const watermarkText = [
+								`时间: ${new Date().toLocaleString('zh-CN')}`,
+								`坐标: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+								`地址: ${address || '获取地址失败'}`,
+								`检查员: ${inspector}`,
+								`检查项: ${itemName}`
+							]
+							
+								// 设置水印样式
+								ctx.setFillStyle('rgba(0, 0, 0, 0.7)')
+								ctx.fillRect(10, imgHeight - 140, imgWidth - 20, 130)
+								
+								ctx.setFillStyle('#ffffff')
+								ctx.setFontSize(18)
+								
+								// 绘制水印文字
+								watermarkText.forEach((text, index) => {
+									ctx.fillText(text, 20, imgHeight - 115 + index * 25)
+								})
+							
+								// 导出处理后的图片
+								ctx.draw(false, () => {
+									uni.canvasToTempFilePath({
+										canvasId: 'watermarkCanvas',
+										destWidth: imgWidth,
+										destHeight: imgHeight,
+										success: (canvasRes) => {
+											console.log('水印处理成功:', canvasRes.tempFilePath)
+											resolve(canvasRes.tempFilePath)
+										},
+										fail: (canvasError) => {
+											console.error('Canvas导出失败:', canvasError)
+											reject(canvasError)
+										}
+									})
+								})
+							}, 100) // setTimeout结束
+						},
+						fail: (error) => {
+							// 如果水印处理失败，返回原图
+							console.error('水印处理失败:', error)
+							resolve(imagePath)
+						}
+					})
+				})
+			}
+		}
 	}
 	
 	const previewPhoto = (photo) => {
@@ -697,6 +917,70 @@
 				validation_result: currentItem.value.validation_result
 			}
 			
+			// 先上传照片（如果有新照片的话）
+			if (currentItem.value.photos && currentItem.value.photos.length > 0) {
+				console.log('开始上传照片，照片数量:', currentItem.value.photos.length)
+				uni.showLoading({ title: '上传照片中...' })
+				
+				try {
+					for (const photo of currentItem.value.photos) {
+						console.log('检查照片路径:', photo.file_path)
+						// 上传所有照片（可能是新拍摄的临时文件）
+						// UniApp的临时文件路径通常包含 temp、tmp、_tmp_ 等标识
+						if (photo.file_path && (
+							photo.file_path.includes('temp') || 
+							photo.file_path.includes('tmp') ||
+							photo.file_path.includes('_tmp_') ||
+							photo.file_path.includes('wxfile://') ||
+							!photo.uploaded // 如果有uploaded标记，则跳过已上传的
+						)) {
+							console.log('开始上传照片:', photo.file_path)
+							
+							// 将参数分解为单独的字段，适配后端Form参数接收方式
+							const photoData = {
+								check_item_id: currentItem.value.id,
+								gps_latitude: photo.latitude,
+								gps_longitude: photo.longitude,
+								gps_accuracy: photo.gps_accuracy,
+								has_watermark: photo.has_watermark || false
+								// 其他复杂数据暂时不传，后端会自动处理
+							}
+							
+							console.log('照片上传数据:', photoData)
+							
+							const uploadResult = await inspectionStore.uploadPhoto(
+								inspectionId.value,
+								photo.file_path,
+								photoData
+							)
+							
+							console.log('照片上传结果:', uploadResult)
+							
+							if (!uploadResult.success) {
+								throw new Error(`照片上传失败: ${uploadResult.error}`)
+							}
+							
+							// 标记为已上传
+							photo.uploaded = true
+							
+						} else {
+							console.log('跳过照片（已上传或非临时文件）:', photo.file_path)
+						}
+					}
+				} catch (photoError) {
+					console.error('照片上传失败:', photoError)
+					uni.hideLoading()
+					uni.showToast({
+						title: `照片上传失败: ${photoError.message}`,
+						icon: 'error',
+						duration: 3000
+					})
+					return
+				} finally {
+					uni.hideLoading()
+				}
+			}
+
 			const result = await inspectionStore.updateInspectionItem(
 				inspectionId.value, 
 				currentItem.value.id, 

@@ -3,6 +3,10 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
+# Import for photos
+if True:  # Avoid circular import
+    from .inspection_enhanced import InspectionPhotoResponse
+
 
 class WorkOrderStatusEnum(str, Enum):
     PENDING = "PENDING"
@@ -103,6 +107,7 @@ class WorkOrderItemResponse(BaseModel):
     review_status: Optional[str]
     review_comments: Optional[str]
     reviewed_at: Optional[datetime]
+    photos: List['InspectionPhotoResponse'] = []
     created_at: datetime
     updated_at: datetime
 

@@ -97,6 +97,19 @@
 			</cover-view>
 		</camera>
 		
+		<!-- 隐藏的canvas用于水印处理 -->
+		<canvas 
+			v-if="canvasId" 
+			:canvas-id="canvasId" 
+			:style="{ 
+				position: 'fixed', 
+				top: '-9999px', 
+				left: '-9999px',
+				width: canvasWidth + 'px',
+				height: canvasHeight + 'px'
+			}"
+		></canvas>
+		
 		<!-- 照片预览弹窗 -->
 		<view class="photo-preview-modal" v-if="showPreview" @click="hidePreview">
 			<view class="preview-container" @click.stop>
@@ -152,20 +165,49 @@
 	</view>
 </template>
 
+<script>
+export default {
+	onLoad(options) {
+		console.log('Camera页面onLoad接收参数:', options)
+		// 这里会在组件setup之后被调用
+		this.$nextTick(() => {
+			if (this.setupOnLoad) {
+				this.setupOnLoad(options)
+			}
+		})
+	}
+}
+</script>
+
 <script setup>
 	import { ref, computed, onMounted, onUnmounted } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useOfflineStore } from '@/stores/offline'
+	import { useWorkOrderStore } from '@/stores/workorder'
+	import { watermarkTool } from '@/utils/watermark.js'
+	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
 	
 	const userStore = useUserStore()
 	const inspectionStore = useInspectionStore()
 	const offlineStore = useOfflineStore()
+	const workOrderStore = useWorkOrderStore()
 	
-	// Props
+	// URL参数 (在UniApp中通过onLoad接收)
+	const urlParams = ref({
+		inspectionId: '',
+		checkItemId: '',
+		workOrderId: '',
+		mode: 'inspection',
+		itemIndex: 0
+	})
+	
+	// Props (保持兼容性)
 	const props = defineProps({
 		inspectionId: String,
 		checkItemId: String,
+		workOrderId: String,  // 工单ID
+		mode: String,         // 模式: inspection | workorder
 		itemIndex: {
 			type: Number,
 			default: 0
@@ -195,6 +237,12 @@
 	const gpsWatcher = ref(null)
 	const timeInterval = ref(null)
 	
+	// 水印相关状态
+	const isProcessingWatermark = ref(false)
+	const canvasId = ref(null)
+	const canvasWidth = ref(0)
+	const canvasHeight = ref(0)
+	
 	// 计算属性
 	const canTakePhoto = computed(() => {
 		// 需要GPS且GPS未获取时不能拍照
@@ -204,6 +252,11 @@
 		
 		// 正在拍照时不能拍照
 		if (isCapturing.value) {
+			return false
+		}
+		
+		// 正在处理水印时不能拍照
+		if (isProcessingWatermark.value) {
 			return false
 		}
 		
@@ -222,7 +275,31 @@
 		return `GPS良好(${gpsInfo.value.accuracy}m)`
 	})
 	
-	// 生命周期
+	// 处理URL参数的函数
+	const setupOnLoad = (options) => {
+		console.log('Camera页面setup接收参数:', options)
+		
+		// 更新URL参数
+		urlParams.value = {
+			inspectionId: options.inspectionId || props.inspectionId || '',
+			checkItemId: options.checkItemId || props.checkItemId || '',
+			workOrderId: options.workOrderId || props.workOrderId || '',
+			mode: options.mode || props.mode || 'inspection',
+			itemIndex: parseInt(options.itemIndex || props.itemIndex || '0')
+		}
+		
+		console.log('解析后的参数:', urlParams.value)
+		
+		// 参数更新后重新加载检查项信息
+		loadCheckItemInfo()
+	}
+	
+	// 暴露setupOnLoad给外部script调用
+	defineExpose({
+		setupOnLoad
+	})
+	
+	// Vue生命周期
 	onMounted(() => {
 		initCamera()
 		loadCheckItemInfo()
@@ -256,17 +333,31 @@
 	
 	const loadCheckItemInfo = async () => {
 		try {
-			if (props.inspectionId && props.checkItemId) {
-				const result = await inspectionStore.getInspection(props.inspectionId)
+			const inspectionId = urlParams.value.inspectionId || props.inspectionId
+			const checkItemId = urlParams.value.checkItemId || props.checkItemId
+			
+			if (inspectionId && checkItemId) {
+				console.log('开始加载检查项信息:', { inspectionId, checkItemId })
+				
+				const result = await inspectionStore.getInspection(inspectionId)
 				if (result.success) {
 					const inspection = result.data
 					currentSite.value = inspection.site
 					
 					// 查找检查项
 					checkItem.value = inspection.check_items.find(
-						item => item.id === props.checkItemId
+						item => item.id === checkItemId
 					)
+					
+					console.log('检查项信息加载成功:', { 
+						site: currentSite.value?.site_name, 
+						checkItem: checkItem.value?.item_name 
+					})
+				} else {
+					console.error('获取检查信息失败:', result.error)
 				}
+			} else {
+				console.warn('缺少必要参数:', { inspectionId, checkItemId })
 			}
 		} catch (error) {
 			console.error('加载检查项信息失败:', error)
@@ -453,14 +544,36 @@
 				filePath: result.tempImagePath
 			})
 			
+			// 开始处理水印
+			isProcessingWatermark.value = true
+			
+			uni.showLoading({
+				title: '添加水印中...',
+				mask: true
+			})
+			
+			// 添加水印
+			const watermarkedPath = await addWatermarkToPhoto(result.tempImagePath, fileInfo)
+			
 			// 准备照片数据
 			const photoData = {
-				path: result.tempImagePath,
+				path: watermarkedPath, // 使用带水印的照片
+				originalPath: result.tempImagePath, // 保留原始路径
 				timestamp: new Date().toISOString(),
 				size: fileInfo.size,
 				gps: { ...gpsInfo.value },
-				checkItemId: props.checkItemId,
-				inspectionId: props.inspectionId
+				checkItemId: urlParams.value.checkItemId || props.checkItemId,
+				inspectionId: urlParams.value.inspectionId || props.inspectionId,
+				hasWatermark: true
+			}
+			
+			// 生成照片哈希值和数字签名
+			if (watermarkConfig.security.enableHash) {
+				photoData.hash = await generateSecureHash(watermarkedPath, watermarkData)
+			}
+			
+			if (watermarkConfig.security.enableSignature) {
+				photoData.signature = securityUtils.generateSignature(photoData)
 			}
 			
 			// 显示预览
@@ -473,6 +586,9 @@
 				title: '处理照片失败',
 				icon: 'error'
 			})
+		} finally {
+			isProcessingWatermark.value = false
+			uni.hideLoading()
 		}
 	}
 	
@@ -489,7 +605,7 @@
 				// 离线模式：保存到本地
 				await savePhotoOffline(previewPhoto.value)
 			} else {
-				// 在线模式：直接上传
+				// 在线模式：统一使用检查系统上传
 				await uploadPhotoOnline(previewPhoto.value)
 			}
 			
@@ -545,11 +661,56 @@
 			
 			// 调用上传接口
 			const result = await inspectionStore.uploadPhoto(
-				props.inspectionId,
+				urlParams.value.inspectionId || props.inspectionId,
 				photoData.path,
 				{
-					checkItemId: props.checkItemId,
+					checkItemId: urlParams.value.checkItemId || props.checkItemId,
 					gpsData: photoData.gps
+				}
+			)
+			
+			if (result.success) {
+				uni.showToast({
+					title: '上传成功',
+					icon: 'success'
+				})
+			} else {
+				throw new Error(result.error || '上传失败')
+			}
+			
+		} catch (error) {
+			// 上传失败时保存到离线
+			await savePhotoOffline(photoData)
+			throw error
+		}
+	}
+	
+	const uploadPhotoToWorkOrder = async (photoData) => {
+		try {
+			// 模拟上传进度
+			const uploadInterval = setInterval(() => {
+				uploadProgress.value += 10
+				updateUploadSpeed()
+				
+				if (uploadProgress.value >= 100) {
+					clearInterval(uploadInterval)
+				}
+			}, 200)
+			
+			// 调用工单上传接口
+			const result = await workOrderStore.uploadPhoto(
+				props.workOrderId,
+				photoData.path,
+				{
+					item_id: props.checkItemId,
+					gps_latitude: photoData.gps?.latitude || 0,
+					gps_longitude: photoData.gps?.longitude || 0,
+					gps_accuracy: photoData.gps?.accuracy || undefined,
+					watermark_data: {
+						hasWatermark: photoData.hasWatermark,
+						hash: photoData.hash,
+						signature: photoData.signature
+					}
 				}
 			)
 			
@@ -633,6 +794,269 @@
 		// 这里可以调用地图服务的逆地理编码API
 		// 简化实现，返回坐标描述
 		return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+	}
+	
+	// 水印处理函数
+	const addWatermarkToPhoto = async (imagePath, fileInfo) => {
+		try {
+			console.log('开始添加水印:', imagePath)
+			
+			// 准备水印数据
+			const watermarkData = {
+				gps: gpsInfo.value,
+				timestamp: new Date().toISOString(),
+				inspector: userStore.user?.username || '未知检查员',
+				checkItem: checkItem.value?.item_name || '检查项目',
+				siteName: currentSite.value?.site_name || '未知站点'
+			}
+			
+			// 获取图片信息用于canvas尺寸
+			const imageInfo = await getImageInfo(imagePath)
+			
+			// 设置canvas尺寸
+			canvasWidth.value = imageInfo.width
+			canvasHeight.value = imageInfo.height
+			canvasId.value = 'watermark-canvas-' + Date.now()
+			
+			// 等待canvas元素渲染
+			await new Promise(resolve => setTimeout(resolve, 100))
+			
+			// 使用自定义水印工具添加水印
+			const watermarkedPath = await addWatermarkWithCanvas(imagePath, watermarkData, imageInfo)
+			
+			console.log('水印添加完成:', watermarkedPath)
+			return watermarkedPath
+			
+		} catch (error) {
+			console.error('添加水印失败:', error)
+			// 如果水印添加失败，返回原图
+			uni.showToast({
+				title: '水印添加失败，使用原图',
+				icon: 'none'
+			})
+			return imagePath
+		}
+	}
+	
+	const getImageInfo = async (imagePath) => {
+		return new Promise((resolve, reject) => {
+			uni.getImageInfo({
+				src: imagePath,
+				success: resolve,
+				fail: reject
+			})
+		})
+	}
+	
+	const addWatermarkWithCanvas = async (imagePath, watermarkData, imageInfo) => {
+		return new Promise((resolve, reject) => {
+			const ctx = uni.createCanvasContext(canvasId.value)
+			
+			// 绘制原始图片
+			ctx.drawImage(imagePath, 0, 0, imageInfo.width, imageInfo.height)
+			
+			// 准备水印文本
+			const watermarkLines = prepareWatermarkText(watermarkData)
+			
+			// 绘制水印
+			drawWatermarkOnCanvas(ctx, watermarkLines, imageInfo)
+			
+			// 渲染canvas
+			ctx.draw(true, () => {
+				// 保存canvas为图片
+				uni.canvasToTempFilePath({
+					canvasId: canvasId.value,
+					destWidth: imageInfo.width,
+					destHeight: imageInfo.height,
+					quality: 0.9,
+					fileType: 'jpg',
+					success: (res) => {
+						resolve(res.tempFilePath)
+					},
+					fail: (error) => {
+						reject(new Error('保存canvas失败: ' + error.errMsg))
+					}
+				})
+			})
+		})
+	}
+	
+	const prepareWatermarkText = (watermarkData) => {
+		const lines = []
+		
+		// GPS坐标信息
+		if (watermarkData.gps && watermarkData.gps.latitude) {
+			lines.push(`📍 ${watermarkData.gps.latitude.toFixed(6)}, ${watermarkData.gps.longitude.toFixed(6)}`)
+			
+			if (watermarkData.gps.accuracy) {
+				lines.push(`📊 精度: ${watermarkData.gps.accuracy.toFixed(1)}m`)
+			}
+		}
+		
+		// 时间信息
+		if (watermarkData.timestamp) {
+			const date = new Date(watermarkData.timestamp)
+			lines.push(`🕐 ${date.toLocaleString('zh-CN')}`)
+		}
+		
+		// 检查员信息
+		if (watermarkData.inspector) {
+			lines.push(`👤 ${watermarkData.inspector}`)
+		}
+		
+		// 检查项信息
+		if (watermarkData.checkItem) {
+			lines.push(`📋 ${watermarkData.checkItem}`)
+		}
+		
+		// 站点信息
+		if (watermarkData.siteName) {
+			lines.push(`🏗️ ${watermarkData.siteName}`)
+		}
+		
+		return lines
+	}
+	
+	const drawWatermarkOnCanvas = (ctx, lines, imageInfo) => {
+		const config = watermarkConfig.style
+		const fontSize = config.fontSize
+		const padding = config.padding
+		const margin = config.margin
+		const lineHeight = config.lineHeight
+		const backgroundColor = config.backgroundColor
+		const textColor = config.textColor
+		
+		// 计算水印尺寸
+		ctx.setFontSize(fontSize)
+		let maxWidth = 0
+		lines.forEach(line => {
+			const width = ctx.measureText(line).width
+			maxWidth = Math.max(maxWidth, width)
+		})
+		
+		const watermarkWidth = maxWidth + padding * 2
+		const watermarkHeight = lines.length * lineHeight + padding * 2
+		
+		// 计算水印位置
+		const position = watermarkConfig.position.default
+		let x, y
+		
+		switch (position) {
+			case 'topLeft':
+				x = margin
+				y = margin
+				break
+			case 'topRight':
+				x = imageInfo.width - watermarkWidth - margin
+				y = margin
+				break
+			case 'bottomRight':
+				x = imageInfo.width - watermarkWidth - margin
+				y = imageInfo.height - watermarkHeight - margin
+				break
+			case 'center':
+				x = (imageInfo.width - watermarkWidth) / 2
+				y = (imageInfo.height - watermarkHeight) / 2
+				break
+			case 'bottomLeft':
+			default:
+				x = margin
+				y = imageInfo.height - watermarkHeight - margin
+				break
+		}
+		
+		// 绘制背景
+		ctx.setFillStyle(backgroundColor)
+		drawRoundedRect(ctx, x, y, watermarkWidth, watermarkHeight, 8)
+		ctx.fill()
+		
+		// 绘制文本
+		ctx.setFillStyle(textColor)
+		ctx.setFontSize(fontSize)
+		ctx.setTextAlign('left')
+		
+		lines.forEach((line, index) => {
+			const textX = x + padding
+			const textY = y + padding + (index + 1) * lineHeight - 8
+			ctx.fillText(line, textX, textY)
+		})
+	}
+	
+	const drawRoundedRect = (ctx, x, y, width, height, radius) => {
+		ctx.beginPath()
+		ctx.moveTo(x + radius, y)
+		ctx.lineTo(x + width - radius, y)
+		ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
+		ctx.lineTo(x + width, y + height - radius)
+		ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
+		ctx.lineTo(x + radius, y + height)
+		ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
+		ctx.lineTo(x, y + radius)
+		ctx.quadraticCurveTo(x, y, x + radius, y)
+		ctx.closePath()
+	}
+	
+	// 安全相关函数
+	const generateSecureHash = async (imagePath, watermarkData) => {
+		try {
+			// 获取文件信息
+			const fileInfo = await uni.getFileInfo({
+				filePath: imagePath
+			})
+			
+			// 组合数据用于哈希
+			const hashData = {
+				filePath: imagePath,
+				fileSize: fileInfo.size,
+				watermarkData,
+				timestamp: new Date().toISOString(),
+				version: watermarkConfig.security.watermarkVersion
+			}
+			
+			// 生成哈希值
+			return securityUtils.generateSimpleHash(hashData)
+		} catch (error) {
+			console.error('生成哈希失败:', error)
+			return securityUtils.generateTimestamp()
+		}
+	}
+	
+	// 验证照片完整性
+	const verifyPhotoIntegrity = (photoData) => {
+		if (!watermarkConfig.security.enableTamperDetection) {
+			return true
+		}
+		
+		try {
+			// 验证哈希值
+			if (photoData.hash) {
+				const expectedHash = securityUtils.generateSimpleHash({
+					path: photoData.path,
+					size: photoData.size,
+					timestamp: photoData.timestamp,
+					gps: photoData.gps
+				})
+				
+				if (expectedHash !== photoData.hash) {
+					console.warn('照片哈希验证失败')
+					return false
+				}
+			}
+			
+			// 验证签名
+			if (photoData.signature) {
+				const expectedSignature = securityUtils.generateSignature(photoData)
+				if (expectedSignature !== photoData.signature) {
+					console.warn('照片签名验证失败')
+					return false
+				}
+			}
+			
+			return true
+		} catch (error) {
+			console.error('完整性验证失败:', error)
+			return false
+		}
 	}
 </script>
 

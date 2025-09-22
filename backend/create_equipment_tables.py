@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.core.database import Base
 from app.models.equipment import Equipment, EquipmentPackage, EquipmentInstance, Warehouse, Inventory, StockTransaction, StockTransactionItem, PickupRecord
-from app.models.inspection import TaskAssignment
+from app.models.work_order import WorkOrder
 from app.models.user import User
 
 def create_equipment_tables():

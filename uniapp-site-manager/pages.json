@@ -100,6 +100,14 @@
 				"navigationBarBackgroundColor": "#f97316",
 				"navigationBarTextStyle": "white"
 			}
+		},
+		{
+			"path": "pages/test/logging-test",
+			"style": {
+				"navigationBarTitleText": "日志测试",
+				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarTextStyle": "white"
+			}
 		}
 	],
 	"globalStyle": {
