@@ -6,7 +6,6 @@ from typing import Optional, List, Any
 from datetime import datetime
 from pydantic import BaseModel, Field, validator
 
-from app.models.inspection import TaskTypeEnum
 
 
 class ResolveContextSchema(BaseModel):
@@ -19,15 +18,6 @@ class ResolveContextSchema(BaseModel):
     customer: Optional[str] = None
     tags: Optional[List[str]] = None
 
-    @validator('task_type')
-    def validate_task_type(cls, v):
-        if v is not None:
-            try:
-                TaskTypeEnum(v)
-            except ValueError:
-                valid_types = [t.value for t in TaskTypeEnum]
-                raise ValueError(f"Invalid task_type. Valid values: {valid_types}")
-        return v
 
     @validator('site_type')
     def validate_site_type(cls, v):
@@ -45,7 +35,6 @@ class TemplateBindingCreate(BaseModel):
     # 条件维度
     site_id: Optional[int] = Field(None, description="站点ID")
     site_type: Optional[str] = Field(None, description="站点类型")
-    task_type: Optional[TaskTypeEnum] = Field(None, description="任务类型")
     region: Optional[str] = Field(None, description="区域")
     customer: Optional[str] = Field(None, description="客户")
     tags: Optional[List[str]] = Field(None, description="标签数组")
@@ -69,7 +58,6 @@ class TemplateBindingUpdate(BaseModel):
     # 条件维度
     site_id: Optional[int] = None
     site_type: Optional[str] = None
-    task_type: Optional[TaskTypeEnum] = None
     region: Optional[str] = None
     customer: Optional[str] = None
     tags: Optional[List[str]] = None
@@ -96,7 +84,6 @@ class TemplateBindingResponse(BaseModel):
     # 条件维度
     site_id: Optional[int]
     site_type: Optional[str]
-    task_type: Optional[TaskTypeEnum]
     region: Optional[str]
     customer: Optional[str]
     tags: Optional[List[str]]

@@ -7,7 +7,7 @@
           <el-icon @click="toggleSidebar" class="menu-toggle">
             <Menu />
           </el-icon>
-          <h1 class="system-title">设备货物管理系统</h1>
+          <h1 class="system-title">站点信息管理系统</h1>
         </div>
         
         <div class="header-right">

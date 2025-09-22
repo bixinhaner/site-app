@@ -24,7 +24,6 @@ from app.models.equipment import (
     InventoryStatusEnum,
     EquipmentStatusEnum
 )
-from app.models.inspection import TaskAssignment
 
 router = APIRouter()
 
@@ -247,7 +246,6 @@ async def scan_equipment_checkout(
             transaction_id=transaction_id,
             equipment_id=item.equipment_id,
             quantity=item.quantity,
-            unit_price=item.equipment.standard_price
         )
         db.add(transaction_item)
         
@@ -404,7 +402,6 @@ async def create_stock_in(
             transaction_id=transaction_id,
             equipment_id=equipment_id,
             quantity=quantity,
-            unit_price=item_data.get("unit_price"),
             batch_number=item_data.get("batch_number")
         )
         db.add(transaction_item)
@@ -954,7 +951,6 @@ async def get_equipment_instances(
             "warranty_end_date": instance.warranty_end_date.isoformat() if instance.warranty_end_date else None,
             "vendor": instance.vendor,
             "batch_number": instance.batch_number,
-            "purchase_price": float(instance.purchase_price) if instance.purchase_price else None,
             "quality_status": instance.quality_status,
             "status": instance.status,
             "location": instance.location,

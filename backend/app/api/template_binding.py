@@ -14,7 +14,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.site import Site
 from app.models.inspection import (
-    InspectionTemplate, TemplateBinding, TaskTypeEnum
+    InspectionTemplate, TemplateBinding
 )
 from app.schemas.template_binding import (
     TemplateBindingCreate, TemplateBindingUpdate, TemplateBindingResponse,
@@ -42,8 +42,8 @@ async def get_templates(
     current_user: User = Depends(get_current_user)
 ):
     """获取检查模板列表"""
-    # 权限检查
-    if current_user.role not in ["admin", "manager"]:
+    # 权限检查：管理员/经理可管理，检查员可读
+    if current_user.role not in ["admin", "manager", "inspector"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"
@@ -57,6 +57,7 @@ async def get_templates(
     if q:
         query = query.filter(InspectionTemplate.template_name.contains(q))
     
+
     # 按更新时间排序
     query = query.order_by(desc(InspectionTemplate.updated_at))
     

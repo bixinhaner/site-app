@@ -26,11 +26,11 @@
 				</view>
 				
 				<!-- 所有角色都能查看检查 -->
-				<view class="stat-card" @click="goToInspections">
+				<view class="stat-card" @click="goToWorkOrders">
 					<view class="stat-icon inspection-icon">🔍</view>
 					<view class="stat-info">
-						<text class="stat-number">{{ inspectionStats.pending }}</text>
-						<text class="stat-label">{{ getInspectionLabel() }}</text>
+						<text class="stat-number">{{ workOrderStats.assigned + workOrderStats.in_progress + workOrderStats.submitted }}</text>
+						<text class="stat-label">{{ getWorkOrderLabel() }}</text>
 					</view>
 				</view>
 				
@@ -52,21 +52,14 @@
 				</view>
 				
 				<!-- 检查员显示我的任务 -->
-				<view class="stat-card" v-if="isInspector" @click="goToMyTasks">
+				<view class="stat-card" v-if="isInspector" @click="goToWorkOrders">
 					<view class="stat-icon inspection-icon">📋</view>
 					<view class="stat-info">
-						<text class="stat-number">{{ myTaskStats.assigned }}</text>
-						<text class="stat-label">我的任务</text>
+						<text class="stat-number">{{ workOrderStats.assigned }}</text>
+						<text class="stat-label">我的工单</text>
 					</view>
 				</view>
 				
-				<view class="stat-card" v-if="isInspector">
-					<view class="stat-icon operational-icon">✅</view>
-					<view class="stat-info">
-						<text class="stat-number">{{ myTaskStats.completed }}</text>
-						<text class="stat-label">已完成</text>
-					</view>
-				</view>
 			</view>
 		</view>
 		
@@ -89,22 +82,12 @@
 					<text class="action-label">站点列表</text>
 				</view>
 				
-				<!-- 管理员和经理专用功能 -->
-				<view class="action-item" v-if="canManageTasks" @click="goToTaskManagement">
-					<view class="action-icon">📝</view>
-					<text class="action-label">任务管理</text>
-				</view>
 				
 				<view class="action-item" v-if="canViewReports" @click="goToReports">
 					<view class="action-icon">📊</view>
 					<text class="action-label">数据报告</text>
 				</view>
 				
-				<!-- 检查员专用功能 -->
-				<view class="action-item" v-if="isInspector" @click="goToMyTasks">
-					<view class="action-icon">📋</view>
-					<text class="action-label">我的任务</text>
-				</view>
 				
 				<!-- 扫码领料功能 -->
 				<view class="action-item" @click="goToScanPickup">
@@ -124,7 +107,7 @@
 		<view class="recent-activities">
 			<view class="section-header">
 				<text class="section-title">最近活动</text>
-				<text class="see-all" @click="goToInspections">查看全部</text>
+				<text class="see-all" @click="goToWorkOrders">查看全部</text>
 			</view>
 			
 			<view class="activity-list">
@@ -154,12 +137,12 @@
 	import { ref, reactive, computed, onMounted } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
-	import { useInspectionStore } from '@/stores/inspection'
+	import { useWorkOrderStore } from '@/stores/workorder'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
-	const inspectionStore = useInspectionStore()
+	const workOrderStore = useWorkOrderStore()
 	
 	// 统计数据
 	const siteStats = reactive({
@@ -169,19 +152,14 @@
 		construction: 0
 	})
 	
-	const inspectionStats = reactive({
-		pending: 0,
-		completed: 0,
-		failed: 0
+	const workOrderStats = reactive({
+		assigned: 0,
+		in_progress: 0,
+		submitted: 0
 	})
 	
 	const recentActivities = ref([])
 	
-	// 我的任务统计（检查员专用）
-	const myTaskStats = reactive({
-		assigned: 0,
-		completed: 0
-	})
 	
 	// 权限控制计算属性
 	const userRole = computed(() => {
@@ -192,7 +170,6 @@
 	const isManager = computed(() => userRole.value === 'manager')
 	const isInspector = computed(() => userRole.value === 'inspector')
 	const canViewStats = computed(() => isAdmin.value || isManager.value)
-	const canManageTasks = computed(() => isAdmin.value || isManager.value)
 	const canViewReports = computed(() => isAdmin.value || isManager.value)
 	
 	// 获取用户头像文字
@@ -202,13 +179,7 @@
 	}
 	
 	// 获取检查标签文字
-	const getInspectionLabel = () => {
-		if (isInspector.value) {
-			return '待检查'
-		} else {
-			return '待审核'
-		}
-	}
+	const getWorkOrderLabel = () => '待处理工单'
 	
 	// 加载数据
 	const loadData = async () => {
@@ -231,59 +202,26 @@
 				siteStats.construction = sites.filter(s => s.status === 'construction').length
 			}
 			
-			// 加载检查数据
-			const inspectionsResult = await inspectionStore.getInspections()
-			if (inspectionsResult.success) {
-				const inspections = inspectionsResult.data
-				inspectionStats.pending = inspections.filter(i => i.status === 'pending').length
-				inspectionStats.completed = inspections.filter(i => i.status === 'completed').length
-				inspectionStats.failed = inspections.filter(i => i.status === 'failed').length
-				
-				// 取最近5条活动
-				recentActivities.value = inspections
-					.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+			// 加载工单数据
+			const woRes = await workOrderStore.getMyWorkOrders()
+			if (woRes.success) {
+				const wos = woRes.data || []
+				workOrderStats.assigned = wos.filter(w => w.status === 'assigned').length
+				workOrderStats.in_progress = wos.filter(w => w.status === 'in_progress').length
+				workOrderStats.submitted = wos.filter(w => w.status === 'submitted').length
+				recentActivities.value = wos
+					.sort((a, b) => new Date(b.assigned_at) - new Date(a.assigned_at))
 					.slice(0, 5)
-					.map(inspection => ({
-						...inspection,
-						title: `检查站点: ${inspection.site?.site_name || 'Unknown'}`,
-						type: 'inspection'
-					}))
+					.map(wo => ({ id: wo.id, created_at: wo.assigned_at, title: `工单: ${wo.title}`, type: 'work_order', status: wo.status }))
 			}
 			
-			// 如果是检查员，加载我的任务统计
-			if (isInspector.value) {
-				await loadMyTaskStats()
-			}
+
 		} catch (error) {
 			console.error('Load data error:', error)
 		}
 	}
 	
-	// 加载我的任务统计
-	const loadMyTaskStats = async () => {
-		if (!userStore || !userStore.userInfo) return
-		
-		try {
-			const response = await uni.request({
-				url: buildApiUrl(API_ENDPOINTS.TASKS.LIST),
-				method: 'GET',
-				header: {
-					'Authorization': `Bearer ${userStore.token}`
-				},
-				data: {
-					assigned_to: userStore.userInfo.id
-				}
-			})
-			
-			if (response.statusCode === 200) {
-				const tasks = response.data
-				myTaskStats.assigned = tasks.filter(t => ['assigned', 'in_progress'].includes(t.status)).length
-				myTaskStats.completed = tasks.filter(t => t.status === 'completed').length
-			}
-		} catch (error) {
-			console.error('Load my task stats error:', error)
-		}
-	}
+
 	
 	// 格式化时间
 	const formatTime = (timeStr) => {
@@ -300,7 +238,7 @@
 	// 获取活动图标
 	const getActivityIcon = (type) => {
 		switch(type) {
-			case 'inspection': return '🔍'
+			case 'work_order': return '📋'
 			case 'site': return '📍'
 			default: return '📋'
 		}
@@ -314,38 +252,18 @@
 		return `status-${status}`
 	}
 	
-	const getStatusText = (status) => {
-		const statusMap = {
-			'pending': '待处理',
-			'in_progress': '进行中',
-			'completed': '已完成',
-			'failed': '失败'
-		}
-		return statusMap[status] || status
-	}
+	const getStatusText = (status) => ({ assigned: '已分配', in_progress: '进行中', submitted: '待审核', approved: '已通过', rejected: '已驳回', completed: '已完成' })[status] || status
 	
 	// 页面跳转方法
 	const goToSites = () => {
 		uni.switchTab({ url: '/pages/site/list' })
 	}
 	
-	const goToInspections = () => {
-		uni.switchTab({ url: '/pages/inspection/list' })
+	const goToWorkOrders = () => {
+		uni.switchTab({ url: '/pages/workorder/list' })
 	}
 	
-	const goToNewInspection = () => {
-		// 显示检查类型选择弹窗
-		uni.showActionSheet({
-			itemList: ['新站点设备安装', '维护检查'],
-			success: (res) => {
-				const typeMap = ['opening', 'maintenance']
-				const selectedType = typeMap[res.tapIndex]
-				uni.navigateTo({ 
-					url: `/pages/inspection/site-select?type=${selectedType}` 
-				})
-			}
-		})
-	}
+	const goToNewInspection = () => { goToWorkOrders() }
 	
 	const goToSiteList = () => {
 		uni.switchTab({ url: '/pages/site/list' })
@@ -359,14 +277,6 @@
 		uni.showToast({ title: '报告功能开发中', icon: 'none' })
 	}
 	
-	const goToTaskManagement = () => {
-		uni.switchTab({ url: '/pages/task/list' })
-	}
-	
-	const goToMyTasks = () => {
-		// 跳转到我的任务列表，只显示分配给当前用户的任务
-		uni.switchTab({ url: '/pages/task/list' })
-	}
 	
 	const goToScanPickup = () => {
 		// 跳转到扫码领料页面
@@ -607,7 +517,7 @@
 		margin-right: 12px;
 		font-size: 18px;
 		
-		&.icon-inspection { background: #dbeafe; }
+		&.icon-work_order { background: #dbeafe; }
 		&.icon-site { background: #fef3c7; }
 	}
 	

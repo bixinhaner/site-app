@@ -32,6 +32,7 @@ from app.api.auth import get_current_user
 from app.utils.file_handler import save_uploaded_file, generate_watermark
 from app.utils.gps_utils import reverse_geocode, validate_gps_accuracy
 from app.services.template_resolver import create_resolver, ResolveContext
+from app.services.cell_generator import CellGenerator
 
 router = APIRouter()
 
@@ -235,24 +236,46 @@ async def create_inspection(
     db.add(inspection)
     db.flush()
     
-    # 根据模板创建检查项
+    # 根据模板和站点规划创建检查项
     template_data = template.template_data
     total_items = 0
     
+    # 基于站点规划数据生成小区配置
+    cells = CellGenerator.generate_cells_from_planning(db, inspection_data.site_id)
+    cells_summary = CellGenerator.get_cells_summary(cells)
+    
     for category in template_data.get("check_categories", []):
         for item in category.get("items", []):
-            # 如果是扇区级检查，为每个扇区创建检查项
-            if category.get("sector_specific", False):
-                # 假设3个扇区，实际应该根据站点配置
-                for sector_num in range(1, 4):
+            # 如果是小区级检查，为每个小区创建检查项
+            if category.get("cell_specific", False):
+                for cell in cells:
                     check_item = InspectionCheckItem(
                         id=str(uuid.uuid4()),
                         inspection_id=inspection.id,
-                        item_id=f"{item['item_id']}_sector_{sector_num}",
-                        item_name=f"{item['item_name']} - Sector {sector_num}",
+                        item_id=f"{item['item_id']}_cell_{cell.cell_id}",
+                        item_name=f"{item['item_name']} - 小区 {cell.cell_id}",
                         category_id=category["category_id"],
                         category_name=category["category_name"],
-                        sector_id=str(sector_num),
+                        sector_id=cell.sector_id,
+                        band=cell.band,
+                        cell_id=cell.cell_id,
+                        required_type=item["required_type"],
+                        status=CheckItemStatusEnum.PENDING
+                    )
+                    db.add(check_item)
+                    total_items += 1
+            # 如果是扇区级检查（向后兼容）
+            elif category.get("sector_specific", False):
+                sectors = set(cell.sector_id for cell in cells)
+                for sector_id in sectors:
+                    check_item = InspectionCheckItem(
+                        id=str(uuid.uuid4()),
+                        inspection_id=inspection.id,
+                        item_id=f"{item['item_id']}_sector_{sector_id}",
+                        item_name=f"{item['item_name']} - 扇区 {sector_id}",
+                        category_id=category["category_id"],
+                        category_name=category["category_name"],
+                        sector_id=sector_id,
                         required_type=item["required_type"],
                         status=CheckItemStatusEnum.PENDING
                     )

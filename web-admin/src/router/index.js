@@ -91,17 +91,6 @@ const routes = [
           { path: 'planning-batch', name: 'SitePlanningBatch', component: () => import('../views/site/SitePlanningBatch.vue'), meta: { title: '规划批量导入', icon: 'Operation' } }
         ]
       },
-      // 任务管理（二级菜单）
-      {
-        path: 'tasks',
-        name: 'TasksMgmt',
-        component: RouterView,
-        meta: { title: '任务管理', icon: 'List' },
-        children: [
-          { path: 'list', name: 'TaskList', component: () => import('../views/task/TaskList.vue'), meta: { title: '任务列表', icon: 'List' } },
-          { path: 'review', name: 'TaskReview', component: () => import('../views/task/TaskReview.vue'), meta: { title: '任务审核台', icon: 'Operation' } }
-        ]
-      },
       // 检查管理（二级菜单）
       {
         path: 'inspections',

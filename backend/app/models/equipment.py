@@ -42,7 +42,6 @@ class Equipment(Base):
     specifications = Column(JSON)  # 技术规格参数
     unit = Column(String(20), default="台")  # 计量单位
     barcode_prefix = Column(String(10))  # 条码前缀
-    standard_price = Column(DECIMAL(10, 2))  # 标准价格
     description = Column(Text)  # 描述说明
     status = Column(Enum(EquipmentStatusEnum), default=EquipmentStatusEnum.ACTIVE)
     
@@ -78,7 +77,6 @@ class EquipmentPackage(Base):
     main_equipment = relationship("Equipment", foreign_keys=[main_equipment_id])
     creator = relationship("User", foreign_keys=[created_by])
     package_items = relationship("EquipmentPackageItem", back_populates="package", cascade="all, delete-orphan")
-    task_assignments = relationship("TaskAssignment", back_populates="equipment_package")
 
 class EquipmentPackageItem(Base):
     """套装明细表"""
@@ -119,7 +117,6 @@ class EquipmentInstance(Base):
     warranty_start_date = Column(DateTime)  # 保修开始日期
     warranty_end_date = Column(DateTime)  # 保修截止日期
     vendor = Column(String(100))  # 供应商
-    purchase_price = Column(DECIMAL(10, 2))  # 采购价格
     quality_status = Column(String(20), default="good")  # 质量状态: good, defective, repair_needed
     
     # 位置信息
@@ -133,7 +130,6 @@ class EquipmentInstance(Base):
     # 出库信息
     issued_date = Column(DateTime)  # 出库日期
     issued_to = Column(Integer, ForeignKey("users.id"))  # 领料人
-    task_id = Column(String(32), ForeignKey("task_assignments.id"))  # 关联任务
     
     # 系统字段
     created_at = Column(DateTime, server_default=func.now())
@@ -145,7 +141,6 @@ class EquipmentInstance(Base):
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
     receiver = relationship("User", foreign_keys=[received_by])
     issuer = relationship("User", foreign_keys=[issued_to])
-    task = relationship("TaskAssignment", foreign_keys=[task_id])
 
 class Warehouse(Base):
     """仓库表"""
@@ -207,7 +202,6 @@ class StockTransaction(Base):
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False)
     
     # 关联信息
-    task_id = Column(String(32), ForeignKey("task_assignments.id"))  # 关联任务
     package_id = Column(Integer, ForeignKey("equipment_packages.id"))  # 关联套装
     
     # 操作信息
@@ -236,7 +230,6 @@ class StockTransaction(Base):
     
     # 关系
     warehouse = relationship("Warehouse")
-    task = relationship("TaskAssignment", foreign_keys=[task_id])
     package = relationship("EquipmentPackage")
     operator = relationship("User", foreign_keys=[operator_id])
     approver = relationship("User", foreign_keys=[approved_by])
@@ -251,10 +244,8 @@ class StockTransactionItem(Base):
     equipment_instance_id = Column(String(32), ForeignKey("equipment_instances.id"))  # 具体设备实例
     equipment_id = Column(Integer, ForeignKey("equipment.id"), nullable=False)  # 设备型号
     
-    # 数量和价格
+    # 数量
     quantity = Column(Integer, nullable=False)
-    unit_price = Column(DECIMAL(10, 2))
-    total_amount = Column(DECIMAL(10, 2))
     
     # 批次信息
     batch_number = Column(String(50))
@@ -310,7 +301,6 @@ class PickupRecord(Base):
     
     # 关系
     transaction = relationship("StockTransaction")
-    task = relationship("TaskAssignment")
     package = relationship("EquipmentPackage")
     picker = relationship("User", foreign_keys=[picker_id])
 
@@ -366,7 +356,6 @@ class SNImportDetail(Base):
     warranty_start_date = Column(DateTime)
     warranty_end_date = Column(DateTime)
     vendor = Column(String(100))
-    purchase_price = Column(DECIMAL(10, 2))
     batch_number = Column(String(50))
     
     # 导入结果

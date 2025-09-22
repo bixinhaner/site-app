@@ -62,7 +62,6 @@ def create_equipment_tables():
                 "brand": "华为",
                 "unit": "台",
                 "barcode_prefix": "BBU",
-                "standard_price": 150000.00,
                 "specifications": {"频段": "2.6GHz", "功率": "200W", "接口": "CPRI"},
                 "description": "5G基站核心处理单元"
             },
@@ -74,7 +73,6 @@ def create_equipment_tables():
                 "brand": "华为",
                 "unit": "台",
                 "barcode_prefix": "RRU",
-                "standard_price": 80000.00,
                 "specifications": {"频段": "2.6GHz", "功率": "200W"},
                 "description": "5G射频处理单元"
             },
@@ -86,7 +84,6 @@ def create_equipment_tables():
                 "brand": "凯仕林",
                 "unit": "副",
                 "barcode_prefix": "ANT",
-                "standard_price": 2500.00,
                 "specifications": {"频段": "800MHz", "增益": "15dBi", "极化": "双极化"},
                 "description": "800M频段定向天线"
             },
@@ -97,7 +94,6 @@ def create_equipment_tables():
                 "model": "LCF78-50J", 
                 "brand": "大唐电缆",
                 "unit": "米",
-                "standard_price": 45.00,
                 "specifications": {"阻抗": "50欧", "直径": "7/8英寸", "损耗": "0.1dB/m"},
                 "description": "7/8英寸射频馈线"
             },
@@ -108,7 +104,6 @@ def create_equipment_tables():
                 "model": "PWR48-3000", 
                 "brand": "艾默生",
                 "unit": "台",
-                "standard_price": 12000.00,
                 "specifications": {"输出电压": "-48V", "输出电流": "60A", "效率": "95%"},
                 "description": "通信设备直流供电模块"
             }

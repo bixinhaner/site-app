@@ -8,7 +8,7 @@
             <div class="logo-icon">
               <el-icon size="40" color="#f97316"><Box /></el-icon>
             </div>
-            <h1 class="system-title">设备货物管理系统</h1>
+            <h1 class="system-title">站点信息管理系统</h1>
           </div>
           <p class="login-subtitle">通信基站设备管理平台</p>
         </div>
@@ -73,7 +73,7 @@
 
       <!-- 页面底部 -->
       <div class="login-footer">
-        <p>&copy; 2024 Baicells Trae - 设备货物管理系统</p>
+        <p>&copy; 2024 Baicells Trae - 站点信息管理系统</p>
       </div>
     </div>
   </div>

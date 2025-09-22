@@ -31,9 +31,9 @@
 			}
 		},
 		{
-			"path": "pages/inspection/list",
+			"path": "pages/workorder/list",
 			"style": {
-				"navigationBarTitleText": "现场检查",
+				"navigationBarTitleText": "我的工单",
 				"navigationStyle": "custom",
 				"enablePullDownRefresh": true
 			}
@@ -54,10 +54,10 @@
 			}
 		},
 		{
-			"path": "pages/inspection/detail",
+			"path": "pages/workorder/detail",
 			"style": {
-				"navigationBarTitleText": "检查详情",
-				"navigationBarBackgroundColor": "#667eea",
+				"navigationBarTitleText": "工单详情",
+				"navigationBarBackgroundColor": "#f97316",
 				"navigationBarTextStyle": "white"
 			}
 		},
@@ -78,41 +78,17 @@
 			}
 		},
 		{
+			"path": "pages/inspection/detail",
+			"style": {
+				"navigationBarTitleText": "检查详情",
+				"navigationBarBackgroundColor": "#667eea",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
 			"path": "pages/profile/profile",
 			"style": {
 				"navigationBarTitleText": "个人中心",
-				"navigationBarBackgroundColor": "#f97316",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/task/list",
-			"style": {
-				"navigationBarTitleText": "任务管理",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": true
-			}
-		},
-		{
-			"path": "pages/task/assign",
-			"style": {
-				"navigationBarTitleText": "任务分配",
-				"navigationBarBackgroundColor": "#f97316",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/task/review",
-			"style": {
-				"navigationBarTitleText": "任务审核",
-				"navigationBarBackgroundColor": "#f97316",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/task/detail",
-			"style": {
-				"navigationBarTitleText": "任务详情",
 				"navigationBarBackgroundColor": "#f97316",
 				"navigationBarTextStyle": "white"
 			}
@@ -151,16 +127,10 @@
 				"text": "站点"
 			},
 			{
-				"pagePath": "pages/inspection/list",
-				"iconPath": "static/icons/inspection.png",
-				"selectedIconPath": "static/icons/inspection-active.png",
-				"text": "检查"
-			},
-			{
-				"pagePath": "pages/task/list",
+				"pagePath": "pages/workorder/list",
 				"iconPath": "static/icons/task.png",
 				"selectedIconPath": "static/icons/task-active.png",
-				"text": "任务"
+				"text": "工单"
 			},
 			{
 				"pagePath": "pages/profile/profile",

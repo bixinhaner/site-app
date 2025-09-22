@@ -13,12 +13,8 @@ export const useUserStore = defineStore('user', () => {
 	const isUser = computed(() => userInfo.value?.role === 'user')
 	
 	// 页面访问权限
-	const canAccessTaskManagement = computed(() => isAdmin.value)
 	const canAccessSiteManagement = computed(() => isAdmin.value)
 	const canAccessUserManagement = computed(() => isAdmin.value)
-	const canCreateTasks = computed(() => isAdmin.value)
-	const canAssignTasks = computed(() => isAdmin.value)
-	const canViewAllTasks = computed(() => isAdmin.value)
 	const canViewAllInspections = computed(() => isAdmin.value)
 	
 	// 登录
@@ -200,12 +196,8 @@ export const useUserStore = defineStore('user', () => {
 		isAdmin,
 		isInspector,
 		isUser,
-		canAccessTaskManagement,
 		canAccessSiteManagement,
 		canAccessUserManagement,
-		canCreateTasks,
-		canAssignTasks,
-		canViewAllTasks,
 		canViewAllInspections,
 		// 方法
 		login,

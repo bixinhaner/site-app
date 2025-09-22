@@ -44,23 +44,6 @@ export const API_ENDPOINTS = {
     DELETE: (id) => `/api/sites/${id}`
   },
   
-  // 任务相关
-  TASKS: {
-    LIST: '/api/tasks/',
-    DETAIL: (id) => `/api/tasks/${id}`,
-    CREATE: '/api/tasks/',
-    UPDATE: (id) => `/api/tasks/${id}`,
-    DELETE: (id) => `/api/tasks/${id}`,
-    STATUS: (id) => `/api/tasks/${id}/status`,
-    ASSIGN: (id) => `/api/tasks/${id}/assign`,
-    PHOTOS: (id) => `/api/tasks/${id}/photos`,
-    HISTORY: (id) => `/api/tasks/${id}/history`,
-    REVIEW: (id) => `/api/tasks/${id}/review`,
-    ASSIGNMENTS: (id) => `/api/tasks/${id}/assignments`,
-    STATISTICS: {
-      OVERVIEW: '/api/tasks/statistics/overview'
-    }
-  },
   
   // 检查相关
   INSPECTIONS: {

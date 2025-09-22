@@ -101,6 +101,7 @@ class SiteInspectionCreate(BaseModel):
 class SiteInspectionUpdate(BaseModel):
     """更新站点检查"""
     status: Optional[InspectionStatusEnum] = None
+    work_order_id: Optional[str] = None  # 添加工单关联字段
     end_time: Optional[datetime] = None
     location: Optional[str] = None
     gps_info: Optional[GPSInfo] = None
@@ -180,6 +181,7 @@ class SiteInspectionResponse(BaseModel):
     """站点检查响应"""
     id: str
     site_id: int
+    work_order_id: Optional[str] = None  # 添加工单关联字段
     template_id: str
     inspector_id: int
     inspection_type: InspectionTypeEnum

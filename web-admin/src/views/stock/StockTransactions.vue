@@ -168,7 +168,7 @@ const todayStats = computed(() => {
 
 const totalAmount = computed(() => 
   stockInForm.value.items.reduce((sum, item) => 
-    sum + (item.quantity || 0) * (item.unit_price || 0), 0
+    0
   )
 )
 
@@ -263,7 +263,6 @@ const addStockInItem = () => {
   stockInForm.value.items.push({
     equipment_id: null,
     quantity: 1,
-    unit_price: 0,
     batch_number: ''
   })
 }
@@ -274,8 +273,6 @@ const removeStockInItem = (index) => {
 
 const onEquipmentChange = (row, index) => {
   const equipment = equipmentOptions.value.find(eq => eq.id === row.equipment_id)
-  if (equipment && equipment.standard_price) {
-    row.unit_price = equipment.standard_price
   }
 }
 

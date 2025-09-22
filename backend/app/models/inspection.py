@@ -17,29 +17,10 @@ class InspectionTypeEnum(str, enum.Enum):
     OPENING = "OPENING"               # 新站点设备安装
     MAINTENANCE = "MAINTENANCE"        # 维护检查
 
-class TaskStatusEnum(str, enum.Enum):
-    PENDING = "pending"               # 待分配
-    ASSIGNED = "assigned"             # 已分配
-    ACCEPTED = "accepted"             # 已接受
-    IN_PROGRESS = "in_progress"       # 进行中
-    SUBMITTED = "submitted"            # 已提交
-    UNDER_REVIEW = "under_review"      # 审核中
-    APPROVED = "approved"              # 已通过
-    REJECTED = "rejected"              # 已驳回
-    COMPLETED = "completed"            # 已完成
-
 class BaseStationStatusEnum(str, enum.Enum):
     OFFLINE = "offline"               # 未开通
     ONLINE = "online"                 # 开通未激活
     ACTIVATED = "activated"           # 开通激活
-
-class TaskTypeEnum(str, enum.Enum):
-    OPENING_INSPECTION = "opening_inspection"        # 新站点设备安装任务
-    MAINTENANCE = "maintenance"                      # 维护任务
-    POWER_ISSUE = "power_issue"                      # 断电问题
-    TRANSMISSION_ISSUE = "transmission_issue"        # 传输问题
-    GPS_ISSUE = "gps_issue"                          # GPS问题
-    SIGNAL_ISSUE = "signal_issue"                    # 信号问题
 
 class CheckItemStatusEnum(str, enum.Enum):
     PENDING = "pending"               # 待处理
@@ -74,7 +55,6 @@ class TemplateBinding(Base):
     # 条件维度字段（可空，多维组合）
     site_id = Column(Integer, ForeignKey("sites.id"), nullable=True)
     site_type = Column(String(50), nullable=True)  # macro, micro, indoor, etc.
-    task_type = Column(Enum(TaskTypeEnum), nullable=True)
     region = Column(String(100), nullable=True)
     customer = Column(String(100), nullable=True)
     tags = Column(JSON, nullable=True)  # 数组[str]
@@ -102,7 +82,7 @@ class SiteInspection(Base):
     
     id = Column(String(32), primary_key=True)
     site_id = Column(Integer, ForeignKey("sites.id"), nullable=False)
-    task_id = Column(String(32), ForeignKey("task_assignments.id"), nullable=True)  # 关联任务ID，可选
+    work_order_id = Column(String(32), ForeignKey("work_orders.id"), nullable=True)  # 关联工单ID
     template_id = Column(String(32), ForeignKey("inspection_templates.id"), nullable=False)
     inspector_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
@@ -152,7 +132,7 @@ class SiteInspection(Base):
     
     # 关系
     site = relationship("Site")
-    task = relationship("TaskAssignment", foreign_keys=[task_id])  # 关联的任务
+    work_order = relationship("WorkOrder", foreign_keys=[work_order_id])  # 关联的工单
     template = relationship("InspectionTemplate", back_populates="inspections")
     inspector = relationship("User", foreign_keys=[inspector_id])
     reviewer = relationship("User", foreign_keys=[reviewed_by])
@@ -172,8 +152,10 @@ class InspectionCheckItem(Base):
     category_id = Column(String(50))  # site_level, sector_level
     category_name = Column(String(100))
     
-    # 扇区信息（如果是扇区级检查）
+    # 小区信息（支持小区级检查）
     sector_id = Column(String(10))  # 扇区编号
+    band = Column(String(20))       # 频段，如 n41, n78, n3
+    cell_id = Column(String(20))    # 小区ID，格式：sector_band (如: 1_n41, 2_n78)
     
     # 检查类型和状态
     required_type = Column(String(20))  # photo, data, both
@@ -315,58 +297,6 @@ class BaseStationDevice(Base):
     # 关系
     site = relationship("Site")
 
-class TaskAssignment(Base):
-    """任务分配表"""
-    __tablename__ = "task_assignments"
-    
-    id = Column(String(32), primary_key=True)
-    
-    # 任务基本信息
-    task_title = Column(String(200), nullable=False)   # 任务标题
-    task_type = Column(Enum(TaskTypeEnum), nullable=False)  # 任务类型
-    task_description = Column(Text)                    # 任务描述
-    priority = Column(String(20), default="normal")   # urgent, high, normal, low
-    
-    # 关联信息
-    site_id = Column(Integer, ForeignKey("sites.id"), nullable=False)
-    inspection_id = Column(String(32), ForeignKey("site_inspections.id"))  # 可选，关联检查记录
-    equipment_package_id = Column(Integer, ForeignKey("equipment_packages.id"))  # 可选，关联设备套装
-    
-    # 人员分配
-    assigned_by = Column(Integer, ForeignKey("users.id"), nullable=False)   # 分配人
-    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=False)   # 被分配人
-    
-    # 任务状态
-    status = Column(Enum(TaskStatusEnum), default=TaskStatusEnum.PENDING)
-    
-    # 时间信息
-    assigned_at = Column(DateTime, server_default=func.now())              # 分配时间
-    accepted_at = Column(DateTime)                                          # 接受时间
-    due_date = Column(DateTime)                                             # 截止时间
-    started_at = Column(DateTime)                                           # 开始时间
-    completed_at = Column(DateTime)                                         # 完成时间
-    
-    # 任务要求和结果
-    requirements = Column(JSON)                        # 任务要求（检查项目、问题类型等）
-    estimated_duration = Column(Integer)               # 预计工期（小时）
-    actual_duration = Column(Integer)                  # 实际工期（小时）
-    
-    # 反馈和备注
-    accept_comments = Column(Text)                     # 接受任务时的备注
-    progress_notes = Column(Text)                      # 进度备注
-    completion_notes = Column(Text)                    # 完成备注
-    rejection_reason = Column(Text)                    # 拒绝原因
-    
-    # 系统字段
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    
-    # 关系
-    site = relationship("Site")
-    inspection = relationship("SiteInspection", foreign_keys="TaskAssignment.inspection_id")
-    equipment_package = relationship("EquipmentPackage", foreign_keys=[equipment_package_id])
-    assigner = relationship("User", foreign_keys=[assigned_by])
-    assignee = relationship("User", foreign_keys=[assigned_to])
 
 class OMCSystemLog(Base):
     """OMC系统同步日志表"""
@@ -425,25 +355,6 @@ class OfflineInspectionData(Base):
     # 关系
     user = relationship("User")
 
-class TaskStatusHistory(Base):
-    """任务状态变更历史表"""
-    __tablename__ = "task_status_history"
-    
-    id = Column(String(32), primary_key=True)
-    task_id = Column(String(32), ForeignKey("task_assignments.id"), nullable=False)
-    
-    # 状态变更信息
-    from_status = Column(String(20))
-    to_status = Column(String(20), nullable=False)
-    change_reason = Column(Text)
-    
-    # 操作人员
-    changed_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    changed_at = Column(DateTime, server_default=func.now())
-    
-    # 关系
-    task = relationship("TaskAssignment")
-    changer = relationship("User")
 
 # 保持向后兼容的原始Inspection模型
 class Inspection(Base):

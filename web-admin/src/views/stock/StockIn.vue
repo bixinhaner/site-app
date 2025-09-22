@@ -82,19 +82,9 @@
             <span>{{ getEquipmentUnit(row.equipment_id) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="单价" width="120">
-          <template #default="{ row }">
-            <el-input-number v-model="row.unit_price" :min="0" :precision="2" size="small" @change="calculateTotal" />
-          </template>
-        </el-table-column>
         <el-table-column label="批次号" width="120">
           <template #default="{ row }">
             <el-input v-model="row.batch_number" size="small" placeholder="可选" />
-          </template>
-        </el-table-column>
-        <el-table-column label="小计" width="120">
-          <template #default="{ row }">
-            ¥{{ ((row.quantity || 0) * (row.unit_price || 0)).toFixed(2) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="80">
@@ -332,7 +322,7 @@ const auxiliaryCount = computed(() =>
 
 const totalAmount = computed(() => 
   stockInForm.value.items.reduce((sum, item) => 
-    sum + (item.quantity || 0) * (item.unit_price || 0), 0
+    0
   )
 )
 
@@ -382,7 +372,6 @@ const addStockInItem = () => {
   stockInForm.value.items.push({
     equipment_id: null,
     quantity: 1,
-    unit_price: 0,
     batch_number: ''
   })
 }
@@ -394,8 +383,6 @@ const removeStockInItem = (index) => {
 
 const onEquipmentChange = (row, index) => {
   const equipment = equipmentOptions.value.find(eq => eq.id === row.equipment_id)
-  if (equipment && equipment.standard_price) {
-    row.unit_price = equipment.standard_price
     calculateTotal()
   }
 }

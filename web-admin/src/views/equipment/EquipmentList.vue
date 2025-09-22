@@ -110,11 +110,6 @@
         
         <el-table-column prop="unit" label="单位" width="80" />
         
-        <el-table-column prop="standard_price" label="标准价格" width="120">
-          <template #default="{ row }">
-            <span class="price">¥{{ row.standard_price }}</span>
-          </template>
-        </el-table-column>
         
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
@@ -245,17 +240,6 @@
 
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="标准价格" prop="standard_price">
-              <el-input-number
-                v-model="equipmentForm.standard_price"
-                style="width: 100%"
-                :precision="2"
-                :min="0"
-                controls-position="right"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
             <el-form-item label="条码前缀">
               <el-input v-model="equipmentForm.barcode_prefix" placeholder="如: BST" />
             </el-form-item>
@@ -325,7 +309,6 @@ const equipmentForm = reactive({
   brand: '',
   model: '',
   unit: '台',
-  standard_price: 0,
   barcode_prefix: '',
   specifications: '',
   description: ''
@@ -350,10 +333,6 @@ const equipmentRules = {
   unit: [
     { required: true, message: '请选择单位', trigger: 'change' }
   ],
-  standard_price: [
-    { required: true, message: '请输入标准价格', trigger: 'blur' },
-    { type: 'number', min: 0, message: '价格必须大于等于0', trigger: 'blur' }
-  ]
 }
 
 // 加载设备列表
@@ -418,7 +397,6 @@ const handleEdit = (equipment) => {
     brand: equipment.brand || '',
     model: equipment.model || '',
     unit: equipment.unit || '台',
-    standard_price: equipment.standard_price || 0,
     barcode_prefix: equipment.barcode_prefix || '',
     specifications: equipment.specifications || '',
     description: equipment.description || ''
@@ -542,7 +520,6 @@ const resetForm = () => {
     brand: '',
     model: '',
     unit: '台',
-    standard_price: 0,
     barcode_prefix: '',
     specifications: '',
     description: ''
@@ -623,10 +600,6 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
-.price {
-  color: var(--primary-color);
-  font-weight: 600;
-}
 
 .dialog-footer {
   text-align: right;

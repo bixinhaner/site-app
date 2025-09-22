@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
 from app.models.inspection import (
-    InspectionTemplate, TemplateBinding, TaskTypeEnum
+    InspectionTemplate, TemplateBinding
 )
 from app.models.site import Site
 
@@ -306,14 +306,6 @@ class TemplateResolver:
             site = self.db.query(Site).filter(Site.id == binding_data['site_id']).first()
             if not site:
                 errors.append(f"站点 ID {binding_data['site_id']} 不存在")
-        
-        # 验证 task_type 枚举值
-        if binding_data.get('task_type'):
-            try:
-                TaskTypeEnum(binding_data['task_type'])
-            except ValueError:
-                valid_types = [t.value for t in TaskTypeEnum]
-                errors.append(f"任务类型 '{binding_data['task_type']}' 无效。有效值: {valid_types}")
         
         # 验证 site_type
         if binding_data.get('site_type'):

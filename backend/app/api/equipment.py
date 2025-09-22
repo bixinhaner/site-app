@@ -50,7 +50,6 @@ async def get_equipment_list(
             "specifications": eq.specifications,
             "unit": eq.unit,
             "barcode_prefix": eq.barcode_prefix,
-            "standard_price": float(eq.standard_price) if eq.standard_price else None,
             "status": eq.status,
             "created_at": eq.created_at.isoformat() if eq.created_at else None
         }
@@ -81,7 +80,6 @@ async def create_equipment(
         specifications=equipment_data.get("specifications", {}),
         unit=equipment_data.get("unit", "台"),
         barcode_prefix=equipment_data.get("barcode_prefix"),
-        standard_price=equipment_data.get("standard_price"),
         description=equipment_data.get("description"),
         created_by=current_user.id
     )

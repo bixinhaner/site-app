@@ -80,13 +80,25 @@
                         placeholder="分类名称"
                         size="small"
                       />
-                      <el-switch
-                        v-model="category.sector_specific"
-                        active-text="扇区级"
-                        inactive-text="站点级"
+                      <el-select
+                        v-model="category.level_type"
+                        placeholder="检查级别"
                         size="small"
-                        style="margin-left: 12px;"
-                      />
+                        style="margin-left: 12px; width: 120px;"
+                        @change="onLevelTypeChange(category)"
+                      >
+                        <el-option label="站点级" value="site" />
+                        <el-option label="扇区级" value="sector" />
+                        <el-option label="小区级" value="cell" />
+                      </el-select>
+                      
+                      <el-tag 
+                        :type="category.cell_specific ? 'danger' : (category.sector_specific ? 'warning' : 'success')"
+                        size="small"
+                        style="margin-left: 8px;"
+                      >
+                        {{ category.cell_specific ? '小区级' : (category.sector_specific ? '扇区级' : '站点级') }}
+                      </el-tag>
                     </div>
                     
                     <div class="category-actions">
@@ -259,6 +271,34 @@
                 <div class="stat-label">扇区级检查项</div>
                 <div class="stat-value">{{ getSectorLevelItems() }}</div>
               </div>
+              
+              <div class="stat-item">
+                <div class="stat-label">小区级检查项</div>
+                <div class="stat-value">{{ getCellLevelItems() }}</div>
+              </div>
+            </div>
+          </el-card>
+          
+          <el-card class="help-card" style="margin-top: 20px;">
+            <template #header>
+              <span>检查级别说明</span>
+            </template>
+            
+            <div class="help-content">
+              <div class="help-item">
+                <el-tag type="success" size="small">站点级</el-tag>
+                <span>整个站点检查一次（如：供电、环境）</span>
+              </div>
+              
+              <div class="help-item">
+                <el-tag type="warning" size="small">扇区级</el-tag>
+                <span>每个扇区独立检查（如：天线安装）</span>
+              </div>
+              
+              <div class="help-item">
+                <el-tag type="danger" size="small">小区级</el-tag>
+                <span>每个小区（扇区×频段）独立检查（如：功率测试）</span>
+              </div>
             </div>
           </el-card>
           
@@ -328,10 +368,23 @@ const loadTemplate = async () => {
     templateForm.template_name = response.template_name
     templateForm.description = response.template_data.description || ''
     
-    // 深拷贝模板数据
+    // 深拷贝模板数据并处理 level_type
     templateData.check_categories = JSON.parse(
       JSON.stringify(response.template_data.check_categories || [])
     )
+    
+    // 为现有类别设置 level_type
+    templateData.check_categories.forEach(category => {
+      if (!category.level_type) {
+        if (category.cell_specific) {
+          category.level_type = 'cell'
+        } else if (category.sector_specific) {
+          category.level_type = 'sector'
+        } else {
+          category.level_type = 'site'
+        }
+      }
+    })
   } catch (error) {
     console.error('加载模板失败:', error)
     ElMessage.error('加载模板失败')
@@ -394,10 +447,30 @@ const addCategory = () => {
     category_name: '新检查分类',
     description: '',
     sector_specific: false,
+    cell_specific: false,
+    level_type: 'site', // 默认为站点级
     items: []
   }
   
   templateData.check_categories.push(newCategory)
+}
+
+// 处理检查级别变更
+const onLevelTypeChange = (category) => {
+  switch (category.level_type) {
+    case 'site':
+      category.sector_specific = false
+      category.cell_specific = false
+      break
+    case 'sector':
+      category.sector_specific = true
+      category.cell_specific = false
+      break
+    case 'cell':
+      category.sector_specific = false
+      category.cell_specific = true
+      break
+  }
 }
 
 const removeCategory = async (categoryIndex) => {
@@ -500,13 +573,19 @@ const getTotalItems = () => {
 
 const getSiteLevelItems = () => {
   return templateData.check_categories.reduce((total, category) => {
-    return total + (category.sector_specific ? 0 : category.items.length)
+    return total + (!category.sector_specific && !category.cell_specific ? category.items.length : 0)
   }, 0)
 }
 
 const getSectorLevelItems = () => {
   return templateData.check_categories.reduce((total, category) => {
     return total + (category.sector_specific ? category.items.length : 0)
+  }, 0)
+}
+
+const getCellLevelItems = () => {
+  return templateData.check_categories.reduce((total, category) => {
+    return total + (category.cell_specific ? category.items.length : 0)
   }, 0)
 }
 
@@ -686,6 +765,31 @@ onMounted(() => {
   padding: 12px;
   border-radius: 4px;
   margin: 0;
+}
+
+.help-content {
+  background: #f0f9ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.help-item {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border-radius: 4px;
+  border-left: 3px solid #3b82f6;
+}
+
+.help-item:last-child {
+  margin-bottom: 0;
+}
+
+.help-item strong {
+  color: #1e40af;
+  font-weight: 600;
 }
 </style>
 
