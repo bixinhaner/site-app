@@ -3,6 +3,18 @@
     <div class="page-header">
       <h1>工单列表</h1>
       <div class="header-actions">
+        <el-input
+          v-model="searchKeyword"
+          placeholder="搜索工单标题、站点名称..."
+          style="width: 240px"
+          clearable
+          @clear="load"
+          @keyup.enter="load"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
         <el-select v-model="statusFilter" clearable placeholder="状态" style="width: 140px">
           <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
@@ -13,8 +25,28 @@
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新建工单</el-button>
       </div>
     </div>
+    
+    <!-- 批量操作栏 -->
+    <el-card v-if="selectedWorkOrders.length > 0" class="batch-operations">
+      <div class="batch-info">
+        <span>已选择 {{ selectedWorkOrders.length }} 个工单</span>
+        <div class="batch-actions">
+          <el-button size="small" @click="clearSelection">取消选择</el-button>
+          <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button>
+          <el-button size="small" type="warning" @click="showBatchAssignDialog = true">批量重新分配</el-button>
+          <el-button size="small" type="info" @click="showBatchPriorityDialog = true">批量修改优先级</el-button>
+          <el-button size="small" type="danger" @click="confirmBatchDelete">批量删除</el-button>
+        </div>
+      </div>
+    </el-card>
     <el-card>
-      <el-table :data="items" v-loading="loading" stripe>
+      <el-table 
+        :data="items" 
+        v-loading="loading" 
+        stripe
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="55" />
         <el-table-column prop="title" label="标题" min-width="220">
           <template #default="{ row }">
             <div>
@@ -143,20 +175,80 @@
       <el-button type="primary" :loading="updating" @click="submitUpdate">保存</el-button>
     </template>
   </el-dialog>
+
+  <!-- 批量修改状态对话框 -->
+  <el-dialog v-model="showBatchStatusDialog" title="批量修改状态" width="400px">
+    <el-form label-width="80px">
+      <el-form-item label="新状态">
+        <el-select v-model="batchStatusValue" placeholder="选择状态" style="width: 100%">
+          <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
+        </el-select>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showBatchStatusDialog = false">取消</el-button>
+      <el-button type="primary" :loading="batchLoading" @click="executeBatchStatus">确认修改</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 批量重新分配对话框 -->
+  <el-dialog v-model="showBatchAssignDialog" title="批量重新分配" width="400px">
+    <el-form label-width="80px">
+      <el-form-item label="分配给">
+        <el-select v-model="batchAssignValue" filterable placeholder="选择人员" style="width: 100%" @visible-change="v=> v && loadUsers()">
+          <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
+        </el-select>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showBatchAssignDialog = false">取消</el-button>
+      <el-button type="primary" :loading="batchLoading" @click="executeBatchAssign">确认分配</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 批量修改优先级对话框 -->
+  <el-dialog v-model="showBatchPriorityDialog" title="批量修改优先级" width="400px">
+    <el-form label-width="80px">
+      <el-form-item label="优先级">
+        <el-select v-model="batchPriorityValue" placeholder="选择优先级" style="width: 100%">
+          <el-option label="低" value="low" />
+          <el-option label="普通" value="normal" />
+          <el-option label="高" value="high" />
+          <el-option label="紧急" value="urgent" />
+        </el-select>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showBatchPriorityDialog = false">取消</el-button>
+      <el-button type="primary" :loading="batchLoading" @click="executeBatchPriority">确认修改</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import apiClient from '../../api/auth'
+import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete } from '@element-plus/icons-vue'
+import { Edit, Delete, Search, Refresh, Plus } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const loading = ref(false)
 const items = ref([])
 const statusFilter = ref('')
 const typeFilter = ref('')
+const searchKeyword = ref('')
+
+// 批量操作相关
+const selectedWorkOrders = ref([])
+const batchLoading = ref(false)
+const showBatchStatusDialog = ref(false)
+const showBatchAssignDialog = ref(false)
+const showBatchPriorityDialog = ref(false)
+const batchStatusValue = ref('')
+const batchAssignValue = ref('')
+const batchPriorityValue = ref('')
 
 const statuses = [
   { label: '待分配', value: 'PENDING' },
@@ -180,9 +272,17 @@ const load = async () => {
   try {
     loading.value = true
     const params = {}
-    if (statusFilter.value) params.status_filter = statusFilter.value
-    if (typeFilter.value) params.type_filter = typeFilter.value
-    items.value = await apiClient.get('/api/work-orders', { params })
+    if (searchKeyword.value) params.keyword = searchKeyword.value
+    if (statusFilter.value) params.status = statusFilter.value
+    if (typeFilter.value) params.type = typeFilter.value
+    
+    // 使用搜索API如果有搜索条件，否则使用普通列表API
+    if (searchKeyword.value || statusFilter.value || typeFilter.value) {
+      const response = await workOrderAPI.searchWorkOrders(params)
+      items.value = response.work_orders || []
+    } else {
+      items.value = await apiClient.get('/api/work-orders', { params })
+    }
   } catch (e) {
     console.error(e)
     ElMessage.error('加载工单失败')
@@ -375,6 +475,144 @@ const typeText = (v) => (types.find(t => t.value === v)?.label || v)
 const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
 
+// 批量操作相关函数
+const handleSelectionChange = (selection) => {
+  selectedWorkOrders.value = selection
+}
+
+const clearSelection = () => {
+  selectedWorkOrders.value = []
+}
+
+const confirmBatchDelete = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedWorkOrders.value.length} 个工单吗？只能删除待分配或已分配状态的工单。`,
+      '确认批量删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await executeBatchDelete()
+  } catch (e) {
+    // 用户取消删除
+  }
+}
+
+const executeBatchDelete = async () => {
+  try {
+    batchLoading.value = true
+    const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
+    const result = await workOrderAPI.batchOperation(workOrderIds, 'delete')
+    
+    if (result.error_count > 0) {
+      ElMessage.warning(`批量删除完成：成功 ${result.updated_count} 个，失败 ${result.error_count} 个`)
+      if (result.errors) {
+        console.warn('删除失败的工单:', result.errors)
+      }
+    } else {
+      ElMessage.success(`成功删除 ${result.updated_count} 个工单`)
+    }
+    
+    clearSelection()
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('批量删除失败: ' + e.message)
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+const executeBatchStatus = async () => {
+  if (!batchStatusValue.value) {
+    ElMessage.warning('请选择新状态')
+    return
+  }
+  
+  try {
+    batchLoading.value = true
+    const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
+    const result = await workOrderAPI.batchOperation(workOrderIds, 'change_status', batchStatusValue.value)
+    
+    if (result.error_count > 0) {
+      ElMessage.warning(`批量修改状态完成：成功 ${result.updated_count} 个，失败 ${result.error_count} 个`)
+    } else {
+      ElMessage.success(`成功修改 ${result.updated_count} 个工单状态`)
+    }
+    
+    showBatchStatusDialog.value = false
+    batchStatusValue.value = ''
+    clearSelection()
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('批量修改状态失败: ' + e.message)
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+const executeBatchAssign = async () => {
+  if (!batchAssignValue.value) {
+    ElMessage.warning('请选择分配人员')
+    return
+  }
+  
+  try {
+    batchLoading.value = true
+    const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
+    const result = await workOrderAPI.batchOperation(workOrderIds, 'change_assignee', batchAssignValue.value.toString())
+    
+    if (result.error_count > 0) {
+      ElMessage.warning(`批量重新分配完成：成功 ${result.updated_count} 个，失败 ${result.error_count} 个`)
+    } else {
+      ElMessage.success(`成功重新分配 ${result.updated_count} 个工单`)
+    }
+    
+    showBatchAssignDialog.value = false
+    batchAssignValue.value = ''
+    clearSelection()
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('批量重新分配失败: ' + e.message)
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+const executeBatchPriority = async () => {
+  if (!batchPriorityValue.value) {
+    ElMessage.warning('请选择优先级')
+    return
+  }
+  
+  try {
+    batchLoading.value = true
+    const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
+    const result = await workOrderAPI.batchOperation(workOrderIds, 'change_priority', batchPriorityValue.value)
+    
+    if (result.error_count > 0) {
+      ElMessage.warning(`批量修改优先级完成：成功 ${result.updated_count} 个，失败 ${result.error_count} 个`)
+    } else {
+      ElMessage.success(`成功修改 ${result.updated_count} 个工单优先级`)
+    }
+    
+    showBatchPriorityDialog.value = false
+    batchPriorityValue.value = ''
+    clearSelection()
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('批量修改优先级失败: ' + e.message)
+  } finally {
+    batchLoading.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -387,5 +625,22 @@ onMounted(load)
   color: #909399; 
   margin-top: 4px; 
   font-family: 'Courier New', monospace;
+}
+
+.batch-operations {
+  margin-bottom: 16px;
+  background-color: #f0f9ff;
+  border: 1px solid #0ea5e9;
+}
+
+.batch-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>

@@ -173,3 +173,27 @@ class ReviewSummary(BaseModel):
     fail_count: int
     warning_count: int
     pending_count: int
+
+
+class WorkOrderBatchOperation(BaseModel):
+    work_order_ids: List[str]
+    operation: str  # 'delete', 'change_status', 'change_assignee', 'change_priority'
+    value: Optional[str] = None  # For operations that need a value
+
+
+class WorkOrderSearchParams(BaseModel):
+    keyword: Optional[str] = None
+    status: Optional[WorkOrderStatusEnum] = None
+    type: Optional[WorkOrderTypeEnum] = None
+    assigned_to: Optional[int] = None
+    priority: Optional[WorkOrderPriorityEnum] = None
+    skip: int = 0
+    limit: int = 50
+
+
+class WorkOrderListResponse(BaseModel):
+    work_orders: List[WorkOrderResponse]
+    total: int
+    page: int
+    size: int
+    pages: int

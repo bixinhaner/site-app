@@ -19,7 +19,7 @@ from app.schemas.work_order import (
     WorkOrderItemUpdate, WorkOrderItemResponse,
     WorkOrderStatusChangeRequest, WorkOrderReviewRequest,
     ItemReviewRequest, PhotoReviewRequest, WorkOrderPhotoResponse,
-    ReviewSummary
+    ReviewSummary, WorkOrderBatchOperation, WorkOrderSearchParams, WorkOrderListResponse
 )
 from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.work_order_sync import get_work_order_sync_service
@@ -27,6 +27,76 @@ from app.utils.file_handler import save_uploaded_file, generate_watermark
 from app.utils.gps_utils import reverse_geocode
 
 router = APIRouter()
+
+
+@router.get("/search", response_model=WorkOrderListResponse)
+async def search_work_orders(
+    keyword: Optional[str] = None,
+    status: Optional[WorkOrderStatusEnum] = None,
+    type: Optional[WorkOrderTypeEnum] = None,
+    assigned_to: Optional[int] = None,
+    priority: Optional[WorkOrderPriorityEnum] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """搜索工单（带分页和筛选）"""
+    from sqlalchemy import or_, and_
+    import math
+    
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    query = db.query(WorkOrder)
+    
+    # 关键词搜索
+    if keyword:
+        query = query.join(Site, WorkOrder.site_id == Site.id, isouter=True).filter(
+            or_(
+                WorkOrder.title.contains(keyword),
+                WorkOrder.description.contains(keyword),
+                Site.site_name.contains(keyword),
+                Site.site_code.contains(keyword)
+            )
+        )
+    
+    # 状态筛选
+    if status:
+        query = query.filter(WorkOrder.status == status)
+    
+    # 类型筛选
+    if type:
+        query = query.filter(WorkOrder.type == type)
+    
+    # 分配人筛选
+    if assigned_to:
+        query = query.filter(WorkOrder.assigned_to == assigned_to)
+    
+    # 优先级筛选
+    if priority:
+        query = query.filter(WorkOrder.priority == priority)
+    
+    # 计算总数
+    total = query.count()
+    
+    # 分页查询
+    work_orders = query.order_by(WorkOrder.assigned_at.desc()).offset(skip).limit(limit).all()
+    
+    # 计算分页信息
+    page = (skip // limit) + 1
+    pages = math.ceil(total / limit)
+    
+    return WorkOrderListResponse(
+        work_orders=[_enrich_work_order_response(db, wo) for wo in work_orders],
+        total=total,
+        page=page,
+        size=limit,
+        pages=pages
+    )
 
 
 def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
@@ -1424,4 +1494,157 @@ async def review_work_order(
     return {
         "message": f"工单{review_data.action}成功",
         "work_order": _enrich_work_order_response(db, wo)
+    }
+
+
+@router.post("/batch-operation")
+async def batch_work_order_operation(
+    operation: WorkOrderBatchOperation,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """批量工单操作"""
+    # 只有admin和manager可以批量操作
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin and manager can perform batch operations"
+        )
+    
+    if not operation.work_order_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No work order IDs provided"
+        )
+    
+    work_orders = db.query(WorkOrder).filter(WorkOrder.id.in_(operation.work_order_ids)).all()
+    
+    if len(work_orders) != len(operation.work_order_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Some work orders not found"
+        )
+    
+    # 执行批量操作
+    updated_count = 0
+    error_count = 0
+    errors = []
+    
+    for wo in work_orders:
+        try:
+            if operation.operation == "delete":
+                # 检查工单状态：只能删除待分配或已分配状态的工单
+                if wo.status not in [WorkOrderStatusEnum.PENDING, WorkOrderStatusEnum.ACTIVE]:
+                    errors.append(f"工单 {wo.id} 状态不允许删除: {wo.status}")
+                    error_count += 1
+                    continue
+                
+                # 如果有关联的检查记录，需要同时删除
+                if wo.inspection_id:
+                    inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+                    if inspection:
+                        db.delete(inspection)
+                
+                # 删除工单
+                db.delete(wo)
+                _audit(db, "work_order", wo.id, "batch_delete", current_user.id,
+                       from_status=wo.status.value, to_status="deleted")
+                updated_count += 1
+                
+            elif operation.operation == "change_status" and operation.value:
+                try:
+                    new_status = WorkOrderStatusEnum(operation.value)
+                    old_status = wo.status
+                    wo.status = new_status
+                    _audit(db, "work_order", wo.id, "batch_status_change", current_user.id,
+                           from_status=old_status.value, to_status=new_status.value)
+                    updated_count += 1
+                except ValueError:
+                    errors.append(f"工单 {wo.id} 无效状态: {operation.value}")
+                    error_count += 1
+                    
+            elif operation.operation == "change_assignee" and operation.value:
+                try:
+                    new_assignee_id = int(operation.value)
+                    # 检查用户是否存在
+                    assignee = db.query(User).filter(User.id == new_assignee_id).first()
+                    if not assignee:
+                        errors.append(f"工单 {wo.id} 分配人不存在: {new_assignee_id}")
+                        error_count += 1
+                        continue
+                    
+                    wo.assigned_to = new_assignee_id
+                    _audit(db, "work_order", wo.id, "batch_assignee_change", current_user.id,
+                           details={"new_assignee": new_assignee_id})
+                    updated_count += 1
+                except ValueError:
+                    errors.append(f"工单 {wo.id} 无效分配人ID: {operation.value}")
+                    error_count += 1
+                    
+            elif operation.operation == "change_priority" and operation.value:
+                try:
+                    new_priority = WorkOrderPriorityEnum(operation.value)
+                    wo.priority = new_priority
+                    _audit(db, "work_order", wo.id, "batch_priority_change", current_user.id,
+                           details={"new_priority": new_priority.value})
+                    updated_count += 1
+                except ValueError:
+                    errors.append(f"工单 {wo.id} 无效优先级: {operation.value}")
+                    error_count += 1
+                    
+        except Exception as e:
+            errors.append(f"工单 {wo.id} 操作失败: {str(e)}")
+            error_count += 1
+    
+    db.commit()
+    
+    result = {
+        "message": f"批量操作完成，成功 {updated_count} 个，失败 {error_count} 个",
+        "updated_count": updated_count,
+        "error_count": error_count
+    }
+    
+    if errors:
+        result["errors"] = errors
+    
+    return result
+
+
+@router.get("/stats/summary")
+async def get_work_order_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取工单统计信息"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    total_work_orders = db.query(WorkOrder).count()
+    
+    # 按状态统计
+    status_stats = {}
+    for status_enum in WorkOrderStatusEnum:
+        count = db.query(WorkOrder).filter(WorkOrder.status == status_enum).count()
+        status_stats[status_enum.value] = count
+    
+    # 按类型统计
+    type_stats = {}
+    for type_enum in WorkOrderTypeEnum:
+        count = db.query(WorkOrder).filter(WorkOrder.type == type_enum).count()
+        type_stats[type_enum.value] = count
+    
+    # 按优先级统计
+    priority_stats = {}
+    for priority_enum in WorkOrderPriorityEnum:
+        count = db.query(WorkOrder).filter(WorkOrder.priority == priority_enum).count()
+        priority_stats[priority_enum.value] = count
+    
+    return {
+        "total_work_orders": total_work_orders,
+        "status_stats": status_stats,
+        "type_stats": type_stats,
+        "priority_stats": priority_stats
     }
