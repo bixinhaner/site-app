@@ -68,6 +68,7 @@ export const useUserStore = defineStore('user', () => {
   return {
     user,
     token,
+    currentUser: user, // 添加 currentUser 别名
     isLoggedIn,
     isAdmin,
     isManager,

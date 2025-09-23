@@ -115,6 +115,16 @@ const routes = [
           { path: 'review', name: 'WorkOrderReview', component: () => import('../views/workorder/WorkOrderReview.vue'), meta: { title: '工单审核台', icon: 'Stamp' } }
         ]
       },
+      // 用户管理（二级菜单）
+      {
+        path: 'users',
+        name: 'UsersMgmt',
+        component: RouterView,
+        meta: { title: '用户管理', icon: 'User' },
+        children: [
+          { path: 'list', name: 'UserList', component: () => import('../views/user/UserList.vue'), meta: { title: '用户列表', icon: 'UserFilled' } }
+        ]
+      },
       // 兼容旧路径的重定向
       { path: 'equipment', redirect: { name: 'Equipment' }, meta: { hidden: true } },
       { path: 'packages', redirect: { name: 'Packages' }, meta: { hidden: true } },
