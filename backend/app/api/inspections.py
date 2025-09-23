@@ -552,6 +552,7 @@ async def upload_inspection_photo(
     gps_longitude: float = Form(0),
     gps_accuracy: Optional[float] = Form(None),
     has_watermark: bool = Form(False),
+    replace_existing: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -608,6 +609,44 @@ async def upload_inspection_photo(
             detail="只支持图片文件"
         )
     
+    # 照片逻辑：驳回状态默认替换，其他情况明确指定才替换
+    import os
+    
+    # 默认逻辑：如果检查是驳回状态且该检查项已有照片，则自动启用替换模式
+    should_replace = replace_existing
+    if not should_replace and inspection.status == InspectionStatusEnum.REJECTED and check_item_id:
+        existing_count = db.query(InspectionPhoto).filter(
+            InspectionPhoto.inspection_id == inspection_id,
+            InspectionPhoto.check_item_id == check_item_id
+        ).count()
+        if existing_count > 0:
+            should_replace = True
+            print(f"检查驳回状态，检查项 {check_item_id} 已有 {existing_count} 张照片，自动启用替换模式")
+    
+    # 执行照片替换逻辑
+    if should_replace and check_item_id:
+        # 删除同一检查项的已有照片
+        existing_photos = db.query(InspectionPhoto).filter(
+            InspectionPhoto.inspection_id == inspection_id,
+            InspectionPhoto.check_item_id == check_item_id
+        ).all()
+        
+        # 删除旧照片文件和数据库记录
+        for old_photo in existing_photos:
+            try:
+                # 删除物理文件
+                if old_photo.file_path and os.path.exists(old_photo.file_path):
+                    os.remove(old_photo.file_path)
+                # 删除数据库记录
+                db.delete(old_photo)
+                print(f"替换模式：删除旧检查照片 {old_photo.id}")
+            except Exception as e:
+                print(f"替换模式：删除旧检查照片失败 {old_photo.id}: {e}")
+        
+        print(f"检查照片替换模式：should_replace={should_replace}，已清理旧照片")
+    else:
+        print(f"检查照片添加模式：should_replace={should_replace}，直接添加新照片")
+
     # 保存文件
     file_path = await save_uploaded_file(file, "inspections", inspection_id)
     
@@ -666,6 +705,499 @@ async def upload_inspection_photo(
     db.refresh(photo)
     
     return photo
+
+
+@router.delete("/photos/{photo_id}")
+async def delete_inspection_photo(
+    photo_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """删除指定检查照片"""
+    import os
+    
+    photo = db.query(InspectionPhoto).filter(InspectionPhoto.id == photo_id).first()
+    if not photo:
+        raise HTTPException(status_code=404, detail="照片不存在")
+    
+    # 检查权限：检查关联的检查记录权限
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == photo.inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=404, detail="关联检查不存在")
+        
+    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限删除该照片")
+    
+    # 检查检查状态是否允许删除照片
+    if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
+        raise HTTPException(status_code=400, detail=f"检查状态 {inspection.status} 下不允许删除照片")
+    
+    # 删除物理文件
+    try:
+        if photo.file_path and os.path.exists(photo.file_path):
+            os.remove(photo.file_path)
+            print(f"已删除检查照片文件: {photo.file_path}")
+    except Exception as e:
+        print(f"删除检查照片文件失败: {e}")
+    
+    # 删除数据库记录
+    db.delete(photo)
+    db.commit()
+    
+    # 记录审计日志
+    audit_log = InspectionAuditLog(
+        id=str(uuid.uuid4()),
+        inspection_id=photo.inspection_id,
+        action="delete_photo",
+        operator_id=current_user.id,
+        details={"photo_id": photo_id, "check_item_id": photo.check_item_id}
+    )
+    db.add(audit_log)
+    db.commit()
+    
+    return {"message": "照片删除成功"}
+
+
+@router.put("/photos/{photo_id}", response_model=InspectionPhotoResponse)
+async def replace_inspection_photo(
+    photo_id: str,
+    file: UploadFile = File(...),
+    gps_latitude: Optional[float] = Form(None),
+    gps_longitude: Optional[float] = Form(None),
+    gps_accuracy: Optional[float] = Form(None),
+    has_watermark: bool = Form(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """替换指定检查照片"""
+    import os
+    
+    existing_photo = db.query(InspectionPhoto).filter(InspectionPhoto.id == photo_id).first()
+    if not existing_photo:
+        raise HTTPException(status_code=404, detail="照片不存在")
+    
+    # 检查权限：检查关联的检查记录权限
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == existing_photo.inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=404, detail="关联检查不存在")
+        
+    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限替换该照片")
+    
+    # 检查检查状态是否允许替换照片
+    if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
+        raise HTTPException(status_code=400, detail=f"检查状态 {inspection.status} 下不允许替换照片")
+    
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="只支持图片文件")
+    
+    # 使用传入的GPS坐标，如果没有则使用原照片的坐标
+    latitude = gps_latitude if gps_latitude is not None else existing_photo.latitude
+    longitude = gps_longitude if gps_longitude is not None else existing_photo.longitude
+    accuracy = gps_accuracy if gps_accuracy is not None else existing_photo.gps_accuracy
+    
+    # 保存新文件
+    file_path = await save_uploaded_file(file, "inspections", existing_photo.inspection_id)
+    
+    # 根据是否已有水印决定是否添加水印
+    watermarked_path = file_path
+    watermark_data = None
+    
+    if not has_watermark:
+        # 前端没有水印，后端添加水印
+        watermark_data = {
+            "gps_coordinates": f"{latitude:.6f}, {longitude:.6f}",
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "inspector": current_user.full_name or current_user.username,
+            "accuracy": f"{accuracy}m" if accuracy else "N/A"
+        }
+        watermarked_path = await generate_watermark(file_path, watermark_data)
+    else:
+        # 前端已有水印，跳过后端水印处理
+        watermark_data = {
+            "source": "frontend_watermark",
+            "gps_coordinates": f"{latitude:.6f}, {longitude:.6f}",
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "inspector": current_user.full_name or current_user.username
+        }
+    
+    file_hash = calculate_file_hash(watermarked_path)
+    address = await reverse_geocode(latitude, longitude)
+    
+    # 删除旧文件
+    try:
+        if existing_photo.file_path and os.path.exists(existing_photo.file_path):
+            os.remove(existing_photo.file_path)
+            print(f"已删除旧检查照片文件: {existing_photo.file_path}")
+    except Exception as e:
+        print(f"删除旧检查照片文件失败: {e}")
+    
+    # 更新照片记录
+    existing_photo.original_name = file.filename
+    existing_photo.file_path = watermarked_path
+    existing_photo.file_size = file.size
+    existing_photo.mime_type = file.content_type
+    existing_photo.latitude = latitude
+    existing_photo.longitude = longitude
+    existing_photo.gps_accuracy = accuracy
+    existing_photo.address = address
+    existing_photo.taken_at = datetime.utcnow()
+    existing_photo.has_watermark = has_watermark or watermark_data is not None
+    existing_photo.watermark_data = watermark_data
+    existing_photo.hash_value = file_hash
+    existing_photo.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(existing_photo)
+    
+    # 记录审计日志
+    audit_log = InspectionAuditLog(
+        id=str(uuid.uuid4()),
+        inspection_id=existing_photo.inspection_id,
+        action="replace_photo",
+        operator_id=current_user.id,
+        details={"photo_id": photo_id, "check_item_id": existing_photo.check_item_id}
+    )
+    db.add(audit_log)
+    db.commit()
+    
+    return existing_photo
+
+
+@router.post("/detail/{inspection_id}/photos/batch")
+async def batch_inspection_photo_operations(
+    inspection_id: str,
+    operations: List[dict],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """批量检查照片操作：删除、更新、添加照片
+    
+    operations: 操作列表，每个操作包含:
+    - action: "delete" | "replace" | "add"
+    - photo_id: 照片ID (delete/replace时必需)
+    - file_data: base64编码的文件数据 (replace/add时必需)
+    - filename: 文件名 (replace/add时必需)
+    - check_item_id: 检查项ID (add时必需)
+    - gps_latitude, gps_longitude, gps_accuracy: GPS信息 (replace/add时可选)
+    - has_watermark: 是否已有水印 (replace/add时可选)
+    """
+    import os
+    import base64
+    import tempfile
+    from fastapi import UploadFile
+    from io import BytesIO
+    
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=404, detail="检查记录不存在")
+        
+    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限操作该检查照片")
+    
+    # 检查检查状态是否允许操作照片
+    if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
+        raise HTTPException(status_code=400, detail=f"检查状态 {inspection.status} 下不允许操作照片")
+    
+    results = []
+    
+    for i, operation in enumerate(operations):
+        try:
+            action = operation.get("action")
+            photo_id = operation.get("photo_id")
+            
+            if action == "delete":
+                if not photo_id:
+                    results.append({"index": i, "action": "delete", "success": False, "error": "缺少photo_id"})
+                    continue
+                
+                # 删除照片
+                photo = db.query(InspectionPhoto).filter(InspectionPhoto.id == photo_id).first()
+                if not photo:
+                    results.append({"index": i, "action": "delete", "success": False, "error": "照片不存在"})
+                    continue
+                
+                # 删除物理文件
+                try:
+                    if photo.file_path and os.path.exists(photo.file_path):
+                        os.remove(photo.file_path)
+                except Exception as e:
+                    print(f"批量操作：删除检查照片文件失败: {e}")
+                
+                # 删除数据库记录
+                db.delete(photo)
+                results.append({"index": i, "action": "delete", "success": True, "photo_id": photo_id})
+                
+            elif action == "replace":
+                if not photo_id or not operation.get("file_data"):
+                    results.append({"index": i, "action": "replace", "success": False, "error": "缺少photo_id或file_data"})
+                    continue
+                
+                # 获取现有照片
+                existing_photo = db.query(InspectionPhoto).filter(InspectionPhoto.id == photo_id).first()
+                if not existing_photo:
+                    results.append({"index": i, "action": "replace", "success": False, "error": "照片不存在"})
+                    continue
+                
+                # 处理文件数据
+                try:
+                    file_data = base64.b64decode(operation["file_data"])
+                    filename = operation.get("filename", "replaced_photo.jpg")
+                    
+                    # 创建临时UploadFile对象
+                    temp_file = BytesIO(file_data)
+                    upload_file = UploadFile(
+                        filename=filename,
+                        file=temp_file,
+                        size=len(file_data),
+                        headers={"content-type": "image/jpeg"}
+                    )
+                    
+                    # 使用GPS坐标
+                    latitude = operation.get("gps_latitude", existing_photo.latitude)
+                    longitude = operation.get("gps_longitude", existing_photo.longitude)
+                    accuracy = operation.get("gps_accuracy", existing_photo.gps_accuracy)
+                    has_watermark = operation.get("has_watermark", False)
+                    
+                    # 保存新文件
+                    file_path = await save_uploaded_file(upload_file, "inspections", inspection_id)
+                    
+                    # 根据是否已有水印决定是否添加水印
+                    watermarked_path = file_path
+                    watermark_data = None
+                    
+                    if not has_watermark:
+                        # 前端没有水印，后端添加水印
+                        watermark_data = {
+                            "gps_coordinates": f"{latitude:.6f}, {longitude:.6f}",
+                            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                            "inspector": current_user.full_name or current_user.username,
+                            "accuracy": f"{accuracy}m" if accuracy else "N/A"
+                        }
+                        watermarked_path = await generate_watermark(file_path, watermark_data)
+                    else:
+                        # 前端已有水印，跳过后端水印处理
+                        watermark_data = {
+                            "source": "frontend_watermark",
+                            "gps_coordinates": f"{latitude:.6f}, {longitude:.6f}",
+                            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                            "inspector": current_user.full_name or current_user.username
+                        }
+                    
+                    file_hash = calculate_file_hash(watermarked_path)
+                    address = await reverse_geocode(latitude, longitude)
+                    
+                    # 删除旧文件
+                    try:
+                        if existing_photo.file_path and os.path.exists(existing_photo.file_path):
+                            os.remove(existing_photo.file_path)
+                    except Exception as e:
+                        print(f"批量操作：删除旧检查照片文件失败: {e}")
+                    
+                    # 更新照片记录
+                    existing_photo.original_name = filename
+                    existing_photo.file_path = watermarked_path
+                    existing_photo.file_size = len(file_data)
+                    existing_photo.mime_type = "image/jpeg"
+                    existing_photo.latitude = latitude
+                    existing_photo.longitude = longitude
+                    existing_photo.gps_accuracy = accuracy
+                    existing_photo.address = address
+                    existing_photo.taken_at = datetime.utcnow()
+                    existing_photo.has_watermark = has_watermark or watermark_data is not None
+                    existing_photo.watermark_data = watermark_data
+                    existing_photo.hash_value = file_hash
+                    existing_photo.updated_at = datetime.utcnow()
+                    
+                    results.append({"index": i, "action": "replace", "success": True, "photo_id": photo_id})
+                    
+                except Exception as e:
+                    results.append({"index": i, "action": "replace", "success": False, "error": str(e)})
+                    
+            elif action == "add":
+                if not operation.get("file_data") or not operation.get("check_item_id"):
+                    results.append({"index": i, "action": "add", "success": False, "error": "缺少file_data或check_item_id"})
+                    continue
+                
+                # 处理文件数据
+                try:
+                    file_data = base64.b64decode(operation["file_data"])
+                    filename = operation.get("filename", "new_photo.jpg")
+                    
+                    # 创建临时UploadFile对象
+                    temp_file = BytesIO(file_data)
+                    upload_file = UploadFile(
+                        filename=filename,
+                        file=temp_file,
+                        size=len(file_data),
+                        headers={"content-type": "image/jpeg"}
+                    )
+                    
+                    # GPS坐标
+                    latitude = operation.get("gps_latitude", 0)
+                    longitude = operation.get("gps_longitude", 0)
+                    accuracy = operation.get("gps_accuracy")
+                    has_watermark = operation.get("has_watermark", False)
+                    
+                    # 保存文件
+                    file_path = await save_uploaded_file(upload_file, "inspections", inspection_id)
+                    
+                    # 根据是否已有水印决定是否添加水印
+                    watermarked_path = file_path
+                    watermark_data = None
+                    
+                    if not has_watermark:
+                        # 前端没有水印，后端添加水印
+                        watermark_data = {
+                            "gps_coordinates": f"{latitude:.6f}, {longitude:.6f}",
+                            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                            "inspector": current_user.full_name or current_user.username,
+                            "accuracy": f"{accuracy}m" if accuracy else "N/A"
+                        }
+                        watermarked_path = await generate_watermark(file_path, watermark_data)
+                    else:
+                        # 前端已有水印，跳过后端水印处理
+                        watermark_data = {
+                            "source": "frontend_watermark",
+                            "gps_coordinates": f"{latitude:.6f}, {longitude:.6f}",
+                            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                            "inspector": current_user.full_name or current_user.username
+                        }
+                    
+                    file_hash = calculate_file_hash(watermarked_path)
+                    address = await reverse_geocode(latitude, longitude)
+                    
+                    # 创建新照片记录
+                    new_photo = InspectionPhoto(
+                        id=str(uuid.uuid4()),
+                        inspection_id=inspection_id,
+                        check_item_id=operation["check_item_id"],
+                        original_name=filename,
+                        file_path=watermarked_path,
+                        file_size=len(file_data),
+                        mime_type="image/jpeg",
+                        latitude=latitude,
+                        longitude=longitude,
+                        gps_accuracy=accuracy,
+                        address=address,
+                        taken_at=datetime.utcnow(),
+                        has_watermark=has_watermark or watermark_data is not None,
+                        watermark_data=watermark_data,
+                        hash_value=file_hash,
+                        uploaded_by=current_user.id
+                    )
+                    db.add(new_photo)
+                    
+                    results.append({"index": i, "action": "add", "success": True, "photo_id": new_photo.id})
+                    
+                except Exception as e:
+                    results.append({"index": i, "action": "add", "success": False, "error": str(e)})
+            
+            else:
+                results.append({"index": i, "action": action, "success": False, "error": "无效的操作类型"})
+                
+        except Exception as e:
+            results.append({"index": i, "action": operation.get("action", "unknown"), "success": False, "error": str(e)})
+    
+    # 提交所有更改
+    db.commit()
+    
+    # 记录审计日志
+    audit_log = InspectionAuditLog(
+        id=str(uuid.uuid4()),
+        inspection_id=inspection_id,
+        action="batch_photo_operations",
+        operator_id=current_user.id,
+        details={"operations_count": len(operations), "results": results}
+    )
+    db.add(audit_log)
+    db.commit()
+    
+    return {
+        "message": "批量检查照片操作完成",
+        "total_operations": len(operations),
+        "results": results
+    }
+
+
+@router.post("/detail/{inspection_id}/photos/cleanup")
+async def cleanup_duplicate_inspection_photos(
+    inspection_id: str,
+    check_item_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """清理重复和累积的检查照片，只保留最新的照片"""
+    import os
+    from collections import defaultdict
+    
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=404, detail="检查记录不存在")
+        
+    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限操作该检查照片")
+    
+    # 构建查询条件
+    query = db.query(InspectionPhoto).filter(InspectionPhoto.inspection_id == inspection_id)
+    if check_item_id:
+        query = query.filter(InspectionPhoto.check_item_id == check_item_id)
+    
+    # 获取所有照片，按检查项分组
+    photos = query.order_by(InspectionPhoto.created_at.desc()).all()
+    
+    # 按检查项分组
+    photos_by_item = defaultdict(list)
+    for photo in photos:
+        key = photo.check_item_id or "inspection_level"
+        photos_by_item[key].append(photo)
+    
+    deleted_count = 0
+    kept_count = 0
+    
+    for item_key, item_photos in photos_by_item.items():
+        if len(item_photos) <= 1:
+            kept_count += len(item_photos)
+            continue
+        
+        # 保留最新的照片，删除其他的
+        latest_photo = item_photos[0]  # 已按created_at倒序排列
+        photos_to_delete = item_photos[1:]
+        
+        for old_photo in photos_to_delete:
+            try:
+                # 删除物理文件
+                if old_photo.file_path and os.path.exists(old_photo.file_path):
+                    os.remove(old_photo.file_path)
+                # 删除数据库记录
+                db.delete(old_photo)
+                deleted_count += 1
+                print(f"清理累积检查照片: {old_photo.id} (检查项: {item_key})")
+            except Exception as e:
+                print(f"清理检查照片失败 {old_photo.id}: {e}")
+        
+        kept_count += 1  # 保留的最新照片
+    
+    db.commit()
+    
+    # 记录审计日志
+    audit_log = InspectionAuditLog(
+        id=str(uuid.uuid4()),
+        inspection_id=inspection_id,
+        action="cleanup_duplicate_photos",
+        operator_id=current_user.id,
+        details={"deleted_count": deleted_count, "kept_count": kept_count, "check_item_id": check_item_id}
+    )
+    db.add(audit_log)
+    db.commit()
+    
+    return {
+        "message": "检查照片清理完成",
+        "deleted_count": deleted_count,
+        "kept_count": kept_count,
+        "details": f"已删除 {deleted_count} 张重复照片，保留 {kept_count} 张最新照片"
+    }
+
 
 # Template endpoints moved to template_binding.py
 # Old template endpoint removed to avoid routing conflicts

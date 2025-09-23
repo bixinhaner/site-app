@@ -24,8 +24,9 @@
           <view class="meta">{{ it.category_name }}</view>
           <view class="photos" v-if="itemPhotos(it).length">
             <scroll-view class="photo-scroll" scroll-x>
-              <view class="p-item" v-for="p in itemPhotos(it)" :key="p.id" @click="previewPhoto(p)">
+              <view class="p-item" v-for="p in itemPhotos(it)" :key="p.id" @click="previewPhoto(p)" @longpress="deletePhoto(p)">
                 <image class="thumb" :src="p.file_path" mode="aspectFill" />
+                <view class="delete-tip">长按删除</view>
               </view>
             </scroll-view>
           </view>
@@ -171,6 +172,17 @@ const previewPhoto = (p) => {
 
 const chooseAndUpload = async (it) => {
   try {
+    // 检查该检查项是否已有照片，如果有则限制只能上传1张
+    const existingPhotos = itemPhotos(it)
+    if (existingPhotos.length >= 1) {
+      uni.showModal({
+        title: '提示',
+        content: '每个检查项只能上传1张照片，如需更换照片，请先删除已有照片',
+        showCancel: false
+      })
+      return
+    }
+    
     // 显示选择方式
     const actionResult = await new Promise((resolve) => {
       uni.showActionSheet({
@@ -250,6 +262,35 @@ const chooseAndUpload = async (it) => {
   } catch (e) {
     console.error('上传失败:', e)
     uni.showToast({ title: '上传取消', icon: 'none' })
+  }
+}
+
+// 删除照片
+const deletePhoto = async (photo) => {
+  try {
+    const confirmResult = await new Promise((resolve) => {
+      uni.showModal({
+        title: '确认删除',
+        content: '确定要删除这张照片吗？',
+        success: (res) => resolve(res.confirm),
+        fail: () => resolve(false)
+      })
+    })
+    
+    if (!confirmResult) return
+    
+    // 调用后端删除接口
+    await store.deletePhoto(photo.id)
+    
+    uni.showToast({ title: '删除成功', icon: 'success' })
+    
+    // 刷新照片列表
+    const c = await store.getPhotos(orderId.value)
+    if (c.success) photos.value = c.data
+    
+  } catch (e) {
+    console.error('删除失败:', e)
+    uni.showToast({ title: '删除失败', icon: 'error' })
   }
 }
 
@@ -651,6 +692,7 @@ onLoad((options) => {
 	
 	.p-item {
 		display: inline-block;
+		position: relative;
 		width: 144rpx;
 		height: 144rpx;
 		margin-right: 16rpx;
@@ -658,6 +700,18 @@ onLoad((options) => {
 		overflow: hidden;
 		background: #f3f4f6;
 		box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.1);
+	}
+	
+	.delete-tip {
+		position: absolute;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		background: rgba(0, 0, 0, 0.6);
+		color: white;
+		font-size: 20rpx;
+		text-align: center;
+		padding: 4rpx 0;
 	}
 	
 	.thumb {

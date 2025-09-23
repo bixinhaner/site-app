@@ -196,10 +196,27 @@ export const useWorkOrderStore = defineStore('workorder', () => {
     }
   }
 
+  const deletePhoto = async (photoId) => {
+    if (!userStore.token) return { success: false, error: '未登录' }
+    try {
+      const response = await uni.request({
+        url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.DELETE_PHOTO(photoId)),
+        ...createRequestConfig({ method: 'DELETE', headers: getAuthHeaders(userStore.token) })
+      })
+      if (response.statusCode === 200) {
+        return { success: true, data: response.data }
+      }
+      throw new Error(response.data?.detail || '删除照片失败')
+    } catch (e) {
+      console.error('deletePhoto error:', e)
+      return { success: false, error: e.message || '删除失败' }
+    }
+  }
+
   return { 
     list, current, items, photos, loading, 
     getMyWorkOrders, getWorkOrder, getItems, getPhotos, 
     acceptWorkOrder, getInspection, completeWorkOrder,
-    uploadPhoto, updateItem, getItemFieldSchema 
+    uploadPhoto, deletePhoto, updateItem, getItemFieldSchema 
   }
 })
