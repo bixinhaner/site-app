@@ -321,9 +321,10 @@ const auxiliaryCount = computed(() =>
 )
 
 const totalAmount = computed(() => 
-  stockInForm.value.items.reduce((sum, item) => 
-    0
-  )
+  stockInForm.value.items.reduce((sum, item) => {
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0)
+    return sum + itemTotal
+  }, 0)
 )
 
 const getEquipmentUnit = (equipmentId) => {
@@ -383,8 +384,10 @@ const removeStockInItem = (index) => {
 
 const onEquipmentChange = (row, index) => {
   const equipment = equipmentOptions.value.find(eq => eq.id === row.equipment_id)
-    calculateTotal()
+  if (equipment) {
+    row.unit_price = equipment.price || 0
   }
+  calculateTotal()
 }
 
 const calculateTotal = () => {

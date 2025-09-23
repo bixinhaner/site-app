@@ -1,254 +1,232 @@
-# 站点信息管理系统 - 项目分析报告
+# CLAUDE.md
 
-## 项目概述
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-这是一个现代化的**通信站点信息管理系统**，专门为运营商工程建网项目开发，采用 **UniApp + FastAPI** 全栈架构，实现从物料管理到规划、安装、验收的全链路闭环管控。
+- 如果需要关闭、启动、重启后台服务，请告诉使用者，让使用者自己操作。
+- github推送信息用中文。
+
+# 站点信息管理系统
+
+现代化的**通信站点信息管理系统**，采用 **UniApp + FastAPI + Vue Web Admin** 三端架构，为运营商工程建网项目提供从物料管理到规划、安装、验收的全链路闭环管控。
 
 ## 技术架构
 
-### 前端 (UniApp)
-- **框架**: UniApp (Vue 3) + Pinia状态管理
-- **UI设计**: 现代化橙色主题设计 (#f97316)
-- **平台支持**: Android原生应用 (当前版本)
-- **构建工具**: Vite + uni-cli
-
 ### 后端 (FastAPI)
-- **框架**: Python FastAPI 0.104.1
-- **数据库**: SQLite (开发) / MySQL (生产)
-- **认证**: JWT Token + RBAC权限模型
-- **ORM**: SQLAlchemy 2.0.23
+- **框架**: Python FastAPI 0.104.1 + SQLAlchemy 2.0.23
+- **数据库**: SQLite (开发) / MySQL (生产) 
+- **认证**: JWT Token + RBAC权限模型，30分钟过期
 - **服务器**: Uvicorn
 
-## 核心业务模块
+### 前端 (三端架构)
+1. **UniApp移动端**: Vue 3 + Pinia，支持Android原生应用
+2. **Web管理端**: Vue 3 + Element Plus + Vite，设备货物管理
+3. **主题设计**: 现代化橙色主题 (#f97316)
 
-### 1. 用户管理系统
-- **角色体系**: admin (系统管理员) | manager (项目经理) | inspector (现场工程师) | user (普通用户)
-- **权限模型**: 基于角色的访问控制(RBAC)
-- **认证机制**: JWT Bearer Token，30分钟过期
-- **默认账户**:
-  - admin/admin123 (管理员)
-  - inspector/inspector123 (检查员)
-  - tom/tom123456 (Tom用户)
-  - test_user/user123 (测试用户)
+## 开发环境设置
 
-### 2. 站点管理系统
-- **站点状态**: planning → construction → operational → maintenance
-- **地理信息**: GPS坐标、地址、省市区三级联动
-- **分配机制**: 站点与施工人员的关联管理
-- **数据模型**: `backend/app/models/site.py:6-31`
+### 后端服务启动
+```bash
+# 一键启动（推荐）- 自动创建venv、安装依赖、初始化数据库
+python start_backend.py
 
-### 3. 检查系统 (核心模块)
-#### 检查模板系统
-- **动态模板生成**: 基于站点类型自动生成检查清单
-- **模板结构**: JSON格式存储，支持站点级和扇区级检查项
-- **版本管理**: 模板版本控制机制
+# 手动启动
+cd backend
+python -m uvicorn app.main:app --reload --port 8000
 
-#### 检查执行流程
-```
-创建检查 → 选择站点 → 执行检查项 → 拍照记录 → 数据验证 → 提交审核 → 完成归档
+# 网络访问模式（移动端开发必需）
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 终止所有后端服务
+pkill -f "uvicorn.*8000"
 ```
 
-#### 高级检查功能
-- **GPS水印拍照**: 自动添加经纬度、时间戳、检查员信息
-- **防篡改机制**: 文件哈希值、数字签名验证
-- **离线支持**: IndexedDB + localStorage双重保障
-- **实时同步**: 网络恢复后自动批量同步
+### 前端启动
+```bash
+# UniApp移动端
+cd uniapp-site-manager
+npm install
+npm run dev                    # 本地开发
+npm run build:h5:prod         # 构建H5生产版
+npm run build:prod            # 构建App生产版
 
-### 4. 任务管理系统
-#### 任务工作流
+# Web管理端
+cd web-admin  
+npm install
+npm run dev                    # 开发服务器 (通常在5173端口)
+npm run build                  # 生产构建
 ```
-PENDING → ASSIGNED → ACCEPTED → IN_PROGRESS → SUBMITTED → UNDER_REVIEW → APPROVED/REJECTED → COMPLETED
+
+### 测试验证
+```bash
+# 后端API测试
+python backend/test_login.py
+python backend/test_task_api.py
+
+# 健康检查
+curl http://localhost:8000/health
 ```
 
-#### 任务类型
-- `opening_inspection`: 新站点设备安装任务
-- `maintenance`: 维护检查任务
-- `power_issue`: 断电问题处理
-- `transmission_issue`: 传输问题
-- `gps_issue`: GPS问题
-- `signal_issue`: 信号问题
+## 核心业务架构
 
-### 5. OMC系统集成
-- **设备状态同步**: offline → online → activated
-- **实时监控**: 基站设备状态查询
-- **日志记录**: 完整的OMC操作审计日志
-- **数据模型**: `backend/app/models/inspection.py:250-286`
+### 用户权限体系
+- **admin**: 系统管理员 (全权限)
+- **manager**: 项目经理 (站点和人员管理)  
+- **inspector**: 现场工程师 (检查和数据录入)
+- **user**: 普通用户
+
+**默认测试账户**:
+- admin/admin123, inspector/inspector123, tom/tom123456, test_user/user123
+
+### 工作流状态机
+```
+工单流程: PENDING → ASSIGNED → ACCEPTED → IN_PROGRESS → SUBMITTED → UNDER_REVIEW → APPROVED/REJECTED → COMPLETED
+站点状态: planning → construction → operational → maintenance  
+设备状态: offline → online → activated
+```
+
+### 检查系统核心设计
+采用**模板+实例**模式:
+1. **InspectionTemplate**: JSON格式检查模板，支持站点级和扇区级检查项
+2. **SiteInspection**: 检查实例，关联特定站点和检查员
+3. **InspectionCheckItem**: 具体检查项，支持多频段扇区细分
+4. **InspectionPhoto**: GPS水印照片，包含防篡改机制
 
 ## 关键技术特性
 
-### 1. 离线优先架构
-```javascript
-// 离线存储策略: uniapp-site-manager/stores/offline.js:1-795
-- IndexedDB主存储 (优先)
-- localStorage备用存储
-- 自动网络状态检测
-- 智能同步队列管理
-- 冲突检测与解决
+### 离线优先架构 
+- **存储策略**: IndexedDB主存储 + localStorage备用
+- **同步机制**: 三层状态同步 (本地状态 ↔ 离线存储 ↔ 服务器)
+- **智能队列**: 网络恢复后自动批量同步，冲突检测与解决
+
+### GPS和位置服务
+- **高精度定位**: GPS accuracy验证，现场位置与站点坐标匹配
+- **水印技术**: 自动添加经纬度、时间戳、检查员信息到照片
+- **防篡改**: 文件哈希值验证 + 数字签名
+
+### 用户行为日志系统
+- **全链路追踪**: `stores/logger.js` + `utils/api-interceptor.js`
+- **会话管理**: 自动生成session ID，记录完整用户轨迹  
+- **API拦截**: 自动记录所有请求响应，支持离线日志同步
+
+### 数据验证规则
+- **天线参数**: 方位角(0-360°)，挂高(0-100m)，下倾角(0-20°)，驻波比(1.0-2.0)
+- **审核工作流**: 多级审批，完整审计追踪，0-100分质量评分
+
+## 项目结构要点
+
+### 后端核心
+```
+backend/app/
+├── api/                    # 路由层
+│   ├── auth.py            # JWT认证 (/api/auth/login,register,me)
+│   ├── work_orders.py     # 工单管理（核心业务API）
+│   ├── inspections.py     # 检查系统API  
+│   ├── logs.py            # 用户行为日志API
+│   └── equipment.py       # 设备物料管理
+├── models/                # SQLAlchemy模型
+│   ├── inspection.py      # 复杂检查系统模型
+│   ├── work_order.py      # 工单流程模型
+│   └── user_log.py        # 日志模型
+├── core/
+│   ├── config.py          # 环境配置 (JWT, 文件上传, CORS)
+│   ├── database.py        # 数据库连接
+│   └── security.py        # 安全组件
+└── utils/
+    └── file_handler.py    # 文件上传和水印处理
 ```
 
-### 2. GPS和位置服务
-- **高精度定位**: GPS accuracy验证
-- **逆地理编码**: 坐标转地址
-- **照片地理标记**: 自动GPS水印
-- **位置验证**: 现场位置与站点坐标匹配
-
-### 3. 质量保证机制
-- **数据验证规则**:
-  - 天线方位角: 0-360度
-  - 天线挂高: 0-100米  
-  - 下倾角: 0-20度
-  - 驻波比: 1.0-2.0
-- **审核工作流**: 多级审批，完整审计追踪
-- **评分系统**: 0-100分质量评分机制
-
-### 4. 现代化UI设计
-- **设计语言**: 橙色主题 (#f97316)，卡片式布局
-- **响应式设计**: 适配多种屏幕尺寸
-- **用户体验**: 手势操作、下拉刷新、无限滚动
-- **离线指示**: 实时网络状态显示
-
-## 项目文件结构
-
-### 后端核心文件
-```
-backend/
-├── app/
-│   ├── api/          # API路由层
-│   │   ├── auth.py   # 认证API (login/register/me)
-│   │   ├── users.py  # 用户管理API
-│   │   ├── sites.py  # 站点管理API
-│   │   ├── inspections.py # 检查系统API (核心模块)
-│   │   └── tasks.py  # 任务管理API
-│   ├── models/       # 数据模型层
-│   │   ├── user.py   # 用户模型
-│   │   ├── site.py   # 站点模型
-│   │   └── inspection.py # 检查系统模型 (复杂)
-│   ├── core/         # 核心组件
-│   │   ├── config.py # 配置管理
-│   │   ├── database.py # 数据库连接
-│   │   └── security.py # 安全组件
-│   └── main.py       # 应用入口
-└── start_backend.py  # 自动化启动脚本
-```
-
-### 前端核心文件
+### 前端核心  
 ```
 uniapp-site-manager/
-├── pages/            # 页面组件
-│   ├── home/         # 首页 (统计面板)
-│   ├── site/         # 站点管理页面
-│   ├── inspection/   # 检查系统页面 (核心功能)
-│   ├── task/         # 任务管理页面
-│   └── profile/      # 个人中心
-├── stores/           # 状态管理 (Pinia)
-│   ├── user.js       # 用户状态管理
-│   ├── site.js       # 站点状态管理
-│   ├── inspection.js # 检查状态管理
-│   └── offline.js    # 离线数据管理 (核心)
+├── stores/                # Pinia状态管理
+│   ├── user.js           # 用户认证和权限控制
+│   ├── offline.js        # 离线数据管理（核心）
+│   ├── logger.js         # 用户行为日志
+│   └── inspection.js     # 检查状态管理
 ├── config/
-│   └── api.js        # API配置管理
-└── App.vue           # 应用根组件
+│   ├── env.js            # 环境配置（API_BASE_URL动态配置）
+│   └── api.js            # API端点定义
+├── utils/
+│   ├── api-interceptor.js # API请求拦截器
+│   └── watermark.js      # GPS水印处理
+└── pages/
+    ├── login/            # 登录认证
+    ├── workorder/        # 工单管理（核心功能）
+    └── inspection/       # 现场检查系统
 ```
 
-## 重要实现细节
-
-### 检查系统设计模式
-检查系统采用**模板+实例**的设计模式:
-
-1. **InspectionTemplate**: 定义检查模板结构
-2. **SiteInspection**: 检查实例，关联特定站点和检查员
-3. **InspectionCheckItem**: 具体检查项，支持扇区级细分
-4. **InspectionPhoto**: 照片管理，包含GPS信息和防篡改机制
-
-### 状态同步机制
-系统实现了复杂的**三层状态同步**:
-1. **本地状态**: Pinia store实时状态
-2. **离线存储**: IndexedDB/localStorage持久化
-3. **服务器状态**: FastAPI数据库同步
-
-### 权限控制实现
-前端权限控制: `uniapp-site-manager/stores/user.js:10-22`
-```javascript
-const canAccessTaskManagement = computed(() => isAdmin.value)
-const canAccessSiteManagement = computed(() => isAdmin.value)
-const canCreateTasks = computed(() => isAdmin.value)
-```
-
-## API端点总览
-
-### 认证相关
-- `POST /api/auth/login` - 用户登录
-- `POST /api/auth/register` - 用户注册  
-- `GET /api/auth/me` - 获取当前用户信息
+## API端点概览
 
 ### 核心业务API
-- `GET /api/sites/` - 站点列表 (支持筛选)
-- `POST /api/inspections/` - 创建检查记录
+- `POST /api/auth/login` - 用户登录
+- `GET /api/work-orders` - 工单列表
+- `GET /api/work-orders/{id}` - 工单详情  
+- `POST /api/work-orders/{id}/items/{item_id}` - 更新检查项
+- `POST /api/work-orders/{id}/photos` - 上传检查照片
+- `POST /api/work-orders/{id}/complete` - 完成工单
 - `GET /api/inspections/detail/{id}` - 检查详情
-- `POST /api/inspections/detail/{id}/photos` - 上传检查照片
-- `GET /api/tasks/` - 任务列表
-- `POST /api/tasks/{id}/review` - 任务审核
+- `POST /api/logs` - 创建用户日志
+- `POST /api/logs/batch` - 批量同步日志
 
-### 系统管理
+### 管理API
 - `GET /health` - 健康检查
-- `GET /api/inspections/statistics/overview` - 检查统计
-- `GET /api/tasks/statistics/overview` - 任务统计
+- `GET /docs` - Swagger API文档  
+- `GET /redoc` - ReDoc API文档
 
-## 业务流程核心
+## 网络配置要点
 
-### 典型检查流程
-1. **管理员**: 创建站点，分配给施工人员
-2. **施工人员**: 接受任务，前往现场
-3. **现场检查**: 按模板逐项检查，GPS拍照取证
-4. **数据采集**: 天线参数、设备状态、环境信息
-5. **提交审核**: 数据完整性验证后提交
-6. **审核通过**: 管理员审核，评分，完成流程
-
-### 关键业务规则
-- **强制GPS验证**: 确保现场作业真实性
-- **照片防篡改**: 哈希值验证，数字签名
-- **状态机管理**: 严格的状态转换控制
-- **权限隔离**: 用户只能操作分配给自己的任务
-
-## 启动和部署
-
-### 快速启动
-```bash
-# 后端自动化启动
-python start_backend.py
-
-# 前端开发
-cd uniapp-site-manager
-npm install && npm run dev
+### 开发环境网络设置
+```javascript
+// uniapp-site-manager/config/env.js
+// 根据实际网络环境动态配置
+config.API_BASE_URL = 'http://192.168.31.184:8000'  // 局域网IP
+config.API_BASE_URL = 'http://127.0.0.1:8000'       // 本地开发
 ```
 
-### 服务地址
-- **后端API**: http://localhost:8000
-- **API文档**: http://localhost:8000/docs
-- **ReDoc文档**: http://localhost:8000/redoc
+### 后端CORS配置
+```python
+# backend/app/core/config.py
+ALLOWED_HOSTS_STR: str = "*"  # 开发环境允许所有来源
+```
 
-## 项目特色亮点
+## 重要业务规则
 
-1. **企业级检查系统**: 完整的现场检查、拍照、审核工作流
-2. **离线优先设计**: 支持断网环境下的数据采集和同步
-3. **GPS防伪技术**: 照片自动水印，位置验证机制
-4. **移动优先体验**: 专为现场作业优化的移动端UI
-5. **一键部署脚本**: 自动环境配置、依赖安装、数据库初始化
+### 检查系统业务逻辑
+1. **强制GPS验证**: 确保现场作业真实性，照片必须包含位置信息
+2. **模板版本控制**: 检查模板支持版本管理，向下兼容
+3. **状态机管理**: 严格的状态转换控制，防止非法状态切换
+4. **权限隔离**: 用户只能操作分配给自己的工单和站点
 
-## 技术债务和注意事项
+### 数据同步策略
+1. **优先本地**: 离线环境下优先使用本地存储
+2. **增量同步**: 网络恢复后仅同步变更数据，减少带宽消耗
+3. **冲突解决**: 基于时间戳的冲突检测和解决机制
 
-1. **CORS配置**: 开发环境允许所有来源 (`allow_origins=["*"]`)
-2. **默认密钥**: 需要在生产环境更换 `SECRET_KEY`
-3. **文件权限**: uploads目录权限管理
-4. **数据库**: 生产环境需要迁移到MySQL
+## 文件和目录约定
 
-## 扩展计划
+### 上传文件管理
+- **路径**: `backend/uploads/` (自动创建)
+- **权限**: 确保写入权限，生产环境注意安全配置
+- **格式**: 支持 jpg,jpeg,png,pdf，最大10MB
+- **命名**: UUID格式防止冲突，支持水印后缀
 
-根据设计文档，后续可能的扩展方向:
-- **物料管理模块**: 设备申请、库存管理
-- **知识库系统**: 技术文档、FAQ管理
-- **报表系统**: Excel/PDF导出
-- **AI辅助检查**: 图像识别、智能评分
-- **IoT集成**: 设备状态自动采集
+### 环境配置
+- **后端**: `backend/.env` (从.env.example复制)
+- **前端**: `uniapp-site-manager/config/env.js` (动态环境配置)
+- **数据库**: SQLite开发环境，生产环境迁移MySQL
 
-这是一个功能完整、架构合理的企业级移动应用，特别适合通信行业的现场作业管理场景。
+## 调试和故障排除
+
+### 常见问题解决
+1. **登录连接失败**: 检查API_BASE_URL配置，确认后端服务运行在0.0.0.0
+2. **端口冲突**: 使用 `lsof -i :8000` 检查端口占用
+3. **数据库初始化**: 运行 `python start_backend.py` 自动创建默认数据
+4. **权限问题**: 检查uploads目录权限，确保可写入
+
+### 调试工具
+- **后端日志**: Uvicorn控制台输出
+- **前端调试**: 浏览器开发者工具，HBuilderX控制台
+- **API测试**: 使用 `/docs` Swagger界面进行API测试
+- **数据库**: SQLite Browser查看数据表结构
+
+这是一个功能完整、架构合理的企业级移动应用，特别适合通信行业的现场作业管理场景。系统采用离线优先设计，支持断网环境下的数据采集和同步，具备GPS防伪技术和完整的审核工作流。

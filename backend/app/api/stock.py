@@ -491,7 +491,7 @@ async def get_stock_transactions(
             "scan_barcode": trans.scan_barcode,
             "notes": trans.notes,
             "items": items,
-            "task_id": trans.task_id,
+            "task_id": None,
             "package_name": trans.package.package_name if trans.package else None
         })
     

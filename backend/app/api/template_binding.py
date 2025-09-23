@@ -282,7 +282,7 @@ async def get_template_bindings(
             template_id=binding.template_id,
             site_id=binding.site_id,
             site_type=binding.site_type,
-            task_type=binding.task_type,
+            task_type=None,
             region=binding.region,
             customer=binding.customer,
             tags=binding.tags,
