@@ -56,7 +56,15 @@
 		</view>
 		
 		<!-- 详情内容 -->
-		<scroll-view class="detail-content" scroll-y v-if="inspectionData">
+		<scroll-view 
+			class="detail-content" 
+			scroll-y 
+			v-if="inspectionData"
+			refresher-enabled 
+			:refresher-triggered="refreshing" 
+			@refresherrefresh="handleRefresh"
+			refresher-background="#f5f5f5"
+		>
 			<!-- 基本信息卡片 -->
 			<view class="detail-card">
 				<view class="card-header">
@@ -413,7 +421,7 @@
 
 <script setup>
 	import { ref, computed, onMounted } from 'vue'
-	import { onLoad } from '@dcloudio/uni-app'
+	import { onLoad, onShow } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl } from '@/config/api.js'
@@ -433,6 +441,8 @@
 	const checkItems = ref([])
 	const currentFilter = ref('all')
 	const currentItem = ref(null)
+	const refreshing = ref(false)
+	const isPageVisible = ref(false)
 	
 	// 筛选选项
 	const statusFilters = [
@@ -464,11 +474,29 @@
 	})
 	
 	// 生命周期
+	// 页面初次加载
 	onLoad((options) => {
+		console.log('📱 检查详情页面 onLoad', options)
 		if (options.id) {
 			inspectionId.value = options.id
+			isPageVisible.value = true
 			loadInspectionDetail()
 		}
+	})
+	
+	// 每次页面显示时刷新数据
+	onShow(() => {
+		console.log('👁️ 检查详情页面 onShow', { 
+			inspectionId: inspectionId.value,
+			isPageVisible: isPageVisible.value 
+		})
+		
+		// 避免重复刷新（onLoad后立即触发onShow）
+		if (isPageVisible.value && inspectionId.value) {
+			console.log('🔄 页面重新显示，自动刷新数据')
+			loadInspectionDetail()
+		}
+		isPageVisible.value = true
 	})
 	
 	// 方法
@@ -536,7 +564,9 @@
 	
 	const loadInspectionDetail = async () => {
 		try {
+			console.log('🔄 检查详情页面加载中...', { inspectionId: inspectionId.value })
 			loading.value = true
+			refreshing.value = true
 			
 			// 加载检查详情
 			const inspectionResult = await inspectionStore.getInspectionDetail(inspectionId.value)
@@ -577,14 +607,21 @@
 			}
 			
 		} catch (error) {
-			console.error('加载检查详情失败:', error)
+			console.error('❌ 检查详情加载异常:', error)
 			uni.showToast({
 				title: '加载失败',
 				icon: 'error'
 			})
 		} finally {
 			loading.value = false
+			refreshing.value = false
+			console.log('✅ 检查详情页面加载完成')
 		}
+	}
+	
+	// 下拉刷新处理
+	const handleRefresh = async () => {
+		await loadInspectionDetail()
 	}
 	
 	const switchFilter = (filterValue) => {

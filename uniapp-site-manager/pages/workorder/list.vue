@@ -14,7 +14,14 @@
       <view class="tab" :class="{active: status==='COMPLETED'}" @click="setStatus('COMPLETED')">已完成</view>
     </view>
 
-    <scroll-view class="orders-scroll" scroll-y :refreshing="refreshing" @refresh="reload">
+    <scroll-view 
+      class="orders-scroll" 
+      scroll-y 
+      refresher-enabled 
+      :refresher-triggered="refreshing" 
+      @refresherrefresh="handleRefresh"
+      refresher-background="#f5f5f5"
+    >
       <view class="order-list">
         <view class="order-item" v-for="wo in orders" :key="wo.id" @click="openDetail(wo)">
           <view class="order-header">
@@ -42,18 +49,38 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 
 const store = useWorkOrderStore()
 const orders = ref([])
 const status = ref('')
 const refreshing = ref(false)
+const isPageVisible = ref(false)
 
 const reload = async () => {
-  refreshing.value = true
-  const res = await store.getMyWorkOrders(status.value || undefined)
-  if (res.success) orders.value = res.data
-  refreshing.value = false
+  try {
+    refreshing.value = true
+    console.log('🔄 工单列表刷新中...', { status: status.value })
+    const res = await store.getMyWorkOrders(status.value || undefined)
+    if (res.success) {
+      orders.value = res.data
+      console.log('✅ 工单列表刷新成功', { count: res.data?.length })
+    } else {
+      console.error('❌ 工单列表刷新失败', res.error)
+      uni.showToast({ title: '刷新失败', icon: 'none' })
+    }
+  } catch (error) {
+    console.error('❌ 工单列表刷新异常', error)
+    uni.showToast({ title: '刷新异常', icon: 'none' })
+  } finally {
+    refreshing.value = false
+  }
+}
+
+// 下拉刷新处理
+const handleRefresh = async () => {
+  await reload()
 }
 
 const setStatus = async (s) => {
@@ -124,7 +151,23 @@ const handleContinue = async (wo) => {
   }
 }
 
-onMounted(reload)
+// 页面初次加载
+onMounted(() => {
+  console.log('📱 工单列表页面 onMounted')
+  isPageVisible.value = true
+  reload()
+})
+
+// 每次页面显示时刷新数据
+onShow(() => {
+  console.log('👁️ 工单列表页面 onShow', { isPageVisible: isPageVisible.value })
+  // 避免重复刷新（onMounted后立即触发onShow）
+  if (isPageVisible.value) {
+    console.log('🔄 页面重新显示，自动刷新数据')
+    reload()
+  }
+  isPageVisible.value = true
+})
 </script>
 
 <style lang="scss" scoped>

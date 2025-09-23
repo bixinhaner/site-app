@@ -119,7 +119,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 
 const store = useWorkOrderStore()
@@ -127,6 +127,7 @@ const order = ref(null)
 const items = ref([])
 const photos = ref([])
 const orderId = ref(null)
+const isPageVisible = ref(false)
 
 // 编辑弹窗（动态字段）
 const editVisible = ref(false)
@@ -138,12 +139,42 @@ const fieldValues = ref({})
 const load = async () => {
   const id = orderId.value
   if (!id) return
-  const a = await store.getWorkOrder(id)
-  if (a.success) order.value = a.data
-  const b = await store.getItems(id)
-  if (b.success) items.value = b.data
-  const c = await store.getPhotos(id)
-  if (c.success) photos.value = c.data
+  
+  try {
+    console.log('🔄 工单详情页面加载中...', { orderId: id })
+    
+    // 并行加载所有数据
+    const [orderRes, itemsRes, photosRes] = await Promise.all([
+      store.getWorkOrder(id),
+      store.getItems(id),
+      store.getPhotos(id)
+    ])
+    
+    if (orderRes.success) {
+      order.value = orderRes.data
+      console.log('✅ 工单详情加载成功')
+    } else {
+      console.error('❌ 工单详情加载失败', orderRes.error)
+    }
+    
+    if (itemsRes.success) {
+      items.value = itemsRes.data
+      console.log('✅ 工单检查项加载成功', { count: itemsRes.data?.length })
+    } else {
+      console.error('❌ 工单检查项加载失败', itemsRes.error)
+    }
+    
+    if (photosRes.success) {
+      photos.value = photosRes.data
+      console.log('✅ 工单照片加载成功', { count: photosRes.data?.length })
+    } else {
+      console.error('❌ 工单照片加载失败', photosRes.error)
+    }
+    
+  } catch (error) {
+    console.error('❌ 工单详情加载异常', error)
+    uni.showToast({ title: '加载失败', icon: 'none' })
+  }
 }
 
 const completeWorkOrder = async () => {
@@ -533,9 +564,27 @@ const saveEdit = async () => {
   }
 }
 
+// 页面初次加载
 onLoad((options) => {
+  console.log('📱 工单详情页面 onLoad', options)
   orderId.value = options?.id
+  isPageVisible.value = true
   load()
+})
+
+// 每次页面显示时刷新数据
+onShow(() => {
+  console.log('👁️ 工单详情页面 onShow', { 
+    orderId: orderId.value, 
+    isPageVisible: isPageVisible.value 
+  })
+  
+  // 避免重复刷新（onLoad后立即触发onShow）
+  if (isPageVisible.value && orderId.value) {
+    console.log('🔄 页面重新显示，自动刷新数据')
+    load()
+  }
+  isPageVisible.value = true
 })
 </script>
 
