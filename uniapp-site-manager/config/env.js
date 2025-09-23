@@ -49,7 +49,7 @@ const getConfig = () => {
   // 如果配置未被替换，使用开发环境默认值
   if (!validateConfig(config)) {
     // 开发环境使用网络地址，同时支持本地和移动设备访问
-    config.API_BASE_URL = 'http://192.168.31.184:8000'
+    config.API_BASE_URL = 'http://192.168.2.100:8000'
     config.APP_NAME = '站点管理系统'
     config.APP_VERSION = '1.0.0'
     config.DEBUG = 'true'
