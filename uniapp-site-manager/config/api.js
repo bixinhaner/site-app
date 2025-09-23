@@ -129,6 +129,17 @@ export const buildImageUrl = (filePath) => {
     return filePath
   }
   
+  // 如果是本地临时文件（包括uni-app临时文件路径），直接返回
+  if (filePath.includes('temp') || 
+      filePath.includes('tmp') ||
+      filePath.includes('_tmp_') ||
+      filePath.startsWith('wxfile://') ||
+      filePath.startsWith('file://') ||
+      filePath.startsWith('/var/mobile/') ||
+      filePath.includes('uniapp_temp')) {
+    return filePath
+  }
+  
   // 如果路径已经包含 /uploads，直接拼接
   if (filePath.startsWith('/uploads') || filePath.startsWith('uploads')) {
     const cleanPath = filePath.startsWith('/') ? filePath : `/${filePath}`
