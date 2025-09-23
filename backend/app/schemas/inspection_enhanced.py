@@ -170,6 +170,7 @@ class InspectionCheckItemResponse(BaseModel):
     checked_at: Optional[datetime]
     review_status: Optional[str]
     review_comments: Optional[str]
+    reviewed_at: Optional[datetime]
     photos: List[InspectionPhotoResponse] = []
     created_at: datetime
     updated_at: datetime

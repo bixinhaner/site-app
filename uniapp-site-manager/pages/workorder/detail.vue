@@ -19,9 +19,18 @@
         <view class="item" v-for="it in items" :key="it.id">
           <view class="item-header">
             <text class="name">{{ it.item_name }}</text>
-            <text class="istatus" :class="'istatus-'+it.status">{{ itemStatusText(it.status) }}</text>
+            <view class="status-group">
+              <text class="istatus" :class="'istatus-'+it.status">{{ itemStatusText(it.status) }}</text>
+              <text v-if="it.review_status" class="review-status" :class="'review-'+it.review_status">
+                {{ reviewStatusText(it.review_status) }}
+              </text>
+            </view>
           </view>
           <view class="meta">{{ it.category_name }}</view>
+          <view v-if="it.review_comments" class="review-comments">
+            <text class="comments-label">审核备注：</text>
+            <text class="comments-text">{{ it.review_comments }}</text>
+          </view>
           <view class="photos" v-if="itemPhotos(it).length">
             <scroll-view class="photo-scroll" scroll-x>
               <view class="p-item" v-for="p in itemPhotos(it)" :key="p.id" @click="previewPhoto(p)" @longpress="deletePhoto(p)">
@@ -160,6 +169,7 @@ const statusText = (s) => ({
   UNDER_REVIEW: '审核中', APPROVED: '已通过', REJECTED: '已驳回', COMPLETED: '已完成'
 })[s] || s
 const itemStatusText = (s) => ({ pending: '待处理', in_progress: '进行中', completed: '已完成', failed: '失败' })[s] || s
+const reviewStatusText = (s) => ({ pass: '✅ 通过', fail: '❌ 不合格', warning: '⚠️ 警告' })[s] || s
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString('zh-CN') : '-')
 
 const itemPhotos = (it) => (photos.value || []).filter(p => p.item_id === it.id)
@@ -652,6 +662,12 @@ onLoad((options) => {
 		flex: 1;
 	}
 	
+	.status-group {
+		display: flex;
+		gap: 8rpx;
+		align-items: center;
+	}
+	
 	.istatus {
 		font-size: 24rpx;
 		color: #6b7280;
@@ -672,6 +688,53 @@ onLoad((options) => {
 		&.istatus-failed {
 			background: #fee2e2;
 			color: #dc2626;
+		}
+	}
+	
+	.review-status {
+		font-size: 22rpx;
+		padding: 4rpx 8rpx;
+		border-radius: 8rpx;
+		font-weight: 500;
+		
+		&.review-pass {
+			background: #dcfce7;
+			color: #16a34a;
+			border: 1rpx solid #22c55e;
+		}
+		
+		&.review-fail {
+			background: #fef2f2;
+			color: #dc2626;
+			border: 1rpx solid #ef4444;
+		}
+		
+		&.review-warning {
+			background: #fffbeb;
+			color: #d97706;
+			border: 1rpx solid #f59e0b;
+		}
+	}
+	
+	.review-comments {
+		margin-top: 8rpx;
+		padding: 12rpx;
+		background: #f8fafc;
+		border-radius: 8rpx;
+		border-left: 4rpx solid #f97316;
+		
+		.comments-label {
+			font-size: 24rpx;
+			color: #f97316;
+			font-weight: 500;
+		}
+		
+		.comments-text {
+			font-size: 24rpx;
+			color: #374151;
+			line-height: 1.5;
+			margin-top: 4rpx;
+			display: block;
 		}
 	}
 	

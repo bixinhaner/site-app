@@ -190,6 +190,9 @@
 									</view>
 								</view>
 								<view class="item-result">
+									<text class="review-status" v-if="item.review_status" :class="'review-'+item.review_status">
+										{{ getReviewStatusText(item.review_status) }}
+									</text>
 									<text class="result-icon" v-if="item.validation_result && !item.validation_result.valid">⚠️</text>
 									<text class="action-arrow">›</text>
 								</view>
@@ -373,6 +376,27 @@
 						</view>
 					</view>
 					
+					<!-- 审核信息 -->
+					<view class="modal-section" v-if="currentItem.review_status || currentItem.review_comments">
+						<text class="section-title">审核信息</text>
+						<view class="review-info">
+							<view class="review-status-item" v-if="currentItem.review_status">
+								<text class="review-label">审核状态:</text>
+								<text class="review-value" :class="'review-'+currentItem.review_status">
+									{{ getReviewStatusText(currentItem.review_status) }}
+								</text>
+							</view>
+							<view class="review-comments-item" v-if="currentItem.review_comments">
+								<text class="review-label">审核意见:</text>
+								<text class="review-comments-text">{{ currentItem.review_comments }}</text>
+							</view>
+							<view class="review-time-item" v-if="currentItem.reviewed_at">
+								<text class="review-label">审核时间:</text>
+								<text class="review-time">{{ formatDateTime(currentItem.reviewed_at) }}</text>
+							</view>
+						</view>
+					</view>
+					
 					<!-- 备注 -->
 					<view class="modal-section" v-if="currentItem.notes">
 						<text class="section-title">备注</text>
@@ -501,6 +525,11 @@
 	}
 	
 	const viewCheckItem = (item) => {
+		console.log('ViewCheckItem - Review data:', {
+			review_status: item.review_status,
+			review_comments: item.review_comments,
+			reviewed_at: item.reviewed_at
+		})
 		currentItem.value = item
 	}
 	
@@ -673,6 +702,15 @@
 	
 	const formatCoordinates = (lat, lon) => {
 		return `${lat.toFixed(6)}, ${lon.toFixed(6)}`
+	}
+	
+	const getReviewStatusText = (status) => {
+		const statusMap = {
+			pass: '✅ 通过',
+			fail: '❌ 不合格', 
+			warning: '⚠️ 警告'
+		}
+		return statusMap[status] || status
 	}
 </script>
 
@@ -1043,14 +1081,19 @@
 		display: flex;
 		flex-direction: column;
 		gap: 15rpx;
+		width: 100%;
+		box-sizing: border-box;
 	}
 	
 	.check-item {
-		padding: 25rpx;
+		padding: 20rpx;
 		background: #f8f9fa;
 		border-radius: 15rpx;
 		border-left: 6rpx solid #e9ecef;
 		transition: transform 0.2s ease;
+		width: 100%;
+		box-sizing: border-box;
+		overflow: hidden;
 	}
 	
 	.check-item:active {
@@ -1075,8 +1118,11 @@
 	
 	.item-header {
 		display: flex;
-		align-items: center;
-		gap: 15rpx;
+		align-items: flex-start;
+		gap: 12rpx;
+		width: 100%;
+		min-width: 0;
+		box-sizing: border-box;
 	}
 	
 	.item-status {
@@ -1089,34 +1135,58 @@
 	
 	.item-info {
 		flex: 1;
+		min-width: 0;
+		max-width: calc(100% - 140rpx);
+		overflow: hidden;
 	}
 	
 	.item-name {
-		font-size: 28rpx;
+		font-size: 26rpx;
 		font-weight: 500;
 		color: #333;
 		margin-bottom: 5rpx;
+		word-break: break-word;
+		overflow-wrap: break-word;
+		line-height: 1.4;
+		max-width: 100%;
+		display: block;
 	}
 	
 	.item-meta {
 		display: flex;
-		gap: 15rpx;
+		gap: 10rpx;
+		flex-wrap: wrap;
+		max-width: 100%;
+		overflow: hidden;
 	}
 	
 	.item-category {
-		font-size: 22rpx;
+		font-size: 20rpx;
 		color: #666;
+		max-width: 200rpx;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex-shrink: 0;
 	}
 	
 	.item-sector {
-		font-size: 22rpx;
+		font-size: 20rpx;
 		color: #007bff;
+		max-width: 100rpx;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex-shrink: 0;
 	}
 	
 	.item-result {
 		display: flex;
 		align-items: center;
-		gap: 10rpx;
+		gap: 8rpx;
+		flex-shrink: 0;
+		max-width: 120rpx;
+		justify-content: flex-end;
 	}
 	
 	.result-icon {
@@ -1129,15 +1199,23 @@
 	}
 	
 	.item-summary {
-		margin-top: 15rpx;
+		margin-top: 12rpx;
 		display: flex;
-		gap: 20rpx;
+		gap: 15rpx;
 		flex-wrap: wrap;
+		width: 100%;
+		box-sizing: border-box;
+		overflow: hidden;
 	}
 	
 	.summary-text {
-		font-size: 22rpx;
+		font-size: 20rpx;
 		color: #666;
+		max-width: 150rpx;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex-shrink: 0;
 	}
 	
 	.empty-items {
@@ -1233,17 +1311,20 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 40rpx;
+		padding: 20rpx;
 	}
 	
 	.item-detail-modal {
 		background: white;
 		border-radius: 20rpx;
-		width: 100%;
-		max-width: 700rpx;
-		max-height: 90vh;
+		width: calc(100vw - 40rpx);
+		max-width: 680rpx;
+		max-height: 85vh;
 		display: flex;
 		flex-direction: column;
+		min-width: 280rpx;
+		overflow: hidden;
+		box-sizing: border-box;
 	}
 	
 	.modal-header {
@@ -1259,6 +1340,12 @@
 		font-weight: bold;
 		color: #333;
 		flex: 1;
+		word-break: break-word;
+		overflow-wrap: break-word;
+		hyphens: auto;
+		line-height: 1.4;
+		padding-right: 20rpx;
+		max-width: calc(100% - 80rpx);
 	}
 	
 	.modal-close {
@@ -1278,8 +1365,10 @@
 	
 	.modal-content {
 		flex: 1;
-		padding: 30rpx;
+		padding: 20rpx;
 		overflow-y: auto;
+		box-sizing: border-box;
+		width: 100%;
 	}
 	
 	.modal-section {
@@ -1295,26 +1384,49 @@
 	}
 	
 	.info-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
+		display: flex;
+		flex-direction: column;
 		gap: 20rpx;
 	}
 	
 	.grid-item {
 		display: flex;
-		flex-direction: column;
-		gap: 8rpx;
+		flex-direction: row;
+		align-items: flex-start;
+		gap: 10rpx;
+		padding: 12rpx 15rpx;
+		background: #f8f9fa;
+		border-radius: 12rpx;
+		width: 100%;
+		box-sizing: border-box;
+		min-width: 0;
 	}
 	
 	.grid-label {
 		font-size: 24rpx;
 		color: #666;
+		min-width: 80rpx;
+		max-width: 100rpx;
+		flex-shrink: 0;
+		font-weight: 500;
+		word-break: keep-all;
+		white-space: nowrap;
+		line-height: 1.4;
 	}
 	
 	.grid-value {
-		font-size: 26rpx;
+		font-size: 24rpx;
 		color: #333;
 		font-weight: 500;
+		flex: 1;
+		word-break: break-all;
+		overflow-wrap: break-word;
+		hyphens: auto;
+		line-height: 1.4;
+		max-width: 100%;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	
 	/* 数据列表 */
@@ -1327,21 +1439,42 @@
 	.data-item {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
-		padding: 20rpx;
+		align-items: flex-start;
+		padding: 15rpx;
 		background: #f8f9fa;
 		border-radius: 12rpx;
+		gap: 10rpx;
+		width: 100%;
+		box-sizing: border-box;
+		min-width: 0;
 	}
 	
 	.data-label {
-		font-size: 26rpx;
+		font-size: 24rpx;
 		color: #666;
+		min-width: 80rpx;
+		max-width: 100rpx;
+		flex-shrink: 0;
+		font-weight: 500;
+		line-height: 1.4;
+		word-break: keep-all;
+		white-space: nowrap;
 	}
 	
 	.data-value {
-		font-size: 26rpx;
+		font-size: 24rpx;
 		color: #333;
 		font-weight: 500;
+		flex: 1;
+		text-align: right;
+		word-break: break-all;
+		overflow-wrap: break-word;
+		hyphens: auto;
+		line-height: 1.4;
+		max-width: 100%;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	
 	/* 照片网格 */
@@ -1399,5 +1532,110 @@
 		font-size: 26rpx;
 		color: #666;
 		line-height: 1.6;
+	}
+	
+	/* 审核状态样式 */
+	.review-status {
+		font-size: 20rpx;
+		padding: 2rpx 6rpx;
+		border-radius: 6rpx;
+		margin-right: 4rpx;
+		font-weight: 500;
+		max-width: 80rpx;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex-shrink: 0;
+	}
+	
+	.review-pass {
+		background: #d1fae5;
+		color: #059669;
+	}
+	
+	.review-fail {
+		background: #fee2e2;
+		color: #dc2626;
+	}
+	
+	.review-warning {
+		background: #fef3c7;
+		color: #b45309;
+	}
+	
+	/* 审核信息区域样式 */
+	.review-info {
+		background: #f8f9fa;
+		border-radius: 12rpx;
+		padding: 20rpx;
+	}
+	
+	.review-status-item,
+	.review-comments-item,
+	.review-time-item {
+		display: flex;
+		margin-bottom: 12rpx;
+		align-items: flex-start;
+		gap: 10rpx;
+		width: 100%;
+		min-width: 0;
+		box-sizing: border-box;
+	}
+	
+	.review-status-item:last-child,
+	.review-comments-item:last-child,
+	.review-time-item:last-child {
+		margin-bottom: 0;
+	}
+	
+	.review-label {
+		font-size: 24rpx;
+		color: #666;
+		min-width: 80rpx;
+		max-width: 100rpx;
+		font-weight: 500;
+		flex-shrink: 0;
+		word-break: keep-all;
+		white-space: nowrap;
+		line-height: 1.4;
+	}
+	
+	.review-value {
+		font-size: 26rpx;
+		font-weight: 500;
+		padding: 6rpx 12rpx;
+		border-radius: 10rpx;
+		flex: 1;
+		min-width: 0;
+		max-width: 100%;
+		word-break: break-word;
+		overflow-wrap: break-word;
+	}
+	
+	.review-comments-text {
+		font-size: 24rpx;
+		color: #333;
+		line-height: 1.5;
+		flex: 1;
+		background: white;
+		padding: 12rpx;
+		border-radius: 8rpx;
+		border: 1rpx solid #e5e7eb;
+		word-break: break-word;
+		white-space: pre-wrap;
+		max-width: 100%;
+		min-width: 0;
+		overflow-wrap: break-word;
+		box-sizing: border-box;
+	}
+	
+	.review-time {
+		font-size: 26rpx;
+		color: #666;
+		flex: 1;
+		min-width: 0;
+		max-width: 100%;
+		word-break: break-word;
+		overflow-wrap: break-word;
 	}
 </style>

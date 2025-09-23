@@ -1169,6 +1169,20 @@ async def final_review(
     if wo.status not in [WorkOrderStatusEnum.SUBMITTED, WorkOrderStatusEnum.UNDER_REVIEW]:
         raise HTTPException(status_code=400, detail=f"当前状态不允许审核：{wo.status}")
 
+    # 检查是否有不合格的检查项，如果有则不能通过
+    if req.action == "approve" and wo.inspection_id:
+        failed_items = db.query(InspectionCheckItem).filter(
+            InspectionCheckItem.inspection_id == wo.inspection_id,
+            InspectionCheckItem.review_status == "fail"
+        ).all()
+        
+        if failed_items:
+            failed_names = [item.item_name for item in failed_items]
+            raise HTTPException(
+                status_code=400, 
+                detail=f"不能通过工单审核，存在不合格的检查项：{', '.join(failed_names)}"
+            )
+
     old = wo.status
     wo.status = WorkOrderStatusEnum.APPROVED if req.action == "approve" else WorkOrderStatusEnum.REJECTED
     wo.reviewed_by = current_user.id

@@ -62,7 +62,13 @@ const setStatus = async (s) => {
 }
 
 const openDetail = (wo) => {
-  uni.navigateTo({ url: `/pages/workorder/detail?id=${wo.id}` })
+  if (wo.inspection_id) {
+    uni.navigateTo({ 
+      url: `/pages/inspection/detail?id=${wo.inspection_id}&fromWorkOrder=${wo.id}` 
+    })
+  } else {
+    uni.showToast({ title: '该工单暂无关联检查', icon: 'none' })
+  }
 }
 
 const statusText = (s) => ({
