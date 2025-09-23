@@ -11,6 +11,7 @@ class WorkOrderStatusEnum(str, enum.Enum):
     SUBMITTED = "SUBMITTED"     # 已提交待审核
     UNDER_REVIEW = "UNDER_REVIEW"  # 审核中
     APPROVED = "APPROVED"       # 审核通过
+    ACTIVATED = "ACTIVATED"     # 已开通
     REJECTED = "REJECTED"       # 审核驳回
     COMPLETED = "COMPLETED"
 
@@ -68,7 +69,8 @@ class WorkOrder(Base):
     assigned_at = Column(DateTime, server_default=func.now())
     accepted_at = Column(DateTime)
     submitted_at = Column(DateTime)
-    reviewed_at = Column(DateTime) 
+    reviewed_at = Column(DateTime)
+    activated_at = Column(DateTime)
     completed_at = Column(DateTime)
     due_date = Column(DateTime)
 

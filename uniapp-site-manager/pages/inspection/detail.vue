@@ -36,17 +36,20 @@
 			<!-- 进度条 -->
 			<view class="progress-container">
 				<view class="progress-info">
-					<text class="progress-text">完成进度</text>
-					<text class="progress-rate">{{ inspectionData.completion_rate || 0 }}%</text>
+					<text class="progress-text">{{ workOrderProgress ? '工单进度' : '完成进度' }}</text>
+					<text class="progress-rate">{{ workOrderProgress ? workOrderProgress.percentage : (inspectionData.completion_rate || 0) }}%</text>
 				</view>
 				<view class="progress-bar">
 					<view 
 						class="progress-fill" 
-						:style="{ width: (inspectionData.completion_rate || 0) + '%' }"
-						:class="getProgressClass(inspectionData.completion_rate)"
+						:style="{ width: (workOrderProgress ? workOrderProgress.percentage : (inspectionData.completion_rate || 0)) + '%' }"
+						:class="getProgressClass(workOrderProgress ? workOrderProgress.percentage : inspectionData.completion_rate)"
 					></view>
 				</view>
-				<text class="progress-detail">
+				<text class="progress-detail" v-if="workOrderProgress">
+					当前状态: {{ workOrderProgress.status_text }}
+				</text>
+				<text class="progress-detail" v-else>
 					{{ inspectionData.completed_items || 0 }}/{{ inspectionData.total_items || 0 }} 项已完成
 				</text>
 			</view>
@@ -425,6 +428,8 @@
 	const loading = ref(true)
 	const exporting = ref(false)
 	const inspectionData = ref(null)
+	const workOrderProgress = ref(null)
+	const workOrderData = ref(null)
 	const checkItems = ref([])
 	const currentFilter = ref('all')
 	const currentItem = ref(null)
@@ -467,6 +472,68 @@
 	})
 	
 	// 方法
+	// 加载工单进度信息
+	const loadWorkOrderProgress = async (workOrderId) => {
+		try {
+			const response = await uni.request({
+				url: buildApiUrl(`/api/work-orders/${workOrderId}`),
+				...createRequestConfig({
+					method: 'GET',
+					headers: getAuthHeaders(userStore.token)
+				})
+			})
+			
+			if (response.statusCode === 200) {
+				workOrderData.value = response.data
+				
+				// 计算工单进度百分比
+				const status = response.data.status
+				let progressPercentage = 0
+				
+				switch (status) {
+					case 'PENDING':
+						progressPercentage = 0
+						break
+					case 'ACTIVE':
+						// 如果是ACTIVE状态，根据检查项完成度动态计算
+						const completionRate = inspectionData.value?.completion_rate || 0
+						progressPercentage = Math.max(20, Math.min(65, 20 + (completionRate / 100) * 45))
+						break
+					case 'SUBMITTED':
+						progressPercentage = 65
+						break
+					case 'UNDER_REVIEW':
+						progressPercentage = 75
+						break
+					case 'APPROVED':
+						progressPercentage = 85
+						break
+					case 'ACTIVATED':
+						progressPercentage = 95
+						break
+					case 'COMPLETED':
+						progressPercentage = 100
+						break
+					case 'REJECTED':
+						progressPercentage = 50
+						break
+					default:
+						progressPercentage = 0
+				}
+				
+				workOrderProgress.value = {
+					percentage: progressPercentage,
+					status: status,
+					status_text: getWorkOrderStatusText(status)
+				}
+			}
+		} catch (error) {
+			console.warn('获取工单进度失败:', error)
+			// 如果获取工单进度失败，仍然显示检查进度
+			workOrderProgress.value = null
+		}
+	}
+	
 	const loadInspectionDetail = async () => {
 		try {
 			loading.value = true
@@ -502,6 +569,11 @@
 			const itemsResult = await inspectionStore.getInspectionItems(inspectionId.value)
 			if (itemsResult.success) {
 				checkItems.value = itemsResult.data
+			}
+			
+			// 加载工单进度信息（如果检查关联了工单）
+			if (inspectionData.value && inspectionData.value.work_order_id) {
+				await loadWorkOrderProgress(inspectionData.value.work_order_id)
 			}
 			
 		} catch (error) {
@@ -709,6 +781,20 @@
 			pass: '✅ 通过',
 			fail: '❌ 不合格', 
 			warning: '⚠️ 警告'
+		}
+		return statusMap[status] || status
+	}
+	
+	const getWorkOrderStatusText = (status) => {
+		const statusMap = {
+			PENDING: '待处理',
+			ACTIVE: '执行中',
+			SUBMITTED: '已提交',
+			UNDER_REVIEW: '审核中',
+			APPROVED: '已审核',
+			ACTIVATED: '已开通',
+			COMPLETED: '已完成',
+			REJECTED: '已驳回'
 		}
 		return statusMap[status] || status
 	}

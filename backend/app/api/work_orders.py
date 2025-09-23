@@ -1648,3 +1648,119 @@ async def get_work_order_stats(
         "type_stats": type_stats,
         "priority_stats": priority_stats
     }
+
+
+@router.post("/{work_order_id}/check-activation")
+async def check_equipment_activation(
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """手动触发设备开通检测"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=403, detail="无权限执行设备开通检测")
+    
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    
+    if wo.status != WorkOrderStatusEnum.APPROVED:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"只有审核通过的工单才能进行设备开通检测，当前状态：{wo.status}"
+        )
+    
+    from app.services.equipment_activation_service import EquipmentActivationService
+    
+    service = EquipmentActivationService(db)
+    result = await service.trigger_equipment_activation_check(work_order_id)
+    
+    return result
+
+
+@router.get("/{work_order_id}/activation-status")
+async def get_activation_status(
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取工单设备开通状态"""
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    
+    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限访问此工单")
+    
+    activation_check = wo.extra_data.get("activation_check") if wo.extra_data else None
+    
+    return {
+        "work_order_id": work_order_id,
+        "status": wo.status.value,
+        "activation_check": activation_check,
+        "last_check_time": wo.extra_data.get("activation_check_time") if wo.extra_data else None,
+        "activated_at": wo.activated_at.isoformat() if wo.activated_at else None
+    }
+
+
+@router.post("/{work_order_id}/mark-completed")
+async def mark_work_order_completed(
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """将已开通的工单标记为完成"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=403, detail="无权限完成工单")
+    
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    
+    if wo.status != WorkOrderStatusEnum.ACTIVATED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"只有已开通的工单才能标记为完成，当前状态：{wo.status}"
+        )
+    
+    old_status = wo.status
+    wo.status = WorkOrderStatusEnum.COMPLETED
+    wo.completed_at = datetime.utcnow()
+    
+    db.commit()
+    
+    _audit(db, "work_order", work_order_id, "mark_completed", current_user.id,
+           from_status=old_status.value, to_status=wo.status.value)
+    
+    return {
+        "message": "工单已标记为完成",
+        "work_order": _enrich_work_order_response(db, wo)
+    }
+
+
+@router.get("/{work_order_id}/progress")
+async def get_work_order_progress(
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取工单进度信息"""
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    
+    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限访问此工单")
+    
+    from app.utils.work_order_progress import WorkOrderProgressCalculator
+    
+    progress_info = WorkOrderProgressCalculator.calculate_progress(db, wo)
+    
+    return {
+        "work_order_id": work_order_id,
+        "status": wo.status.value,
+        "stage_name": WorkOrderProgressCalculator.get_stage_name(wo.status),
+        "next_action": WorkOrderProgressCalculator.get_next_action(wo.status),
+        "progress_color": WorkOrderProgressCalculator.get_progress_color(progress_info["progress"]),
+        **progress_info
+    }
