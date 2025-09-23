@@ -197,7 +197,7 @@
 								:key="index"
 								@click="previewPhoto(photo)"
 							>
-								<image class="photo-thumb" :src="photo.file_path" mode="aspectFill"></image>
+								<image class="photo-thumb" :src="buildImageUrl(photo.file_path)" mode="aspectFill"></image>
 								<view class="photo-info">
 									<text class="photo-time">{{ formatTime(photo.taken_at) }}</text>
 									<view class="photo-actions">
@@ -284,6 +284,7 @@
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
+	import { buildImageUrl } from '@/config/api.js'
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
@@ -815,9 +816,10 @@
 	}
 	
 	const previewPhoto = (photo) => {
+		const imageUrl = buildImageUrl(photo.file_path)
 		uni.previewImage({
-			urls: [photo.file_path],
-			current: photo.file_path
+			urls: [imageUrl],
+			current: imageUrl
 		})
 	}
 	

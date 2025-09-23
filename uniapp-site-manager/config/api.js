@@ -117,6 +117,29 @@ export const buildApiUrl = (endpoint) => {
 }
 
 /**
+ * 构建图片URL
+ * @param {string} filePath - 文件相对路径
+ * @returns {string} 完整的图片URL
+ */
+export const buildImageUrl = (filePath) => {
+  if (!filePath) return ''
+  
+  // 如果已经是完整URL，直接返回
+  if (filePath.startsWith('http')) {
+    return filePath
+  }
+  
+  // 如果路径已经包含 /uploads，直接拼接
+  if (filePath.startsWith('/uploads') || filePath.startsWith('uploads')) {
+    const cleanPath = filePath.startsWith('/') ? filePath : `/${filePath}`
+    return `${API_CONFIG.BASE_URL}${cleanPath}`
+  }
+  
+  // 默认情况，假设是 uploads 目录下的文件
+  return `${API_CONFIG.BASE_URL}/${filePath}`
+}
+
+/**
  * 获取认证头
  * @param {string} token - 访问令牌
  * @returns {Object} 认证头对象
