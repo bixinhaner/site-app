@@ -27,14 +27,30 @@
             <el-tag type="warning" style="margin-left:8px;">警告 {{ summary.warning_count }}</el-tag>
             <el-tag type="danger" style="margin-left:8px;">不合格 {{ summary.fail_count }}</el-tag>
             <el-tag style="margin-left:8px;">待审 {{ summary.pending_count }}</el-tag>
-            <!-- 如果有不合格检查项，显示警告信息 -->
+            <!-- 审核状态提示 -->
             <el-alert 
-              v-if="hasFailedItems" 
+              v-if="hasPendingItems" 
+              style="margin-left:16px; display:inline-block;" 
+              type="warning" 
+              size="small"
+              :closable="false"
+              :title="`还有 ${pendingItemsCount} 项检查项未完成审核，请先完成所有检查项的审核！`"
+            />
+            <el-alert 
+              v-else-if="hasFailedItems" 
               style="margin-left:16px; display:inline-block;" 
               type="error" 
               size="small"
               :closable="false"
               title="存在不合格检查项，工单无法通过审核！"
+            />
+            <el-alert 
+              v-else-if="!hasPendingItems && !hasFailedItems" 
+              style="margin-left:16px; display:inline-block;" 
+              type="success" 
+              size="small"
+              :closable="false"
+              title="所有检查项已审核完成，可以进行最终审核"
             />
           </div>
         </div>
@@ -101,7 +117,9 @@
               <el-button type="success" :disabled="!canApprove" @click="finalReview('approve')">
                 {{ hasFailedItems ? '存在不合格检查项，无法通过' : '通过' }}
               </el-button>
-              <el-button type="danger" :disabled="!canFinalReview" @click="finalReview('reject')">驳回</el-button>
+              <el-button type="danger" :disabled="!canReject" @click="finalReview('reject')">
+                {{ hasPendingItems ? `还有 ${pendingItemsCount} 项未审核` : '驳回' }}
+              </el-button>
             </el-space>
           </el-form-item>
         </el-form>
@@ -310,9 +328,24 @@ const hasFailedItems = computed(() => {
   return items.value.some(item => item.review_status === 'fail')
 })
 
+// 检查是否有未审核的检查项
+const hasPendingItems = computed(() => {
+  return items.value.some(item => !item.review_status || item.review_status === 'pending')
+})
+
+// 获取未审核检查项的数量
+const pendingItemsCount = computed(() => {
+  return items.value.filter(item => !item.review_status || item.review_status === 'pending').length
+})
+
 // 只有在没有不合格检查项时才能通过
 const canApprove = computed(() => {
-  return canFinalReview.value && !hasFailedItems.value
+  return canFinalReview.value && !hasFailedItems.value && !hasPendingItems.value
+})
+
+// 只有在所有检查项都已审核时才能驳回
+const canReject = computed(() => {
+  return canFinalReview.value && !hasPendingItems.value
 })
 
 const refresh = async () => {
