@@ -27,6 +27,15 @@
             <el-tag type="warning" style="margin-left:8px;">警告 {{ summary.warning_count }}</el-tag>
             <el-tag type="danger" style="margin-left:8px;">不合格 {{ summary.fail_count }}</el-tag>
             <el-tag style="margin-left:8px;">待审 {{ summary.pending_count }}</el-tag>
+            <!-- 如果有不合格检查项，显示警告信息 -->
+            <el-alert 
+              v-if="hasFailedItems" 
+              style="margin-left:16px; display:inline-block;" 
+              type="error" 
+              size="small"
+              :closable="false"
+              title="存在不合格检查项，工单无法通过审核！"
+            />
           </div>
         </div>
         <el-table :data="items" size="small" stripe v-loading="itemsLoading">
@@ -89,7 +98,9 @@
           <el-form-item>
             <el-space>
               <el-button type="primary" :disabled="!canStartReview" @click="startReview">认领审核</el-button>
-              <el-button type="success" :disabled="!canFinalReview" @click="finalReview('approve')">通过</el-button>
+              <el-button type="success" :disabled="!canApprove" @click="finalReview('approve')">
+                {{ hasFailedItems ? '存在不合格检查项，无法通过' : '通过' }}
+              </el-button>
               <el-button type="danger" :disabled="!canFinalReview" @click="finalReview('reject')">驳回</el-button>
             </el-space>
           </el-form-item>
@@ -293,6 +304,16 @@ const types = [
 
 const canStartReview = computed(() => order.value && order.value.status === 'SUBMITTED')
 const canFinalReview = computed(() => order.value && ['SUBMITTED','UNDER_REVIEW'].includes(order.value.status))
+
+// 检查是否有不合格的检查项
+const hasFailedItems = computed(() => {
+  return items.value.some(item => item.review_status === 'fail')
+})
+
+// 只有在没有不合格检查项时才能通过
+const canApprove = computed(() => {
+  return canFinalReview.value && !hasFailedItems.value
+})
 
 const refresh = async () => {
   const id = route.query.id
