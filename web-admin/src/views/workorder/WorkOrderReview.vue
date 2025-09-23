@@ -180,17 +180,8 @@
                   <div v-if="photo.latitude && photo.longitude" class="photo-location">
                     {{ photo.latitude.toFixed(6) }}, {{ photo.longitude.toFixed(6) }}
                   </div>
-                  <div class="photo-status" style="margin-top: 4px;">
-                    <el-tag v-if="photo.review_status === 'approved'" type="success" size="small">已通过</el-tag>
-                    <el-tag v-else-if="photo.review_status === 'rejected'" type="danger" size="small">已驳回</el-tag>
-                    <span v-else style="font-size: 12px; color: #909399;">待审核</span>
-                  </div>
                   <div class="photo-actions" style="margin-top: 4px;">
-                    <el-button-group>
-                      <el-button type="primary" size="small" @click="viewPhotoDetail(photo)">详情</el-button>
-                      <el-button v-if="!photo.review_status" type="success" size="small" @click="reviewPhoto(photo, 'approved')">通过</el-button>
-                      <el-button v-if="!photo.review_status" type="danger" size="small" @click="reviewPhoto(photo, 'rejected')">驳回</el-button>
-                    </el-button-group>
+                    <el-button type="primary" size="small" @click="viewPhotoDetail(photo)">详情</el-button>
                   </div>
                 </div>
               </div>
@@ -257,20 +248,12 @@
               <el-descriptions-item label="GPS精度">{{ selectedPhoto.gps_accuracy || '-' }}</el-descriptions-item>
               <el-descriptions-item label="地址">{{ selectedPhoto.address || '-' }}</el-descriptions-item>
               <el-descriptions-item label="水印">{{ selectedPhoto.has_watermark ? '是' : '否' }}</el-descriptions-item>
-              <el-descriptions-item label="审核状态">
-                <el-tag v-if="selectedPhoto.review_status === 'approved'" type="success">通过</el-tag>
-                <el-tag v-else-if="selectedPhoto.review_status === 'rejected'" type="danger">驳回</el-tag>
-                <span v-else>待审</span>
-              </el-descriptions-item>
-              <el-descriptions-item label="审核意见">{{ selectedPhoto.review_comments || '-' }}</el-descriptions-item>
             </el-descriptions>
           </el-col>
         </el-row>
       </div>
       <template #footer>
         <el-button @click="photoDetailVisible = false">关闭</el-button>
-        <el-button v-if="selectedPhoto && !selectedPhoto.review_status" type="success" @click="reviewPhoto(selectedPhoto, 'approved')">通过</el-button>
-        <el-button v-if="selectedPhoto && !selectedPhoto.review_status" type="danger" @click="reviewPhoto(selectedPhoto, 'rejected')">驳回</el-button>
       </template>
     </el-dialog>
   </div>
@@ -411,10 +394,42 @@ const startReview = async () => {
 const reviewItem = async (row, action) => {
   const id = route.query.id
   try {
-    const { value } = await ElMessageBox.prompt('请输入审核意见', '检查项审核', {
-      confirmButtonText: '提交',
-      cancelButtonText: '取消'
-    })
+    let value = ''
+    
+    // 根据审核动作决定是否强制要求输入意见
+    if (action === 'pass') {
+      // 通过时，意见可选
+      try {
+        const result = await ElMessageBox.prompt('请输入审核意见（可选）', '检查项审核', {
+          confirmButtonText: '提交',
+          cancelButtonText: '取消',
+          inputValidator: null // 不验证输入
+        })
+        value = result.value || ''
+      } catch (e) {
+        if (e === 'cancel') return
+        throw e
+      }
+    } else {
+      // 警告或不合格时，必须输入意见
+      try {
+        const result = await ElMessageBox.prompt('请输入审核意见（必填）', '检查项审核', {
+          confirmButtonText: '提交',
+          cancelButtonText: '取消',
+          inputValidator: (val) => {
+            if (!val || val.trim() === '') {
+              return '请输入审核意见'
+            }
+            return true
+          }
+        })
+        value = result.value
+      } catch (e) {
+        if (e === 'cancel') return
+        throw e
+      }
+    }
+
     // 如果工单有关联的检查，调用检查项审核API
     if (order.value && order.value.inspection_id) {
       await apiClient.post(`/api/inspections/detail/${order.value.inspection_id}/items/${row.id}/review`, { action, comments: value || undefined })
@@ -443,33 +458,6 @@ const finalReview = async (action) => {
   }
 }
 
-const reviewPhoto = async (row, action) => {
-  const id = route.query.id
-  try {
-    const { value } = await ElMessageBox.prompt('请输入审核意见', '照片审核', {
-      confirmButtonText: '提交',
-      cancelButtonText: '取消'
-    })
-    // 如果工单有关联的检查，调用检查照片审核API
-    if (order.value && order.value.inspection_id) {
-      await apiClient.post(`/api/inspections/detail/${order.value.inspection_id}/photos/${row.id}/review`, { action, comments: value || undefined })
-    } else {
-      // 否则调用工单照片审核API
-      await apiClient.post(`/api/work-orders/${id}/photos/${row.id}/review`, { action, comments: value || undefined })
-    }
-    ElMessage.success('已提交')
-    // 刷新检查项数据以更新照片状态
-    await loadItems()
-    // 如果在详情弹窗中审核，关闭弹窗
-    if (photoDetailVisible.value) {
-      photoDetailVisible.value = false
-    }
-  } catch (e) {
-    if (e === 'cancel') return
-    console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '提交失败')
-  }
-}
 
 const getImageUrl = (filePath) => {
   if (!filePath) return ''
