@@ -1,6 +1,7 @@
 import axios from 'axios'
+import config from '@/config/env.js'
 
-const API_BASE_URL = 'http://localhost:8000'
+const API_BASE_URL = config.API_BASE_URL
 
 // 创建axios实例
 const apiClient = axios.create({

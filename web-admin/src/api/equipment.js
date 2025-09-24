@@ -1,8 +1,9 @@
 import axios from 'axios'
+import config from '@/config/env.js'
 
 // 创建axios实例
 const apiClient = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: config.API_BASE_URL,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json'

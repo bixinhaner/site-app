@@ -263,6 +263,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import apiClient from '../../api/auth'
+import config from '../../config/env.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ZoomIn, ZoomOut, FullScreen, Aim, Download } from '@element-plus/icons-vue'
 
@@ -463,7 +464,7 @@ const getImageUrl = (filePath) => {
   if (!filePath) return ''
   // 如果文件路径以uploads开头，需要添加后端URL前缀
   if (filePath.startsWith('uploads/')) {
-    return `http://localhost:8000/${filePath}`
+    return `${config.API_BASE_URL}/${filePath}`
   }
   return filePath
 }
