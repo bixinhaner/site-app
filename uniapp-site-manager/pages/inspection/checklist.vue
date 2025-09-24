@@ -739,78 +739,121 @@
 	// 获取水印工具
 	const getWatermarkTool = () => {
 		return {
-			addWatermark: (imagePath, latitude, longitude, address, inspector, itemName) => {
-				return new Promise((resolve, reject) => {
-					// 创建canvas进行水印处理
-					const ctx = uni.createCanvasContext('watermarkCanvas')
+			addWatermark: async (imagePath, latitude, longitude, address, inspector, itemName) => {
+				try {
+					console.log('使用增强GPS地址水印功能')
 					
-					// 加载图片
-					uni.getImageInfo({
-						src: imagePath,
-						success: (imageInfo) => {
-							const imgWidth = imageInfo.width
-							const imgHeight = imageInfo.height
-							
-							// 更新canvas尺寸
-							canvasWidth.value = imgWidth
-							canvasHeight.value = imgHeight
-							
-							console.log('更新Canvas尺寸:', imgWidth, imgHeight)
-							
-							// 等待DOM更新后再绘制
-							setTimeout(() => {
-								// 重新创建canvas上下文
-								const ctx = uni.createCanvasContext('watermarkCanvas')
-								
-								// 设置canvas尺寸并绘制图片
-								ctx.drawImage(imagePath, 0, 0, imgWidth, imgHeight)
-							
-							// 添加水印文字
-							const watermarkText = [
-								`时间: ${new Date().toLocaleString('zh-CN')}`,
-								`坐标: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
-								`地址: ${address || '获取地址失败'}`,
-								`检查员: ${inspector}`,
-								`检查项: ${itemName}`
-							]
-							
-								// 设置水印样式
-								ctx.setFillStyle('rgba(0, 0, 0, 0.7)')
-								ctx.fillRect(10, imgHeight - 140, imgWidth - 20, 130)
-								
-								ctx.setFillStyle('#ffffff')
-								ctx.setFontSize(18)
-								
-								// 绘制水印文字
-								watermarkText.forEach((text, index) => {
-									ctx.fillText(text, 20, imgHeight - 115 + index * 25)
-								})
-							
-								// 导出处理后的图片
-								ctx.draw(false, () => {
-									uni.canvasToTempFilePath({
-										canvasId: 'watermarkCanvas',
-										destWidth: imgWidth,
-										destHeight: imgHeight,
-										success: (canvasRes) => {
-											console.log('水印处理成功:', canvasRes.tempFilePath)
-											resolve(canvasRes.tempFilePath)
-										},
-										fail: (canvasError) => {
-											console.error('Canvas导出失败:', canvasError)
-											reject(canvasError)
-										}
-									})
-								})
-							}, 100) // setTimeout结束
-						},
-						fail: (error) => {
-							// 如果水印处理失败，返回原图
-							console.error('水印处理失败:', error)
-							resolve(imagePath)
-						}
+					// 先获取图片信息并设置canvas尺寸
+					const imageInfo = await new Promise((resolve, reject) => {
+						uni.getImageInfo({
+							src: imagePath,
+							success: resolve,
+							fail: reject
+						})
 					})
-				})
+					
+					// 更新canvas尺寸
+					canvasWidth.value = imageInfo.width
+					canvasHeight.value = imageInfo.height
+					console.log('设置Canvas尺寸:', imageInfo.width, imageInfo.height)
+					
+					// 等待DOM更新
+					await new Promise(resolve => setTimeout(resolve, 100))
+					
+					// 导入增强水印工具
+					const { watermarkTool } = await import('@/utils/watermark.js')
+					
+					// 使用新的增强水印功能，使用页面中的canvas
+					const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
+						inspector: inspector,
+						checkItem: itemName,
+						siteName: inspectionData.value?.site_name || '未知站点'
+					}, {
+						showAddressDetails: true,
+						showPOI: false,
+						fallbackToBasic: true,
+						canvasId: 'watermarkCanvas'  // 使用页面中已有的canvas
+					})
+					
+					console.log('增强水印添加完成:', watermarkedPath)
+					return watermarkedPath
+					
+				} catch (error) {
+					console.error('增强水印失败，使用原方案:', error)
+					
+					// 兜底方案：使用原有的canvas水印方法
+					return new Promise((resolve, reject) => {
+						// 创建canvas进行水印处理
+						const ctx = uni.createCanvasContext('watermarkCanvas')
+						
+						// 加载图片
+						uni.getImageInfo({
+							src: imagePath,
+							success: (imageInfo) => {
+								const imgWidth = imageInfo.width
+								const imgHeight = imageInfo.height
+								
+								// 更新canvas尺寸
+								canvasWidth.value = imgWidth
+								canvasHeight.value = imgHeight
+								
+								console.log('兜底方案更新Canvas尺寸:', imgWidth, imgHeight)
+								
+								// 等待DOM更新后再绘制
+								setTimeout(() => {
+									// 重新创建canvas上下文
+									const ctx = uni.createCanvasContext('watermarkCanvas')
+									
+									// 设置canvas尺寸并绘制图片
+									ctx.drawImage(imagePath, 0, 0, imgWidth, imgHeight)
+								
+								// 添加水印文字
+								const watermarkText = [
+									`时间: ${new Date().toLocaleString('zh-CN')}`,
+									`坐标: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+									`地址: ${address || '获取地址失败'}`,
+									`检查员: ${inspector}`,
+									`检查项: ${itemName}`
+								]
+								
+									// 设置水印样式
+									ctx.setFillStyle('rgba(0, 0, 0, 0.7)')
+									ctx.fillRect(10, imgHeight - 140, imgWidth - 20, 130)
+									
+									ctx.setFillStyle('#ffffff')
+									ctx.setFontSize(18)
+									
+									// 绘制水印文字
+									watermarkText.forEach((text, index) => {
+										ctx.fillText(text, 20, imgHeight - 115 + index * 25)
+									})
+								
+									// 导出处理后的图片
+									ctx.draw(false, () => {
+										uni.canvasToTempFilePath({
+											canvasId: 'watermarkCanvas',
+											destWidth: imgWidth,
+											destHeight: imgHeight,
+											success: (canvasRes) => {
+												console.log('兜底水印处理成功:', canvasRes.tempFilePath)
+												resolve(canvasRes.tempFilePath)
+											},
+											fail: (canvasError) => {
+												console.error('Canvas导出失败:', canvasError)
+												reject(canvasError)
+											}
+										})
+									})
+								}, 100) // setTimeout结束
+							},
+							fail: (error) => {
+								// 如果水印处理失败，返回原图
+								console.error('兜底水印处理失败:', error)
+								resolve(imagePath)
+							}
+						})
+					})
+				}
 			}
 		}
 	}

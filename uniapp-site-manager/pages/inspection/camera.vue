@@ -187,6 +187,7 @@ export default {
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { watermarkTool } from '@/utils/watermark.js'
 	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
+	import { autoConfigureGeocodingServices } from '@/config/geocoding.js'
 	
 	const userStore = useUserStore()
 	const inspectionStore = useInspectionStore()
@@ -305,6 +306,7 @@ export default {
 		loadCheckItemInfo()
 		startGpsWatch()
 		startTimeUpdate()
+		initGeocodingServices()
 	})
 	
 	onUnmounted(() => {
@@ -313,6 +315,16 @@ export default {
 	})
 	
 	// 初始化方法
+	const initGeocodingServices = () => {
+		try {
+			console.log('初始化地理编码服务...')
+			const configuredCount = autoConfigureGeocodingServices(watermarkTool)
+			console.log(`地理编码服务初始化完成，已配置 ${configuredCount} 个商用服务`)
+		} catch (error) {
+			console.error('地理编码服务初始化失败:', error)
+		}
+	}
+	
 	const initCamera = async () => {
 		try {
 			// 检查相机权限
@@ -799,18 +811,10 @@ export default {
 	// 水印处理函数
 	const addWatermarkToPhoto = async (imagePath, fileInfo) => {
 		try {
-			console.log('开始添加水印:', imagePath)
+			console.log('开始添加GPS地址水印:', imagePath)
 			
-			// 准备水印数据
-			const watermarkData = {
-				gps: gpsInfo.value,
-				timestamp: new Date().toISOString(),
-				inspector: userStore.user?.username || '未知检查员',
-				checkItem: checkItem.value?.item_name || '检查项目',
-				siteName: currentSite.value?.site_name || '未知站点'
-			}
-			
-			// 获取图片信息用于canvas尺寸
+			// 使用新的增强水印功能，自动获取GPS和地址信息
+			// 获取图片信息并设置canvas
 			const imageInfo = await getImageInfo(imagePath)
 			
 			// 设置canvas尺寸
@@ -818,23 +822,69 @@ export default {
 			canvasHeight.value = imageInfo.height
 			canvasId.value = 'watermark-canvas-' + Date.now()
 			
+			console.log('设置Camera页面Canvas:', {
+				canvasId: canvasId.value,
+				width: canvasWidth.value,
+				height: canvasHeight.value
+			})
+			
 			// 等待canvas元素渲染
 			await new Promise(resolve => setTimeout(resolve, 100))
 			
-			// 使用自定义水印工具添加水印
-			const watermarkedPath = await addWatermarkWithCanvas(imagePath, watermarkData, imageInfo)
+			const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
+				inspector: userStore.user?.username || '未知检查员',
+				checkItem: checkItem.value?.item_name || '检查项目',
+				siteName: currentSite.value?.site_name || '未知站点'
+			}, {
+				showAddressDetails: true,  // 显示详细地址信息
+				showPOI: false,           // 不显示POI信息
+				fallbackToBasic: true,    // GPS失败时使用基本模式
+				canvasId: canvasId.value  // 使用页面中的canvas
+			})
 			
-			console.log('水印添加完成:', watermarkedPath)
+			console.log('GPS地址水印添加完成:', watermarkedPath)
 			return watermarkedPath
 			
 		} catch (error) {
-			console.error('添加水印失败:', error)
-			// 如果水印添加失败，返回原图
-			uni.showToast({
-				title: '水印添加失败，使用原图',
-				icon: 'none'
-			})
-			return imagePath
+			console.error('添加水印失败，尝试兜底方案:', error)
+			
+			// 如果新水印方案失败，尝试使用原有方案作为兜底
+			try {
+				const watermarkData = {
+					gps: gpsInfo.value,
+					timestamp: new Date().toISOString(),
+					inspector: userStore.user?.username || '未知检查员',
+					checkItem: checkItem.value?.item_name || '检查项目',
+					siteName: currentSite.value?.site_name || '未知站点'
+				}
+				
+				// 获取图片信息用于canvas尺寸
+				const imageInfo = await getImageInfo(imagePath)
+				
+				// 设置canvas尺寸
+				canvasWidth.value = imageInfo.width
+				canvasHeight.value = imageInfo.height
+				canvasId.value = 'watermark-canvas-' + Date.now()
+				
+				// 等待canvas元素渲染
+				await new Promise(resolve => setTimeout(resolve, 100))
+				
+				// 使用原有方案
+				const watermarkedPath = await addWatermarkWithCanvas(imagePath, watermarkData, imageInfo)
+				
+				console.log('兜底水印添加完成:', watermarkedPath)
+				return watermarkedPath
+				
+			} catch (fallbackError) {
+				console.error('兜底水印方案也失败:', fallbackError)
+				
+				// 如果所有方案都失败，返回原图
+				uni.showToast({
+					title: '水印添加失败，使用原图',
+					icon: 'none'
+				})
+				return imagePath
+			}
 		}
 	}
 	

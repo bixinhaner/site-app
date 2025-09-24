@@ -375,14 +375,17 @@ const getHighAccuracyGPS = async () => {
 // 为照片添加水印
 const addWatermarkToImage = async (imagePath, checkItem, gpsData) => {
   try {
-    console.log('开始添加水印:', { imagePath, checkItem: checkItem.item_name })
+    console.log('开始添加GPS地址水印:', { imagePath, checkItem: checkItem.item_name })
     
     uni.showLoading({
       title: '添加水印中...',
       mask: true
     })
     
-    // 获取图片信息
+    // 导入增强水印工具
+    const { watermarkTool } = await import('@/utils/watermark.js')
+    
+    // 获取图片信息并设置canvas
     const imageInfo = await new Promise((resolve, reject) => {
       uni.getImageInfo({
         src: imagePath,
@@ -391,22 +394,59 @@ const addWatermarkToImage = async (imagePath, checkItem, gpsData) => {
       })
     })
     
-    console.log('图片信息:', imageInfo)
-    
-    // 创建canvas进行水印处理
     const canvasId = 'watermark-canvas-' + Date.now()
-    const watermarkedPath = await processImageWithWatermark(imagePath, imageInfo, checkItem, gpsData, canvasId)
     
-    console.log('水印添加完成:', watermarkedPath)
+    console.log('设置WorkOrder页面Canvas:', {
+      canvasId: canvasId,
+      width: imageInfo.width,
+      height: imageInfo.height
+    })
+    
+    // 使用新的增强水印功能
+    const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
+      inspector: userInfo.value?.username || '未知检查员',
+      checkItem: checkItem.item_name || '检查项目',
+      siteName: order.value?.site_name || '未知站点'
+    }, {
+      showAddressDetails: true,  // 显示详细地址信息
+      showPOI: false,           // 不显示POI信息
+      fallbackToBasic: true,    // GPS失败时使用基本模式
+      canvasId: canvasId        // 使用生成的canvasId
+    })
+    
+    console.log('GPS地址水印添加完成:', watermarkedPath)
     return watermarkedPath
     
   } catch (error) {
-    console.error('添加水印失败:', error)
-    uni.showToast({
-      title: '水印添加失败，使用原图',
-      icon: 'none'
-    })
-    return imagePath
+    console.error('增强水印添加失败，尝试原方案:', error)
+    
+    try {
+      // 获取图片信息
+      const imageInfo = await new Promise((resolve, reject) => {
+        uni.getImageInfo({
+          src: imagePath,
+          success: resolve,
+          fail: reject
+        })
+      })
+      
+      console.log('图片信息:', imageInfo)
+      
+      // 创建canvas进行水印处理（兜底方案）
+      const canvasId = 'watermark-canvas-' + Date.now()
+      const watermarkedPath = await processImageWithWatermark(imagePath, imageInfo, checkItem, gpsData, canvasId)
+      
+      console.log('兜底水印添加完成:', watermarkedPath)
+      return watermarkedPath
+      
+    } catch (fallbackError) {
+      console.error('兜底水印方案也失败:', fallbackError)
+      uni.showToast({
+        title: '水印添加失败，使用原图',
+        icon: 'none'
+      })
+      return imagePath
+    }
   } finally {
     uni.hideLoading()
   }
