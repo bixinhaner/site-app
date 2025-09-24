@@ -53,3 +53,4 @@ backend/uploads/*
 
 # PID files
 *.pid
+test.keystore
