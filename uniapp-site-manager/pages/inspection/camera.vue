@@ -187,7 +187,6 @@ export default {
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { watermarkTool } from '@/utils/watermark.js'
 	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
-	import { autoConfigureGeocodingServices } from '@/config/geocoding.js'
 	
 	const userStore = useUserStore()
 	const inspectionStore = useInspectionStore()
@@ -306,7 +305,6 @@ export default {
 		loadCheckItemInfo()
 		startGpsWatch()
 		startTimeUpdate()
-		initGeocodingServices()
 	})
 	
 	onUnmounted(() => {
@@ -315,15 +313,6 @@ export default {
 	})
 	
 	// 初始化方法
-	const initGeocodingServices = () => {
-		try {
-			console.log('初始化地理编码服务...')
-			const configuredCount = autoConfigureGeocodingServices(watermarkTool)
-			console.log(`地理编码服务初始化完成，已配置 ${configuredCount} 个商用服务`)
-		} catch (error) {
-			console.error('地理编码服务初始化失败:', error)
-		}
-	}
 	
 	const initCamera = async () => {
 		try {

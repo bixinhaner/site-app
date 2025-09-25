@@ -20,7 +20,9 @@
             "Gallery" : {},
             "GPS" : {},
             "Contacts" : {},
-            "Push" : {}
+            "Barcode" : {},
+            "Bluetooth" : {},
+            "Geolocation" : {}
         },
         "distribute" : {
             "android" : {
@@ -45,10 +47,28 @@
                     "<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\" />",
                     "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" />"
                 ],
-                "abiFilters" : [ "armeabi-v7a", "arm64-v8a", "x86" ]
+                "abiFilters" : [ "armeabi-v7a", "arm64-v8a", "x86" ],
+                "buildFeatures" : []
             },
             "ios" : {
-                "dSYMs" : false
+                "dSYMs" : false,
+                "buildFeatures" : []
+            },
+            "sdkConfigs" : {
+                "geolocation" : {
+                    "system" : {
+                        "__platform__" : [ "android" ]
+                    }
+                },
+                "maps" : {
+                    "amap" : {
+                        "name" : "amap_15686172592SNmFErh7",
+                        "appkey_ios" : "",
+                        "appkey_android" : ""
+                    }
+                },
+                "speech" : {},
+                "push" : {}
             }
         }
     },
