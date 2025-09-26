@@ -114,6 +114,22 @@
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
+				
+				<view class="menu-item" @click="goToLocationPluginTest" v-if="userInfo?.role === 'admin'">
+					<view class="menu-left">
+						<text class="menu-icon">📍</text>
+						<text class="menu-text">定位插件测试</text>
+					</view>
+					<text class="menu-arrow">›</text>
+				</view>
+				
+				<view class="menu-item" @click="goToBuiltinLocationTest" v-if="userInfo?.role === 'admin'">
+					<view class="menu-left">
+						<text class="menu-icon">🌍</text>
+						<text class="menu-text">内置定位测试</text>
+					</view>
+					<text class="menu-arrow">›</text>
+				</view>
 			</view>
 			
 			<view class="menu-group">
@@ -300,6 +316,20 @@
 	const goToLoggingTest = () => {
 		uni.navigateTo({
 			url: '/pages/test/logging-test'
+		})
+	}
+	
+	// 跳转到定位插件测试页面
+	const goToLocationPluginTest = () => {
+		uni.navigateTo({
+			url: '/pages/test-location-plugin/test-location-plugin'
+		})
+	}
+	
+	// 跳转到内置定位测试页面
+	const goToBuiltinLocationTest = () => {
+		uni.navigateTo({
+			url: '/pages/test-location-builtin/test-location-builtin'
 		})
 	}
 	

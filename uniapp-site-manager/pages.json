@@ -94,6 +94,22 @@
 			}
 		},
 		{
+			"path": "pages/test-location-plugin/test-location-plugin",
+			"style": {
+				"navigationBarTitleText": "定位插件测试",
+				"navigationBarBackgroundColor": "#007aff",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/test-location-builtin/test-location-builtin",
+			"style": {
+				"navigationBarTitleText": "内置定位测试",
+				"navigationBarBackgroundColor": "#10b981",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
 			"path": "pages/stock/scan-pickup",
 			"style": {
 				"navigationBarTitleText": "扫码领料",

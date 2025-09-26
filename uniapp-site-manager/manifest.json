@@ -24,6 +24,11 @@
             "Bluetooth" : {},
             "Geolocation" : {}
         },
+        "nativePlugins" : {
+            "my-location-plugin" : {
+                "android" : {}
+            }
+        },
         "distribute" : {
             "android" : {
                 "permissions" : [

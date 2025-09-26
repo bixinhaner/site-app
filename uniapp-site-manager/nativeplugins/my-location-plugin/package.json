@@ -1,0 +1,35 @@
+{
+  "name": "my-location-plugin",
+  "id": "my-location-plugin",
+  "version": "1.0.0",
+  "description": "UniApp 自定义原生定位插件，支持高精度GPS定位和地址逆解析",
+  "_dp_type": "nativeplugin",
+  "_dp_nativeplugin": {
+    "android": {
+      "plugins": [
+        {
+          "type": "module",
+          "name": "my-location-plugin",
+          "class": "com.example.location.LocationPlugin"
+        }
+      ],
+      "integrateType": "aar",
+      "minSdkVersion": 21,
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.INTERNET"
+      ]
+    }
+  },
+  "keywords": [
+    "uniapp",
+    "location",
+    "gps",
+    "原生插件",
+    "定位"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
