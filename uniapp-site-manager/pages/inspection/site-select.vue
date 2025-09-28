@@ -318,17 +318,43 @@
 		}
 	}
 	
-	const getCurrentLocation = () => {
-		uni.getLocation({
-			type: 'gcj02',
-			success: (res) => {
-				// 计算站点距离
-				calculateDistances(res.latitude, res.longitude)
-			},
-			fail: (err) => {
-				console.warn('获取位置失败:', err)
+	const getCurrentLocation = async () => {
+		try {
+			console.log('使用原生插件获取当前位置...')
+			
+			// 获取原生定位插件
+			const locationPlugin = uni.requireNativePlugin('my-location-plugin')
+			
+			if (!locationPlugin) {
+				throw new Error('原生定位插件未加载')
 			}
-		})
+			
+			// 调用插件的同步定位方法（更快）
+			const result = locationPlugin.getLocationSync()
+			console.log('原生插件位置结果:', result)
+			
+			// 解析结果
+			let parsedResult = result
+			if (typeof result === 'string') {
+				try {
+					parsedResult = JSON.parse(result)
+				} catch (parseError) {
+					console.error('解析原生插件结果失败:', parseError)
+					return
+				}
+			}
+			
+			if (parsedResult && parsedResult.success && parsedResult.data) {
+				const data = parsedResult.data
+				// 计算站点距离
+				calculateDistances(data.latitude, data.longitude)
+			} else {
+				console.warn('原生插件获取位置失败:', parsedResult?.message)
+			}
+			
+		} catch (error) {
+			console.warn('原生插件获取位置失败:', error.message)
+		}
 	}
 	
 	const calculateDistances = (userLat, userLon) => {

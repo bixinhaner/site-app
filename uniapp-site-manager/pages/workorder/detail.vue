@@ -335,22 +335,57 @@ const deletePhoto = async (photo) => {
   }
 }
 
-// 获取高精度GPS定位
+// 使用原生插件获取高精度GPS定位
 const getHighAccuracyGPS = async () => {
   try {
-    console.log('开始获取GPS定位...')
+    console.log('开始通过原生插件获取GPS定位...')
+    
+    // 获取原生定位插件
+    const locationPlugin = uni.requireNativePlugin('my-location-plugin')
+    
+    if (!locationPlugin) {
+      throw new Error('原生定位插件未加载')
+    }
     
     const gpsResult = await new Promise((resolve, reject) => {
-      uni.getLocation({
-        type: 'gcj02',
-        altitude: true,
-        isHighAccuracy: true,
-        success: resolve,
-        fail: reject
+      // 调用插件的异步定位方法
+      locationPlugin.getLocationWithAddress((result) => {
+        console.log('原生插件定位结果:', result)
+        
+        // 解析结果
+        let parsedResult = result
+        if (typeof result === 'string') {
+          try {
+            parsedResult = JSON.parse(result)
+          } catch (parseError) {
+            console.error('解析原生插件结果失败:', parseError)
+            reject(new Error('解析原生插件结果失败'))
+            return
+          }
+        }
+        
+        if (parsedResult && parsedResult.success && parsedResult.data) {
+          const data = parsedResult.data
+          const address = parsedResult.address
+          
+          // 转换为旧的格式，保持兼容性
+          const compatibleResult = {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            accuracy: data.accuracy || 0,
+            altitude: data.altitude || 0,
+            address: address,
+            provider: 'native-plugin'
+          }
+          
+          resolve(compatibleResult)
+        } else {
+          reject(new Error(parsedResult?.message || '原生插件定位失败'))
+        }
       })
     })
     
-    console.log('GPS定位成功:', gpsResult)
+    console.log('原生插件GPS定位成功:', gpsResult)
     
     // 检查GPS精度
     if (gpsResult.accuracy > 20) {
@@ -363,9 +398,9 @@ const getHighAccuracyGPS = async () => {
     
     return gpsResult
   } catch (error) {
-    console.error('GPS定位失败:', error)
+    console.error('原生插件GPS定位失败:', error)
     uni.showToast({
-      title: 'GPS定位失败',
+      title: '原生插件定位失败',
       icon: 'error'
     })
     return null
@@ -378,7 +413,7 @@ const addWatermarkToImage = async (imagePath, checkItem, gpsData) => {
     console.log('开始添加GPS地址水印:', { imagePath, checkItem: checkItem.item_name })
     
     uni.showLoading({
-      title: '添加水印中...',
+      title: '正在添加GPS水印...',
       mask: true
     })
     
@@ -410,7 +445,6 @@ const addWatermarkToImage = async (imagePath, checkItem, gpsData) => {
     }, {
       showAddressDetails: true,  // 显示详细地址信息
       showPOI: false,           // 不显示POI信息
-      fallbackToBasic: true,    // GPS失败时使用基本模式
       canvasId: canvasId        // 使用生成的canvasId
     })
     
