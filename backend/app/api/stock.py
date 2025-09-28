@@ -141,7 +141,7 @@ async def scan_equipment_checkout(
     """扫码出库 - 核心功能"""
     barcode = scan_data.get("barcode")
     parsed_barcode = scan_data.get("parsed_barcode")  # 解析后的条码数据
-    task_id = scan_data.get("task_id")  # 可选的关联任务
+    work_order_id = scan_data.get("work_order_id")  # 可选的关联工单
     gps_location = scan_data.get("gps_location")
     
     if not barcode:
@@ -251,7 +251,7 @@ async def scan_equipment_checkout(
         id=transaction_id,
         transaction_type=TransactionTypeEnum.STOCK_OUT,
         warehouse_id=1,  # 默认仓库
-        task_id=task_id,
+        work_order_id=work_order_id,
         package_id=package.id,
         operator_id=current_user.id,
         scan_barcode=barcode,
@@ -294,7 +294,7 @@ async def scan_equipment_checkout(
     pickup_record = PickupRecord(
         id=str(uuid.uuid4()),
         transaction_id=transaction_id,
-        work_order_id=task_id or f"MANUAL-{current_user.id}",  # 使用work_order_id
+        work_order_id=work_order_id or f"MANUAL-{current_user.id}",  # 使用work_order_id
         package_id=package.id,
         picker_id=current_user.id,
         main_device_barcode=barcode,

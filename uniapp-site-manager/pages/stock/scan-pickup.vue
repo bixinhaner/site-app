@@ -52,12 +52,12 @@
       </view>
     </view>
 
-    <!-- 任务选择 -->
-    <view v-if="availablePackages.length > 0" class="task-section">
-      <view class="section-title">选择关联任务 (可选)</view>
-      <picker @change="onTaskChange" :value="selectedTaskIndex" :range="taskOptions">
+    <!-- 工单选择 -->
+    <view v-if="availablePackages.length > 0" class="work-order-section">
+      <view class="section-title">选择关联工单 (可选)</view>
+      <picker @change="onWorkOrderChange" :value="selectedWorkOrderIndex" :range="workOrderOptions">
         <view class="picker-input">
-          <text>{{ selectedTask ? selectedTask.task_title : '选择任务 (可选)' }}</text>
+          <text>{{ selectedWorkOrder ? selectedWorkOrder.title : '选择工单 (可选)' }}</text>
           <text class="picker-arrow">▼</text>
         </view>
       </picker>
@@ -190,9 +190,9 @@ export default {
       scanResult: '',
       parsedBarcode: null, // 解析后的条码信息
       selectedPackageIndex: 0,
-      selectedTaskIndex: 0,
+      selectedWorkOrderIndex: 0,
       availablePackages: [],
-      myTasks: [],
+      myWorkOrders: [],
       pickupHistory: [],
       loading: false,
       confirming: false,
@@ -205,17 +205,17 @@ export default {
       return this.availablePackages[this.selectedPackageIndex]
     },
     
-    selectedTask() {
-      return this.myTasks[this.selectedTaskIndex]
+    selectedWorkOrder() {
+      return this.myWorkOrders[this.selectedWorkOrderIndex]
     },
     
-    taskOptions() {
-      return ['无关联任务', ...this.myTasks.map(task => task.task_title)]
+    workOrderOptions() {
+      return ['无关联工单', ...this.myWorkOrders.map(workOrder => workOrder.title)]
     }
   },
   
   onLoad() {
-    this.loadMyTasks()
+    this.loadMyWorkOrders()
     this.loadPickupHistory()
     this.getCurrentLocation()
   },
@@ -392,8 +392,8 @@ export default {
       this.selectedPackageIndex = index
     },
     
-    onTaskChange(e) {
-      this.selectedTaskIndex = e.detail.value
+    onWorkOrderChange(e) {
+      this.selectedWorkOrderIndex = e.detail.value
     },
     
     async confirmPickup() {
@@ -409,7 +409,7 @@ export default {
           barcode: this.scanResult,
           parsed_barcode: this.parsedBarcode, // 传递解析后的数据
           package_id: this.selectedPackage.id,
-          task_id: this.selectedTask?.id || null,
+          work_order_id: this.selectedWorkOrder?.id || null,
           gps_location: this.userLocation
         }
         
@@ -462,7 +462,7 @@ export default {
       this.parsedBarcode = null
       this.availablePackages = []
       this.selectedPackageIndex = 0
-      this.selectedTaskIndex = 0
+      this.selectedWorkOrderIndex = 0
     },
     
     getFormatName(format) {
@@ -478,21 +478,22 @@ export default {
       return formatMacAddress(mac)
     },
     
-    async loadMyTasks() {
+    async loadMyWorkOrders() {
       try {
         const response = await new Promise((resolve, reject) => {
           uni.request({
             url: buildApiUrl('/api/work-orders/'),
             method: 'GET',
             header: getAuthHeaders(this.userStore.token),
-            data: { assigned_to_me: true, status: 'accepted,in_progress' },
+            data: { status_filter: 'ACTIVE' },
             success: resolve,
             fail: reject
           })
         })
-        this.myTasks = response.data?.work_orders || []
+        this.myWorkOrders = response.data || []
+        console.log('加载工单列表成功:', this.myWorkOrders.length, '个工单')
       } catch (error) {
-        console.error('加载任务列表失败:', error)
+        console.error('加载工单列表失败:', error)
       }
     },
     
@@ -732,7 +733,7 @@ export default {
   }
 }
 
-.task-section, .package-section {
+.work-order-section, .package-section {
   background: white;
   padding: 30rpx;
   border-radius: 12rpx;

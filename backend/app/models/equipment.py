@@ -203,6 +203,7 @@ class StockTransaction(Base):
     
     # 关联信息
     package_id = Column(Integer, ForeignKey("equipment_packages.id"))  # 关联套装
+    work_order_id = Column(String(32), ForeignKey("work_orders.id"))  # 关联工单
     
     # 操作信息
     operator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
