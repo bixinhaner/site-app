@@ -343,20 +343,56 @@ async def get_equipment_by_barcode(
     current_user: User = Depends(get_current_user)
 ):
     """通过条码获取设备信息（扫码时使用）"""
-    # 通过条码前缀匹配设备
+    from app.models.equipment import EquipmentInstance
+    
+    print(f"🔍 [后端API] 收到条码查询请求: {equipment_code}")
+    print(f"🔍 [后端API] 用户: {current_user.username}")
+    
+    # 首先通过SN查找设备实例
+    print(f"🔍 [后端API] 步骤1: 通过SN查找设备实例")
+    equipment_instance = db.query(EquipmentInstance).filter(
+        EquipmentInstance.serial_number == equipment_code
+    ).first()
+    
+    print(f"🔍 [后端API] 设备实例查询结果: {equipment_instance}")
+    if equipment_instance:
+        print(f"🔍 [后端API] 找到设备实例: ID={equipment_instance.id}, SN={equipment_instance.serial_number}")
+    
     equipment = None
-    equipment_list = db.query(Equipment).filter(Equipment.barcode_prefix.isnot(None)).all()
-    for eq in equipment_list:
-        if eq.barcode_prefix and equipment_code.startswith(eq.barcode_prefix):
-            equipment = eq
-            break
+    
+    if equipment_instance:
+        # 如果找到设备实例，获取对应的设备型号
+        print(f"🔍 [后端API] 步骤2a: 从设备实例获取设备型号")
+        equipment = equipment_instance.equipment
+        print(f"🔍 [后端API] 从实例获取设备: {equipment.equipment_name if equipment else 'None'}")
+    else:
+        print(f"🔍 [后端API] 步骤2b: 通过条码前缀匹配设备型号")
+        # 通过条码前缀匹配设备型号
+        equipment_list = db.query(Equipment).filter(Equipment.barcode_prefix.isnot(None)).all()
+        print(f"🔍 [后端API] 查询到{len(equipment_list)}个有条码前缀的设备")
+        
+        for eq in equipment_list:
+            print(f"🔍 [后端API] 检查设备: {eq.equipment_name}, 前缀: {eq.barcode_prefix}")
+            if eq.barcode_prefix and equipment_code.startswith(eq.barcode_prefix):
+                equipment = eq
+                print(f"🔍 [后端API] 匹配成功: {eq.equipment_name}")
+                break
+        
+        if not equipment:
+            print(f"🔍 [后端API] 步骤2c: 直接匹配设备编码")
+            # 尝试直接匹配设备编码
+            equipment = db.query(Equipment).filter(Equipment.equipment_code == equipment_code).first()
+            if equipment:
+                print(f"🔍 [后端API] 直接匹配成功: {equipment.equipment_name}")
+            else:
+                print(f"🔍 [后端API] 直接匹配失败")
     
     if not equipment:
-        # 尝试直接匹配设备编码
-        equipment = db.query(Equipment).filter(Equipment.equipment_code == equipment_code).first()
-    
-    if not equipment:
+        print(f"❌ [后端API] 未找到对应的设备")
         raise HTTPException(status_code=404, detail="未找到对应的设备")
+    
+    print(f"🔍 [后端API] 步骤3: 查找包含此设备的套装")
+    print(f"🔍 [后端API] 设备ID: {equipment.id}, 设备名称: {equipment.equipment_name}")
     
     # 查找包含此设备的套装
     packages = db.query(EquipmentPackage).filter(
@@ -364,8 +400,11 @@ async def get_equipment_by_barcode(
         EquipmentPackage.status == EquipmentStatusEnum.ACTIVE
     ).all()
     
+    print(f"🔍 [后端API] 找到{len(packages)}个套装")
+    
     package_list = []
     for package in packages:
+        print(f"🔍 [后端API] 处理套装: {package.package_name}")
         items = []
         for item in package.package_items:
             items.append({
@@ -376,20 +415,36 @@ async def get_equipment_by_barcode(
                 "is_required": item.is_required
             })
         
-        package_list.append({
+        package_info = {
             "id": package.id,
             "package_code": package.package_code,
             "package_name": package.package_name,
             "site_type": package.site_type,
             "items": items
-        })
+        }
+        package_list.append(package_info)
+        print(f"🔍 [后端API] 套装信息: {package_info}")
     
-    return {
+    result = {
         "equipment": {
             "id": equipment.id,
             "code": equipment.equipment_code,
             "name": equipment.equipment_name,
             "category": equipment.category
         },
+        "equipment_instance": {
+            "id": equipment_instance.id if equipment_instance else None,
+            "serial_number": equipment_instance.serial_number if equipment_instance else None,
+            "mac_address": equipment_instance.mac_address if equipment_instance else None,
+            "status": equipment_instance.status if equipment_instance else None,
+            "warehouse_name": equipment_instance.warehouse.warehouse_name if equipment_instance and equipment_instance.warehouse else None
+        } if equipment_instance else None,
         "available_packages": package_list
     }
+    
+    print(f"✅ [后端API] 返回结果:")
+    print(f"✅ [后端API] 设备: {result['equipment']}")
+    print(f"✅ [后端API] 设备实例: {result['equipment_instance']}")
+    print(f"✅ [后端API] 套装数量: {len(result['available_packages'])}")
+    
+    return result

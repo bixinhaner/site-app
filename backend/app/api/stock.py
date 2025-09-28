@@ -140,25 +140,50 @@ async def scan_equipment_checkout(
 ):
     """扫码出库 - 核心功能"""
     barcode = scan_data.get("barcode")
+    parsed_barcode = scan_data.get("parsed_barcode")  # 解析后的条码数据
     task_id = scan_data.get("task_id")  # 可选的关联任务
     gps_location = scan_data.get("gps_location")
     
     if not barcode:
         raise HTTPException(status_code=400, detail="条码不能为空")
     
+    # 提取SN和MAC地址信息
+    serial_number = None
+    mac1 = None
+    mac2 = None
+    
+    if parsed_barcode and parsed_barcode.get("success"):
+        serial_number = parsed_barcode.get("sn")
+        mac1 = parsed_barcode.get("mac1")
+        mac2 = parsed_barcode.get("mac2")
+    
+    # 使用SN查询设备，如果没有SN则使用原始条码
+    search_code = serial_number if serial_number else barcode
+    
     # 1. 通过条码查找设备
     equipment = None
+    equipment_instance = None
     
-    # 先尝试通过条码前缀匹配
-    equipment_list = db.query(Equipment).filter(Equipment.barcode_prefix.isnot(None)).all()
-    for eq in equipment_list:
-        if eq.barcode_prefix and barcode.startswith(eq.barcode_prefix):
-            equipment = eq
-            break
+    # 首先尝试通过SN查找设备实例
+    if serial_number:
+        equipment_instance = db.query(EquipmentInstance).filter(
+            EquipmentInstance.serial_number == serial_number
+        ).first()
+        
+        if equipment_instance:
+            equipment = equipment_instance.equipment
     
-    # 如果没找到，尝试直接匹配设备编码
+    # 如果没找到设备实例，尝试通过条码前缀匹配设备型号
     if not equipment:
-        equipment = db.query(Equipment).filter(Equipment.equipment_code == barcode).first()
+        equipment_list = db.query(Equipment).filter(Equipment.barcode_prefix.isnot(None)).all()
+        for eq in equipment_list:
+            if eq.barcode_prefix and search_code.startswith(eq.barcode_prefix):
+                equipment = eq
+                break
+    
+    # 如果还没找到，尝试直接匹配设备编码
+    if not equipment:
+        equipment = db.query(Equipment).filter(Equipment.equipment_code == search_code).first()
     
     if not equipment:
         raise HTTPException(status_code=404, detail="未识别的设备条码")
@@ -269,10 +294,14 @@ async def scan_equipment_checkout(
     pickup_record = PickupRecord(
         id=str(uuid.uuid4()),
         transaction_id=transaction_id,
-        task_id=task_id or f"MANUAL-{current_user.id}",
+        work_order_id=task_id or f"MANUAL-{current_user.id}",  # 使用work_order_id
         package_id=package.id,
         picker_id=current_user.id,
         main_device_barcode=barcode,
+        serial_number=serial_number,  # 记录SN
+        mac_address_1=mac1,  # 记录MAC1
+        mac_address_2=mac2,  # 记录MAC2
+        equipment_instance_id=equipment_instance.id if equipment_instance else None,  # 关联设备实例
         scan_location=gps_location
     )
     db.add(pickup_record)
@@ -351,10 +380,18 @@ async def get_my_pickup_records(
             "transaction_id": record.transaction_id,
             "package_name": record.package.package_name if record.package else None,
             "main_device_barcode": record.main_device_barcode,
+            "serial_number": record.serial_number,
+            "mac_address_1": record.mac_address_1,
+            "mac_address_2": record.mac_address_2,
+            "equipment_instance": {
+                "id": record.equipment_instance.id if record.equipment_instance else None,
+                "status": record.equipment_instance.status if record.equipment_instance else None,
+                "warehouse_name": record.equipment_instance.warehouse.warehouse_name if record.equipment_instance and record.equipment_instance.warehouse else None
+            } if record.equipment_instance else None,
             "pickup_time": record.pickup_time.isoformat() if record.pickup_time else None,
             "is_confirmed": record.is_confirmed,
             "confirmed_at": record.confirmed_at.isoformat() if record.confirmed_at else None,
-            "task_id": record.task_id
+            "work_order_id": record.work_order_id
         })
     
     return {"pickup_records": result}
