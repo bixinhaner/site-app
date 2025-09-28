@@ -73,9 +73,25 @@
 				<view class="card-content">
 					<view class="info-row">
 						<text class="info-label">检查员:</text>
-						<text class="info-value">{{ inspectionData.inspector_name || '未知' }}</text>
+						<text class="info-value">{{ getInspectorName() }}</text>
 					</view>
 					<view class="info-row">
+						<text class="info-label">指派时间:</text>
+						<text class="info-value">{{ getAssignedTime() }}</text>
+					</view>
+					<view class="info-row" v-if="workOrderData">
+						<text class="info-label">工单标题:</text>
+						<text class="info-value">{{ workOrderData.title || '未知工单' }}</text>
+					</view>
+					<view class="info-row" v-if="workOrderData">
+						<text class="info-label">工单优先级:</text>
+						<text class="info-value">{{ getPriorityText(workOrderData.priority) }}</text>
+					</view>
+					<view class="info-row" v-if="workOrderData">
+						<text class="info-label">工单类型:</text>
+						<text class="info-value">{{ getWorkOrderTypeText(workOrderData.task_type) }}</text>
+					</view>
+					<view class="info-row" v-if="inspectionData.start_time">
 						<text class="info-label">开始时间:</text>
 						<text class="info-value">{{ formatDateTime(inspectionData.start_time) }}</text>
 					</view>
@@ -86,14 +102,6 @@
 					<view class="info-row" v-if="inspectionData.location">
 						<text class="info-label">位置:</text>
 						<text class="info-value">{{ inspectionData.location }}</text>
-					</view>
-					<view class="info-row" v-if="inspectionData.weather">
-						<text class="info-label">天气:</text>
-						<text class="info-value">{{ inspectionData.weather }}</text>
-					</view>
-					<view class="info-row" v-if="inspectionData.temperature">
-						<text class="info-label">温度:</text>
-						<text class="info-value">{{ inspectionData.temperature }}</text>
 					</view>
 				</view>
 			</view>
@@ -438,6 +446,7 @@
 	const inspectionData = ref(null)
 	const workOrderProgress = ref(null)
 	const workOrderData = ref(null)
+	const inspectorInfo = ref(null)
 	const checkItems = ref([])
 	const currentFilter = ref('all')
 	const currentItem = ref(null)
@@ -562,6 +571,26 @@
 		}
 	}
 	
+	// 加载检查员信息
+	const loadInspectorInfo = async (inspectorId) => {
+		try {
+			const response = await uni.request({
+				url: buildApiUrl(`/api/users/${inspectorId}`),
+				...createRequestConfig({
+					method: 'GET',
+					headers: getAuthHeaders(userStore.token)
+				})
+			})
+			
+			if (response.statusCode === 200) {
+				inspectorInfo.value = response.data
+				console.log('✅ 检查员信息加载成功:', response.data)
+			}
+		} catch (error) {
+			console.warn('获取检查员信息失败:', error)
+		}
+	}
+	
 	const loadInspectionDetail = async () => {
 		try {
 			console.log('🔄 检查详情页面加载中...', { inspectionId: inspectionId.value })
@@ -604,6 +633,11 @@
 			// 加载工单进度信息（如果检查关联了工单）
 			if (inspectionData.value && inspectionData.value.work_order_id) {
 				await loadWorkOrderProgress(inspectionData.value.work_order_id)
+			}
+			
+			// 加载检查员信息
+			if (inspectionData.value && inspectionData.value.inspector_id) {
+				await loadInspectorInfo(inspectionData.value.inspector_id)
 			}
 			
 		} catch (error) {
@@ -748,6 +782,52 @@
 		return classMap[status] || 'status-default'
 	}
 	
+	// 获取检查员姓名
+	const getInspectorName = () => {
+		if (inspectorInfo.value) {
+			return inspectorInfo.value.full_name || inspectorInfo.value.username || '未知检查员'
+		}
+		if (workOrderData.value && workOrderData.value.assigned_to_name) {
+			return workOrderData.value.assigned_to_name
+		}
+		return '加载中...'
+	}
+	
+	// 获取指派时间
+	const getAssignedTime = () => {
+		if (workOrderData.value && workOrderData.value.assigned_at) {
+			return formatDateTime(workOrderData.value.assigned_at)
+		}
+		if (workOrderData.value && workOrderData.value.created_at) {
+			return formatDateTime(workOrderData.value.created_at)
+		}
+		return '未知'
+	}
+	
+	// 获取优先级文本
+	const getPriorityText = (priority) => {
+		const priorityMap = {
+			low: '低',
+			normal: '正常',
+			high: '高',
+			urgent: '紧急'
+		}
+		return priorityMap[priority] || '正常'
+	}
+	
+	// 获取工单类型文本
+	const getWorkOrderTypeText = (taskType) => {
+		const typeMap = {
+			opening_inspection: '新站开通检查',
+			maintenance: '维护工单',
+			power_issue: '电源问题',
+			transmission_issue: '传输问题',
+			gps_issue: 'GPS问题',
+			signal_issue: '信号问题'
+		}
+		return typeMap[taskType] || '其他'
+	}
+
 	const getStatusText = (status) => {
 		const statusMap = {
 			draft: '草稿',

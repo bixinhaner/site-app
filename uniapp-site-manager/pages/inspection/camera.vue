@@ -495,7 +495,7 @@ export default {
 			})
 			
 			if (!confirmResult.confirm) {
-				getCurrentLocation()
+				getCurrentLocationFromNativePlugin()
 				return
 			}
 		}
@@ -549,7 +549,7 @@ export default {
 			isProcessingWatermark.value = true
 			
 			uni.showLoading({
-				title: '添加水印中...',
+				title: '正在添加GPS水印...',
 				mask: true
 			})
 			
@@ -791,11 +791,7 @@ export default {
 		return (size / (1024 * 1024)).toFixed(1) + 'MB'
 	}
 	
-	const reverseGeocode = async (latitude, longitude) => {
-		// 这里可以调用地图服务的逆地理编码API
-		// 简化实现，返回坐标描述
-		return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-	}
+	// 移除reverseGeocode函数，因为原生插件已经包含地址解析功能
 	
 	// 水印处理函数
 	const addWatermarkToPhoto = async (imagePath, fileInfo) => {
@@ -821,13 +817,12 @@ export default {
 			await new Promise(resolve => setTimeout(resolve, 100))
 			
 			const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
-				inspector: userStore.user?.username || '未知检查员',
+				inspector: userStore.userInfo?.username || '未知检查员',
 				checkItem: checkItem.value?.item_name || '检查项目',
 				siteName: currentSite.value?.site_name || '未知站点'
 			}, {
 				showAddressDetails: true,  // 显示详细地址信息
 				showPOI: false,           // 不显示POI信息
-				fallbackToBasic: true,    // GPS失败时使用基本模式
 				canvasId: canvasId.value  // 使用页面中的canvas
 			})
 			
@@ -835,45 +830,16 @@ export default {
 			return watermarkedPath
 			
 		} catch (error) {
-			console.error('添加水印失败，尝试兜底方案:', error)
+			console.error('原生插件水印添加失败:', error)
 			
-			// 如果新水印方案失败，尝试使用原有方案作为兜底
-			try {
-				const watermarkData = {
-					gps: gpsInfo.value,
-					timestamp: new Date().toISOString(),
-					inspector: userStore.user?.username || '未知检查员',
-					checkItem: checkItem.value?.item_name || '检查项目',
-					siteName: currentSite.value?.site_name || '未知站点'
-				}
-				
-				// 获取图片信息用于canvas尺寸
-				const imageInfo = await getImageInfo(imagePath)
-				
-				// 设置canvas尺寸
-				canvasWidth.value = imageInfo.width
-				canvasHeight.value = imageInfo.height
-				canvasId.value = 'watermark-canvas-' + Date.now()
-				
-				// 等待canvas元素渲染
-				await new Promise(resolve => setTimeout(resolve, 100))
-				
-				// 使用原有方案
-				const watermarkedPath = await addWatermarkWithCanvas(imagePath, watermarkData, imageInfo)
-				
-				console.log('兜底水印添加完成:', watermarkedPath)
-				return watermarkedPath
-				
-			} catch (fallbackError) {
-				console.error('兜底水印方案也失败:', fallbackError)
-				
-				// 如果所有方案都失败，返回原图
-				uni.showToast({
-					title: '水印添加失败，使用原图',
-					icon: 'none'
-				})
-				return imagePath
-			}
+			// 不再提供兜底方案，直接抛出错误
+			// 确保只使用原生插件定位，不使用任何备用方案
+			uni.showToast({
+				title: '原生定位插件水印添加失败',
+				icon: 'error'
+			})
+			
+			throw error
 		}
 	}
 	

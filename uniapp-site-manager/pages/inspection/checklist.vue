@@ -284,10 +284,12 @@
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
-	import { buildImageUrl } from '@/config/api.js'
+	import { useWorkOrderStore } from '@/stores/workorder'
+	import { buildImageUrl, buildApiUrl, getAuthHeaders } from '@/config/api.js'
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
+	const workOrderStore = useWorkOrderStore()
 	
 	// 页面参数
 	const inspectionId = ref('')
@@ -340,19 +342,66 @@
 	
 	// 生命周期
 	onLoad((options) => {
+		console.log('Checklist页面加载，参数:', options)
 		if (options.inspectionId) {
 			inspectionId.value = options.inspectionId
+			console.log('开始加载检查数据，inspectionId:', options.inspectionId)
 			loadInspectionData()
+		} else {
+			console.log('⚠️ 缺少inspectionId参数')
 		}
 	})
 	
 	// 方法
 	const loadInspectionData = async () => {
+		console.log('🚀 loadInspectionData函数开始执行')
 		try {
 			// 加载检查数据
 			const inspectionResult = await inspectionStore.getInspectionDetail(inspectionId.value)
 			if (inspectionResult.success) {
 				inspectionData.value = inspectionResult.data
+				
+				// 如果检查数据中没有站点名称，通过work_order_id获取工单信息
+				if (!inspectionData.value.site_name && inspectionData.value.work_order_id) {
+					console.log('检查数据缺少站点名称，尝试通过work_order_id获取:', inspectionData.value.work_order_id)
+					try {
+						// 调用工单详情API获取站点名称
+						const workOrderResult = await workOrderStore.getWorkOrder(inspectionData.value.work_order_id)
+						
+						if (workOrderResult.success && workOrderResult.data?.site_name) {
+							console.log('成功从工单获取站点信息:', workOrderResult.data.site_name)
+							inspectionData.value.site_name = workOrderResult.data.site_name
+						} else {
+							console.warn('工单中没有站点名称，尝试通过site_id获取')
+							// 备用方案：通过site_id获取
+							if (inspectionData.value.site_id) {
+								const siteResponse = await uni.request({
+									url: buildApiUrl(`/api/sites/${inspectionData.value.site_id}`),
+									method: 'GET',
+									header: getAuthHeaders(userStore.token)
+								})
+								
+								if (siteResponse.statusCode === 200 && siteResponse.data?.site_name) {
+									console.log('成功通过site_id获取站点信息:', siteResponse.data.site_name)
+									inspectionData.value.site_name = siteResponse.data.site_name
+								}
+							}
+						}
+					} catch (error) {
+						console.warn('获取工单站点信息失败:', error)
+					}
+				}
+				
+				// 调试检查数据结构
+				console.log('检查数据调试信息:', {
+					完整检查数据: inspectionData.value,
+					所有字段名: Object.keys(inspectionData.value || {}),
+					site_name字段: inspectionData.value?.site_name,
+					site_id字段: inspectionData.value?.site_id,
+					站点相关字段: Object.keys(inspectionData.value || {}).filter(key => 
+						key.toLowerCase().includes('site') || key.toLowerCase().includes('站点')
+					)
+				})
 			}
 			
 			// 加载检查项
@@ -619,6 +668,13 @@
 								// 如果是拍照，添加水印
 								if (isCamera) {
 									console.log('拍照模式，添加GPS水印')
+									
+									// 显示水印添加加载提示
+									uni.showLoading({
+										title: '正在添加GPS水印...',
+										mask: true
+									})
+									
 									try {
 										const watermarkTool = getWatermarkTool()
 										finalImagePath = await watermarkTool.addWatermark(
@@ -626,12 +682,26 @@
 											gpsData.latitude,
 											gpsData.longitude,
 											gpsData.address,
-											userStore.user?.username || '未知用户',
+											userStore.userInfo?.username || '未知用户',
 											currentItem.value.item_name || '检查项'
 										)
 										console.log('水印添加成功，最终图片路径:', finalImagePath)
+										
+										// 隐藏加载提示
+										uni.hideLoading()
+										
 									} catch (watermarkError) {
 										console.warn('水印添加失败，使用原图:', watermarkError)
+										
+										// 隐藏加载提示
+										uni.hideLoading()
+										
+										// 显示错误提示
+										uni.showToast({
+											title: '水印添加失败，使用原图',
+											icon: 'none',
+											duration: 2000
+										})
 									}
 								}
 								
@@ -648,7 +718,7 @@
 										timestamp: new Date().toISOString(),
 										coordinates: `${gpsData.latitude},${gpsData.longitude}`,
 										accuracy: gpsData.accuracy,
-										inspector: userStore.user?.username || '未知用户',
+										inspector: userStore.userInfo?.username || '未知用户',
 										item_name: currentItem.value.item_name || '检查项'
 									} : null
 								}
@@ -691,38 +761,72 @@
 		})
 	}
 	
-	// GPS高精度定位函数
+	// 使用原生插件的GPS高精度定位函数
 	const getHighAccuracyLocation = () => {
 		return new Promise((resolve, reject) => {
-			uni.getLocation({
-				type: 'gcj02',
-				altitude: true,
-				highAccuracyExpireTime: 10000,
-				isHighAccuracy: true,
-				success: async (res) => {
-					try {
-						// 逆地理编码获取地址
-						const address = await getAddressFromCoords(res.latitude, res.longitude)
-						resolve({
-							latitude: res.latitude,
-							longitude: res.longitude,
-							accuracy: res.accuracy || 10,
-							address: address || ''
-						})
-					} catch (addressError) {
-						// 即使地址获取失败，也返回GPS坐标
-						resolve({
-							latitude: res.latitude,
-							longitude: res.longitude,
-							accuracy: res.accuracy || 10,
-							address: ''
-						})
-					}
-				},
-				fail: (error) => {
-					reject(error)
+			try {
+				console.log('使用原生插件获取高精度定位...')
+				
+				// 获取原生定位插件
+				const locationPlugin = uni.requireNativePlugin('my-location-plugin')
+				
+				if (!locationPlugin) {
+					throw new Error('原生定位插件未加载')
 				}
-			})
+				
+				// 调用插件的异步定位方法
+				locationPlugin.getLocationWithAddress((result) => {
+					console.log('原生插件定位结果:', result)
+					
+					// 解析结果
+					let parsedResult = result
+					if (typeof result === 'string') {
+						try {
+							parsedResult = JSON.parse(result)
+						} catch (parseError) {
+							console.error('解析原生插件结果失败:', parseError)
+							reject(new Error('解析原生插件结果失败'))
+							return
+						}
+					}
+					
+					if (parsedResult && parsedResult.success && parsedResult.data) {
+						const data = parsedResult.data
+						const address = parsedResult.address
+						
+						// 构建地址字符串
+						let addressString = ''
+						if (address && typeof address === 'object') {
+							const addressParts = [
+								address.country,
+								address.province,
+								address.city,
+								address.district,
+								address.street,
+								address.streetNum
+							].filter(part => part && part.trim())
+							
+							if (addressParts.length > 0) {
+								addressString = addressParts.join('')
+							}
+						}
+						
+						resolve({
+							latitude: data.latitude,
+							longitude: data.longitude,
+							accuracy: data.accuracy || 0,
+							address: addressString,
+							provider: 'native-plugin'
+						})
+					} else {
+						reject(new Error(parsedResult?.message || '原生插件定位失败'))
+					}
+				})
+				
+			} catch (error) {
+				console.error('原生插件定位调用失败:', error)
+				reject(error)
+			}
 		})
 	}
 	
@@ -763,15 +867,38 @@
 					// 导入增强水印工具
 					const { watermarkTool } = await import('@/utils/watermark.js')
 					
+					// 准备水印数据，尝试多种站点名称获取方式
+					const siteName = inspectionData.value?.site_name || 
+									 inspectionData.value?.site?.site_name || 
+									 inspectionData.value?.work_order?.site_name ||
+									 '检查站点'
+					
+					const watermarkData = {
+						inspector: inspector || userStore.userInfo?.username || '检查员',
+						checkItem: itemName || currentItem.value?.item_name || '检查项',
+						siteName: siteName
+					}
+					
+					console.log('水印数据准备:', {
+						传入的inspector: inspector,
+						用户store状态: userStore.isLoggedIn,
+						用户完整信息: userStore.userInfo,
+						用户名字段: userStore.userInfo?.username,
+						传入的itemName: itemName,
+						当前项目名称: currentItem.value?.item_name,
+						检查数据完整: inspectionData.value,
+						检查数据所有字段: Object.keys(inspectionData.value || {}),
+						站点名称尝试1_site_name: inspectionData.value?.site_name,
+						站点名称尝试2_site对象: inspectionData.value?.site,
+						站点名称尝试3_workorder: inspectionData.value?.work_order,
+						最终站点名称: siteName,
+						最终水印数据: watermarkData
+					})
+					
 					// 使用新的增强水印功能，使用页面中的canvas
-					const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
-						inspector: inspector,
-						checkItem: itemName,
-						siteName: inspectionData.value?.site_name || '未知站点'
-					}, {
+					const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, watermarkData, {
 						showAddressDetails: true,
 						showPOI: false,
-						fallbackToBasic: true,
 						canvasId: 'watermarkCanvas'  // 使用页面中已有的canvas
 					})
 					

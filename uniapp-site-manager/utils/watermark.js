@@ -418,114 +418,104 @@ export class WatermarkTool {
   }
 
   /**
-   * 自动获取GPS信息并添加水印的便捷方法
+   * 自动获取GPS信息并添加水印的便捷方法（使用原生定位插件）
    * @param {string} imagePath - 原始照片路径
    * @param {Object} watermarkData - 基础水印数据
    * @param {Object} options - 配置选项
    * @returns {Promise<string>} - 带水印的照片路径
    */
   async addWatermarkWithGPS(imagePath, watermarkData = {}, options = {}) {
-    console.log('开始添加GPS水印...')
+    console.log('开始使用原生插件添加GPS水印...')
     
     try {
-      console.log('开始获取GPS和地址信息...')
+      console.log('开始通过原生插件获取GPS和地址信息...')
       
-      // 使用UniApp内置的geocode功能，最简单的方式
-      const locationResult = await new Promise((resolve, reject) => {
-        uni.getLocation({
-          type: 'gcj02',
-          geocode: true, // 启用地址解析
-          isHighAccuracy: true,
-          success: (res) => {
-            console.log('高精度GPS定位成功:', res)
-            resolve(res)
-          },
-          fail: (error) => {
-            console.log('高精度定位失败，尝试普通精度:', error)
-            // 降级到普通精度
-            uni.getLocation({
-              type: 'gcj02',
-              geocode: true,
-              isHighAccuracy: false,
-              success: (res) => {
-                console.log('普通精度定位成功:', res)
-                resolve(res)
-              },
-              fail: (err) => {
-                console.error('定位完全失败:', err)
-                reject(err)
-              }
-            })
-          }
-        })
-      })
+      // 使用原生定位插件获取位置信息
+      const locationResult = await this.getLocationFromNativePlugin()
       
-      // 提取地址信息
+      // 从原生插件结果中提取地址信息
       let address = '位置获取中...'
       let watermarkAddress = []
       
-      if (locationResult.address && (locationResult.address.city || locationResult.address.province)) {
-        // 如果有详细地址信息
-        const addr = locationResult.address
-        console.log('获取到详细地址信息:', addr)
+      if (locationResult.success && locationResult.data) {
+        const data = locationResult.data
         
-        // 构建完整地址
-        const fullAddress = [
-          addr.country,
-          addr.province, 
-          addr.city,
-          addr.district,
-          addr.street,
-          addr.streetNum,
-          addr.poiName
-        ].filter(item => item && item.trim()).join('')
-        
-        address = fullAddress || `${locationResult.latitude.toFixed(6)}, ${locationResult.longitude.toFixed(6)}`
-        
-        // 分行显示地址信息
-        if (addr.country && addr.province && addr.city) {
-          watermarkAddress.push(`🏠 ${addr.country}${addr.province}${addr.city}`)
-        }
-        if (addr.district) {
-          watermarkAddress.push(`📍 ${addr.district}`)
-        }
-        if (addr.street) {
-          let streetInfo = addr.street
-          if (addr.streetNum) streetInfo += addr.streetNum
-          watermarkAddress.push(`🛣️ ${streetInfo}`)
-        }
-        if (addr.poiName && options.showPOI) {
-          watermarkAddress.push(`🏪 ${addr.poiName}`)
-        }
-      } else {
-        // 内置geocode没有返回地址，尝试使用OpenStreetMap API
-        console.log('内置geocode未返回地址，尝试OpenStreetMap逆地理编码...')
-        try {
-          const osmResult = await this.getAddressFromOSM(locationResult.latitude, locationResult.longitude)
-          if (osmResult && osmResult.display_name) {
-            address = osmResult.display_name
-            watermarkAddress.push(`🏠 ${address}`)
-            console.log('OpenStreetMap地址获取成功:', address)
+        // 如果原生插件返回了地址信息
+        if (locationResult.address && typeof locationResult.address === 'object') {
+          const addr = locationResult.address
+          console.log('原生插件返回详细地址信息:', addr)
+          
+          // 优先使用格式化地址，如果不存在则手动构建
+          if (addr.formattedAddress && addr.formattedAddress.trim()) {
+            // 使用原生插件提供的完整格式化地址
+            address = addr.formattedAddress
             
-            // 如果有详细地址组件，添加更多信息
-            if (osmResult.address) {
-              const addr = osmResult.address
-              if (addr.road) {
-                watermarkAddress.push(`🛣️ ${addr.road}${addr.house_number || ''}`)
-              }
-              if (addr.suburb || addr.neighbourhood) {
-                watermarkAddress.push(`📍 ${addr.suburb || addr.neighbourhood}`)
-              }
+            // 为水印显示提取关键地址信息，分行显示更清晰
+            const addressLines = []
+            
+            // 第一行：国家、省份、城市（如果城市为空则跳过）
+            const regionParts = [addr.country, addr.province]
+            if (addr.city && addr.city.trim()) {
+              regionParts.push(addr.city)
             }
+            if (regionParts.length > 0) {
+              addressLines.push(`🏠 ${regionParts.join(' ')}`)
+            }
+            
+            // 第二行：区县
+            if (addr.district && addr.district.trim()) {
+              addressLines.push(`📍 ${addr.district}`)
+            }
+            
+            // 第三行：从formattedAddress中提取详细地址信息
+            // 由于各个独立字段可能为空，我们从完整地址中解析
+            const detailAddress = this.extractDetailedAddress(addr.formattedAddress, addr)
+            if (detailAddress) {
+              addressLines.push(`🛣️ ${detailAddress}`)
+            }
+            
+            watermarkAddress = addressLines
+            
           } else {
-            throw new Error('OpenStreetMap未返回有效地址')
+            // 手动构建地址（备用方案）
+            const addressParts = [
+              addr.country,
+              addr.province, 
+              addr.city,
+              addr.district,
+              addr.street,
+              addr.streetNumber
+            ].filter(item => item && item.trim())
+            
+            if (addressParts.length > 0) {
+              address = addressParts.join(' ')
+              
+              // 分行显示地址信息
+              if (addr.country && addr.province) {
+                const region = addr.city ? `${addr.country} ${addr.province} ${addr.city}` : `${addr.country} ${addr.province}`
+                watermarkAddress.push(`🏠 ${region}`)
+              }
+              if (addr.district) {
+                watermarkAddress.push(`📍 ${addr.district}`)
+              }
+              if (addr.street) {
+                let streetInfo = addr.street
+                if (addr.streetNumber) streetInfo += addr.streetNumber
+                watermarkAddress.push(`🛣️ ${streetInfo}`)
+              }
+            } else {
+              address = `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`
+              watermarkAddress.push(`📍 坐标: ${address}`)
+            }
           }
-        } catch (osmError) {
-          console.log('OpenStreetMap地址获取失败，使用坐标:', osmError.message)
-          // 如果API也失败，显示坐标
-          address = `${locationResult.latitude.toFixed(6)}, ${locationResult.longitude.toFixed(6)}`
+        } else {
+          // 如果没有地址信息，仅显示坐标
+          address = `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`
           watermarkAddress.push(`📍 坐标: ${address}`)
         }
+      } else {
+        // 原生插件调用失败
+        throw new Error(locationResult.message || '原生定位插件调用失败')
       }
       
       console.log('最终地址信息:', address)
@@ -533,13 +523,14 @@ export class WatermarkTool {
       
       // 构建GPS信息对象
       const gpsInfo = {
-        latitude: locationResult.latitude,
-        longitude: locationResult.longitude,
-        accuracy: locationResult.accuracy || 0,
+        latitude: locationResult.data.latitude,
+        longitude: locationResult.data.longitude,
+        accuracy: locationResult.data.accuracy || 0,
         address: address,
         watermarkAddress: watermarkAddress,
         timestamp: new Date().toLocaleString('zh-CN'),
-        addressInfo: locationResult.address
+        addressInfo: locationResult.address,
+        provider: locationResult.data.provider || 'native-plugin'
       }
       
       // 合并GPS信息到水印数据
@@ -562,39 +553,32 @@ export class WatermarkTool {
       return result
       
     } catch (error) {
-      console.error('添加GPS水印失败:', error)
+      console.error('原生插件GPS水印添加失败:', error)
       
-      // 如果允许降级到基础水印
-      if (options.fallbackToBasic !== false) {
-        console.log('降级到基础水印模式...')
-        
-        const basicGpsInfo = {
-          latitude: 0,
-          longitude: 0,
-          accuracy: 0,
-          address: '位置获取失败',
-          watermarkAddress: ['📍 位置获取失败'],
-          timestamp: new Date().toLocaleString('zh-CN'),
-          addressError: error.message
-        }
-        
-        return await this.addWatermark(imagePath, {
-          ...watermarkData,
-          gps: basicGpsInfo,
-          timestamp: new Date().toLocaleString('zh-CN'),
-          options: {
-            showPOI: false,
-            showAddressDetails: false
-          }
-        }, options.canvasId)
+      // 不再提供降级方案，直接抛出错误
+      // 确保只使用原生插件定位，不使用任何备用方案
+      const failedGpsInfo = {
+        latitude: 0,
+        longitude: 0,
+        accuracy: 0,
+        address: '原生定位插件获取失败',
+        watermarkAddress: ['📍 原生定位插件获取失败'],
+        timestamp: new Date().toLocaleString('zh-CN'),
+        addressError: error.message,
+        provider: 'native-plugin-failed'
       }
       
-      throw error
+      // 即使失败也添加失败信息的水印
+      return await this.addWatermark(imagePath, {
+        ...watermarkData,
+        gps: failedGpsInfo,
+        timestamp: new Date().toLocaleString('zh-CN')
+      }, options.canvasId)
     }
   }
 
   /**
-   * 批量处理照片水印（支持多张照片同时处理）
+   * 批量处理照片水印（支持多张照片同时处理，使用原生定位插件）
    * @param {Array<string>} imagePaths - 照片路径数组
    * @param {Object} watermarkData - 共同的水印数据
    * @param {Object} options - 配置选项
@@ -603,68 +587,107 @@ export class WatermarkTool {
   async addWatermarkBatch(imagePaths, watermarkData = {}, options = {}) {
     const results = []
     
-    // 获取一次GPS信息，用于所有照片
+    // 获取一次GPS信息，用于所有照片（使用原生插件）
     let gpsInfo = null
     if (options.useGPS !== false) {
       try {
-        const locationResult = await new Promise((resolve, reject) => {
-          uni.getLocation({
-            type: 'gcj02',
-            geocode: true,
-            isHighAccuracy: true,
-            success: resolve,
-            fail: reject
-          })
-        })
+        const locationResult = await this.getLocationFromNativePlugin()
         
-        let address = '位置获取中...'
-        let watermarkAddress = []
-        
-        if (locationResult.address && (locationResult.address.city || locationResult.address.province)) {
-          const addr = locationResult.address
-          const fullAddress = [addr.country, addr.province, addr.city, addr.district, addr.street, addr.streetNum, addr.poiName]
-            .filter(item => item && item.trim()).join('')
-          address = fullAddress || `${locationResult.latitude.toFixed(6)}, ${locationResult.longitude.toFixed(6)}`
+        if (locationResult.success && locationResult.data) {
+          const data = locationResult.data
+          let address = '位置获取中...'
+          let watermarkAddress = []
           
-          if (addr.country && addr.province && addr.city) {
-            watermarkAddress.push(`🏠 ${addr.country}${addr.province}${addr.city}`)
-          }
-          if (addr.district) watermarkAddress.push(`📍 ${addr.district}`)
-          if (addr.street) {
-            let streetInfo = addr.street
-            if (addr.streetNum) streetInfo += addr.streetNum
-            watermarkAddress.push(`🛣️ ${streetInfo}`)
-          }
-          if (addr.poiName && options.showPOI) watermarkAddress.push(`🏪 ${addr.poiName}`)
-        } else {
-          // 尝试使用OpenStreetMap获取地址
-          try {
-            const osmResult = await this.getAddressFromOSM(locationResult.latitude, locationResult.longitude)
-            if (osmResult && osmResult.display_name) {
-              address = osmResult.display_name
-              watermarkAddress.push(`🏠 ${address}`)
+          // 如果原生插件返回了地址信息（使用与单张照片相同的处理逻辑）
+          if (locationResult.address && typeof locationResult.address === 'object') {
+            const addr = locationResult.address
+            
+            // 优先使用格式化地址
+            if (addr.formattedAddress && addr.formattedAddress.trim()) {
+              address = addr.formattedAddress
+              
+              // 为水印显示提取关键地址信息
+              const addressLines = []
+              
+              // 第一行：国家、省份、城市
+              const regionParts = [addr.country, addr.province]
+              if (addr.city && addr.city.trim()) {
+                regionParts.push(addr.city)
+              }
+              if (regionParts.length > 0) {
+                addressLines.push(`🏠 ${regionParts.join(' ')}`)
+              }
+              
+              // 第二行：区县
+              if (addr.district && addr.district.trim()) {
+                addressLines.push(`📍 ${addr.district}`)
+              }
+              
+              // 第三行：从formattedAddress中提取详细地址信息
+              const detailAddress = this.extractDetailedAddress(addr.formattedAddress, addr)
+              if (detailAddress) {
+                addressLines.push(`🛣️ ${detailAddress}`)
+              }
+              
+              watermarkAddress = addressLines
+              
             } else {
-              throw new Error('OSM未返回地址')
+              // 手动构建地址（备用方案）
+              const addressParts = [
+                addr.country, addr.province, addr.city, addr.district, addr.street, addr.streetNumber
+              ].filter(item => item && item.trim())
+              
+              if (addressParts.length > 0) {
+                address = addressParts.join(' ')
+                
+                if (addr.country && addr.province) {
+                  const region = addr.city ? `${addr.country} ${addr.province} ${addr.city}` : `${addr.country} ${addr.province}`
+                  watermarkAddress.push(`🏠 ${region}`)
+                }
+                if (addr.district) watermarkAddress.push(`📍 ${addr.district}`)
+                if (addr.street) {
+                  let streetInfo = addr.street
+                  if (addr.streetNumber) streetInfo += addr.streetNumber
+                  watermarkAddress.push(`🛣️ ${streetInfo}`)
+                }
+              } else {
+                address = `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`
+                watermarkAddress.push(`📍 坐标: ${address}`)
+              }
             }
-          } catch (error) {
-            address = `${locationResult.latitude.toFixed(6)}, ${locationResult.longitude.toFixed(6)}`
+          } else {
+            address = `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`
             watermarkAddress.push(`📍 坐标: ${address}`)
           }
+          
+          gpsInfo = {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            accuracy: data.accuracy || 0,
+            address: address,
+            watermarkAddress: watermarkAddress,
+            timestamp: new Date().toLocaleString('zh-CN'),
+            addressInfo: locationResult.address,
+            provider: 'native-plugin'
+          }
+          
+          console.log('批量处理原生插件GPS信息获取成功')
+        } else {
+          throw new Error(locationResult.message || '原生定位插件批量调用失败')
         }
-        
-        gpsInfo = {
-          latitude: locationResult.latitude,
-          longitude: locationResult.longitude,
-          accuracy: locationResult.accuracy || 0,
-          address: address,
-          watermarkAddress: watermarkAddress,
-          timestamp: new Date().toLocaleString('zh-CN'),
-          addressInfo: locationResult.address
-        }
-        
-        console.log('批量处理GPS信息获取成功')
       } catch (error) {
-        console.warn('批量处理GPS获取失败，将使用基本模式:', error.message)
+        console.warn('批量处理原生插件GPS获取失败:', error.message)
+        // 不再提供降级方案
+        gpsInfo = {
+          latitude: 0,
+          longitude: 0,
+          accuracy: 0,
+          address: '原生定位插件获取失败',
+          watermarkAddress: ['📍 原生定位插件获取失败'],
+          timestamp: new Date().toLocaleString('zh-CN'),
+          addressError: error.message,
+          provider: 'native-plugin-failed'
+        }
       }
     }
     
@@ -712,43 +735,100 @@ export class WatermarkTool {
   }
 
   /**
-   * 使用OpenStreetMap Nominatim逆地理编码获取地址（完全免费，无需key）
+   * 使用原生定位插件获取位置和地址信息
+   * @returns {Promise<Object>} 原生插件返回的位置结果
    */
-  async getAddressFromOSM(latitude, longitude) {
+  async getLocationFromNativePlugin() {
     return new Promise((resolve, reject) => {
-      // OpenStreetMap Nominatim API - 完全免费，无需API Key
-      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1&accept-language=zh-CN,zh,en`
-      
-      uni.request({
-        url: url,
-        method: 'GET',
-        timeout: 8000,
-        header: {
-          'User-Agent': 'UniApp-SiteManager/1.0'  // OSM要求设置User-Agent
-        },
-        success: (res) => {
-          if (res.statusCode === 200 && res.data && res.data.display_name) {
-            resolve(res.data)
-          } else {
-            reject(new Error('OSM API返回错误: 未找到地址信息'))
-          }
-        },
-        fail: (error) => {
-          reject(new Error('OSM API请求失败: ' + error.errMsg))
+      try {
+        console.log('开始调用原生定位插件...')
+        
+        // 获取原生定位插件实例
+        const locationPlugin = uni.requireNativePlugin('my-location-plugin')
+        
+        if (!locationPlugin) {
+          throw new Error('原生定位插件未加载或不可用')
         }
-      })
+        
+        // 调用插件的getLocationWithAddress方法获取位置和地址
+        locationPlugin.getLocationWithAddress((result) => {
+          console.log('原生插件返回结果:', result)
+          
+          // 如果返回字符串，尝试解析为JSON
+          let parsedResult = result
+          if (typeof result === 'string') {
+            try {
+              parsedResult = JSON.parse(result)
+            } catch (parseError) {
+              console.error('解析原生插件结果失败:', parseError)
+              reject(new Error('原生插件返回数据解析失败: ' + parseError.message))
+              return
+            }
+          }
+          
+          if (parsedResult && parsedResult.success) {
+            resolve(parsedResult)
+          } else {
+            reject(new Error(parsedResult?.message || '原生插件定位失败'))
+          }
+        })
+        
+      } catch (error) {
+        console.error('调用原生定位插件失败:', error)
+        reject(new Error('无法调用原生定位插件: ' + error.message))
+      }
     })
   }
 
   /**
-   * 简化的地址获取配置
+   * 从完整地址中提取详细地址信息
+   * @param {string} formattedAddress - 格式化的完整地址
+   * @param {Object} addr - 地址对象
+   * @returns {string} 详细地址信息
    */
-  setGeocodingConfig(options = {}) {
-    console.log('使用UniApp内置地理编码功能和高德地图API作为备用')
-    this.geocodingOptions = {
-      timeout: options.timeout || 10000,
-      type: options.type || 'gcj02',
-      isHighAccuracy: options.isHighAccuracy !== false
+  extractDetailedAddress(formattedAddress, addr) {
+    try {
+      // formattedAddress 格式: "China, Bei Jing Shi, Hai Dian Qu, Zhongguancun, 理想国际大厦708室 邮政编码: 100086"
+      
+      // 移除邮政编码部分
+      let cleanAddress = formattedAddress.replace(/\s*邮政编码:\s*\d+\s*$/, '').trim()
+      
+      // 分割地址组件
+      const parts = cleanAddress.split(',').map(part => part.trim())
+      
+      // 已知的组件：country, province, district
+      const knownParts = []
+      if (addr.country) knownParts.push(addr.country)
+      if (addr.province) knownParts.push(addr.province)
+      if (addr.district) knownParts.push(addr.district)
+      
+      // 找到详细地址部分（去除已知的行政区划）
+      const detailParts = []
+      for (const part of parts) {
+        // 跳过已知的行政区划部分
+        if (!knownParts.some(known => part.includes(known) || known.includes(part))) {
+          detailParts.push(part)
+        }
+      }
+      
+      // 返回详细地址（街道、建筑物等）
+      return detailParts.length > 0 ? detailParts.join(', ') : ''
+      
+    } catch (error) {
+      console.warn('解析详细地址失败:', error)
+      return ''
+    }
+  }
+
+  /**
+   * 原生定位插件配置
+   */
+  setNativeLocationConfig(options = {}) {
+    console.log('配置原生定位插件参数')
+    this.nativeLocationOptions = {
+      timeout: options.timeout || 30000,
+      enableAddress: options.enableAddress !== false,
+      highAccuracy: options.highAccuracy !== false
     }
   }
 }

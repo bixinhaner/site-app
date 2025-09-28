@@ -299,20 +299,46 @@ export default {
       }
     },
     
-    getCurrentLocation() {
-      uni.getLocation({
-        type: 'gcj02',
-        success: (res) => {
-          this.userLocation = {
-            latitude: res.latitude,
-            longitude: res.longitude,
-            accuracy: res.accuracy
-          }
-        },
-        fail: (error) => {
-          console.warn('获取位置失败:', error)
+    async getCurrentLocation() {
+      try {
+        console.log('使用原生插件获取当前位置...')
+        
+        // 获取原生定位插件
+        const locationPlugin = uni.requireNativePlugin('my-location-plugin')
+        
+        if (!locationPlugin) {
+          throw new Error('原生定位插件未加载')
         }
-      })
+        
+        // 调用插件的同步定位方法
+        const result = locationPlugin.getLocationSync()
+        console.log('原生插件位置结果:', result)
+        
+        // 解析结果
+        let parsedResult = result
+        if (typeof result === 'string') {
+          try {
+            parsedResult = JSON.parse(result)
+          } catch (parseError) {
+            console.error('解析原生插件结果失败:', parseError)
+            return
+          }
+        }
+        
+        if (parsedResult && parsedResult.success && parsedResult.data) {
+          const data = parsedResult.data
+          this.userLocation = {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            accuracy: data.accuracy || 0
+          }
+        } else {
+          console.warn('原生插件获取位置失败:', parsedResult?.message)
+        }
+        
+      } catch (error) {
+        console.warn('原生插件获取位置失败:', error.message)
+      }
     },
     
     formatTime(timeString) {
