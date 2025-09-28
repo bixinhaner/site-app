@@ -57,7 +57,7 @@
       <view class="section-title">选择关联工单 (可选)</view>
       <picker @change="onWorkOrderChange" :value="selectedWorkOrderIndex" :range="workOrderOptions">
         <view class="picker-input">
-          <text>{{ selectedWorkOrder ? selectedWorkOrder.title : '选择工单 (可选)' }}</text>
+          <text>{{ selectedWorkOrder ? selectedWorkOrder.title : '无关联工单' }}</text>
           <text class="picker-arrow">▼</text>
         </view>
       </picker>
@@ -206,7 +206,12 @@ export default {
     },
     
     selectedWorkOrder() {
-      return this.myWorkOrders[this.selectedWorkOrderIndex]
+      // 如果选择索引为0，表示"无关联工单"，返回null
+      if (this.selectedWorkOrderIndex === 0) {
+        return null
+      }
+      // 否则返回对应的工单（需要减1，因为第0项是"无关联工单"）
+      return this.myWorkOrders[this.selectedWorkOrderIndex - 1]
     },
     
     workOrderOptions() {
@@ -413,6 +418,9 @@ export default {
           gps_location: this.userLocation
         }
         
+        console.log('🚀 [confirmPickup] 开始确认领料')
+        console.log('🚀 [confirmPickup] 请求数据:', pickupData)
+        
         const response = await new Promise((resolve, reject) => {
           uni.request({
             url: buildApiUrl('/api/stock/scan-checkout'),
@@ -424,10 +432,16 @@ export default {
           })
         })
         
-        if (response.action === 'checkout_success') {
+        console.log('🚀 [confirmPickup] 完整响应:', response)
+        console.log('🚀 [confirmPickup] 响应数据:', response.data)
+        console.log('🚀 [confirmPickup] 响应状态码:', response.statusCode)
+        
+        const responseData = response.data
+        
+        if (responseData.action === 'checkout_success') {
           uni.showModal({
             title: '领料成功',
-            content: `出库单号: ${response.document_number}\n套装: ${response.package.name}`,
+            content: `出库单号: ${responseData.document_number}\n套装: ${responseData.package.name}`,
             showCancel: false,
             confirmText: '确定',
             success: () => {
@@ -435,8 +449,8 @@ export default {
               this.loadPickupHistory()
             }
           })
-        } else if (response.action === 'insufficient_stock') {
-          let shortage = response.shortage_items.map(item => 
+        } else if (responseData.action === 'insufficient_stock') {
+          let shortage = responseData.shortage_items.map(item => 
             `${item.equipment_name}: 需要${item.required}，库存${item.available}`
           ).join('\n')
           
@@ -445,15 +459,33 @@ export default {
             content: shortage,
             showCancel: false
           })
+        } else {
+          console.warn('🚀 [confirmPickup] 未知的响应类型:', responseData.action)
+          uni.showToast({
+            title: '操作完成，但响应类型未知',
+            icon: 'none'
+          })
         }
       } catch (error) {
-        console.error('确认领料失败:', error)
+        console.error('🚀 [confirmPickup] 确认领料失败:', error)
+        console.error('🚀 [confirmPickup] 错误详情:', error.data)
+        console.error('🚀 [confirmPickup] 错误状态码:', error.statusCode)
+        
+        let errorMessage = '网络错误'
+        if (error.data?.detail) {
+          errorMessage = error.data.detail
+        } else if (error.statusCode) {
+          errorMessage = `服务器错误 (${error.statusCode})`
+        }
+        
         uni.showToast({
-          title: '领料失败: ' + (error.response?.data?.detail || '网络错误'),
-          icon: 'none'
+          title: '领料失败: ' + errorMessage,
+          icon: 'none',
+          duration: 3000
         })
       } finally {
         this.confirming = false
+        console.log('🚀 [confirmPickup] 领料确认流程结束')
       }
     },
     

@@ -290,7 +290,7 @@ async def scan_equipment_checkout(
             "unit": item.equipment.unit
         })
     
-    # 创建领料记录
+    # 创建领料记录（直接设置为已确认状态）
     pickup_record = PickupRecord(
         id=str(uuid.uuid4()),
         transaction_id=transaction_id,
@@ -302,7 +302,10 @@ async def scan_equipment_checkout(
         mac_address_1=mac1,  # 记录MAC1
         mac_address_2=mac2,  # 记录MAC2
         equipment_instance_id=equipment_instance.id if equipment_instance else None,  # 关联设备实例
-        scan_location=gps_location
+        scan_location=gps_location,
+        is_confirmed=True,  # 直接设置为已确认
+        confirmed_at=datetime.now(),  # 设置确认时间
+        confirmation_notes="扫码领料自动确认"  # 添加确认备注
     )
     db.add(pickup_record)
     
