@@ -212,7 +212,6 @@ async def create_inspection(
     inspection = SiteInspection(
         id=str(uuid.uuid4()),
         site_id=inspection_data.site_id,
-        task_id=inspection_data.task_id,
         template_id=template.id,
         inspector_id=current_user.id,
         inspection_type=inspection_data.inspection_type,
@@ -241,60 +240,135 @@ async def create_inspection(
     total_items = 0
     
     # 基于站点规划数据生成小区配置
+    print(f"DEBUG: 开始为站点 {inspection_data.site_id} 生成小区配置")
     cells = CellGenerator.generate_cells_from_planning(db, inspection_data.site_id)
     cells_summary = CellGenerator.get_cells_summary(cells)
+    print(f"DEBUG: 生成了 {len(cells)} 个小区: {[cell.to_dict() for cell in cells]}")
+    print(f"DEBUG: 小区摘要: {cells_summary}")
     
-    for category in template_data.get("check_categories", []):
-        for item in category.get("items", []):
+    print(f"DEBUG: 模板数据类型: {type(template_data)}")
+    print(f"DEBUG: 检查分类数量: {len(template_data.get('check_categories', []))}")
+    
+    for i, category in enumerate(template_data.get("check_categories", [])):
+        category_name = category.get("category_name", "未知分类")
+        category_id = category.get("category_id", "unknown")
+        print(f"DEBUG: === 处理分类 {i+1}: {category_name} (ID: {category_id}) ===")
+        print(f"DEBUG:   cell_specific: {category.get('cell_specific')}")
+        print(f"DEBUG:   sector_specific: {category.get('sector_specific')}")
+        print(f"DEBUG:   level_type: {category.get('level_type')}")
+        
+        items = category.get("items", [])
+        print(f"DEBUG:   该分类有 {len(items)} 个检查项")
+        
+        for j, item in enumerate(items):
+            item_name = item.get("item_name", "未知检查项")
+            item_id = item.get("item_id", "unknown")
+            required_type = item.get("required_type", "unknown")
+            print(f"DEBUG:   --- 处理检查项 {j+1}: {item_name} (ID: {item_id}) ---")
+            print(f"DEBUG:     required_type: {required_type}")
+            
+            # 检查是否是小区级检查
+            is_cell_specific = category.get("cell_specific", False)
+            is_sector_specific = category.get("sector_specific", False)
+            
+            print(f"DEBUG:     判断检查级别:")
+            print(f"DEBUG:       is_cell_specific: {is_cell_specific} (type: {type(is_cell_specific)})")
+            print(f"DEBUG:       is_sector_specific: {is_sector_specific} (type: {type(is_sector_specific)})")
+            print(f"DEBUG:       cells数量: {len(cells)}")
+            
             # 如果是小区级检查，为每个小区创建检查项
-            if category.get("cell_specific", False):
-                for cell in cells:
-                    check_item = InspectionCheckItem(
-                        id=str(uuid.uuid4()),
-                        inspection_id=inspection.id,
-                        item_id=f"{item['item_id']}_cell_{cell.cell_id}",
-                        item_name=f"{item['item_name']} - 小区 {cell.cell_id}",
-                        category_id=category["category_id"],
-                        category_name=category["category_name"],
-                        sector_id=cell.sector_id,
-                        band=cell.band,
-                        cell_id=cell.cell_id,
-                        required_type=item["required_type"],
-                        status=CheckItemStatusEnum.PENDING
-                    )
-                    db.add(check_item)
-                    total_items += 1
+            if is_cell_specific:
+                print(f"DEBUG:     ✅ 进入小区级检查分支，准备为 {len(cells)} 个小区创建检查项")
+                cell_items_created = 0
+                for k, cell in enumerate(cells):
+                    cell_item_id = f"{item_id}_cell_{cell.cell_id}"
+                    cell_item_name = f"{item_name} - 小区 {cell.cell_id}"
+                    print(f"DEBUG:       创建小区检查项 {k+1}: {cell_item_name} (ID: {cell_item_id})")
+                    print(f"DEBUG:         扇区: {cell.sector_id}, 频段: {cell.band}, 小区: {cell.cell_id}")
+                    
+                    try:
+                        check_item = InspectionCheckItem(
+                            id=str(uuid.uuid4()),
+                            inspection_id=inspection.id,
+                            item_id=cell_item_id,
+                            item_name=cell_item_name,
+                            category_id=category_id,
+                            category_name=category_name,
+                            sector_id=cell.sector_id,
+                            band=cell.band,
+                            cell_id=cell.cell_id,
+                            required_type=required_type,
+                            status=CheckItemStatusEnum.PENDING
+                        )
+                        db.add(check_item)
+                        cell_items_created += 1
+                        total_items += 1
+                        print(f"DEBUG:         ✅ 成功创建小区检查项: {cell_item_id}")
+                    except Exception as e:
+                        print(f"DEBUG:         ❌ 创建小区检查项失败: {e}")
+                        
+                print(f"DEBUG:     小区级检查项创建完成，共创建 {cell_items_created} 个")
+                
             # 如果是扇区级检查（向后兼容）
-            elif category.get("sector_specific", False):
+            elif is_sector_specific:
+                print(f"DEBUG:     ✅ 进入扇区级检查分支")
                 sectors = set(cell.sector_id for cell in cells)
+                print(f"DEBUG:       发现 {len(sectors)} 个扇区: {list(sectors)}")
+                sector_items_created = 0
                 for sector_id in sectors:
-                    check_item = InspectionCheckItem(
-                        id=str(uuid.uuid4()),
-                        inspection_id=inspection.id,
-                        item_id=f"{item['item_id']}_sector_{sector_id}",
-                        item_name=f"{item['item_name']} - 扇区 {sector_id}",
-                        category_id=category["category_id"],
-                        category_name=category["category_name"],
-                        sector_id=sector_id,
-                        required_type=item["required_type"],
-                        status=CheckItemStatusEnum.PENDING
-                    )
-                    db.add(check_item)
-                    total_items += 1
+                    sector_item_id = f"{item_id}_sector_{sector_id}"
+                    sector_item_name = f"{item_name} - 扇区 {sector_id}"
+                    print(f"DEBUG:       创建扇区检查项: {sector_item_name} (ID: {sector_item_id})")
+                    
+                    try:
+                        check_item = InspectionCheckItem(
+                            id=str(uuid.uuid4()),
+                            inspection_id=inspection.id,
+                            item_id=sector_item_id,
+                            item_name=sector_item_name,
+                            category_id=category_id,
+                            category_name=category_name,
+                            sector_id=sector_id,
+                            required_type=required_type,
+                            status=CheckItemStatusEnum.PENDING
+                        )
+                        db.add(check_item)
+                        sector_items_created += 1
+                        total_items += 1
+                        print(f"DEBUG:         ✅ 成功创建扇区检查项: {sector_item_id}")
+                    except Exception as e:
+                        print(f"DEBUG:         ❌ 创建扇区检查项失败: {e}")
+                        
+                print(f"DEBUG:     扇区级检查项创建完成，共创建 {sector_items_created} 个")
+                
             else:
                 # 站点级检查项
-                check_item = InspectionCheckItem(
-                    id=str(uuid.uuid4()),
-                    inspection_id=inspection.id,
-                    item_id=item["item_id"],
-                    item_name=item["item_name"],
-                    category_id=category["category_id"],
-                    category_name=category["category_name"],
-                    required_type=item["required_type"],
-                    status=CheckItemStatusEnum.PENDING
-                )
-                db.add(check_item)
-                total_items += 1
+                print(f"DEBUG:     ✅ 进入站点级检查分支")
+                site_item_id = item_id
+                site_item_name = item_name
+                print(f"DEBUG:       创建站点检查项: {site_item_name} (ID: {site_item_id})")
+                
+                try:
+                    check_item = InspectionCheckItem(
+                        id=str(uuid.uuid4()),
+                        inspection_id=inspection.id,
+                        item_id=site_item_id,
+                        item_name=site_item_name,
+                        category_id=category_id,
+                        category_name=category_name,
+                        required_type=required_type,
+                        status=CheckItemStatusEnum.PENDING
+                    )
+                    db.add(check_item)
+                    total_items += 1
+                    print(f"DEBUG:         ✅ 成功创建站点检查项: {site_item_id}")
+                except Exception as e:
+                    print(f"DEBUG:         ❌ 创建站点检查项失败: {e}")
+                    
+            print(f"DEBUG:     检查项 {item_name} 处理完成，当前总数: {total_items}")
+            
+    print(f"DEBUG: === 检查项创建汇总 ===")
+    print(f"DEBUG: 总共创建了 {total_items} 个检查项")
     
     # 更新总检查项数
     inspection.total_items = total_items

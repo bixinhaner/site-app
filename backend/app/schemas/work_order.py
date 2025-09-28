@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, validator
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from enum import Enum
+import json
 
 # Import for photos
 if True:  # Avoid circular import
@@ -161,6 +162,18 @@ class WorkOrderResponse(BaseModel):
     due_date: Optional[datetime]
     review_comments: Optional[str] = None
     extra_data: Optional[Dict[str, Any]] = {}
+    
+    @validator('extra_data', pre=True)
+    def parse_extra_data(cls, v):
+        """处理extra_data字段，如果是字符串则解析为字典"""
+        if v is None:
+            return {}
+        if isinstance(v, str):
+            try:
+                return json.loads(v) if v else {}
+            except json.JSONDecodeError:
+                return {}
+        return v
     created_at: datetime
     updated_at: datetime
 
