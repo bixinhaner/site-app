@@ -1,9 +1,9 @@
 <template>
   <view class="container">
     <view class="header">
-      <text class="title">扫码领料</text>
+      <text class="title">{{ $t('stock.scan') }}</text>
       <view class="scan-info">
-        <text class="info-text">扫描主设备条码自动配套设备套装</text>
+        <text class="info-text">{{ $t('stock.scanInfo') }}</text>
       </view>
     </view>
 
@@ -11,34 +11,34 @@
     <view class="scan-section">
       <view class="scan-button" @click="startScan">
         <view class="scan-icon">📷</view>
-        <text class="scan-text">点击扫描设备条码</text>
+        <text class="scan-text">{{ $t('stock.clickToScan') }}</text>
       </view>
       
       <view v-if="scanResult" class="scan-result">
-        <text class="result-title">扫描结果:</text>
+        <text class="result-title">{{ $t('stock.scanResult') }}:</text>
         <text class="result-code">{{ scanResult }}</text>
         
         <!-- 解析后的结果展示 -->
         <view v-if="parsedBarcode" class="parsed-result">
           <view v-if="parsedBarcode.success" class="parse-success">
             <view class="parse-header">
-              <text class="parse-title">识别信息:</text>
+              <text class="parse-title">{{ $t('stock.identifiedInfo') }}:</text>
               <text class="parse-format">[{{ getFormatName(parsedBarcode.format) }}]</text>
             </view>
             
             <view class="parse-details">
               <view v-if="parsedBarcode.sn" class="detail-item">
-                <text class="detail-label">序列号:</text>
+                <text class="detail-label">{{ $t('stock.serialNumber') }}:</text>
                 <text class="detail-value sn-value">{{ parsedBarcode.sn }}</text>
               </view>
               
               <view v-if="parsedBarcode.mac1" class="detail-item">
-                <text class="detail-label">MAC地址:</text>
+                <text class="detail-label">{{ $t('stock.macAddress') }}:</text>
                 <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac1) }}</text>
               </view>
               
               <view v-if="parsedBarcode.mac2" class="detail-item">
-                <text class="detail-label">MAC地址2:</text>
+                <text class="detail-label">{{ $t('stock.macAddress') }}2:</text>
                 <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac2) }}</text>
               </view>
             </view>

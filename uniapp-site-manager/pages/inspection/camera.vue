@@ -20,7 +20,7 @@
 				</cover-view>
 				
 				<cover-view class="toolbar-center">
-					<cover-text class="toolbar-title">{{ checkItem?.item_name || '拍照检查' }}</cover-text>
+					<cover-text class="toolbar-title">{{ checkItem?.item_name || $t('inspection.photoInspection') }}</cover-text>
 					<cover-text class="toolbar-subtitle" v-if="currentSite">{{ currentSite.site_name }}</cover-text>
 				</cover-view>
 				
@@ -37,7 +37,7 @@
 			<!-- GPS信息显示 -->
 			<cover-view class="gps-overlay" v-if="gpsInfo.latitude">
 				<cover-text class="gps-text">📍 {{ formatGPS(gpsInfo) }}</cover-text>
-				<cover-text class="gps-accuracy">📊 精度: {{ gpsInfo.accuracy }}m</cover-text>
+				<cover-text class="gps-accuracy">📊 {{ $t('inspection.accuracy') }}: {{ gpsInfo.accuracy }}m</cover-text>
 				<cover-text class="gps-address" v-if="gpsInfo.address">🏠 {{ gpsInfo.address }}</cover-text>
 				<cover-text class="gps-time">🕐 {{ currentTime }}</cover-text>
 			</cover-view>

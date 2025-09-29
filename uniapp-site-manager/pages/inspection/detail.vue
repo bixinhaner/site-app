@@ -6,7 +6,7 @@
 				<view class="back-button" @click="goBack">
 					<text class="back-icon">←</text>
 				</view>
-				<text class="navbar-title">检查详情</text>
+				<text class="navbar-title">{{ $t('inspection.detail') }}</text>
 				<view class="navbar-actions">
 					<view class="share-button" @click="shareInspection" v-if="inspectionData">
 						<text class="share-icon">📤</text>
@@ -29,14 +29,14 @@
 				
 				<view class="header-score" v-if="inspectionData.score">
 					<text class="score-value">{{ inspectionData.score }}</text>
-					<text class="score-label">分</text>
+					<text class="score-label">{{ $t('inspection.score') }}</text>
 				</view>
 			</view>
 			
 			<!-- 进度条 -->
 			<view class="progress-container">
 				<view class="progress-info">
-					<text class="progress-text">{{ workOrderProgress ? '工单进度' : '完成进度' }}</text>
+					<text class="progress-text">{{ workOrderProgress ? $t('workorder.progress') : $t('inspection.progress') }}</text>
 					<text class="progress-rate">{{ workOrderProgress ? workOrderProgress.percentage : (inspectionData.completion_rate || 0) }}%</text>
 				</view>
 				<view class="progress-bar">
@@ -47,10 +47,10 @@
 					></view>
 				</view>
 				<text class="progress-detail" v-if="workOrderProgress">
-					当前状态: {{ workOrderProgress.status_text }}
+					{{ $t('workorder.currentStatus') }}: {{ workOrderProgress.status_text }}
 				</text>
 				<text class="progress-detail" v-else>
-					{{ inspectionData.completed_items || 0 }}/{{ inspectionData.total_items || 0 }} 项已完成
+					{{ inspectionData.completed_items || 0 }}/{{ inspectionData.total_items || 0 }} {{ $t('inspection.itemsCompleted') }}
 				</text>
 			</view>
 		</view>
@@ -68,39 +68,39 @@
 			<!-- 基本信息卡片 -->
 			<view class="detail-card">
 				<view class="card-header">
-					<text class="card-title">基本信息</text>
+					<text class="card-title">{{ $t('inspection.basicInfo') }}</text>
 				</view>
 				<view class="card-content">
 					<view class="info-row">
-						<text class="info-label">检查员:</text>
+						<text class="info-label">{{ $t('inspection.inspector') }}:</text>
 						<text class="info-value">{{ getInspectorName() }}</text>
 					</view>
 					<view class="info-row">
-						<text class="info-label">指派时间:</text>
+						<text class="info-label">{{ $t('inspection.assignedTime') }}:</text>
 						<text class="info-value">{{ getAssignedTime() }}</text>
 					</view>
 					<view class="info-row" v-if="workOrderData">
-						<text class="info-label">工单标题:</text>
-						<text class="info-value">{{ workOrderData.title || '未知工单' }}</text>
+						<text class="info-label">{{ $t('inspection.workOrderTitle') }}:</text>
+						<text class="info-value">{{ workOrderData.title || $t('inspection.unknownWorkOrder') }}</text>
 					</view>
 					<view class="info-row" v-if="workOrderData">
-						<text class="info-label">工单优先级:</text>
+						<text class="info-label">{{ $t('inspection.workOrderPriority') }}:</text>
 						<text class="info-value">{{ getPriorityText(workOrderData.priority) }}</text>
 					</view>
 					<view class="info-row" v-if="workOrderData">
-						<text class="info-label">工单类型:</text>
+						<text class="info-label">{{ $t('inspection.workOrderType') }}:</text>
 						<text class="info-value">{{ getWorkOrderTypeText(workOrderData.task_type) }}</text>
 					</view>
 					<view class="info-row" v-if="inspectionData.start_time">
-						<text class="info-label">开始时间:</text>
+						<text class="info-label">{{ $t('inspection.startTime') }}:</text>
 						<text class="info-value">{{ formatDateTime(inspectionData.start_time) }}</text>
 					</view>
 					<view class="info-row" v-if="inspectionData.end_time">
-						<text class="info-label">结束时间:</text>
+						<text class="info-label">{{ $t('inspection.endTime') }}:</text>
 						<text class="info-value">{{ formatDateTime(inspectionData.end_time) }}</text>
 					</view>
 					<view class="info-row" v-if="inspectionData.location">
-						<text class="info-label">位置:</text>
+						<text class="info-label">{{ $t('inspection.location') }}:</text>
 						<text class="info-value">{{ inspectionData.location }}</text>
 					</view>
 				</view>
@@ -109,22 +109,22 @@
 			<!-- GPS信息卡片 -->
 			<view class="detail-card" v-if="inspectionData.latitude && inspectionData.longitude">
 				<view class="card-header">
-					<text class="card-title">GPS信息</text>
+					<text class="card-title">{{ $t('inspection.gpsInfo') }}</text>
 					<view class="card-action" @click="openMap">
-						<text class="action-text">查看地图</text>
+						<text class="action-text">{{ $t('inspection.viewMap') }}</text>
 					</view>
 				</view>
 				<view class="card-content">
 					<view class="info-row">
-						<text class="info-label">经纬度:</text>
+						<text class="info-label">{{ $t('inspection.coordinates') }}:</text>
 						<text class="info-value">{{ formatCoordinates(inspectionData.latitude, inspectionData.longitude) }}</text>
 					</view>
 					<view class="info-row" v-if="inspectionData.gps_accuracy">
-						<text class="info-label">精度:</text>
+						<text class="info-label">{{ $t('inspection.accuracy') }}:</text>
 						<text class="info-value">{{ inspectionData.gps_accuracy }}m</text>
 					</view>
 					<view class="info-row" v-if="inspectionData.address">
-						<text class="info-label">地址:</text>
+						<text class="info-label">{{ $t('inspection.address') }}:</text>
 						<text class="info-value">{{ inspectionData.address }}</text>
 					</view>
 				</view>
@@ -428,7 +428,7 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
 	import { onLoad, onShow } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
@@ -436,6 +436,8 @@
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
+	
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
 	// 页面参数
 	const inspectionId = ref('')
@@ -506,6 +508,13 @@
 			loadInspectionDetail()
 		}
 		isPageVisible.value = true
+	})
+	
+	onMounted(() => {
+		// 动态设置页面标题
+		uni.setNavigationBarTitle({
+			title: $t('inspection.detail')
+		})
 	})
 	
 	// 方法

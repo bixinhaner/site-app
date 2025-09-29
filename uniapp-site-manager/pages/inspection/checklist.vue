@@ -6,7 +6,7 @@
 				<view class="back-button" @click="goBack">
 					<text class="back-icon">←</text>
 				</view>
-				<text class="navbar-title">{{ inspectionData?.site_name || '检查清单' }}</text>
+				<text class="navbar-title">{{ inspectionData?.site_name || $t('inspection.checklist') }}</text>
 				<view class="navbar-actions">
 					<view class="save-button" @click="saveInspection">
 						<text class="save-icon">💾</text>
@@ -18,15 +18,15 @@
 		<!-- 检查信息卡片 -->
 		<view class="inspection-info">
 			<view class="info-row">
-				<text class="info-label">站点:</text>
+				<text class="info-label">{{ $t('site.name') }}:</text>
 				<text class="info-value">{{ inspectionData?.site_name }}</text>
 			</view>
 			<view class="info-row">
-				<text class="info-label">类型:</text>
+				<text class="info-label">{{ $t('site.type') }}:</text>
 				<text class="info-value">{{ getInspectionTypeText(inspectionData?.inspection_type) }}</text>
 			</view>
 			<view class="info-row">
-				<text class="info-label">进度:</text>
+				<text class="info-label">{{ $t('inspection.progress') }}:</text>
 				<text class="info-value">{{ inspectionData?.completed_items || 0 }}/{{ inspectionData?.total_items || 0 }}</text>
 				<view class="progress-bar">
 					<view 
@@ -45,7 +45,7 @@
 					:class="{ active: currentCategory === 'all' }"
 					@click="switchCategory('all')"
 				>
-					<text class="tab-text">全部 ({{ checkItems.length }})</text>
+					<text class="tab-text">{{ $t('inspection.allChecks') }} ({{ checkItems.length }})</text>
 				</view>
 				<view 
 					class="tab-item"
@@ -64,7 +64,7 @@
 			<view class="check-section" v-for="section in groupedCheckItems" :key="section.categoryId">
 				<view class="section-header" v-if="currentCategory === 'all'">
 					<text class="section-title">{{ section.categoryName }}</text>
-					<text class="section-count">{{ section.items.length }}项</text>
+					<text class="section-count">{{ section.items.length }}{{ $t('inspection.itemsUnit') }}</text>
 				</view>
 				
 				<view 
@@ -80,40 +80,40 @@
 						</view>
 						<view class="item-info">
 							<text class="item-name">{{ item.item_name }}</text>
-							<text class="item-id" v-if="item.sector_id">扇区 {{ item.sector_id }}</text>
+							<text class="item-id" v-if="item.sector_id">{{ $t('inspection.sector') }} {{ item.sector_id }}</text>
 							<text class="equipment-binding" v-if="item.sector_id && isCellBound(item)">
-								📱 已绑定: {{ getCellEquipmentSn(item) }}
+								📱 {{ $t('inspection.bound') }}: {{ getCellEquipmentSn(item) }}
 							</text>
 							<text class="equipment-binding pending" v-else-if="item.sector_id && !isCellBound(item)">
-								🔗 需要绑定设备
+								🔗 {{ $t('inspection.needBinding') }}
 							</text>
 						</view>
 						<view class="item-actions">
-							<text class="required-badge" v-if="item.required_type === 'both'">照片+数据</text>
-							<text class="required-badge" v-else-if="item.required_type === 'photo'">照片</text>
-							<text class="required-badge" v-else-if="item.required_type === 'data'">数据</text>
+							<text class="required-badge" v-if="item.required_type === 'both'">{{ $t('inspection.photos') }}+{{ $t('inspection.data') }}</text>
+							<text class="required-badge" v-else-if="item.required_type === 'photo'">{{ $t('inspection.photos') }}</text>
+							<text class="required-badge" v-else-if="item.required_type === 'data'">{{ $t('inspection.data') }}</text>
 							<text class="action-arrow">›</text>
 						</view>
 					</view>
 					
 					<view class="item-details" v-if="item.status !== 'pending'">
 						<view class="detail-row" v-if="item.checked_at">
-							<text class="detail-label">检查时间:</text>
+							<text class="detail-label">{{ $t('inspection.checkTime') }}:</text>
 							<text class="detail-value">{{ formatDateTime(item.checked_at) }}</text>
 						</view>
 						
 						<view class="detail-row" v-if="item.photos && item.photos.length > 0">
-							<text class="detail-label">照片:</text>
-							<text class="detail-value">{{ item.photos.length }}张</text>
+							<text class="detail-label">{{ $t('inspection.photos') }}:</text>
+							<text class="detail-value">{{ item.photos.length }}{{ $t('inspection.photosUnit') }}</text>
 						</view>
 						
 						<view class="detail-row" v-if="item.data_value && item.data_value.length > 0">
-							<text class="detail-label">数据:</text>
-							<text class="detail-value">{{ item.data_value.length }}项</text>
+							<text class="detail-label">{{ $t('inspection.data') }}:</text>
+							<text class="detail-value">{{ item.data_value.length }}{{ $t('inspection.itemsUnit') }}</text>
 						</view>
 						
 						<view class="detail-row" v-if="item.validation_result && !item.validation_result.valid">
-							<text class="detail-label">验证结果:</text>
+							<text class="detail-label">{{ $t('inspection.validationResult') }}:</text>
 							<text class="detail-value error">{{ item.validation_result.errors.join(', ') }}</text>
 						</view>
 					</view>
@@ -123,8 +123,8 @@
 			<!-- 空状态 -->
 			<view class="empty-state" v-if="filteredCheckItems.length === 0">
 				<text class="empty-icon">📝</text>
-				<text class="empty-title">暂无检查项</text>
-				<text class="empty-desc">请等待检查模板加载</text>
+				<text class="empty-title">{{ $t('inspection.noInspectionItems') }}</text>
+				<text class="empty-desc">{{ $t('inspection.pleaseWaitTemplate') }}</text>
 			</view>
 		</scroll-view>
 		
@@ -135,7 +135,7 @@
 				@click="saveDraft"
 				:disabled="saving"
 			>
-				{{ saving ? '保存中...' : '保存草稿' }}
+				{{ saving ? $t('inspection.savingInProgress') : $t('inspection.saveDraft') }}
 			</button>
 			
 			<button 
@@ -143,7 +143,7 @@
 				@click="submitInspection"
 				:disabled="!canSubmit || submitting"
 			>
-				{{ submitting ? '提交中...' : '提交检查' }}
+				{{ submitting ? $t('inspection.submitInProgress') : $t('inspection.submitInspection') }}
 			</button>
 		</view>
 		
@@ -167,27 +167,27 @@
 				<scroll-view class="modal-content" scroll-y>
 					<!-- 设备绑定部分 (仅小区级检查项显示) -->
 					<view class="modal-section" v-if="currentItem.sector_id">
-						<text class="section-label">设备绑定</text>
+						<text class="section-label">{{ $t('inspection.equipmentBinding') }}</text>
 						<view class="equipment-binding-section">
 							<view v-if="currentItem.equipment_sn" class="bound-equipment">
 								<text class="bound-icon">✅</text>
 								<view class="bound-info">
-									<text class="bound-text">已绑定设备</text>
+									<text class="bound-text">{{ $t('inspection.boundEquipment') }}</text>
 									<text class="bound-sn">{{ currentItem.equipment_sn }}</text>
 								</view>
 								<button class="unbind-btn" @click="unbindEquipment">
-									<text>解绑</text>
+									<text>{{ $t('inspection.unbind') }}</text>
 								</button>
 							</view>
 							<view v-else class="unbind-equipment">
 								<text class="unbind-icon">⚠️</text>
 								<view class="unbind-info">
-									<text class="unbind-text">请先扫码绑定设备</text>
-									<text class="unbind-desc">小区 {{ currentItem.band ? `${currentItem.sector_id}_${currentItem.band}` : currentItem.sector_id }} 需要绑定设备后才能检查</text>
+									<text class="unbind-text">{{ $t('inspection.pleaseBindFirst') }}</text>
+									<text class="unbind-desc">{{ $t('inspection.sector') }} {{ currentItem.band ? `${currentItem.sector_id}_${currentItem.band}` : currentItem.sector_id }} {{ $t('inspection.needBindDesc') }}</text>
 								</view>
 								<button class="bind-btn" @click="scanEquipmentForBinding">
 									<text class="btn-icon">📷</text>
-									<text>扫码绑定</text>
+									<text>{{ $t('inspection.scanBind') }}</text>
 								</button>
 							</view>
 						</view>
@@ -195,18 +195,18 @@
 					
 					<!-- 检查项基本信息 -->
 					<view class="modal-section">
-						<text class="section-label">基本信息</text>
+						<text class="section-label">{{ $t('inspection.basicInfo') }}</text>
 						<view class="info-grid">
 							<view class="grid-item">
-								<text class="grid-label">检查类型:</text>
+								<text class="grid-label">{{ $t('inspection.checkType') }}:</text>
 								<text class="grid-value">{{ getRequiredTypeText(currentItem.required_type) }}</text>
 							</view>
 							<view class="grid-item" v-if="currentItem.sector_id">
-								<text class="grid-label">扇区:</text>
+								<text class="grid-label">{{ $t('inspection.sector') }}:</text>
 								<text class="grid-value">{{ currentItem.sector_id }}</text>
 							</view>
 							<view class="grid-item">
-								<text class="grid-label">状态:</text>
+								<text class="grid-label">{{ $t('inspection.status') }}:</text>
 								<text class="grid-value" :class="getStatusClass(currentItem.status)">
 									{{ getStatusText(currentItem.status) }}
 								</text>
@@ -217,10 +217,10 @@
 					<!-- 照片部分 -->
 					<view class="modal-section" v-if="['photo', 'both'].includes(currentItem.required_type)">
 						<view class="section-header">
-							<text class="section-label">照片 ({{ currentItem.photos?.length || 0 }})</text>
+							<text class="section-label">{{ $t('inspection.photos') }} ({{ currentItem.photos?.length || 0 }})</text>
 							<button class="add-photo-btn" @click="takePhoto">
 								<text class="btn-icon">📷</text>
-								<text class="btn-text">拍照</text>
+								<text class="btn-text">{{ $t('inspection.takePhoto') }}</text>
 							</button>
 						</view>
 						
@@ -242,13 +242,13 @@
 						</view>
 						
 						<view class="no-photos" v-else>
-							<text class="no-photos-text">暂无照片，点击拍照按钮添加</text>
+							<text class="no-photos-text">{{ $t('inspection.noPhotosText') }}</text>
 						</view>
 					</view>
 					
 					<!-- 数据填写部分 -->
 					<view class="modal-section" v-if="['data', 'both'].includes(currentItem.required_type)">
-						<text class="section-label">数据填写</text>
+						<text class="section-label">{{ $t('inspection.dataEntry') }}</text>
 						<view class="data-form">
 							<view 
 								class="form-item"
@@ -270,12 +270,12 @@
 						<!-- 验证结果 -->
 						<view class="validation-result" v-if="currentItem.validation_result">
 							<view class="result-header">
-								<text class="result-title">验证结果</text>
+								<text class="result-title">{{ $t('inspection.validationResult') }}</text>
 								<text 
 									class="result-status"
 									:class="currentItem.validation_result.valid ? 'valid' : 'invalid'"
 								>
-									{{ currentItem.validation_result.valid ? '✅ 通过' : '❌ 不通过' }}
+									{{ currentItem.validation_result.valid ? `✅ ${$t('inspection.pass')}` : `❌ ${$t('inspection.fail')}` }}
 								</text>
 							</view>
 							<view class="result-errors" v-if="!currentItem.validation_result.valid">
@@ -292,10 +292,10 @@
 					
 					<!-- 备注 -->
 					<view class="modal-section">
-						<text class="section-label">备注</text>
+						<text class="section-label">{{ $t('inspection.remarks') }}</text>
 						<textarea 
 							class="note-textarea"
-							placeholder="添加检查备注..."
+							:placeholder="$t('inspection.addCheckNote')"
 							v-model="currentItem.notes"
 							@input="onNotesChange"
 						></textarea>
@@ -303,9 +303,9 @@
 				</scroll-view>
 				
 				<view class="modal-actions">
-					<button class="modal-btn cancel-btn" @click="closeItemModal">取消</button>
+					<button class="modal-btn cancel-btn" @click="closeItemModal">{{ $t('inspection.cancel') }}</button>
 					<button class="modal-btn save-btn" @click="saveCurrentItem" :disabled="savingItem">
-						{{ savingItem ? '保存中...' : '保存' }}
+						{{ savingItem ? $t('inspection.savingInProgress') : $t('inspection.save') }}
 					</button>
 				</view>
 			</view>
@@ -314,7 +314,7 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
@@ -325,6 +325,9 @@
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
 	const workOrderStore = useWorkOrderStore()
+	
+	// 获取翻译函数
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
 	// 页面参数
 	const inspectionId = ref('')
@@ -1388,11 +1391,11 @@
 	// 工具函数
 	const getInspectionTypeText = (type) => {
 		const typeMap = {
-			installation: '安装检查',
-			opening: '新站点设备安装',
-			maintenance: '维护检查'
+			installation: $t('inspection.installation'),
+			opening: $t('inspection.opening'),
+			maintenance: $t('inspection.maintenance')
 		}
-		return typeMap[type] || '检查'
+		return typeMap[type] || $t('inspection.check')
 	}
 	
 	const getCheckItemClass = (status) => {
@@ -1416,22 +1419,22 @@
 	
 	const getStatusText = (status) => {
 		const statusMap = {
-			pending: '待处理',
-			in_progress: '进行中',
-			completed: '已完成',
-			failed: '失败',
-			skipped: '跳过'
+			pending: $t('inspection.pending'),
+			in_progress: $t('inspection.inProgress'),
+			completed: $t('inspection.completed'),
+			failed: $t('inspection.failed'),
+			skipped: $t('inspection.skipped')
 		}
-		return statusMap[status] || '未知'
+		return statusMap[status] || $t('inspection.unknown')
 	}
 	
 	const getRequiredTypeText = (type) => {
 		const typeMap = {
-			photo: '仅照片',
-			data: '仅数据',
-			both: '照片+数据'
+			photo: $t('inspection.photoOnly'),
+			data: $t('inspection.dataOnly'),
+			both: $t('inspection.photoAndData')
 		}
-		return typeMap[type] || '未知'
+		return typeMap[type] || $t('inspection.unknown')
 	}
 	
 	const formatDateTime = (dateTime) => {

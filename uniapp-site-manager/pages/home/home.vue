@@ -3,7 +3,7 @@
 		<!-- 自定义导航栏 -->
 		<view class="custom-navbar">
 			<view class="navbar-content">
-				<text class="navbar-title">站点管理系统</text>
+				<text class="navbar-title">{{ $t('login.title') }}</text>
 				<view class="user-info" @click="showUserMenu">
 					<text class="user-name">{{ userStore.userInfo?.full_name || userStore.userInfo?.username }}</text>
 					<view class="avatar">
@@ -21,7 +21,7 @@
 					<view class="stat-icon site-icon">📍</view>
 					<view class="stat-info">
 						<text class="stat-number">{{ siteStats.total }}</text>
-						<text class="stat-label">总站点数</text>
+						<text class="stat-label">{{ $t('home.totalSites') }}</text>
 					</view>
 				</view>
 				
@@ -39,7 +39,7 @@
 					<view class="stat-icon operational-icon">✅</view>
 					<view class="stat-info">
 						<text class="stat-number">{{ siteStats.operational }}</text>
-						<text class="stat-label">运营中</text>
+						<text class="stat-label">{{ $t('site.operational') }}</text>
 					</view>
 				</view>
 				
@@ -47,7 +47,7 @@
 					<view class="stat-icon maintenance-icon">⚠️</view>
 					<view class="stat-info">
 						<text class="stat-number">{{ siteStats.maintenance }}</text>
-						<text class="stat-label">维护中</text>
+						<text class="stat-label">{{ $t('site.maintenance') }}</text>
 					</view>
 				</view>
 				
@@ -56,7 +56,7 @@
 					<view class="stat-icon inspection-icon">📋</view>
 					<view class="stat-info">
 						<text class="stat-number">{{ workOrderStats.assigned }}</text>
-						<text class="stat-label">我的工单</text>
+						<text class="stat-label">{{ $t('workorder.title') }}</text>
 					</view>
 				</view>
 				
@@ -66,39 +66,39 @@
 		<!-- 快捷操作 -->
 		<view class="quick-actions">
 			<view class="section-header">
-				<text class="section-title">快捷操作</text>
+				<text class="section-title">{{ $t('home.dashboard') }}</text>
 			</view>
 			
 			<view class="actions-grid">
 				<!-- 所有角色都能进行现场检查 -->
 				<view class="action-item" @click="goToNewInspection">
 					<view class="action-icon">📷</view>
-					<text class="action-label">现场检查</text>
+					<text class="action-label">{{ $t('inspection.title') }}</text>
 				</view>
 				
 				<!-- 所有角色都能查看站点列表 -->
 				<view class="action-item" @click="goToSiteList">
 					<view class="action-icon">📋</view>
-					<text class="action-label">站点列表</text>
+					<text class="action-label">{{ $t('site.list') }}</text>
 				</view>
 				
 				
 				<view class="action-item" v-if="canViewReports" @click="goToReports">
 					<view class="action-icon">📊</view>
-					<text class="action-label">数据报告</text>
+					<text class="action-label">{{ $t('home.statistics') }}</text>
 				</view>
 				
 				
 				<!-- 扫码领料功能 -->
 				<view class="action-item" @click="goToScanPickup">
 					<view class="action-icon">📦</view>
-					<text class="action-label">扫码领料</text>
+					<text class="action-label">{{ $t('stock.pickup') }}</text>
 				</view>
 				
 				<!-- 公共功能 -->
 				<view class="action-item" @click="goToMap">
 					<view class="action-icon">🗺️</view>
-					<text class="action-label">地图查看</text>
+					<text class="action-label">{{ $t('site.location') }}</text>
 				</view>
 			</view>
 		</view>
@@ -106,8 +106,8 @@
 		<!-- 最近活动 -->
 		<view class="recent-activities">
 			<view class="section-header">
-				<text class="section-title">最近活动</text>
-				<text class="see-all" @click="goToWorkOrders">查看全部</text>
+				<text class="section-title">{{ $t('home.recentActivities') }}</text>
+				<text class="see-all" @click="goToWorkOrders">{{ $t('common.viewAll') }}</text>
 			</view>
 			
 			<view class="activity-list">
@@ -134,17 +134,22 @@
 </template>
 
 <script setup>
-	import { ref, reactive, computed, onMounted } from 'vue'
+	import { ref, reactive, computed, onMounted, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLoggerStore } from '@/stores/logger'
+	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const workOrderStore = useWorkOrderStore()
 	const logger = useLoggerStore()
+	const languageStore = useLanguageStore()
+	
+	const instance = getCurrentInstance()
+	const t = (key, params = {}) => instance.appContext.config.globalProperties.$t(key, params)
 	
 	// 统计数据
 	const siteStats = reactive({
@@ -181,7 +186,7 @@
 	}
 	
 	// 获取检查标签文字
-	const getWorkOrderLabel = () => '待处理工单'
+	const getWorkOrderLabel = () => t('home.activeOrders')
 	
 	// 加载数据
 	const loadData = async () => {
@@ -214,7 +219,7 @@
 				recentActivities.value = wos
 					.sort((a, b) => new Date(b.assigned_at) - new Date(a.assigned_at))
 					.slice(0, 5)
-					.map(wo => ({ id: wo.id, created_at: wo.assigned_at, title: `工单: ${wo.title}`, type: 'work_order', status: wo.status }))
+					.map(wo => ({ id: wo.id, created_at: wo.assigned_at, title: `${t('workorder.title')}: ${wo.title}`, type: 'work_order', status: wo.status }))
 			}
 			
 
@@ -231,10 +236,10 @@
 		const now = new Date()
 		const diff = now - time
 		
-		if (diff < 60000) return '刚刚'
-		if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
-		if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
-		return `${Math.floor(diff / 86400000)}天前`
+		if (diff < 60000) return t('common.justNow')
+		if (diff < 3600000) return t('common.minutesAgo', {minutes: Math.floor(diff / 60000)})
+		if (diff < 86400000) return t('common.hoursAgo', {hours: Math.floor(diff / 3600000)})
+		return t('common.daysAgo', {days: Math.floor(diff / 86400000)})
 	}
 	
 	// 获取活动图标

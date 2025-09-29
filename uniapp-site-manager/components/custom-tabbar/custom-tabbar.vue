@@ -14,7 +14,7 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	
 	const userStore = useUserStore()
@@ -25,31 +25,31 @@
 		{
 			pagePath: 'pages/home/home',
 			icon: '🏠',
-			text: '首页',
+			text: 'navigation.home',
 			roles: ['admin', 'manager', 'inspector'] // 所有角色可见
 		},
 		{
 			pagePath: 'pages/site/list',
 			icon: '📍',
-			text: '站点',
+			text: 'navigation.sites',
 			roles: ['admin'] // 只有管理员可以管理站点
 		},
 		{
 			pagePath: 'pages/inspection/list',
 			icon: '🔍',
-			text: '检查',
+			text: 'navigation.inspection',
 			roles: ['admin', 'manager', 'inspector'] // 管理员、经理和检查员可见
 		},
 		{
 			pagePath: 'pages/task/list',
 			icon: '📋',
-			text: '任务',
+			text: 'navigation.workorders',
 			roles: ['admin', 'manager', 'inspector'] // 管理员、经理可以管理任务，检查员可以查看自己的任务
 		},
 		{
 			pagePath: 'pages/profile/profile',
 			icon: '👤',
-			text: '我的',
+			text: 'navigation.profile',
 			roles: ['admin', 'manager', 'inspector'] // 所有角色可见
 		}
 	]
@@ -62,16 +62,17 @@
 	
 	// 获取标签文本（根据用户角色调整）
 	const getTabText = (item) => {
+		const { $t } = getCurrentInstance().appContext.config.globalProperties
 		const userRole = userStore.userInfo?.role
 		
 		// 为inspector角色调整特定标签的显示文本
 		if (userRole === 'inspector') {
 			if (item.pagePath === 'pages/task/list') {
-				return '我的任务'
+				return $t('navigation.myTasks')
 			}
 		}
 		
-		return item.text
+		return $t(item.text)
 	}
 	
 	// 获取当前页面路径

@@ -6,7 +6,7 @@
 				<input 
 					class="search-input"
 					type="text" 
-					placeholder="搜索站点名称或编码"
+					:placeholder="$t('site.searchPlaceholder')"
 					v-model="searchText"
 					@input="handleSearch"
 				/>
@@ -16,7 +16,7 @@
 				<view 
 					class="filter-tab"
 					:class="{ active: currentFilter === filter.value }"
-					v-for="filter in filters"
+					v-for="filter in filters.value"
 					:key="filter.value"
 					@click="selectFilter(filter.value)"
 				>
@@ -69,7 +69,7 @@
 			<!-- 空状态 -->
 			<view class="empty-state" v-if="filteredSites.length === 0 && !siteStore.loading">
 				<text class="empty-icon">📍</text>
-				<text class="empty-text">暂无站点数据</text>
+				<text class="empty-text">{{ $t('messages.noData') }}</text>
 			</view>
 		</view>
 		
@@ -86,7 +86,7 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	
@@ -96,13 +96,15 @@
 	const searchText = ref('')
 	const currentFilter = ref('all')
 	
-	const filters = [
-		{ label: '全部', value: 'all' },
-		{ label: '规划中', value: 'planning' },
-		{ label: '建设中', value: 'construction' },
-		{ label: '运营中', value: 'operational' },
-		{ label: '维护中', value: 'maintenance' }
-	]
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	
+	const filters = computed(() => [
+		{ label: $t('common.all'), value: 'all' },
+		{ label: $t('site.planning'), value: 'planning' },
+		{ label: $t('site.construction'), value: 'construction' },
+		{ label: $t('site.operational'), value: 'operational' },
+		{ label: $t('site.maintenance'), value: 'maintenance' }
+	])
 	
 	// 过滤后的站点列表
 	const filteredSites = computed(() => {
@@ -151,8 +153,8 @@
 	// 添加站点
 	const addSite = () => {
 		uni.showModal({
-			title: '添加站点',
-			content: '添加站点功能正在开发中',
+			title: $t('site.addSite'),
+			content: $t('messages.featureInDevelopment'),
 			showCancel: false
 		})
 	}
@@ -171,10 +173,10 @@
 	// 获取状态文本
 	const getStatusText = (status) => {
 		const statusMap = {
-			'planning': '规划中',
-			'construction': '建设中',
-			'operational': '运营中',
-			'maintenance': '维护中'
+			'planning': $t('site.planning'),
+			'construction': $t('site.construction'),
+			'operational': $t('site.operational'),
+			'maintenance': $t('site.maintenance')
 		}
 		return statusMap[status] || status
 	}
@@ -182,10 +184,10 @@
 	// 获取站点类型文本
 	const getSiteTypeText = (type) => {
 		const typeMap = {
-			'base_station': '基站',
-			'tower': '铁塔',
-			'indoor': '室内分布',
-			'micro': '微基站'
+			'base_station': $t('site.baseStation'),
+			'tower': $t('site.tower'),
+			'indoor': $t('site.indoor'),
+			'micro': $t('site.micro')
 		}
 		return typeMap[type] || type
 	}
@@ -230,6 +232,10 @@
 	}
 	
 	onMounted(() => {
+		// 动态设置页面标题
+		uni.setNavigationBarTitle({
+			title: $t('site.list')
+		})
 		loadData()
 	})
 </script>

@@ -28,21 +28,21 @@
 		<view class="stats-section">
 			<view class="stat-item">
 				<text class="stat-number">{{ userStats.totalSites }}</text>
-				<text class="stat-label">负责站点</text>
+				<text class="stat-label">{{ $t('home.totalSites') }}</text>
 			</view>
 			
 			<view class="stat-divider"></view>
 			
 			<view class="stat-item">
 				<text class="stat-number">{{ userStats.completedInspections }}</text>
-				<text class="stat-label">完成检查</text>
+				<text class="stat-label">{{ $t('home.completedToday') }}</text>
 			</view>
 			
 			<view class="stat-divider"></view>
 			
 			<view class="stat-item">
 				<text class="stat-number">{{ userStats.pendingTasks }}</text>
-				<text class="stat-label">待处理</text>
+				<text class="stat-label">{{ $t('home.pendingItems') }}</text>
 			</view>
 		</view>
 		
@@ -52,7 +52,7 @@
 				<view class="menu-item" @click="editProfile">
 					<view class="menu-left">
 						<text class="menu-icon">👤</text>
-						<text class="menu-text">个人信息</text>
+						<text class="menu-text">{{ $t('profile.userInfo') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -60,7 +60,7 @@
 				<view class="menu-item" @click="changePassword">
 					<view class="menu-left">
 						<text class="menu-icon">🔒</text>
-						<text class="menu-text">修改密码</text>
+						<text class="menu-text">{{ $t('profile.changePassword') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -68,7 +68,7 @@
 				<view class="menu-item" @click="viewMyInspections">
 					<view class="menu-left">
 						<text class="menu-icon">📋</text>
-						<text class="menu-text">我的检查记录</text>
+						<text class="menu-text">{{ $t('inspection.list') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -76,17 +76,29 @@
 				<view class="menu-item" @click="viewMySites" v-if="canViewSites">
 					<view class="menu-left">
 						<text class="menu-icon">📍</text>
-						<text class="menu-text">{{ userInfo?.role === 'inspector' ? '负责站点' : '我的站点' }}</text>
+						<text class="menu-text">{{ userInfo?.role === 'inspector' ? $t('site.title') : $t('site.list') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
 			</view>
 			
 			<view class="menu-group">
+				<!-- 语言设置菜单项 -->
+				<view class="menu-item" @click="showLanguageSettings">
+					<view class="menu-left">
+						<text class="menu-icon">🌐</text>
+						<text class="menu-text">{{ $t('profile.languageSettings') }}</text>
+					</view>
+					<view class="menu-right">
+						<text class="menu-value">{{ languageStore.currentLanguageName }}</text>
+						<text class="menu-arrow">›</text>
+					</view>
+				</view>
+				
 				<view class="menu-item" @click="showSettings">
 					<view class="menu-left">
 						<text class="menu-icon">⚙️</text>
-						<text class="menu-text">应用设置</text>
+						<text class="menu-text">{{ $t('profile.settings') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -94,7 +106,7 @@
 				<view class="menu-item" @click="showHelp">
 					<view class="menu-left">
 						<text class="menu-icon">❓</text>
-						<text class="menu-text">帮助中心</text>
+						<text class="menu-text">{{ $t('profile.preferences') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -102,7 +114,7 @@
 				<view class="menu-item" @click="showAbout">
 					<view class="menu-left">
 						<text class="menu-icon">ℹ️</text>
-						<text class="menu-text">关于应用</text>
+						<text class="menu-text">{{ t('profile.about') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -136,9 +148,37 @@
 				<view class="menu-item logout" @click="handleLogout">
 					<view class="menu-left">
 						<text class="menu-icon">🚪</text>
-						<text class="menu-text">退出登录</text>
+						<text class="menu-text">{{ $t('profile.logout') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
+				</view>
+			</view>
+		</view>
+		
+		<!-- 语言设置弹窗 -->
+		<view class="language-modal" v-if="showLanguageModal" @click="closeLanguagePopup">
+			<view class="language-popup" @click.stop>
+				<view class="popup-header">
+					<view class="popup-title">{{ $t('profile.languageSettings') }}</view>
+					<view class="popup-close" @click="closeLanguagePopup">✕</view>
+				</view>
+				<view class="language-options">
+					<view 
+						class="language-option" 
+						:class="{ active: languageStore.currentLocale === 'zh' }"
+						@click="setLanguage('zh')"
+					>
+						<text class="language-name">{{ $t('profile.chinese') }}</text>
+						<text class="language-check" v-if="languageStore.currentLocale === 'zh'">✓</text>
+					</view>
+					<view 
+						class="language-option" 
+						:class="{ active: languageStore.currentLocale === 'en' }"
+						@click="setLanguage('en')"
+					>
+						<text class="language-name">{{ $t('profile.english') }}</text>
+						<text class="language-check" v-if="languageStore.currentLocale === 'en'">✓</text>
+					</view>
 				</view>
 			</view>
 		</view>
@@ -152,14 +192,21 @@
 </template>
 
 <script setup>
-	import { ref, reactive, computed, onMounted } from 'vue'
+	import { ref, reactive, computed, onMounted, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
+	import { useLanguageStore } from '@/stores/language'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const inspectionStore = useInspectionStore()
+	const languageStore = useLanguageStore()
+	
+	const instance = getCurrentInstance()
+	const t = (key) => instance.appContext.config.globalProperties.$t(key)
+	
+	const showLanguageModal = ref(false)
 	
 	const userStats = reactive({
 		totalSites: 0,
@@ -306,8 +353,8 @@
 	// 关于应用
 	const showAbout = () => {
 		uni.showModal({
-			title: '关于应用',
-			content: '站点信息管理系统\n\n版本：v1.0.0\n开发商：技术团队\n\n专业的通信站点管理解决方案',
+			title: t('profile.aboutTitle'),
+			content: t('profile.aboutContent'),
 			showCancel: false
 		})
 	}
@@ -333,11 +380,27 @@
 		})
 	}
 	
+	// 显示语言设置弹窗
+	const showLanguageSettings = () => {
+		showLanguageModal.value = true
+	}
+	
+	// 关闭语言设置弹窗
+	const closeLanguagePopup = () => {
+		showLanguageModal.value = false
+	}
+	
+	// 设置语言
+	const setLanguage = (locale) => {
+		languageStore.setLocale(locale)
+		closeLanguagePopup()
+	}
+	
 	// 退出登录
 	const handleLogout = () => {
 		uni.showModal({
-			title: '确认退出',
-			content: '确定要退出登录吗？',
+			title: t('messages.confirmLogout'),
+			content: languageStore.isZh ? '确定要退出登录吗？' : 'Are you sure you want to logout?',
 			success: (res) => {
 				if (res.confirm) {
 					userStore.logout()
@@ -377,6 +440,10 @@
 	}
 	
 	onMounted(() => {
+		// 动态设置页面标题
+		uni.setNavigationBarTitle({
+			title: t('profile.title')
+		})
 		if (userInfo.value) {
 			loadUserStats()
 		}
@@ -553,6 +620,108 @@
 	.menu-arrow {
 		font-size: 18px;
 		color: #d1d5db;
+	}
+	
+	.menu-right {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	
+	.menu-value {
+		font-size: 14px;
+		color: #6b7280;
+	}
+	
+	// 语言设置弹窗
+	.language-modal {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 9999;
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+	}
+	
+	.language-popup {
+		background: white;
+		border-radius: 16px 16px 0 0;
+		padding: 0;
+		min-height: 200px;
+		width: 100%;
+		max-width: 500px;
+	}
+	
+	.popup-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 20px;
+		border-bottom: 1px solid #f3f4f6;
+	}
+	
+	.popup-title {
+		font-size: 18px;
+		font-weight: 600;
+		color: #1f2937;
+	}
+	
+	.popup-close {
+		width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #f9fafb;
+		border-radius: 50%;
+		color: #6b7280;
+		font-size: 16px;
+		cursor: pointer;
+		
+		&:active {
+			background: #f3f4f6;
+		}
+	}
+	
+	.language-options {
+		padding: 10px 0;
+	}
+	
+	.language-option {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 16px 20px;
+		cursor: pointer;
+		transition: background-color 0.2s;
+		
+		&:active {
+			background: #f9fafb;
+		}
+		
+		&.active {
+			background: #fef3e2;
+			
+			.language-name {
+				color: #ea580c;
+				font-weight: 500;
+			}
+		}
+	}
+	
+	.language-name {
+		font-size: 16px;
+		color: #374151;
+	}
+	
+	.language-check {
+		color: #ea580c;
+		font-size: 18px;
+		font-weight: bold;
 	}
 	
 	// 版本信息

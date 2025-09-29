@@ -2,16 +2,16 @@
   <view class="list-container">
     <view class="custom-navbar">
       <view class="navbar-content">
-        <text class="navbar-title">我的工单</text>
+        <text class="navbar-title">{{ $t('workorder.title') }}</text>
       </view>
     </view>
 
     <view class="filter-tabs">
-      <view class="tab" :class="{active: status===''}" @click="setStatus('')">全部</view>
-      <view class="tab" :class="{active: status==='PENDING'}" @click="setStatus('PENDING')">待处理</view>
-      <view class="tab" :class="{active: status==='ACTIVE'}" @click="setStatus('ACTIVE')">执行中</view>
-      <view class="tab" :class="{active: status==='SUBMITTED'}" @click="setStatus('SUBMITTED')">已提交</view>
-      <view class="tab" :class="{active: status==='COMPLETED'}" @click="setStatus('COMPLETED')">已完成</view>
+      <view class="tab" :class="{active: status===''}" @click="setStatus('')">{{ $t('common.all') }}</view>
+      <view class="tab" :class="{active: status==='PENDING'}" @click="setStatus('PENDING')">{{ $t('workorder.pending') }}</view>
+      <view class="tab" :class="{active: status==='ACTIVE'}" @click="setStatus('ACTIVE')">{{ $t('workorder.inProgress') }}</view>
+      <view class="tab" :class="{active: status==='SUBMITTED'}" @click="setStatus('SUBMITTED')">{{ $t('workorder.submitted') }}</view>
+      <view class="tab" :class="{active: status==='COMPLETED'}" @click="setStatus('COMPLETED')">{{ $t('workorder.completed') }}</view>
     </view>
 
     <scroll-view 
@@ -33,13 +33,13 @@
             <text class="time">⏱ {{ formatDateTime(wo.assigned_at) }}</text>
           </view>
           <view class="order-actions" v-if="wo.status === 'PENDING'">
-            <button class="accept-btn" size="mini" @click.stop="handleAccept(wo)">接受工单</button>
+            <button class="accept-btn" size="mini" @click.stop="handleAccept(wo)">{{ $t('workorder.accept') }}</button>
           </view>
           <view class="order-actions" v-else-if="wo.status === 'ACTIVE'">
-            <button class="continue-btn" size="mini" @click.stop="handleContinue(wo)">继续执行</button>
+            <button class="continue-btn" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.continue') }}</button>
           </view>
           <view class="order-actions" v-else-if="wo.status === 'REJECTED'">
-            <button class="rejected-btn" size="mini" @click.stop="handleContinue(wo)">修改重提</button>
+            <button class="rejected-btn" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.resubmit') }}</button>
           </view>
         </view>
       </view>
@@ -48,7 +48,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, getCurrentInstance } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 
@@ -57,6 +57,8 @@ const orders = ref([])
 const status = ref('')
 const refreshing = ref(false)
 const isPageVisible = ref(false)
+
+const { $t } = getCurrentInstance().appContext.config.globalProperties
 
 const reload = async () => {
   try {
@@ -68,11 +70,11 @@ const reload = async () => {
       console.log('✅ 工单列表刷新成功', { count: res.data?.length })
     } else {
       console.error('❌ 工单列表刷新失败', res.error)
-      uni.showToast({ title: '刷新失败', icon: 'none' })
+      uni.showToast({ title: $t('messages.dataLoadFailed'), icon: 'none' })
     }
   } catch (error) {
     console.error('❌ 工单列表刷新异常', error)
-    uni.showToast({ title: '刷新异常', icon: 'none' })
+    uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
   } finally {
     refreshing.value = false
   }
@@ -94,39 +96,51 @@ const openDetail = (wo) => {
       url: `/pages/inspection/detail?id=${wo.inspection_id}&fromWorkOrder=${wo.id}` 
     })
   } else {
-    uni.showToast({ title: '该工单暂无关联检查', icon: 'none' })
+    uni.showToast({ title: $t('messages.noInspectionLinked'), icon: 'none' })
   }
 }
 
-const statusText = (s) => ({
-  PENDING: '待处理', ACTIVE: '执行中', SUBMITTED: '已提交', 
-  UNDER_REVIEW: '审核中', APPROVED: '已通过', REJECTED: '已驳回', COMPLETED: '已完成'
-})[s] || s
+const statusText = (s) => {
+  const { $t } = getCurrentInstance().appContext.config.globalProperties
+  return ({
+    PENDING: $t('workorder.pending'),
+    ACTIVE: $t('workorder.inProgress'),
+    SUBMITTED: $t('workorder.submitted'),
+    UNDER_REVIEW: $t('workorder.underReview'),
+    APPROVED: $t('workorder.approved'),
+    REJECTED: $t('workorder.rejected'),
+    COMPLETED: $t('workorder.completed')
+  })[s] || s
+}
 
-const formatDateTime = (val) => val ? new Date(val).toLocaleString('zh-CN') : '-'
+const formatDateTime = (val) => {
+  if (!val) return '-'
+  const locale = getCurrentInstance().appContext.config.globalProperties.$language?.currentLocale || 'zh'
+  return new Date(val).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')
+}
 
 const handleAccept = async (wo) => {
-  uni.showLoading({ title: '接受中...' })
+  uni.showLoading({ title: $t('messages.accepting') })
   try {
     const res = await store.acceptWorkOrder(wo.id)
     if (res.success) {
-      uni.showToast({ title: '接受成功', icon: 'success' })
+      uni.showToast({ title: $t('messages.acceptSuccess'), icon: 'success' })
       await reload()
       // 跳转到检查页面
       const inspectionId = res.data.inspection_id
       uni.navigateTo({ url: `/pages/inspection/detail?id=${inspectionId}&fromWorkOrder=${wo.id}` })
     } else {
-      uni.showToast({ title: res.error || '接受失败', icon: 'error' })
+      uni.showToast({ title: res.error || $t('messages.acceptFailed'), icon: 'error' })
     }
   } catch (e) {
-    uni.showToast({ title: '接受失败', icon: 'error' })
+    uni.showToast({ title: $t('messages.acceptFailed'), icon: 'error' })
   } finally {
     uni.hideLoading()
   }
 }
 
 const handleContinue = async (wo) => {
-  uni.showLoading({ title: '获取检查...' })
+  uni.showLoading({ title: $t('messages.loadingInspection') })
   try {
     const res = await store.getInspection(wo.id)
     if (res.success) {
@@ -135,17 +149,17 @@ const handleContinue = async (wo) => {
         uni.navigateTo({ 
           url: `/pages/inspection/detail?id=${inspectionId}&fromWorkOrder=${wo.id}`,
           fail: (err) => {
-            uni.showToast({ title: '页面跳转失败', icon: 'error' })
+            uni.showToast({ title: $t('messages.navigationFailed'), icon: 'error' })
           }
         })
       } else {
-        uni.showToast({ title: '检查ID不存在', icon: 'error' })
+        uni.showToast({ title: $t('messages.inspectionIdNotFound'), icon: 'error' })
       }
     } else {
-      uni.showToast({ title: res.error || '获取失败', icon: 'error' })
+      uni.showToast({ title: res.error || $t('messages.loadFailed'), icon: 'error' })
     }
   } catch (e) {
-    uni.showToast({ title: '获取失败', icon: 'error' })
+    uni.showToast({ title: $t('messages.loadFailed'), icon: 'error' })
   } finally {
     uni.hideLoading()
   }
@@ -154,6 +168,10 @@ const handleContinue = async (wo) => {
 // 页面初次加载
 onMounted(() => {
   console.log('📱 工单列表页面 onMounted')
+  // 动态设置页面标题
+  uni.setNavigationBarTitle({
+    title: $t('workorder.title')
+  })
   isPageVisible.value = true
   reload()
 })

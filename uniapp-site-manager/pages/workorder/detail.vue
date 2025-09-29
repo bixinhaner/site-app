@@ -2,20 +2,20 @@
   <view class="detail-container">
     <view class="custom-navbar">
       <view class="navbar-content">
-        <text class="navbar-title">工单详情</text>
+        <text class="navbar-title">{{ $t('workorder.detail') }}</text>
       </view>
     </view>
 
     <view v-if="order" class="content">
       <view class="card">
-        <view class="row"><text class="label">标题</text><text class="value">{{ order.title }}</text></view>
-        <view class="row"><text class="label">站点</text><text class="value">{{ order.site_name || order.site_id }}</text></view>
-        <view class="row"><text class="label">状态</text><text class="value status" :class="'status-'+order.status">{{ statusText(order.status) }}</text></view>
-        <view class="row"><text class="label">分配时间</text><text class="value">{{ formatDateTime(order.assigned_at) }}</text></view>
+        <view class="row"><text class="label">{{ $t('workorder.title') }}</text><text class="value">{{ order.title }}</text></view>
+        <view class="row"><text class="label">{{ $t('site.name') }}</text><text class="value">{{ order.site_name || order.site_id }}</text></view>
+        <view class="row"><text class="label">{{ $t('workorder.status') }}</text><text class="value status" :class="'status-'+order.status">{{ statusText(order.status) }}</text></view>
+        <view class="row"><text class="label">{{ $t('workorder.assignedAt') }}</text><text class="value">{{ formatDateTime(order.assigned_at) }}</text></view>
       </view>
 
       <view class="card">
-        <view class="section-title">检查项</view>
+        <view class="section-title">{{ $t('inspection.checklist') }}</view>
         <view class="item" v-for="it in items" :key="it.id">
           <view class="item-header">
             <text class="name">{{ it.item_name }}</text>
@@ -28,20 +28,20 @@
           </view>
           <view class="meta">{{ it.category_name }}</view>
           <view v-if="it.review_comments" class="review-comments">
-            <text class="comments-label">审核备注：</text>
+            <text class="comments-label">{{ $t('inspection.reviewComments') }}:</text>
             <text class="comments-text">{{ it.review_comments }}</text>
           </view>
           <view class="photos" v-if="itemPhotos(it).length">
             <scroll-view class="photo-scroll" scroll-x>
               <view class="p-item" v-for="p in itemPhotos(it)" :key="p.id" @click="previewPhoto(p)" @longpress="deletePhoto(p)">
                 <image class="thumb" :src="p.file_path" mode="aspectFill" />
-                <view class="delete-tip">长按删除</view>
+                <view class="delete-tip">{{ $t('common.longPressDelete') }}</view>
               </view>
             </scroll-view>
           </view>
           <view class="item-actions">
-            <button class="mini" size="mini" @click.stop="chooseAndUpload(it)">上传照片</button>
-            <button class="mini" size="mini" @click.stop="openEdit(it)">填报</button>
+            <button class="mini" size="mini" @click.stop="chooseAndUpload(it)">{{ $t('common.uploadPhoto') }}</button>
+            <button class="mini" size="mini" @click.stop="openEdit(it)">{{ $t('inspection.fillReport') }}</button>
           </view>
         </view>
       </view>
@@ -51,27 +51,27 @@
           class="action-btn" 
           @click="completeWorkOrder"
           v-if="order.status === 'ACTIVE'"
-        >完成工单</button>
+        >{{ $t('workorder.complete') }}</button>
         <button 
           class="action-btn rejected" 
           @click="openEdit(null)"
           v-if="order.status === 'REJECTED'"
-        >修改工单</button>
+        >{{ $t('workorder.modify') }}</button>
       </view>
     </view>
 
     <!-- 填报弹层 -->
     <view class="overlay" v-if="editVisible" @click="closeEdit">
       <view class="edit-panel" @click.stop>
-        <view class="panel-title">填写检查项</view>
+        <view class="panel-title">{{ $t('inspection.fillInspectionItem') }}</view>
         <!-- 动态字段渲染 -->
         <view class="form-row" v-for="f in fieldDefs" :key="f.field_id || f.label">
           <text class="label">{{ f.label || f.field_id }}</text>
           <block v-if="f.type==='text' || f.type==='rich_text'">
-            <textarea class="textarea" v-model="fieldValues[f.field_id || f.label]" :placeholder="'请输入' + (f.label||'')" />
+            <textarea class="textarea" v-model="fieldValues[f.field_id || f.label]" :placeholder="$t('common.pleaseEnter') + ' ' + (f.label||'')" />
           </block>
           <block v-else-if="f.type==='number'">
-            <input class="input" type="number" v-model.number="fieldValues[f.field_id || f.label]" :placeholder="'请输入' + (f.label||'')" />
+            <input class="input" type="number" v-model.number="fieldValues[f.field_id || f.label]" :placeholder="$t('common.pleaseEnter') + ' ' + (f.label||'')" />
           </block>
           <block v-else-if="f.type==='boolean'">
             <switch :checked="fieldValues[f.field_id || f.label]===true" @change="e=> fieldValues[f.field_id || f.label] = e.detail.value" />
@@ -79,7 +79,7 @@
           <block v-else-if="f.type==='select_single'">
             <picker :range="(f.options||[]).map(o=>o.label||o)" @change="e=> fieldValues[f.field_id || f.label] = (f.options||[])[e.detail.value].value || (f.options||[])[e.detail.value]">
               <view class="picker">
-                {{ (f.options||[]).find(o => (o.value||o) === fieldValues[f.field_id || f.label])?.label || '请选择' }}
+                {{ (f.options||[]).find(o => (o.value||o) === fieldValues[f.field_id || f.label])?.label || $t('common.pleaseSelect') }}
               </view>
             </picker>
           </block>
@@ -91,20 +91,20 @@
             </checkbox-group>
           </block>
           <block v-else>
-            <textarea class="textarea" v-model="fieldValues[f.field_id || f.label]" placeholder="请输入" />
+            <textarea class="textarea" v-model="fieldValues[f.field_id || f.label]" :placeholder="$t('common.pleaseEnter')" />
           </block>
         </view>
         <view class="form-row">
-          <text class="label">状态</text>
+          <text class="label">{{ $t('common.status') }}</text>
           <view class="radio-row">
-            <label class="radio"><radio value="completed" :checked="editStatus==='completed'" @click="setStatus('completed')" /> 完成</label>
-            <label class="radio"><radio value="in_progress" :checked="editStatus==='in_progress'" @click="setStatus('in_progress')" /> 进行中</label>
-            <label class="radio"><radio value="failed" :checked="editStatus==='failed'" @click="setStatus('failed')" /> 失败</label>
+            <label class="radio"><radio value="completed" :checked="editStatus==='completed'" @click="setStatus('completed')" /> {{ $t('inspection.completed') }}</label>
+            <label class="radio"><radio value="in_progress" :checked="editStatus==='in_progress'" @click="setStatus('in_progress')" /> {{ $t('inspection.inProgress') }}</label>
+            <label class="radio"><radio value="failed" :checked="editStatus==='failed'" @click="setStatus('failed')" /> {{ $t('inspection.failed') }}</label>
           </view>
         </view>
         <view class="panel-actions">
-          <button class="btn cancel" @click="closeEdit">取消</button>
-          <button class="btn save" @click="saveEdit">保存</button>
+          <button class="btn cancel" @click="closeEdit">{{ $t('common.cancel') }}</button>
+          <button class="btn save" @click="saveEdit">{{ $t('common.save') }}</button>
         </view>
       </view>
     </view>
@@ -118,10 +118,11 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, getCurrentInstance } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 
+const { $t } = getCurrentInstance().appContext.config.globalProperties
 const store = useWorkOrderStore()
 const order = ref(null)
 const items = ref([])
@@ -173,35 +174,44 @@ const load = async () => {
     
   } catch (error) {
     console.error('❌ 工单详情加载异常', error)
-    uni.showToast({ title: '加载失败', icon: 'none' })
+    uni.showToast({ title: $t('messages.loadFailed'), icon: 'none' })
   }
 }
 
 const completeWorkOrder = async () => {
   const id = orderId.value
   try {
-    uni.showLoading({ title: '完成中...' })
+    uni.showLoading({ title: $t('messages.completing') })
     const res = await store.completeWorkOrder(id)
     if (res.success) {
       order.value = res.data.work_order || res.data
-      uni.showToast({ title: '工单已完成', icon: 'success' })
+      uni.showToast({ title: $t('messages.workOrderCompleted'), icon: 'success' })
     } else {
-      uni.showToast({ title: res.error || '操作失败', icon: 'error' })
+      uni.showToast({ title: res.error || $t('messages.operationFailed'), icon: 'error' })
     }
   } catch (e) {
-    uni.showToast({ title: '操作失败', icon: 'error' })
+    uni.showToast({ title: $t('messages.operationFailed'), icon: 'error' })
   } finally {
     uni.hideLoading()
   }
 }
 
 const statusText = (s) => ({
-  PENDING: '待处理', ACTIVE: '执行中', SUBMITTED: '已提交', 
-  UNDER_REVIEW: '审核中', APPROVED: '已通过', REJECTED: '已驳回', COMPLETED: '已完成'
+  PENDING: $t('workorder.pending'), 
+  ACTIVE: $t('workorder.inProgress'), 
+  SUBMITTED: $t('workorder.submitted'), 
+  UNDER_REVIEW: $t('workorder.underReview'), 
+  APPROVED: $t('workorder.approved'), 
+  REJECTED: $t('workorder.rejected'), 
+  COMPLETED: $t('workorder.completed')
 })[s] || s
-const itemStatusText = (s) => ({ pending: '待处理', in_progress: '进行中', completed: '已完成', failed: '失败' })[s] || s
-const reviewStatusText = (s) => ({ pass: '✅ 通过', fail: '❌ 不合格', warning: '⚠️ 警告' })[s] || s
-const formatDateTime = (val) => (val ? new Date(val).toLocaleString('zh-CN') : '-')
+const itemStatusText = (s) => ({ pending: $t('inspection.pending'), in_progress: $t('inspection.inProgress'), completed: $t('inspection.completed'), failed: $t('inspection.failed') })[s] || s
+const reviewStatusText = (s) => ({ pass: '✅ ' + $t('inspection.passed'), fail: '❌ ' + $t('inspection.failed'), warning: '⚠️ ' + $t('inspection.warning') })[s] || s
+const formatDateTime = (val) => {
+  if (!val) return '-'
+  const locale = getCurrentInstance().appContext.config.globalProperties.$language?.currentLocale || 'zh'
+  return new Date(val).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')
+}
 
 const itemPhotos = (it) => (photos.value || []).filter(p => p.item_id === it.id)
 
@@ -217,8 +227,8 @@ const chooseAndUpload = async (it) => {
     const existingPhotos = itemPhotos(it)
     if (existingPhotos.length >= 1) {
       uni.showModal({
-        title: '提示',
-        content: '每个检查项只能上传1张照片，如需更换照片，请先删除已有照片',
+        title: $t('common.hint'),
+        content: $t('messages.onlyOnePhotoAllowed'),
         showCancel: false
       })
       return
@@ -227,7 +237,7 @@ const chooseAndUpload = async (it) => {
     // 显示选择方式
     const actionResult = await new Promise((resolve) => {
       uni.showActionSheet({
-        itemList: ['拍照', '从相册选择'],
+        itemList: [$t('common.takePhoto'), $t('common.selectFromAlbum')],
         success: (res) => {
           resolve(res.tapIndex)
         },
@@ -290,11 +300,11 @@ const chooseAndUpload = async (it) => {
         })
       } catch (photoError) {
         console.error('处理照片失败:', photoError)
-        uni.showToast({ title: '照片处理失败', icon: 'error' })
+        uni.showToast({ title: $t('messages.photoProcessFailed'), icon: 'error' })
       }
     }
     
-    uni.showToast({ title: '上传完成', icon: 'success' })
+    uni.showToast({ title: $t('messages.uploadCompleted'), icon: 'success' })
     
     // 刷新照片列表
     const c = await store.getPhotos(orderId.value)
@@ -302,7 +312,7 @@ const chooseAndUpload = async (it) => {
     
   } catch (e) {
     console.error('上传失败:', e)
-    uni.showToast({ title: '上传取消', icon: 'none' })
+    uni.showToast({ title: $t('messages.uploadCancelled'), icon: 'none' })
   }
 }
 
@@ -311,8 +321,8 @@ const deletePhoto = async (photo) => {
   try {
     const confirmResult = await new Promise((resolve) => {
       uni.showModal({
-        title: '确认删除',
-        content: '确定要删除这张照片吗？',
+        title: $t('messages.confirmDelete'),
+        content: $t('messages.confirmDeletePhoto'),
         success: (res) => resolve(res.confirm),
         fail: () => resolve(false)
       })
@@ -323,7 +333,7 @@ const deletePhoto = async (photo) => {
     // 调用后端删除接口
     await store.deletePhoto(photo.id)
     
-    uni.showToast({ title: '删除成功', icon: 'success' })
+    uni.showToast({ title: $t('messages.deleteSuccess'), icon: 'success' })
     
     // 刷新照片列表
     const c = await store.getPhotos(orderId.value)
@@ -331,7 +341,7 @@ const deletePhoto = async (photo) => {
     
   } catch (e) {
     console.error('删除失败:', e)
-    uni.showToast({ title: '删除失败', icon: 'error' })
+    uni.showToast({ title: $t('messages.deleteFailed'), icon: 'error' })
   }
 }
 
@@ -390,7 +400,7 @@ const getHighAccuracyGPS = async () => {
     // 检查GPS精度
     if (gpsResult.accuracy > 20) {
       uni.showToast({
-        title: `GPS精度较低(${gpsResult.accuracy}m)`,
+        title: $t('messages.lowGPSAccuracy', {accuracy: gpsResult.accuracy}),
         icon: 'none',
         duration: 2000
       })
@@ -400,7 +410,7 @@ const getHighAccuracyGPS = async () => {
   } catch (error) {
     console.error('原生插件GPS定位失败:', error)
     uni.showToast({
-      title: '原生插件定位失败',
+      title: $t('messages.nativePluginLocationFailed'),
       icon: 'error'
     })
     return null
@@ -413,7 +423,7 @@ const addWatermarkToImage = async (imagePath, checkItem, gpsData) => {
     console.log('开始添加GPS地址水印:', { imagePath, checkItem: checkItem.item_name })
     
     uni.showLoading({
-      title: '正在添加GPS水印...',
+      title: $t('messages.addingGPSWatermark'),
       mask: true
     })
     
@@ -476,7 +486,7 @@ const addWatermarkToImage = async (imagePath, checkItem, gpsData) => {
     } catch (fallbackError) {
       console.error('兜底水印方案也失败:', fallbackError)
       uni.showToast({
-        title: '水印添加失败，使用原图',
+        title: $t('messages.watermarkFailedUsingOriginal'),
         icon: 'none'
       })
       return imagePath
@@ -496,12 +506,12 @@ const processImageWithWatermark = async (imagePath, imageInfo, checkItem, gpsDat
     
     // 准备水印文本
     const watermarkLines = [
-      gpsData ? `📍 ${gpsData.latitude.toFixed(6)}, ${gpsData.longitude.toFixed(6)}` : '📍 GPS未获取',
-      gpsData?.accuracy ? `📊 精度: ${gpsData.accuracy.toFixed(1)}m` : '',
-      `🕐 ${new Date().toLocaleString('zh-CN')}`,
-      `👤 ${user.value?.username || '检查员'}`,
+      gpsData ? `📍 ${gpsData.latitude.toFixed(6)}, ${gpsData.longitude.toFixed(6)}` : `📍 ${$t('messages.gpsNotObtained')}`,
+      gpsData?.accuracy ? `📊 ${$t('messages.accuracy')}: ${gpsData.accuracy.toFixed(1)}m` : '',
+      `🕐 ${new Date().toLocaleString(getCurrentInstance().appContext.config.globalProperties.$language?.currentLocale === 'zh' ? 'zh-CN' : 'en-US')}`,
+      `👤 ${user.value?.username || $t('common.inspector')}`,
       `📋 ${checkItem.item_name}`,
-      `🏗️ ${order.value?.site_name || order.value?.site_id || '工单站点'}`
+      `🏗️ ${order.value?.site_name || order.value?.site_id || $t('common.workOrderSite')}`
     ].filter(Boolean)
     
     // 绘制水印

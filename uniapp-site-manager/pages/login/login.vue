@@ -1,10 +1,17 @@
 <template>
 	<view class="login-container">
+		<!-- 语言切换按钮 -->
+		<view class="language-switch">
+			<text @click="toggleLanguage" class="language-btn">
+				{{ languageStore.currentLanguageName }}
+			</text>
+		</view>
+		
 		<view class="login-header">
 			<view class="logo">
-				<text class="logo-text">站点管理</text>
+				<text class="logo-text">{{ $t('login.title') }}</text>
 			</view>
-			<text class="subtitle">现代化的站点信息管理系统</text>
+			<text class="subtitle">{{ $t('login.subtitle') }}</text>
 		</view>
 		
 		<view class="login-form">
@@ -12,7 +19,7 @@
 				<input 
 					class="input-field"
 					type="text" 
-					placeholder="用户名"
+					:placeholder="$t('login.username')"
 					v-model="loginForm.username"
 					:disabled="loading"
 				/>
@@ -22,7 +29,7 @@
 				<input 
 					class="input-field"
 					type="password" 
-					placeholder="密码"
+					:placeholder="$t('login.password')"
 					v-model="loginForm.password"
 					:disabled="loading"
 				/>
@@ -34,29 +41,34 @@
 				@click="handleLogin"
 				:disabled="loading || !loginForm.username || !loginForm.password"
 			>
-				{{ loading ? '登录中...' : '登录' }}
+				{{ loading ? $t('login.loggingIn') : $t('login.loginBtn') }}
 			</button>
 			
 			<view class="register-link">
-				<text>还没有账号？</text>
-				<text class="link" @click="goToRegister">立即注册</text>
+				<text>{{ $t('login.noAccount') }}</text>
+				<text class="link" @click="goToRegister">{{ $t('login.register') }}</text>
 			</view>
 		</view>
 		
 		<!-- 版本信息 -->
 		<view class="version-info">
-			<text>版本 1.0.0</text>
+			<text>{{ $t('login.version') }} 1.0.0</text>
 		</view>
 	</view>
 </template>
 
 <script setup>
-	import { ref, reactive, onMounted } from 'vue'
+	import { ref, reactive, onMounted, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useLoggerStore } from '@/stores/logger'
+	import { useLanguageStore } from '@/stores/language'
 	
 	const userStore = useUserStore()
 	const logger = useLoggerStore()
+	const languageStore = useLanguageStore()
+	
+	const instance = getCurrentInstance()
+	const t = (key) => instance.appContext.config.globalProperties.$t(key)
 	
 	const loading = ref(false)
 	const loginForm = reactive({
@@ -166,17 +178,27 @@
 		}
 	}
 	
+	// 切换语言
+	const toggleLanguage = () => {
+		languageStore.toggleLocale()
+	}
+	
 	// 跳转到注册页
 	const goToRegister = () => {
 		// logger.logUserInteraction('register-link', 'click')
 		// logger.logAction('REGISTER_LINK_CLICKED')
 		
 		uni.showModal({
-			title: '注册功能',
-			content: '注册功能正在开发中，请联系管理员获取账号',
+			title: t('login.register'),
+			content: languageStore.isZh ? '注册功能正在开发中，请联系管理员获取账号' : 'Registration feature is under development, please contact the administrator for an account',
 			showCancel: false
 		})
 	}
+	
+	// 初始化语言
+	onMounted(() => {
+		languageStore.initLocale()
+	})
 </script>
 
 <style lang="scss" scoped>
@@ -188,6 +210,35 @@
 		align-items: center;
 		justify-content: center;
 		padding: 40px 20px;
+		position: relative;
+	}
+	
+	.language-switch {
+		position: absolute;
+		top: 50px;
+		right: 30px;
+		z-index: 100;
+	}
+	
+	.language-btn {
+		background: rgba(255, 255, 255, 0.2);
+		color: white;
+		padding: 8px 16px;
+		border-radius: 20px;
+		font-size: 14px;
+		backdrop-filter: blur(10px);
+		border: 1px solid rgba(255, 255, 255, 0.3);
+		cursor: pointer;
+		transition: all 0.3s ease;
+		
+		&:hover {
+			background: rgba(255, 255, 255, 0.3);
+			transform: scale(1.05);
+		}
+		
+		&:active {
+			transform: scale(0.95);
+		}
 	}
 	
 	.login-header {

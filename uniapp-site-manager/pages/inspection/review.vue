@@ -1,17 +1,17 @@
 <template>
 	<view class="review-container">
 		<view class="header">
-			<text class="title">检查审核</text>
-			<text class="subtitle">功能开发中...</text>
+			<text class="title">{{ $t('inspection.review') }}</text>
+			<text class="subtitle">{{ $t('messages.featureInDevelopment') }}...</text>
 		</view>
 		
 		<view class="content">
 			<view class="placeholder">
 				<text class="placeholder-icon">✅</text>
-				<text class="placeholder-title">检查审核功能</text>
-				<text class="placeholder-desc">此功能正在开发中，敬请期待</text>
+				<text class="placeholder-title">{{ $t('inspection.reviewFunction') }}</text>
+				<text class="placeholder-desc">{{ $t('messages.featureComingSoon') }}</text>
 				
-				<button class="back-btn" @click="goBack">返回</button>
+				<button class="back-btn" @click="goBack">{{ $t('common.back') }}</button>
 			</view>
 		</view>
 	</view>

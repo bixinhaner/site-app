@@ -13,27 +13,27 @@
 		<view class="site-content">
 			<!-- 基本信息 -->
 			<view class="info-section">
-				<view class="section-title">基本信息</view>
+				<view class="section-title">{{ $t('site.basicInfo') }}</view>
 				<view class="info-grid">
 					<view class="info-item">
-						<text class="info-label">站点类型</text>
+						<text class="info-label">{{ $t('site.type') }}</text>
 						<text class="info-value">{{ getSiteTypeText(site?.site_type) }}</text>
 					</view>
 					
 					<view class="info-item">
-						<text class="info-label">优先级</text>
+						<text class="info-label">{{ $t('workorder.priority') }}</text>
 						<text class="info-value" :class="getPriorityClass(site?.priority)">
 							{{ getPriorityText(site?.priority) }}
 						</text>
 					</view>
 					
 					<view class="info-item">
-						<text class="info-label">联系人</text>
+						<text class="info-label">{{ $t('site.contact') }}</text>
 						<text class="info-value">{{ site?.contact_person || '-' }}</text>
 					</view>
 					
 					<view class="info-item">
-						<text class="info-label">联系电话</text>
+						<text class="info-label">{{ $t('site.contactPhone') }}</text>
 						<text class="info-value">{{ site?.contact_phone || '-' }}</text>
 					</view>
 				</view>
@@ -41,34 +41,34 @@
 			
 			<!-- 位置信息 -->
 			<view class="info-section">
-				<view class="section-title">位置信息</view>
+				<view class="section-title">{{ $t('site.locationInfo') }}</view>
 				<view class="location-info">
 					<view class="address-item">
-						<text class="address-label">详细地址</text>
+						<text class="address-label">{{ $t('site.detailedAddress') }}</text>
 						<text class="address-text">{{ site?.address || '-' }}</text>
 					</view>
 					
 					<view class="coordinates" v-if="site?.latitude && site?.longitude">
 						<view class="coord-item">
-							<text class="coord-label">纬度</text>
+							<text class="coord-label">{{ $t('site.latitude') }}</text>
 							<text class="coord-value">{{ site?.latitude }}</text>
 						</view>
 						<view class="coord-item">
-							<text class="coord-label">经度</text>
+							<text class="coord-label">{{ $t('site.longitude') }}</text>
 							<text class="coord-value">{{ site?.longitude }}</text>
 						</view>
 					</view>
 					
 					<button class="location-btn" @click="showLocation" v-if="site?.latitude && site?.longitude">
 						<text class="btn-icon">📍</text>
-						<text>在地图中查看</text>
+						<text>{{ $t('site.viewOnMap') }}</text>
 					</button>
 				</view>
 			</view>
 			
 			<!-- 描述信息 -->
 			<view class="info-section" v-if="site?.description">
-				<view class="section-title">描述信息</view>
+				<view class="section-title">{{ $t('site.description') }}</view>
 				<text class="description-text">{{ site?.description }}</text>
 			</view>
 			
@@ -76,25 +76,25 @@
 			<view class="action-buttons">
 				<button class="action-btn primary" @click="startInspection">
 					<text class="btn-icon">📷</text>
-					<text>现场检查</text>
+					<text>{{ $t('site.fieldInspection') }}</text>
 				</button>
 				
 				<button class="action-btn secondary" @click="viewHistory">
 					<text class="btn-icon">📋</text>
-					<text>检查历史</text>
+					<text>{{ $t('site.inspectionHistory') }}</text>
 				</button>
 				
 				<button class="action-btn secondary" @click="editSite" v-if="canEdit">
 					<text class="btn-icon">✏️</text>
-					<text>编辑站点</text>
+					<text>{{ $t('site.editSite') }}</text>
 				</button>
 			</view>
 			
 			<!-- 最近检查记录 -->
 			<view class="info-section">
 				<view class="section-header">
-					<text class="section-title">最近检查</text>
-					<text class="see-all" @click="viewHistory">查看全部</text>
+					<text class="section-title">{{ $t('site.recentInspections') }}</text>
+					<text class="see-all" @click="viewHistory">{{ $t('site.viewAll') }}</text>
 				</view>
 				
 				<view class="inspection-list">
@@ -114,7 +114,7 @@
 					</view>
 					
 					<view class="empty-inspections" v-if="recentInspections.length === 0">
-						<text>暂无检查记录</text>
+						<text>{{ $t('site.noInspectionRecords') }}</text>
 					</view>
 				</view>
 			</view>
@@ -128,7 +128,7 @@
 </template>
 
 <script setup>
-	import { ref, computed } from 'vue'
+	import { ref, computed, getCurrentInstance, onMounted } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
@@ -137,6 +137,8 @@
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const inspectionStore = useInspectionStore()
+	
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
 	const loading = ref(false)
 	const siteId = ref(null)
@@ -227,10 +229,10 @@
 	// 获取检查状态文本
 	const getInspectionStatusText = (status) => {
 		const statusMap = {
-			'pending': '待处理',
-			'in_progress': '进行中',
-			'completed': '已完成',
-			'failed': '失败'
+			'pending': $t('inspection.pending'),
+			'in_progress': $t('inspection.inProgress'),
+			'completed': $t('inspection.completed'),
+			'failed': $t('inspection.failed')
 		}
 		return statusMap[status] || status
 	}
@@ -324,13 +326,20 @@
 			loadSiteDetail()
 		} else {
 			uni.showToast({
-				title: '参数错误',
+				title: $t('messages.operationFailed'),
 				icon: 'error'
 			})
 			setTimeout(() => {
 				uni.navigateBack()
 			}, 1500)
 		}
+	})
+	
+	onMounted(() => {
+		// 动态设置页面标题
+		uni.setNavigationBarTitle({
+			title: $t('site.detail')
+		})
 	})
 </script>
 

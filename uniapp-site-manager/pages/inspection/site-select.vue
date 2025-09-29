@@ -6,7 +6,7 @@
 				<view class="back-button" @click="goBack">
 					<text class="back-icon">←</text>
 				</view>
-				<text class="navbar-title">选择站点</text>
+				<text class="navbar-title">{{ $t('inspection.siteSelect') }}</text>
 				<view class="navbar-right">
 					<text class="inspection-type">{{ getInspectionTypeText(inspectionType) }}</text>
 				</view>
@@ -19,7 +19,7 @@
 				<text class="search-icon">🔍</text>
 				<input 
 					class="search-input" 
-					placeholder="搜索站点名称或编号" 
+					:placeholder="$t('site.searchPlaceholder')" 
 					v-model="searchKeyword"
 					@input="onSearch"
 				/>
@@ -30,7 +30,7 @@
 			
 			<view class="filter-button" @click="showFilterModal">
 				<text class="filter-icon">🎯</text>
-				<text class="filter-text">筛选</text>
+				<text class="filter-text">{{ $t('common.filter') }}</text>
 				<text class="filter-count" v-if="activeFilterCount > 0">({{ activeFilterCount }})</text>
 			</view>
 		</view>

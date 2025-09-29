@@ -3,7 +3,7 @@
 		<!-- 自定义导航栏 -->
 		<view class="custom-navbar">
 			<view class="navbar-content">
-				<text class="navbar-title">现场检查</text>
+				<text class="navbar-title">{{ $t('inspection.title') }}</text>
 				<view class="navbar-actions">
 					<view class="sync-status" @click="checkSyncStatus">
 						<text class="sync-icon" :class="{ syncing: isSyncing }">🔄</text>
@@ -17,19 +17,19 @@
 		<view class="stats-container">
 			<view class="stat-item">
 				<text class="stat-number">{{ statistics.total_inspections || 0 }}</text>
-				<text class="stat-label">总检查数</text>
+				<text class="stat-label">{{ $t('inspection.totalInspections') }}</text>
 			</view>
 			<view class="stat-item">
 				<text class="stat-number">{{ statistics.pending_inspections || 0 }}</text>
-				<text class="stat-label">待处理</text>
+				<text class="stat-label">{{ $t('workorder.pending') }}</text>
 			</view>
 			<view class="stat-item">
 				<text class="stat-number">{{ statistics.completed_inspections || 0 }}</text>
-				<text class="stat-label">已完成</text>
+				<text class="stat-label">{{ $t('workorder.completed') }}</text>
 			</view>
 			<view class="stat-item">
 				<text class="stat-number">{{ statistics.average_score || 0 }}分</text>
-				<text class="stat-label">平均分</text>
+				<text class="stat-label">{{ $t('inspection.averageScore') }}</text>
 			</view>
 		</view>
 		
@@ -65,7 +65,7 @@
 					<!-- 检查卡片头部 -->
 					<view class="inspection-header">
 						<view class="site-info">
-							<text class="site-name">{{ inspection.site_name || '未知站点' }}</text>
+							<text class="site-name">{{ inspection.site_name || $t('site.unknownSite') }}</text>
 							<text class="site-code">{{ inspection.site_code || inspection.site_id }}</text>
 						</view>
 						<view class="status-badge" :class="getStatusClass(inspection.status)">
@@ -82,7 +82,7 @@
 						
 						<view class="content-row">
 							<text class="content-icon">👤</text>
-							<text class="content-text">{{ inspection.inspector_name || '检查员' }}</text>
+							<text class="content-text">{{ inspection.inspector_name || $t('inspection.inspector') }}</text>
 						</view>
 						
 						<view class="content-row" v-if="inspection.start_time">
@@ -98,7 +98,7 @@
 						<!-- 进度条 -->
 						<view class="progress-container" v-if="inspection.total_items > 0">
 							<view class="progress-info">
-								<text class="progress-text">完成进度</text>
+								<text class="progress-text">{{ $t('inspection.progress') }}</text>
 								<text class="progress-rate">{{ inspection.completion_rate }}%</text>
 							</view>
 							<view class="progress-bar">
@@ -202,7 +202,7 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
 	import { onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
@@ -225,15 +225,17 @@
 	const isSyncing = ref(false)
 	const statistics = ref({})
 	
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+
 	// 筛选器配置
-	const filters = ref([
-		{ label: '全部', value: 'all', count: 0 },
-		{ label: '草稿', value: 'draft', count: 0 },
-		{ label: '进行中', value: 'in_progress', count: 0 },
-		{ label: '已提交', value: 'submitted', count: 0 },
-		{ label: '待审核', value: 'under_review', count: 0 },
-		{ label: '已通过', value: 'approved', count: 0 },
-		{ label: '已驳回', value: 'rejected', count: 0 }
+	const filters = computed(() => [
+		{ label: $t('common.all'), value: 'all', count: 0 },
+		{ label: $t('inspection.draft'), value: 'draft', count: 0 },
+		{ label: $t('workorder.inProgress'), value: 'in_progress', count: 0 },
+		{ label: $t('workorder.submitted'), value: 'submitted', count: 0 },
+		{ label: $t('workorder.underReview'), value: 'under_review', count: 0 },
+		{ label: $t('workorder.approved'), value: 'approved', count: 0 },
+		{ label: $t('workorder.rejected'), value: 'rejected', count: 0 }
 	])
 	
 	// 计算属性

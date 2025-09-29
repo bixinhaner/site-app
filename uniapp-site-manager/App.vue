@@ -11,6 +11,7 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useOfflineStore } from '@/stores/offline'
 	import { useLoggerStore } from '@/stores/logger'
+	import { useLanguageStore } from '@/stores/language'
 	import { initInterceptors } from '@/utils/api-interceptor'
 	
 	const globalLoading = ref(false)
@@ -23,9 +24,14 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	const userStore = useUserStore()
 	const offlineStore = useOfflineStore()
 	const logger = useLoggerStore()
+	const languageStore = useLanguageStore()
 	
 	onLaunch(async () => {
 		console.log('🚀 App Launch - Start')
+		
+		// 初始化语言设置和底部导航栏文本
+		languageStore.initLocale()
+		console.log('语言设置初始化完成')
 		
 		// 暂时禁用日志功能，专注解决页面加载问题
 		console.log('⚠️ Logger system temporarily disabled for debugging')
