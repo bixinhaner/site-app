@@ -1428,6 +1428,18 @@ async def update_inspection_item(
     check_item.checked_at = datetime.utcnow()
     check_item.updated_at = datetime.utcnow()
     
+    # 如果检查项已完成且绑定了设备，更新设备状态为"已检查"
+    if (check_item.status == CheckItemStatusEnum.COMPLETED and 
+        check_item.equipment_sn):
+        from app.models.equipment import EquipmentInstance, InventoryStatusEnum
+        equipment_instance = db.query(EquipmentInstance).filter(
+            EquipmentInstance.serial_number == check_item.equipment_sn
+        ).first()
+        
+        if equipment_instance:
+            equipment_instance.status = InventoryStatusEnum.INSPECTED
+            equipment_instance.updated_at = datetime.utcnow()
+    
     db.commit()
     db.refresh(check_item)
     
@@ -1789,3 +1801,177 @@ def _update_inspection_result_from_item_reviews(db: Session, inspection_id: str)
     except Exception:
         db.rollback()
         raise
+
+
+# 新增：设备验证和绑定接口
+@router.get("/equipment/check-pickup/{sn}")
+async def check_equipment_pickup_status(
+    sn: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """验证设备是否已被当前用户领料"""
+    from app.models.equipment import EquipmentInstance, InventoryStatusEnum
+    
+    # 查询设备实例
+    equipment_instance = db.query(EquipmentInstance).filter(
+        EquipmentInstance.serial_number == sn
+    ).first()
+    
+    if not equipment_instance:
+        raise HTTPException(
+            status_code=404,
+            detail=f"设备序列号 {sn} 不存在"
+        )
+    
+    # 检查是否已被当前用户领料
+    if equipment_instance.status != InventoryStatusEnum.ISSUED:
+        raise HTTPException(
+            status_code=400,
+            detail="设备未出库，无法进行检查"
+        )
+    
+    if equipment_instance.issued_to != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="设备未被当前用户领料，无法进行检查"
+        )
+    
+    return {
+        "success": True,
+        "equipment_sn": sn,
+        "equipment_name": equipment_instance.equipment.equipment_name if equipment_instance.equipment else "未知设备",
+        "issued_date": equipment_instance.issued_date,
+        "message": "设备验证通过，可以进行检查"
+    }
+
+
+@router.post("/detail/{inspection_id}/bind-equipment")
+async def bind_equipment_to_sector(
+    inspection_id: str,
+    request_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """绑定设备到小区检查项"""
+    equipment_sn = request_data.get("equipment_sn")
+    sector_id = request_data.get("sector_id")
+    band = request_data.get("band")
+    
+    if not sector_id:
+        raise HTTPException(
+            status_code=400,
+            detail="扇区ID不能为空"
+        )
+    
+    # 如果设备SN为空或空字符串，表示解绑操作
+    is_unbind = not equipment_sn or equipment_sn.strip() == ""
+    
+    # 验证检查记录存在且属于当前用户
+    inspection = db.query(SiteInspection).filter(
+        SiteInspection.id == inspection_id,
+        SiteInspection.inspector_id == current_user.id
+    ).first()
+    
+    if not inspection:
+        raise HTTPException(
+            status_code=404,
+            detail="检查记录不存在或无权限操作"
+        )
+    
+    # 验证设备状态（仅在绑定操作时验证）
+    equipment_instance = None
+    if not is_unbind:
+        from app.models.equipment import EquipmentInstance, InventoryStatusEnum
+        equipment_instance = db.query(EquipmentInstance).filter(
+            EquipmentInstance.serial_number == equipment_sn,
+            EquipmentInstance.status == InventoryStatusEnum.ISSUED,
+            EquipmentInstance.issued_to == current_user.id
+        ).first()
+        
+        if not equipment_instance:
+            raise HTTPException(
+                status_code=400,
+                detail="设备序列号无效或未被当前用户领料"
+            )
+    
+    # 构造cell_id
+    cell_id = f"{sector_id}_{band}" if band else sector_id
+    
+    # 查找该小区的检查项
+    check_items = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.sector_id == sector_id
+    )
+    
+    if band:
+        check_items = check_items.filter(InspectionCheckItem.band == band)
+    
+    check_items = check_items.all()
+    
+    if not check_items:
+        raise HTTPException(
+            status_code=404,
+            detail=f"未找到扇区 {sector_id} 的检查项"
+        )
+    
+    # 仅在绑定操作时检查是否已有其他设备绑定到该小区
+    if not is_unbind:
+        existing_binding = db.query(InspectionCheckItem).filter(
+            InspectionCheckItem.inspection_id == inspection_id,
+            InspectionCheckItem.sector_id == sector_id,
+            InspectionCheckItem.equipment_sn.isnot(None),
+            InspectionCheckItem.equipment_sn != equipment_sn
+        ).first()
+        
+        if existing_binding:
+            raise HTTPException(
+                status_code=409,
+                detail=f"扇区 {sector_id} 已绑定其他设备: {existing_binding.equipment_sn}"
+            )
+    
+    # 绑定或解绑设备到所有相关检查项
+    try:
+        for item in check_items:
+            item.equipment_sn = equipment_sn if not is_unbind else None
+            item.updated_at = datetime.utcnow()
+        
+        # 更新设备状态
+        if not is_unbind and equipment_instance:
+            # 绑定时，设备状态更新为"待检查"
+            from app.models.equipment import InventoryStatusEnum
+            equipment_instance.status = InventoryStatusEnum.PENDING_INSPECTION
+            equipment_instance.updated_at = datetime.utcnow()
+        
+        db.commit()
+        
+        if is_unbind:
+            return {
+                "success": True,
+                "message": f"成功解绑扇区 {sector_id} 的设备",
+                "action": "unbind",
+                "sector_id": sector_id,
+                "band": band,
+                "cell_id": cell_id,
+                "affected_items_count": len(check_items)
+            }
+        else:
+            return {
+                "success": True,
+                "message": f"成功绑定设备 {equipment_sn} 到扇区 {sector_id}，设备状态已更新为待检查",
+                "action": "bind",
+                "equipment_sn": equipment_sn,
+                "sector_id": sector_id,
+                "band": band,
+                "cell_id": cell_id,
+                "bound_items_count": len(check_items),
+                "equipment_name": equipment_instance.equipment.equipment_name if equipment_instance and equipment_instance.equipment else "未知设备",
+                "equipment_status": "pending_inspection"
+            }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"绑定设备失败: {str(e)}"
+        )

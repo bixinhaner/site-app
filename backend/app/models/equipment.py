@@ -18,6 +18,8 @@ class InventoryStatusEnum(str, enum.Enum):
     IN_STOCK = "in_stock"            # 库存中
     ALLOCATED = "allocated"          # 已分配
     ISSUED = "issued"                # 已出库
+    PENDING_INSPECTION = "pending_inspection"  # 待检查
+    INSPECTED = "inspected"          # 已检查
     RETURNED = "returned"            # 已退库
     DAMAGED = "damaged"              # 损坏
 

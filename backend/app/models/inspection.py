@@ -164,6 +164,7 @@ class InspectionCheckItem(Base):
     sector_id = Column(String(10))  # 扇区编号
     band = Column(String(20))       # 频段，如 n41, n78, n3
     cell_id = Column(String(20))    # 小区ID，格式：sector_band (如: 1_n41, 2_n78)
+    equipment_sn = Column(String(100))  # 绑定的设备序列号
     
     # 检查类型和状态
     required_type = Column(String(20))  # photo, data, both

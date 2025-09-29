@@ -81,6 +81,12 @@
 						<view class="item-info">
 							<text class="item-name">{{ item.item_name }}</text>
 							<text class="item-id" v-if="item.sector_id">扇区 {{ item.sector_id }}</text>
+							<text class="equipment-binding" v-if="item.sector_id && isCellBound(item)">
+								📱 已绑定: {{ getCellEquipmentSn(item) }}
+							</text>
+							<text class="equipment-binding pending" v-else-if="item.sector_id && !isCellBound(item)">
+								🔗 需要绑定设备
+							</text>
 						</view>
 						<view class="item-actions">
 							<text class="required-badge" v-if="item.required_type === 'both'">照片+数据</text>
@@ -159,6 +165,34 @@
 				</view>
 				
 				<scroll-view class="modal-content" scroll-y>
+					<!-- 设备绑定部分 (仅小区级检查项显示) -->
+					<view class="modal-section" v-if="currentItem.sector_id">
+						<text class="section-label">设备绑定</text>
+						<view class="equipment-binding-section">
+							<view v-if="currentItem.equipment_sn" class="bound-equipment">
+								<text class="bound-icon">✅</text>
+								<view class="bound-info">
+									<text class="bound-text">已绑定设备</text>
+									<text class="bound-sn">{{ currentItem.equipment_sn }}</text>
+								</view>
+								<button class="unbind-btn" @click="unbindEquipment">
+									<text>解绑</text>
+								</button>
+							</view>
+							<view v-else class="unbind-equipment">
+								<text class="unbind-icon">⚠️</text>
+								<view class="unbind-info">
+									<text class="unbind-text">请先扫码绑定设备</text>
+									<text class="unbind-desc">小区 {{ currentItem.band ? `${currentItem.sector_id}_${currentItem.band}` : currentItem.sector_id }} 需要绑定设备后才能检查</text>
+								</view>
+								<button class="bind-btn" @click="scanEquipmentForBinding">
+									<text class="btn-icon">📷</text>
+									<text>扫码绑定</text>
+								</button>
+							</view>
+						</view>
+					</view>
+					
 					<!-- 检查项基本信息 -->
 					<view class="modal-section">
 						<text class="section-label">基本信息</text>
@@ -286,6 +320,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { buildImageUrl, buildApiUrl, getAuthHeaders } from '@/config/api.js'
+	import { parseBarcode, formatMacAddress, isValidParseResult } from '@/utils/barcode-parser.js'
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
@@ -613,8 +648,64 @@
 		return checkItems.value.filter(item => item.category_id === categoryId).length
 	}
 	
-	const openCheckItem = (item) => {
-		currentItem.value = { ...item }
+	// 检查小区是否已绑定设备
+	const isCellBound = (item) => {
+		if (!item.sector_id) return true // 站点级检查项不需要绑定
+		
+		// 检查同一小区的任意检查项是否已绑定设备
+		const cellItems = checkItems.value.filter(checkItem => 
+			checkItem.sector_id === item.sector_id && 
+			checkItem.band === item.band
+		)
+		
+		return cellItems.some(cellItem => cellItem.equipment_sn)
+	}
+	
+	// 获取小区绑定的设备序列号
+	const getCellEquipmentSn = (item) => {
+		if (!item.sector_id) return null
+		
+		const cellItems = checkItems.value.filter(checkItem => 
+			checkItem.sector_id === item.sector_id && 
+			checkItem.band === item.band
+		)
+		
+		const boundItem = cellItems.find(cellItem => cellItem.equipment_sn)
+		return boundItem?.equipment_sn || null
+	}
+
+	const openCheckItem = async (item) => {
+		// 如果是小区级检查项且该小区未绑定设备，先要求绑定设备
+		if (item.sector_id && !isCellBound(item)) {
+			const cellId = item.band ? `${item.sector_id}_${item.band}` : item.sector_id
+			// 显示绑定设备提示
+			uni.showModal({
+				title: '需要绑定设备',
+				content: `小区 ${cellId} 需要先绑定设备才能进行检查，是否现在扫码绑定？`,
+				confirmText: '扫码绑定',
+				cancelText: '稍后绑定',
+				success: (res) => {
+					if (res.confirm) {
+						// 直接调用扫码绑定
+						scanEquipmentForBinding(item)
+					} else {
+						// 仍然打开检查项，但用户需要手动绑定
+						currentItem.value = { ...item }
+						// 确保显示绑定状态
+						currentItem.value.equipment_sn = getCellEquipmentSn(item)
+						showCheckModal.value = true
+					}
+				}
+			})
+		} else {
+			// 正常打开检查项
+			currentItem.value = { ...item }
+			// 如果是小区级检查项，确保显示正确的绑定状态
+			if (item.sector_id) {
+				currentItem.value.equipment_sn = getCellEquipmentSn(item)
+			}
+			showCheckModal.value = true
+		}
 	}
 	
 	const closeItemModal = () => {
@@ -1355,6 +1446,218 @@
 		return date.toLocaleTimeString('zh-CN', {
 			hour: '2-digit',
 			minute: '2-digit'
+		})
+	}
+	
+	// 扫码绑定设备功能
+	const scanEquipmentForBinding = async (item = null) => {
+		const targetItem = item || currentItem.value
+		if (!targetItem || !targetItem.sector_id) {
+			uni.showToast({
+				title: '无效的检查项',
+				icon: 'none'
+			})
+			return
+		}
+		
+		try {
+			console.log('开始扫码绑定设备...')
+			
+			// 执行扫码
+			const result = await new Promise((resolve, reject) => {
+				uni.scanCode({
+					scanType: ['barCode', 'qrCode'],
+					success: resolve,
+					fail: reject
+				})
+			})
+			
+			console.log('扫码结果:', result.result)
+			
+			// 解析条码
+			const parsedBarcode = parseBarcode(result.result)
+			console.log('解析结果:', parsedBarcode)
+			
+			if (!parsedBarcode.success || !isValidParseResult(parsedBarcode)) {
+				uni.showToast({
+					title: parsedBarcode.error || '条码格式不正确',
+					icon: 'none'
+				})
+				return
+			}
+			
+			uni.showLoading({
+				title: '验证设备...',
+				mask: true
+			})
+			
+			try {
+				// 验证设备是否已被当前用户领料
+				const checkResponse = await new Promise((resolve, reject) => {
+					uni.request({
+						url: buildApiUrl(`/api/inspections/equipment/check-pickup/${parsedBarcode.sn}`),
+						method: 'GET',
+						header: getAuthHeaders(userStore.token),
+						success: resolve,
+						fail: reject
+					})
+				})
+				
+				console.log('设备验证结果:', checkResponse.data)
+				
+				if (checkResponse.statusCode !== 200) {
+					throw new Error(checkResponse.data?.detail || '设备验证失败')
+				}
+				
+				// 绑定设备到小区
+				const bindResponse = await new Promise((resolve, reject) => {
+					uni.request({
+						url: buildApiUrl(`/api/inspections/detail/${inspectionData.value.id}/bind-equipment`),
+						method: 'POST',
+						header: getAuthHeaders(userStore.token),
+						data: {
+							equipment_sn: parsedBarcode.sn,
+							sector_id: targetItem.sector_id,
+							band: targetItem.band
+						},
+						success: resolve,
+						fail: reject
+					})
+				})
+				
+				console.log('设备绑定结果:', bindResponse.data)
+				
+				if (bindResponse.statusCode === 200 && bindResponse.data.success) {
+					// 更新本地检查项数据
+					const updatedItems = checkItems.value.map(checkItem => {
+						if (checkItem.sector_id === targetItem.sector_id && 
+							(!targetItem.band || checkItem.band === targetItem.band)) {
+							return {
+								...checkItem,
+								equipment_sn: parsedBarcode.sn
+							}
+						}
+						return checkItem
+					})
+					
+					checkItems.value = updatedItems
+					
+					// 如果当前正在查看该检查项，也更新当前项
+					if (currentItem.value && currentItem.value.id === targetItem.id) {
+						currentItem.value = {
+							...currentItem.value,
+							equipment_sn: parsedBarcode.sn
+						}
+					}
+					
+					uni.hideLoading()
+					uni.showModal({
+						title: '绑定成功',
+						content: `设备 ${parsedBarcode.sn} 已成功绑定到小区 ${targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id}`,
+						showCancel: false,
+						confirmText: '确定',
+						success: () => {
+							// 如果是从外部调用，打开检查项详情
+							if (item && !currentItem.value) {
+								currentItem.value = { ...targetItem, equipment_sn: parsedBarcode.sn }
+								showCheckModal.value = true
+							}
+						}
+					})
+				} else {
+					throw new Error(bindResponse.data?.detail || '设备绑定失败')
+				}
+				
+			} catch (error) {
+				uni.hideLoading()
+				console.error('设备绑定失败:', error)
+				uni.showToast({
+					title: error.message || '设备绑定失败',
+					icon: 'none',
+					duration: 3000
+				})
+			}
+			
+		} catch (error) {
+			console.error('扫码失败:', error)
+			uni.showToast({
+				title: '扫码失败，请重试',
+				icon: 'none'
+			})
+		}
+	}
+	
+	// 解绑设备
+	const unbindEquipment = async () => {
+		if (!currentItem.value || !currentItem.value.equipment_sn) {
+			return
+		}
+		
+		uni.showModal({
+			title: '确认解绑',
+			content: `确定要解绑设备 ${currentItem.value.equipment_sn} 吗？`,
+			success: async (res) => {
+				if (res.confirm) {
+					try {
+						uni.showLoading({
+							title: '解绑中...',
+							mask: true
+						})
+						
+						// 调用绑定接口，传空的设备SN实现解绑
+						const response = await new Promise((resolve, reject) => {
+							uni.request({
+								url: buildApiUrl(`/api/inspections/detail/${inspectionData.value.id}/bind-equipment`),
+								method: 'POST',
+								header: getAuthHeaders(userStore.token),
+								data: {
+									equipment_sn: '',  // 空字符串表示解绑
+									sector_id: currentItem.value.sector_id,
+									band: currentItem.value.band
+								},
+								success: resolve,
+								fail: reject
+							})
+						})
+						
+						if (response.statusCode === 200) {
+							// 更新本地数据
+							const updatedItems = checkItems.value.map(checkItem => {
+								if (checkItem.sector_id === currentItem.value.sector_id && 
+									(!currentItem.value.band || checkItem.band === currentItem.value.band)) {
+									return {
+										...checkItem,
+										equipment_sn: null
+									}
+								}
+								return checkItem
+							})
+							
+							checkItems.value = updatedItems
+							currentItem.value = {
+								...currentItem.value,
+								equipment_sn: null
+							}
+							
+							uni.hideLoading()
+							uni.showToast({
+								title: '解绑成功',
+								icon: 'success'
+							})
+						} else {
+							throw new Error('解绑失败')
+						}
+						
+					} catch (error) {
+						uni.hideLoading()
+						console.error('解绑失败:', error)
+						uni.showToast({
+							title: '解绑失败',
+							icon: 'none'
+						})
+					}
+				}
+			}
 		})
 	}
 </script>
@@ -2156,5 +2459,113 @@
 	
 	.save-btn:disabled {
 		background: #adb5bd;
+	}
+	
+	/* 设备绑定相关样式 */
+	.equipment-binding {
+		font-size: 22rpx;
+		margin-top: 4rpx;
+		
+		&.pending {
+			color: #f59e0b;
+		}
+		
+		&:not(.pending) {
+			color: #10b981;
+		}
+	}
+	
+	.equipment-binding-section {
+		margin-top: 10rpx;
+	}
+	
+	.bound-equipment {
+		display: flex;
+		align-items: center;
+		gap: 15rpx;
+		padding: 20rpx;
+		background: #f0f9ff;
+		border: 1rpx solid #0ea5e9;
+		border-radius: 12rpx;
+	}
+	
+	.bound-icon {
+		font-size: 32rpx;
+	}
+	
+	.bound-info {
+		flex: 1;
+	}
+	
+	.bound-text {
+		font-size: 28rpx;
+		color: #0f172a;
+		font-weight: 500;
+		display: block;
+	}
+	
+	.bound-sn {
+		font-size: 24rpx;
+		color: #0ea5e9;
+		font-family: monospace;
+		margin-top: 4rpx;
+		display: block;
+	}
+	
+	.unbind-btn {
+		background: #fee2e2;
+		color: #dc2626;
+		border: 1rpx solid #fca5a5;
+		padding: 12rpx 20rpx;
+		border-radius: 8rpx;
+		font-size: 24rpx;
+	}
+	
+	.unbind-equipment {
+		display: flex;
+		align-items: center;
+		gap: 15rpx;
+		padding: 20rpx;
+		background: #fef3c7;
+		border: 1rpx solid #f59e0b;
+		border-radius: 12rpx;
+	}
+	
+	.unbind-icon {
+		font-size: 32rpx;
+	}
+	
+	.unbind-info {
+		flex: 1;
+	}
+	
+	.unbind-text {
+		font-size: 28rpx;
+		color: #0f172a;
+		font-weight: 500;
+		display: block;
+	}
+	
+	.unbind-desc {
+		font-size: 24rpx;
+		color: #f59e0b;
+		margin-top: 4rpx;
+		display: block;
+	}
+	
+	.bind-btn {
+		background: linear-gradient(135deg, #f97316, #ea580c);
+		color: white;
+		border: none;
+		padding: 12rpx 20rpx;
+		border-radius: 8rpx;
+		font-size: 24rpx;
+		display: flex;
+		align-items: center;
+		gap: 8rpx;
+	}
+	
+	.btn-icon {
+		font-size: 24rpx;
 	}
 </style>
