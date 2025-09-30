@@ -4,7 +4,7 @@
     <div class="page-header">
       <h1>设备类型管理</h1>
       <div class="header-actions">
-        <el-button type="primary" @click="showCreateDialog = true">
+        <el-button type="primary" @click="handleCreate">
           <el-icon><Plus /></el-icon>
           新增设备类型
         </el-button>
@@ -384,6 +384,13 @@ const resetSearch = () => {
 // 多选处理
 const handleSelectionChange = (selection) => {
   selectedRows.value = selection
+}
+
+// 新增设备
+const handleCreate = () => {
+  editingEquipment.value = null
+  resetForm()
+  showCreateDialog.value = true
 }
 
 // 编辑设备
