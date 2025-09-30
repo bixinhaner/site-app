@@ -30,10 +30,10 @@
 					<view class="stat-icon inspection-icon">🔍</view>
 					<view class="stat-info">
 						<text class="stat-number">{{ workOrderStats.assigned + workOrderStats.in_progress + workOrderStats.submitted }}</text>
-						<text class="stat-label">{{ getWorkOrderLabel() }}</text>
+						<text class="stat-label">{{ $t('home.myWorkOrders') }}</text>
 					</view>
 				</view>
-				
+
 				<!-- 管理员和经理可以看站点状态统计 -->
 				<view class="stat-card" v-if="canViewStats">
 					<view class="stat-icon operational-icon">✅</view>
@@ -42,7 +42,7 @@
 						<text class="stat-label">{{ $t('site.operational') }}</text>
 					</view>
 				</view>
-				
+
 				<view class="stat-card" v-if="canViewStats">
 					<view class="stat-icon maintenance-icon">⚠️</view>
 					<view class="stat-info">
@@ -50,13 +50,13 @@
 						<text class="stat-label">{{ $t('site.maintenance') }}</text>
 					</view>
 				</view>
-				
-				<!-- 检查员显示我的任务 -->
+
+				<!-- 检查员显示活跃工单 -->
 				<view class="stat-card" v-if="isInspector" @click="goToWorkOrders">
 					<view class="stat-icon inspection-icon">📋</view>
 					<view class="stat-info">
 						<text class="stat-number">{{ workOrderStats.assigned }}</text>
-						<text class="stat-label">{{ $t('workorder.title') }}</text>
+						<text class="stat-label">{{ $t('home.activeWorkOrders') }}</text>
 					</view>
 				</view>
 				
@@ -184,10 +184,7 @@
 		const name = userStore.userInfo?.full_name || userStore.userInfo?.username || ''
 		return name.charAt(0).toUpperCase()
 	}
-	
-	// 获取检查标签文字
-	const getWorkOrderLabel = () => t('home.activeOrders')
-	
+
 	// 加载数据
 	const loadData = async () => {
 		// 检查登录状态
@@ -199,29 +196,52 @@
 		}
 		
 		try {
-			// 加载站点数据
-			const sitesResult = await siteStore.getSites()
-			if (sitesResult.success) {
-				const sites = sitesResult.data
-				siteStats.total = sites.length
-				siteStats.operational = sites.filter(s => s.status === 'operational').length
-				siteStats.maintenance = sites.filter(s => s.status === 'maintenance').length
-				siteStats.construction = sites.filter(s => s.status === 'construction').length
-			}
-			
-			// 加载工单数据
+			// 加载工单数据（先加载，用于统计站点）
+			let wos = [] // 定义在外层作用域
 			const woRes = await workOrderStore.getMyWorkOrders()
 			if (woRes.success) {
-				const wos = woRes.data || []
-				workOrderStats.assigned = wos.filter(w => w.status === 'assigned').length
-				workOrderStats.in_progress = wos.filter(w => w.status === 'in_progress').length
-				workOrderStats.submitted = wos.filter(w => w.status === 'submitted').length
+				wos = woRes.data || []
+				// 后端返回的状态是大写格式，需要匹配大写
+				// 统计活跃工单：ASSIGNED + ACTIVE + IN_PROGRESS + ACCEPTED
+				workOrderStats.assigned = wos.filter(w =>
+					['ASSIGNED', 'ACTIVE', 'IN_PROGRESS', 'ACCEPTED'].includes(w.status)
+				).length
+				// 待审核工单：SUBMITTED + UNDER_REVIEW
+				workOrderStats.in_progress = wos.filter(w =>
+					['SUBMITTED', 'UNDER_REVIEW'].includes(w.status)
+				).length
+				// 已完成工单：APPROVED + COMPLETED
+				workOrderStats.submitted = wos.filter(w =>
+					['APPROVED', 'COMPLETED', 'ACTIVATED'].includes(w.status)
+				).length
 				recentActivities.value = wos
 					.sort((a, b) => new Date(b.assigned_at) - new Date(a.assigned_at))
 					.slice(0, 5)
 					.map(wo => ({ id: wo.id, created_at: wo.assigned_at, title: `${t('workorder.title')}: ${wo.title}`, type: 'work_order', status: wo.status }))
 			}
-			
+
+			// 加载站点数据（所有角色都可以访问API）
+			const sitesResult = await siteStore.getSites()
+			if (sitesResult.success) {
+				let sites = sitesResult.data
+
+				// inspector角色：只统计工单关联的站点
+				if (isInspector.value) {
+					const workOrderSiteIds = new Set(
+						wos.map(wo => wo.site_id).filter(id => id)
+					)
+					sites = sites.filter(site => workOrderSiteIds.has(site.id))
+				}
+
+				siteStats.total = sites.length
+
+				// 站点状态统计（仅admin和manager显示）
+				if (canViewStats.value) {
+					siteStats.operational = sites.filter(s => s.status === 'operational').length
+					siteStats.maintenance = sites.filter(s => s.status === 'maintenance').length
+					siteStats.construction = sites.filter(s => s.status === 'construction').length
+				}
+			}
 
 		} catch (error) {
 			console.error('Load data error:', error)

@@ -16,11 +16,24 @@ export const useWorkOrderStore = defineStore('workorder', () => {
     if (!userStore.token) return { success: false, error: '未登录' }
     loading.value = true
     try {
-      const params = { assigned_to: userStore.userInfo?.id }
-      if (status) params.status_filter = status
+      // 构建查询参数
+      const queryParams = []
+      if (userStore.userInfo?.id) {
+        queryParams.push(`assigned_to=${userStore.userInfo.id}`)
+      }
+      if (status) {
+        queryParams.push(`status_filter=${status}`)
+      }
+
+      // 构建完整URL
+      let url = buildApiUrl(API_ENDPOINTS.WORK_ORDERS.LIST)
+      if (queryParams.length > 0) {
+        url += '?' + queryParams.join('&')
+      }
+
       const response = await uni.request({
-        url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.LIST),
-        ...createRequestConfig({ method: 'GET', data: params, headers: getAuthHeaders(userStore.token) })
+        url,
+        ...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
       })
       if (response.statusCode === 200) {
         list.value = response.data

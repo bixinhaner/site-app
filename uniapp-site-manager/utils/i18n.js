@@ -107,6 +107,8 @@ const messages = {
       completedToday: '今日完成',
       totalSites: '站点总数',
       activeOrders: '活跃工单',
+      myWorkOrders: '我的工单',
+      activeWorkOrders: '活跃工单',
       recentActivities: '最近活动'
     },
     workorder: {
@@ -548,6 +550,8 @@ const messages = {
       completedToday: 'Completed Today',
       totalSites: 'Total Sites',
       activeOrders: 'Active Orders',
+      myWorkOrders: 'My Work Orders',
+      activeWorkOrders: 'Active Orders',
       recentActivities: 'Recent Activities'
     },
     workorder: {

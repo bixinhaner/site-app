@@ -89,9 +89,11 @@
 	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
-	
+	import { useWorkOrderStore } from '@/stores/workorder'
+
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
+	const workOrderStore = useWorkOrderStore()
 	
 	const searchText = ref('')
 	const currentFilter = ref('all')
@@ -109,21 +111,35 @@
 	// 过滤后的站点列表
 	const filteredSites = computed(() => {
 		let sites = siteStore.sites || []
-		
+
+		// inspector角色：只显示工单关联的站点
+		const userRole = userStore.userInfo?.role
+		if (userRole === 'inspector') {
+			// 获取工单关联的站点ID集合
+			const workOrderSiteIds = new Set(
+				(workOrderStore.list || [])
+					.map(wo => wo.site_id)
+					.filter(id => id)
+			)
+
+			// 只保留工单关联的站点
+			sites = sites.filter(site => workOrderSiteIds.has(site.id))
+		}
+
 		// 按状态过滤
 		if (currentFilter.value !== 'all') {
 			sites = sites.filter(site => site.status === currentFilter.value)
 		}
-		
+
 		// 按搜索文本过滤
 		if (searchText.value) {
 			const text = searchText.value.toLowerCase()
-			sites = sites.filter(site => 
+			sites = sites.filter(site =>
 				site.site_name.toLowerCase().includes(text) ||
 				site.site_code.toLowerCase().includes(text)
 			)
 		}
-		
+
 		return sites
 	})
 	
@@ -219,8 +235,16 @@
 			})
 			return
 		}
-		
+
 		try {
+			const userRole = userStore.userInfo?.role
+
+			// inspector角色需要先加载工单，用于过滤站点
+			if (userRole === 'inspector') {
+				await workOrderStore.getMyWorkOrders()
+			}
+
+			// 加载站点列表（所有角色都可以访问API）
 			await siteStore.getSites()
 		} catch (error) {
 			console.error('Load sites error:', error)

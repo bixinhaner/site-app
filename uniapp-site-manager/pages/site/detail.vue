@@ -71,38 +71,105 @@
 				<view class="section-title">{{ $t('site.description') }}</view>
 				<text class="description-text">{{ site?.description }}</text>
 			</view>
-			
-			<!-- 操作按钮 -->
-			<view class="action-buttons">
-				<button class="action-btn primary" @click="startInspection">
-					<text class="btn-icon">📷</text>
-					<text>{{ $t('site.fieldInspection') }}</text>
-				</button>
-				
-				<button class="action-btn secondary" @click="viewHistory">
-					<text class="btn-icon">📋</text>
-					<text>{{ $t('site.inspectionHistory') }}</text>
-				</button>
-				
-				<button class="action-btn secondary" @click="editSite" v-if="canEdit">
-					<text class="btn-icon">✏️</text>
-					<text>{{ $t('site.editSite') }}</text>
-				</button>
+
+			<!-- 站点规划信息 -->
+			<view class="info-section" v-if="planning">
+				<view class="section-header expandable" @click="planningExpanded = !planningExpanded">
+					<text class="section-title">站点规划</text>
+					<text class="expand-icon">{{ planningExpanded ? '▼' : '▶' }}</text>
+				</view>
+
+				<view v-if="planningExpanded" class="planning-content">
+					<!-- 基本信息 -->
+					<view class="planning-basic">
+						<view class="planning-item">
+							<text class="planning-label">频段配置</text>
+							<text class="planning-value">{{ planning.bands.join(', ') }}</text>
+						</view>
+						<view class="planning-item">
+							<text class="planning-label">扇区数量</text>
+							<text class="planning-value">{{ planning.sector_count }} 个</text>
+						</view>
+						<view class="planning-item" v-if="planning.notes">
+							<text class="planning-label">备注</text>
+							<text class="planning-value">{{ planning.notes }}</text>
+						</view>
+					</view>
+
+					<!-- 扇区配置 -->
+					<view class="planning-subsection" v-if="planning.sectors && planning.sectors.length > 0">
+						<text class="subsection-title">扇区配置</text>
+						<view class="sector-list">
+							<view class="sector-card" v-for="sector in planning.sectors" :key="sector.sector_index">
+								<view class="sector-header">
+									<text class="sector-title">扇区 {{ sector.sector_index }}</text>
+									<text class="sector-bands">{{ sector.bands.join(', ') }}</text>
+								</view>
+								<view class="sector-params">
+									<view class="param-item">
+										<text class="param-label">方位角</text>
+										<text class="param-value">{{ sector.azimuth_deg }}°</text>
+									</view>
+									<view class="param-item">
+										<text class="param-label">下倾角</text>
+										<text class="param-value">{{ sector.downtilt_deg }}°</text>
+									</view>
+								</view>
+							</view>
+						</view>
+					</view>
+
+					<!-- 天线端口 -->
+					<view class="planning-subsection" v-if="planning.antenna_ports && planning.antenna_ports.length > 0">
+						<text class="subsection-title">天线端口</text>
+						<view class="port-list">
+							<view class="port-item" v-for="(port, index) in planning.antenna_ports" :key="index">
+								<view class="port-header">
+									<text class="port-label">{{ port.port_label }}</text>
+									<text class="port-band">{{ port.band }}</text>
+								</view>
+								<view class="port-details">
+									<text class="port-detail">扇区: {{ port.sector_index }}</text>
+									<text class="port-detail" v-if="port.mimo_chain">MIMO: {{ port.mimo_chain }}</text>
+									<text class="port-detail" v-if="port.remarks">{{ port.remarks }}</text>
+								</view>
+							</view>
+						</view>
+					</view>
+
+					<!-- 交换机端口 -->
+					<view class="planning-subsection" v-if="planning.switch_ports && planning.switch_ports.length > 0">
+						<text class="subsection-title">交换机端口</text>
+						<view class="port-list">
+							<view class="port-item" v-for="(port, index) in planning.switch_ports" :key="index">
+								<view class="port-header">
+									<text class="port-label">{{ port.port_no }}</text>
+									<view class="port-tags">
+										<text class="port-tag uplink" v-if="port.is_uplink">上行</text>
+										<text class="port-tag poe" v-if="port.poe">POE</text>
+									</view>
+								</view>
+								<view class="port-details">
+									<text class="port-detail" v-if="port.vlan_ids && port.vlan_ids.length > 0">
+										VLAN: {{ port.vlan_ids.join(', ') }}
+									</text>
+									<text class="port-detail" v-if="port.description">{{ port.description }}</text>
+								</view>
+							</view>
+						</view>
+					</view>
+				</view>
 			</view>
-			
+
 			<!-- 最近检查记录 -->
 			<view class="info-section">
-				<view class="section-header">
-					<text class="section-title">{{ $t('site.recentInspections') }}</text>
-					<text class="see-all" @click="viewHistory">{{ $t('site.viewAll') }}</text>
-				</view>
+				<view class="section-title">{{ $t('site.recentInspections') }}</view>
 				
 				<view class="inspection-list">
-					<view 
+					<view
 						class="inspection-item"
 						v-for="inspection in recentInspections"
 						:key="inspection.id"
-						@click="viewInspection(inspection)"
 					>
 						<view class="inspection-info">
 							<text class="inspection-type">{{ getInspectionTypeText(inspection.inspection_type) }}</text>
@@ -133,6 +200,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
+	import { API_ENDPOINTS, buildApiUrl, getAuthHeaders, createRequestConfig } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
@@ -143,15 +211,11 @@
 	const loading = ref(false)
 	const siteId = ref(null)
 	const recentInspections = ref([])
-	
+	const planning = ref(null)
+	const planningExpanded = ref(false)
+
 	const site = computed(() => siteStore.currentSite)
-	
-	// 是否可以编辑
-	const canEdit = computed(() => {
-		return userStore.userInfo?.role !== 'user' || 
-			   site.value?.created_by === userStore.userInfo?.id
-	})
-	
+
 	// 获取状态样式类
 	const getStatusClass = (status) => {
 		const classMap = {
@@ -257,52 +321,25 @@
 			address: site.value.address
 		})
 	}
-	
-	// 开始检查
-	const startInspection = () => {
-		uni.navigateTo({
-			url: `/pages/inspection/camera?siteId=${siteId.value}`
-		})
-	}
-	
-	// 查看检查历史
-	const viewHistory = () => {
-		uni.navigateTo({
-			url: `/pages/inspection/list?siteId=${siteId.value}`
-		})
-	}
-	
-	// 编辑站点
-	const editSite = () => {
-		uni.showModal({
-			title: '编辑站点',
-			content: '编辑站点功能正在开发中',
-			showCancel: false
-		})
-	}
-	
-	// 查看检查详情
-	const viewInspection = (inspection) => {
-		uni.navigateTo({
-			url: `/pages/inspection/detail?id=${inspection.id}`
-		})
-	}
-	
+
 	// 加载站点详情
 	const loadSiteDetail = async () => {
 		if (!siteId.value) return
-		
+
 		loading.value = true
-		
+
 		try {
-			// 加载站点详情
+			// 所有角色都直接调用API（已放开inspector权限）
 			await siteStore.getSite(siteId.value)
-			
+
+			// 加载站点规划信息
+			await loadPlanning()
+
 			// 加载相关的检查记录
 			const result = await inspectionStore.getInspections({
 				site_id: siteId.value
 			})
-			
+
 			if (result.success) {
 				// 取最近5条记录
 				recentInspections.value = result.data
@@ -317,6 +354,31 @@
 			})
 		} finally {
 			loading.value = false
+		}
+	}
+
+	// 加载站点规划信息
+	const loadPlanning = async () => {
+		try {
+			const url = buildApiUrl(API_ENDPOINTS.SITES.PLANNING(siteId.value))
+			const response = await uni.request({
+				url,
+				...createRequestConfig({
+					method: 'GET',
+					headers: getAuthHeaders(userStore.token)
+				})
+			})
+
+			if (response.statusCode === 200) {
+				planning.value = response.data
+			} else if (response.statusCode === 404) {
+				// 没有规划信息，不显示
+				planning.value = null
+			}
+		} catch (error) {
+			console.warn('Load planning error:', error)
+			// 规划信息加载失败不影响主流程
+			planning.value = null
 		}
 	}
 	
@@ -526,40 +588,192 @@
 		color: #374151;
 		line-height: 1.6;
 	}
-	
-	// 操作按钮
-	.action-buttons {
+
+	// 站点规划样式
+	.expandable {
 		display: flex;
-		gap: 12px;
-		padding: 20px;
-		background: white;
-		margin-bottom: 12px;
-	}
-	
-	.action-btn {
-		flex: 1;
-		height: 44px;
-		border-radius: 8px;
-		display: flex;
+		justify-content: space-between;
 		align-items: center;
-		justify-content: center;
-		gap: 8px;
-		font-size: 14px;
-		font-weight: 500;
-		border: none;
-		
-		&.primary {
-			background: linear-gradient(135deg, #f97316, #fb923c);
-			color: white;
-		}
-		
-		&.secondary {
-			background: #f8f9fa;
-			color: #374151;
-			border: 1px solid #e9ecef;
+		cursor: pointer;
+		padding: 12px 0;
+	}
+
+	.expand-icon {
+		font-size: 12px;
+		color: #9ca3af;
+		transition: transform 0.3s;
+	}
+
+	.planning-content {
+		margin-top: 16px;
+	}
+
+	.planning-basic {
+		background: #f9fafb;
+		border-radius: 8px;
+		padding: 12px;
+		margin-bottom: 16px;
+	}
+
+	.planning-item {
+		display: flex;
+		justify-content: space-between;
+		padding: 8px 0;
+		border-bottom: 1px solid #e5e7eb;
+
+		&:last-child {
+			border-bottom: none;
 		}
 	}
-	
+
+	.planning-label {
+		font-size: 14px;
+		color: #6b7280;
+	}
+
+	.planning-value {
+		font-size: 14px;
+		color: #111827;
+		font-weight: 500;
+	}
+
+	.planning-subsection {
+		margin-bottom: 16px;
+	}
+
+	.subsection-title {
+		font-size: 15px;
+		font-weight: 600;
+		color: #111827;
+		margin-bottom: 12px;
+		display: block;
+	}
+
+	// 扇区卡片
+	.sector-list {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.sector-card {
+		background: #f8f9fa;
+		border-radius: 8px;
+		padding: 12px;
+		border-left: 3px solid #f97316;
+	}
+
+	.sector-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+
+	.sector-title {
+		font-size: 14px;
+		font-weight: 600;
+		color: #111827;
+	}
+
+	.sector-bands {
+		font-size: 12px;
+		color: #f97316;
+		background: #fed7aa;
+		padding: 2px 8px;
+		border-radius: 4px;
+	}
+
+	.sector-params {
+		display: flex;
+		gap: 16px;
+	}
+
+	.param-item {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.param-label {
+		font-size: 12px;
+		color: #6b7280;
+		margin-bottom: 2px;
+	}
+
+	.param-value {
+		font-size: 14px;
+		color: #111827;
+		font-weight: 500;
+	}
+
+	// 端口列表
+	.port-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.port-item {
+		background: #f9fafb;
+		border-radius: 6px;
+		padding: 10px;
+		border: 1px solid #e5e7eb;
+	}
+
+	.port-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 6px;
+	}
+
+	.port-label {
+		font-size: 14px;
+		font-weight: 600;
+		color: #111827;
+	}
+
+	.port-band {
+		font-size: 12px;
+		color: #059669;
+		background: #d1fae5;
+		padding: 2px 8px;
+		border-radius: 4px;
+	}
+
+	.port-tags {
+		display: flex;
+		gap: 4px;
+	}
+
+	.port-tag {
+		font-size: 11px;
+		padding: 2px 6px;
+		border-radius: 4px;
+
+		&.uplink {
+			background: #dbeafe;
+			color: #2563eb;
+		}
+
+		&.poe {
+			background: #d1fae5;
+			color: #059669;
+		}
+	}
+
+	.port-details {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.port-detail {
+		font-size: 12px;
+		color: #6b7280;
+		line-height: 1.4;
+	}
+
 	// 检查列表
 	.inspection-list {
 		

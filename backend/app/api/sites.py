@@ -46,11 +46,12 @@ async def get_sites(
     current_user: User = Depends(get_current_user)
 ):
     query = db.query(Site)
-    
-    # 根据用户角色过滤
-    if current_user.role in ["user", "inspector"]:
+
+    # 权限控制：inspector和admin/manager都可以查看所有站点（只读）
+    # 只有普通user需要过滤assigned_to
+    if current_user.role == "user":
         query = query.filter(Site.assigned_to == current_user.id)
-    
+
     # 应用过滤条件
     if status:
         query = query.filter(Site.status == status)
@@ -58,7 +59,7 @@ async def get_sites(
         query = query.filter(Site.site_type == site_type)
     if assigned_to:
         query = query.filter(Site.assigned_to == assigned_to)
-    
+
     sites = query.offset(skip).limit(limit).all()
     return [SiteResponse.from_orm(site) for site in sites]
 
@@ -74,16 +75,17 @@ async def get_site(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Site not found"
         )
-    
-    # 检查权限
-    if (current_user.role in ["user", "inspector"] and 
-        site.assigned_to != current_user.id and 
+
+    # 权限控制：inspector可以查看所有站点详情（只读）
+    # 只有普通user需要检查assigned_to权限
+    if (current_user.role == "user" and
+        site.assigned_to != current_user.id and
         site.created_by != current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    
+
     return SiteResponse.from_orm(site)
 
 @router.put("/{site_id}", response_model=SiteResponse)

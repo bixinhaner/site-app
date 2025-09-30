@@ -41,7 +41,8 @@ export const API_ENDPOINTS = {
     DETAIL: (id) => `/api/sites/${id}`,
     CREATE: '/api/sites/',
     UPDATE: (id) => `/api/sites/${id}`,
-    DELETE: (id) => `/api/sites/${id}`
+    DELETE: (id) => `/api/sites/${id}`,
+    PLANNING: (id) => `/api/sites/${id}/planning`
   },
   
   
