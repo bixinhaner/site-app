@@ -4,7 +4,7 @@
     <div class="page-header">
       <h1>套装配置管理</h1>
       <div class="header-actions">
-        <el-button type="primary" @click="showCreateDialog = true">
+        <el-button type="primary" @click="handleCreate">
           <el-icon><Plus /></el-icon>
           新增套装
         </el-button>
@@ -466,6 +466,13 @@ const handleSelectionChange = (selection) => {
   selectedRows.value = selection
 }
 
+// 新增套装
+const handleCreate = () => {
+  editingPackage.value = null
+  resetForm()
+  showCreateDialog.value = true
+}
+
 // 编辑套装
 const handleEdit = (packageData) => {
   editingPackage.value = packageData
@@ -634,6 +641,7 @@ const updateEquipmentInfo = (item, index) => {
 
 // 重置表单
 const resetForm = () => {
+  editingPackage.value = null
   Object.assign(packageForm, {
     package_code: '',
     package_name: '',
@@ -642,7 +650,7 @@ const resetForm = () => {
     description: '',
     items: []
   })
-  
+
   if (packageFormRef.value) {
     packageFormRef.value.clearValidate()
   }
