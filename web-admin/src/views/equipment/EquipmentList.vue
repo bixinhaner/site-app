@@ -520,6 +520,7 @@ const toggleStatus = async (equipment) => {
 
 // 重置表单
 const resetForm = () => {
+  editingEquipment.value = null
   Object.assign(equipmentForm, {
     equipment_code: '',
     equipment_name: '',
@@ -531,7 +532,7 @@ const resetForm = () => {
     specifications: '',
     description: ''
   })
-  
+
   if (equipmentFormRef.value) {
     equipmentFormRef.value.clearValidate()
   }
