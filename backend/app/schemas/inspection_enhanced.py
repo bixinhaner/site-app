@@ -163,6 +163,9 @@ class InspectionCheckItemResponse(BaseModel):
     category_id: Optional[str]
     category_name: Optional[str]
     sector_id: Optional[str]
+    band: Optional[str]
+    cell_id: Optional[str]
+    equipment_sn: Optional[str]
     required_type: str
     status: CheckItemStatusEnum
     data_value: Optional[List[Dict[str, Any]]] = None

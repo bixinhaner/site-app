@@ -304,7 +304,7 @@
 				
 				<view class="modal-actions">
 					<button class="modal-btn cancel-btn" @click="closeItemModal">{{ $t('inspection.cancel') }}</button>
-					<button class="modal-btn save-btn" @click="saveCurrentItem" :disabled="savingItem">
+					<button class="modal-btn save-btn" @click="saveCurrentItem" :disabled="savingItem || (currentItem?.sector_id && !currentItem?.equipment_sn)">
 						{{ savingItem ? $t('inspection.savingInProgress') : $t('inspection.save') }}
 					</button>
 				</view>
@@ -459,7 +459,7 @@
 		} catch (error) {
 			console.error('加载检查数据失败:', error)
 			uni.showToast({
-				title: '加载失败',
+				title: $t('messages.dataLoadFailed'),
 				icon: 'error'
 			})
 		}
@@ -681,12 +681,12 @@
 		// 如果是小区级检查项且该小区未绑定设备，先要求绑定设备
 		if (item.sector_id && !isCellBound(item)) {
 			const cellId = item.band ? `${item.sector_id}_${item.band}` : item.sector_id
-			// 显示绑定设备提示
-			uni.showModal({
-				title: '需要绑定设备',
-				content: `小区 ${cellId} 需要先绑定设备才能进行检查，是否现在扫码绑定？`,
-				confirmText: '扫码绑定',
-				cancelText: '稍后绑定',
+		// 显示绑定设备提示
+		uni.showModal({
+			title: $t('inspection.needBindTitle'),
+			content: $t('inspection.needBindContent'),
+			confirmText: $t('inspection.scanBindButton'),
+			cancelText: $t('inspection.laterBindButton'),
 				success: (res) => {
 					if (res.confirm) {
 						// 直接调用扫码绑定
@@ -718,7 +718,7 @@
 	const takePhoto = async () => {
 		// 显示操作选择弹窗
 		uni.showActionSheet({
-			itemList: ['拍照', '从相册选择'],
+			itemList: [$t('common.takePhoto'), $t('common.selectFromAlbum')],
 			success: async function (res) {
 				const sourceType = res.tapIndex === 0 ? ['camera'] : ['album']
 				const isCamera = res.tapIndex === 0
@@ -728,20 +728,20 @@
 					let gpsData = { latitude: 0, longitude: 0, accuracy: 0, address: '' }
 					
 					if (isCamera) {
-						uni.showLoading({ title: '获取位置信息...' })
+						uni.showLoading({ title: $t('inspection.gettingLocation') || 'Getting location...' })
 						
 						try {
 							gpsData = await getHighAccuracyLocation()
 							// 验证GPS坐标的有效性
 							if (gpsData.latitude === 0 && gpsData.longitude === 0) {
-								throw new Error('GPS坐标获取失败，无法获取有效位置信息')
+								throw new Error($t('inspection.gpsFetchFailedShort') || 'GPS fetch failed')
 							}
 						} catch (gpsError) {
 							console.warn('GPS获取失败:', gpsError)
 							uni.hideLoading()
 							uni.showModal({
-								title: 'GPS获取失败',
-								content: 'GPS获取失败，无法添加位置水印。请检查位置权限设置或移动到信号较好的位置后重试。',
+								title: $t('inspection.gpsFetchFailedTitle') || 'GPS failed',
+								content: $t('inspection.gpsFetchFailedContent') || 'GPS fetch failed, cannot add location watermark. Check permission or move to better signal and retry.',
 								showCancel: false
 							})
 							return // 直接返回，不继续拍照流程
@@ -765,7 +765,7 @@
 									
 									// 显示水印添加加载提示
 									uni.showLoading({
-										title: '正在添加GPS水印...',
+										title: $t('inspection.addingGpsWatermark') || 'Adding GPS watermark...',
 										mask: true
 									})
 									
@@ -776,8 +776,8 @@
 											gpsData.latitude,
 											gpsData.longitude,
 											gpsData.address,
-											userStore.userInfo?.username || '未知用户',
-											currentItem.value.item_name || '检查项'
+											userStore.userInfo?.username || ($t('inspection.unknownUser') || 'Unknown'),
+											currentItem.value.item_name || ($t('inspection.inspectionItem') || 'Inspection Item')
 										)
 										console.log('水印添加成功，最终图片路径:', finalImagePath)
 										
@@ -792,7 +792,7 @@
 										
 										// 显示错误提示
 										uni.showToast({
-											title: '水印添加失败，使用原图',
+											title: $t('inspection.watermarkFailedUseOriginal') || 'Watermark failed, using original',
 											icon: 'none',
 											duration: 2000
 										})
@@ -812,8 +812,8 @@
 										timestamp: new Date().toISOString(),
 										coordinates: `${gpsData.latitude},${gpsData.longitude}`,
 										accuracy: gpsData.accuracy,
-										inspector: userStore.userInfo?.username || '未知用户',
-										item_name: currentItem.value.item_name || '检查项'
+									inspector: userStore.userInfo?.username || ($t('inspection.unknownUser') || 'Unknown'),
+									item_name: currentItem.value.item_name || ($t('inspection.inspectionItem') || 'Inspection Item')
 									} : null
 								}
 								
@@ -822,34 +822,34 @@
 								}
 								currentItem.value.photos.push(photo)
 								
-								uni.showToast({
-									title: '照片已添加',
-									icon: 'success'
-								})
+									uni.showToast({
+										title: $t('inspection.photoAdded') || 'Photo added',
+										icon: 'success'
+									})
 								
 							} catch (processError) {
 								console.error('照片处理失败:', processError)
-								uni.showToast({
-									title: '照片处理失败',
-									icon: 'error'
-								})
+									uni.showToast({
+										title: $t('inspection.photoProcessFailed') || 'Photo processing failed',
+										icon: 'error'
+									})
 							}
 						},
 						fail: (chooseError) => {
 							console.error('选择照片失败:', chooseError)
-							uni.showToast({
-								title: '选择照片失败',
-								icon: 'error'
-							})
+								uni.showToast({
+									title: $t('inspection.photoChooseFailed') || 'Select photo failed',
+									icon: 'error'
+								})
 						}
 					})
 					
 				} catch (error) {
 					console.error('拍照流程失败:', error)
-					uni.showToast({
-						title: '操作失败',
-						icon: 'error'
-					})
+						uni.showToast({
+							title: $t('messages.operationFailed'),
+							icon: 'error'
+						})
 				}
 			}
 		})
@@ -1089,8 +1089,8 @@
 	
 	const deletePhoto = (index) => {
 		uni.showModal({
-			title: '确认删除',
-			content: '确定要删除这张照片吗？',
+			title: $t('inspection.confirmDeleteTitle') || 'Confirm Delete',
+			content: $t('inspection.confirmDeleteContent') || 'Delete this photo?',
 			success: (res) => {
 				if (res.confirm) {
 					currentItem.value.photos.splice(index, 1)
@@ -1144,6 +1144,22 @@
 	}
 	
 	const saveCurrentItem = async () => {
+		// 小区级检查项必须先绑定设备，防止误保存
+		if (currentItem.value?.sector_id && !currentItem.value?.equipment_sn) {
+			uni.showModal({
+				title: $t('inspection.needBindTitle') || '需要绑定设备',
+				content: $t('inspection.needBindContent') || '需要先绑定设备才能进行检查，是否现在扫码绑定？',
+				confirmText: $t('inspection.scanBindButton') || '扫码绑定',
+				cancelText: $t('inspection.laterBindButton') || '稍后绑定',
+				success: (res) => {
+					if (res.confirm) {
+						scanEquipmentForBinding()
+					}
+				}
+			})
+			return
+		}
+
 		try {
 			savingItem.value = true
 			
@@ -1328,16 +1344,16 @@
 	const submitInspection = async () => {
 		if (!canSubmit.value) {
 			uni.showModal({
-				title: '提示',
-				content: '请完成所有必需的检查项后再提交',
+				title: $t('common.hint') || 'Hint',
+				content: $t('inspection.pleaseCompleteAll') || 'Please complete all required inspection items before submitting',
 				showCancel: false
 			})
 			return
 		}
 		
 		uni.showModal({
-			title: '确认提交',
-			content: '提交后将无法修改，确定要提交检查吗？',
+			title: $t('inspection.confirmSubmitTitle') || 'Confirm Submit',
+			content: $t('inspection.confirmSubmitContent') || 'After submission it cannot be modified. Submit?',
 			success: async (res) => {
 				if (res.confirm) {
 					await doSubmitInspection()
@@ -1457,7 +1473,7 @@
 		const targetItem = item || currentItem.value
 		if (!targetItem || !targetItem.sector_id) {
 			uni.showToast({
-				title: '无效的检查项',
+				title: $t('inspection.invalidCheckItem') || 'Invalid check item',
 				icon: 'none'
 			})
 			return
@@ -1483,14 +1499,14 @@
 			
 			if (!parsedBarcode.success || !isValidParseResult(parsedBarcode)) {
 				uni.showToast({
-					title: parsedBarcode.error || '条码格式不正确',
+					title: parsedBarcode.error || $t('stock.invalidBarcode'),
 					icon: 'none'
 				})
 				return
 			}
 			
 			uni.showLoading({
-				title: '验证设备...',
+				title: $t('inspection.validatingEquipment') || 'Validating device...',
 				mask: true
 			})
 			
@@ -1509,7 +1525,7 @@
 				console.log('设备验证结果:', checkResponse.data)
 				
 				if (checkResponse.statusCode !== 200) {
-					throw new Error(checkResponse.data?.detail || '设备验证失败')
+					throw new Error(checkResponse.data?.detail || ($t('inspection.equipmentValidateFailed') || 'Device validation failed'))
 				}
 				
 				// 绑定设备到小区
@@ -1529,6 +1545,24 @@
 				})
 				
 				console.log('设备绑定结果:', bindResponse.data)
+				
+				// 冲突与权限等错误的前置友好提示
+				if (bindResponse.statusCode === 409) {
+					uni.hideLoading()
+					return uni.showModal({
+						title: '绑定冲突',
+						content: bindResponse.data?.detail || `设备 ${parsedBarcode.sn} 已绑定至其他小区，请先解绑后再操作`,
+						showCancel: false
+					})
+				}
+				if (bindResponse.statusCode === 403) {
+					uni.hideLoading()
+					return uni.showToast({ title: bindResponse.data?.detail || '设备未被当前用户领料', icon: 'none', duration: 3000 })
+				}
+				if (bindResponse.statusCode === 400) {
+					uni.hideLoading()
+					return uni.showToast({ title: bindResponse.data?.detail || '设备绑定失败', icon: 'none', duration: 3000 })
+				}
 				
 				if (bindResponse.statusCode === 200 && bindResponse.data.success) {
 					// 更新本地检查项数据
@@ -1555,10 +1589,10 @@
 					
 					uni.hideLoading()
 					uni.showModal({
-						title: '绑定成功',
-						content: `设备 ${parsedBarcode.sn} 已成功绑定到小区 ${targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id}`,
+						title: $t('inspection.bindSuccessTitle'),
+						content: $t('inspection.bindSuccessContent') || `设备 ${parsedBarcode.sn} 已成功绑定到小区 ${targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id}`,
 						showCancel: false,
-						confirmText: '确定',
+						confirmText: $t('common.confirm'),
 						success: () => {
 							// 如果是从外部调用，打开检查项详情
 							if (item && !currentItem.value) {
@@ -1568,14 +1602,14 @@
 						}
 					})
 				} else {
-					throw new Error(bindResponse.data?.detail || '设备绑定失败')
+					throw new Error(bindResponse.data?.detail || ($t('inspection.bindFailed') || 'Bind failed'))
 				}
 				
 			} catch (error) {
 				uni.hideLoading()
 				console.error('设备绑定失败:', error)
 				uni.showToast({
-					title: error.message || '设备绑定失败',
+					title: error.message || ($t('inspection.bindFailed') || 'Bind failed'),
 					icon: 'none',
 					duration: 3000
 				})
@@ -1584,7 +1618,7 @@
 		} catch (error) {
 			console.error('扫码失败:', error)
 			uni.showToast({
-				title: '扫码失败，请重试',
+				title: $t('stock.scanFailed'),
 				icon: 'none'
 			})
 		}
@@ -1597,8 +1631,8 @@
 		}
 		
 		uni.showModal({
-			title: '确认解绑',
-			content: `确定要解绑设备 ${currentItem.value.equipment_sn} 吗？`,
+			title: $t('inspection.unbindConfirmTitle') || 'Confirm Unbind',
+			content: ($t('inspection.unbindConfirmContent') || 'Unbind device {sn}?').replace('{sn}', currentItem.value.equipment_sn),
 			success: async (res) => {
 				if (res.confirm) {
 					try {

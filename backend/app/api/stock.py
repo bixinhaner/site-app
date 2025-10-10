@@ -172,6 +172,30 @@ async def scan_equipment_checkout(
         
         if equipment_instance:
             equipment = equipment_instance.equipment
+
+    # 防重复：若已存在未归还的领料记录（当前用户）则返回幂等结果
+    if serial_number:
+        existing_pickup = db.query(PickupRecord).filter(
+            and_(
+                PickupRecord.serial_number == serial_number,
+                PickupRecord.picker_id == current_user.id,
+                PickupRecord.is_returned == False
+            )
+        ).order_by(desc(PickupRecord.pickup_time)).first()
+
+        if existing_pickup:
+            return {
+                "action": "already_picked",
+                "message": "该设备已完成领料，不可重复领料",
+                "transaction_id": existing_pickup.transaction_id,
+                "pickup_record_id": existing_pickup.id,
+                "serial_number": serial_number,
+                "picked_at": existing_pickup.pickup_time.isoformat() if existing_pickup.pickup_time else None
+            }
+
+    # 若设备实例已被他人领料，则禁止重复领料
+    if equipment_instance and equipment_instance.issued_to and equipment_instance.issued_to != current_user.id:
+        raise HTTPException(status_code=403, detail="设备已被其他用户领料，无法重复领料")
     
     # 如果没找到设备实例，尝试通过条码前缀匹配设备型号
     if not equipment:
@@ -308,7 +332,15 @@ async def scan_equipment_checkout(
         confirmation_notes="扫码领料自动确认"  # 添加确认备注
     )
     db.add(pickup_record)
-    
+
+    # 若找到了具体设备实例，则同步实例的出库状态与领料人
+    if equipment_instance:
+        equipment_instance.status = InventoryStatusEnum.ISSUED
+        equipment_instance.issued_to = current_user.id
+        equipment_instance.issued_date = datetime.now()
+        equipment_instance.warehouse_id = None  # 出库后不再占用仓库库位
+        equipment_instance.updated_at = datetime.now()
+
     db.commit()
     
     return {
@@ -393,11 +425,92 @@ async def get_my_pickup_records(
             } if record.equipment_instance else None,
             "pickup_time": record.pickup_time.isoformat() if record.pickup_time else None,
             "is_confirmed": record.is_confirmed,
+            "is_returned": record.is_returned,
+            "returned_at": record.returned_at.isoformat() if record.returned_at else None,
             "confirmed_at": record.confirmed_at.isoformat() if record.confirmed_at else None,
             "work_order_id": record.work_order_id
         })
     
     return {"pickup_records": result}
+
+# ===== 归还管理 =====
+
+@router.post("/return-pickup")
+async def return_equipment_pickup(
+    return_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """归还领料：将未归还的领料记录标记为已归还，并把设备实例状态恢复为在库。
+
+    入参支持：
+    - pickup_record_id: 直接指定领料记录ID（优先）
+    - serial_number: 通过SN定位当前用户的活动领料记录
+    - warehouse_id: 可选，归还入库的仓库，未提供则不修改仓库或采用默认1（如存在）
+    - notes: 可选归还备注
+    """
+    pickup_record_id: Optional[str] = return_data.get("pickup_record_id")
+    serial_number: Optional[str] = return_data.get("serial_number")
+    warehouse_id: Optional[int] = return_data.get("warehouse_id")
+    notes: str = return_data.get("notes", "")
+
+    if not pickup_record_id and not serial_number:
+        raise HTTPException(status_code=400, detail="缺少 pickup_record_id 或 serial_number")
+
+    # 查找活动领料记录（当前用户）
+    query = db.query(PickupRecord).filter(
+        PickupRecord.picker_id == current_user.id,
+        PickupRecord.is_returned == False
+    )
+    if pickup_record_id:
+        query = query.filter(PickupRecord.id == pickup_record_id)
+    elif serial_number:
+        query = query.filter(PickupRecord.serial_number == serial_number)
+
+    pickup_record = query.order_by(desc(PickupRecord.pickup_time)).first()
+    if not pickup_record:
+        raise HTTPException(status_code=404, detail="未找到活动的领料记录")
+
+    # 标记归还
+    pickup_record.is_returned = True
+    pickup_record.returned_at = datetime.now()
+    pickup_record.return_notes = notes
+
+    # 设备实例回库处理
+    equipment_instance = None
+    if pickup_record.equipment_instance_id:
+        equipment_instance = db.query(EquipmentInstance).filter(
+            EquipmentInstance.id == pickup_record.equipment_instance_id
+        ).first()
+    elif pickup_record.serial_number:
+        equipment_instance = db.query(EquipmentInstance).filter(
+            EquipmentInstance.serial_number == pickup_record.serial_number
+        ).first()
+
+    if equipment_instance:
+        # 将设备置回在库，并清空领料信息
+        equipment_instance.status = InventoryStatusEnum.IN_STOCK
+        equipment_instance.issued_to = None
+        equipment_instance.issued_date = None
+        # 归还仓库逻辑：优先使用传入的 warehouse_id；如未提供且仓库1存在则设为1
+        if warehouse_id is not None:
+            equipment_instance.warehouse_id = warehouse_id
+        else:
+            # 若当前无仓库，尝试设为1（容错）
+            if equipment_instance.warehouse_id is None:
+                default_wh = db.query(Warehouse).filter(Warehouse.id == 1).first()
+                if default_wh:
+                    equipment_instance.warehouse_id = 1
+        equipment_instance.updated_at = datetime.now()
+
+    db.commit()
+
+    return {
+        "message": "归还成功",
+        "pickup_record_id": pickup_record.id,
+        "serial_number": pickup_record.serial_number,
+        "returned_at": pickup_record.returned_at.isoformat() if pickup_record.returned_at else None
+    }
 
 # ===== 入库管理 =====
 

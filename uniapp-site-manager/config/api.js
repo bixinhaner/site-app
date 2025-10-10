@@ -86,6 +86,7 @@ export const API_ENDPOINTS = {
     SCAN_CHECKOUT: '/api/stock/scan-checkout',
     CONFIRM_PICKUP: '/api/stock/confirm-pickup',
     MY_PICKUPS: '/api/stock/my-pickups',
+    RETURN_PICKUP: '/api/stock/return-pickup',
     TRANSACTIONS: '/api/stock/transactions'
   },
   

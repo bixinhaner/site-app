@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通信站点管理系统 - 用户使用手册</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 目录导航样式 */
+        .toc-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: linear-gradient(135deg, #f97316, #fb923c);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(249, 115, 22, 0.4);
+            transition: all 0.3s;
+        }
+
+        .toc-toggle:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(249, 115, 22, 0.5);
+        }
+
+        .toc-sidebar {
+            position: fixed;
+            top: 0;
+            right: -350px;
+            width: 320px;
+            height: 100vh;
+            background: white;
+            box-shadow: -4px 0 20px rgba(0, 0, 0, 0.2);
+            transition: right 0.3s ease;
+            z-index: 999;
+            overflow-y: auto;
+            padding: 80px 20px 20px 20px;
+        }
+
+        .toc-sidebar.active {
+            right: 0;
+        }
+
+        .toc-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 998;
+            display: none;
+        }
+
+        .toc-overlay.active {
+            display: block;
+        }
+
+        .toc-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #f97316;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #f97316;
+        }
+
+        .toc-list {
+            list-style: none;
+        }
+
+        .toc-item {
+            margin: 8px 0;
+        }
+
+        .toc-link {
+            display: block;
+            color: #374151;
+            text-decoration: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+
+        .toc-link:hover {
+            background: #fef3c7;
+            color: #f97316;
+            padding-left: 18px;
+        }
+
+        .toc-link.level-1 {
+            font-weight: 600;
+            font-size: 16px;
+            color: #111827;
+            margin-top: 12px;
+        }
+
+        .toc-link.level-2 {
+            padding-left: 20px;
+            font-size: 14px;
+        }
+
+        .toc-link.level-3 {
+            padding-left: 35px;
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #f97316, #fb923c);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 16px;
+            opacity: 0.95;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 50px;
+            scroll-margin-top: 20px;
+        }
+
+        .section-title {
+            font-size: 28px;
+            color: #f97316;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #f97316;
+            font-weight: 600;
+        }
+
+        .subsection {
+            margin: 30px 0;
+            scroll-margin-top: 20px;
+        }
+
+        .subsection-title {
+            font-size: 22px;
+            color: #667eea;
+            margin-bottom: 15px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+
+        .subsection-title::before {
+            content: "▶";
+            color: #f97316;
+            margin-right: 10px;
+            font-size: 14px;
+        }
+
+        .step {
+            background: #f8f9fa;
+            border-left: 4px solid #f97316;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+        }
+
+        .step-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .step-number {
+            background: #f97316;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 10px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .step-content {
+            color: #6b7280;
+            line-height: 1.8;
+            padding-left: 38px;
+        }
+
+        .feature-box {
+            background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+
+        .feature-title {
+            font-size: 20px;
+            color: #1d4ed8;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+        }
+
+        .feature-icon {
+            font-size: 24px;
+            margin-right: 10px;
+        }
+
+        .feature-list {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .feature-list li {
+            padding: 8px 0;
+            color: #374151;
+            position: relative;
+            padding-left: 25px;
+        }
+
+        .feature-list li::before {
+            content: "✓";
+            color: #10b981;
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+            font-size: 18px;
+        }
+
+        .warning-box {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+
+        .warning-box strong {
+            color: #d97706;
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .warning-box strong::before {
+            content: "⚠️";
+            margin-right: 8px;
+            font-size: 20px;
+        }
+
+        .tip-box {
+            background: #d1fae5;
+            border-left: 4px solid #10b981;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+
+        .tip-box strong {
+            color: #059669;
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .tip-box strong::before {
+            content: "💡";
+            margin-right: 8px;
+            font-size: 20px;
+        }
+
+        .role-badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            margin: 5px 5px 5px 0;
+            font-weight: 500;
+        }
+
+        .role-badge.admin {
+            background: #dc2626;
+        }
+
+        .role-badge.manager {
+            background: #f97316;
+        }
+
+        .role-badge.inspector {
+            background: #10b981;
+        }
+
+        .role-badge.planner {
+            background: #8b5cf6;
+        }
+
+        .role-badge.user {
+            background: #6b7280;
+        }
+
+        .status-flow {
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            text-align: center;
+            padding: 15px;
+            margin: 10px;
+        }
+
+        .status-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 10px;
+            font-size: 32px;
+            color: white;
+            font-weight: bold;
+        }
+
+        .status-circle.pending {
+            background: linear-gradient(135deg, #6b7280, #9ca3af);
+        }
+
+        .status-circle.active {
+            background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+        }
+
+        .status-circle.submitted {
+            background: linear-gradient(135deg, #d97706, #f59e0b);
+        }
+
+        .status-circle.completed {
+            background: linear-gradient(135deg, #059669, #10b981);
+        }
+
+        .status-arrow {
+            font-size: 32px;
+            color: #9ca3af;
+            margin: 0 10px;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 30px;
+            text-align: center;
+            color: #6b7280;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                padding: 20px;
+            }
+
+            .section-title {
+                font-size: 24px;
+            }
+
+            .subsection-title {
+                font-size: 18px;
+            }
+
+            .status-flow {
+                flex-direction: column;
+            }
+
+            .status-arrow {
+                transform: rotate(90deg);
+            }
+
+            .toc-sidebar {
+                width: 280px;
+                right: -280px;
+            }
+
+            .toc-toggle {
+                padding: 10px 16px;
+                font-size: 13px;
+            }
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        thead {
+            background: linear-gradient(135deg, #f97316, #fb923c);
+            color: white;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .highlight {
+            background: linear-gradient(120deg, #fef3c7 0%, #fde68a 100%);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <!-- 目录按钮 -->
+    <button class="toc-toggle" onclick="toggleToc()">📑 目录导航</button>
+
+    <!-- 目录遮罩 -->
+    <div class="toc-overlay" onclick="toggleToc()"></div>
+
+    <!-- 目录侧边栏 -->
+    <div class="toc-sidebar">
+        <div class="toc-title">📑 目录导航</div>
+        <ul class="toc-list">
+            <li class="toc-item"><a href="#intro" class="toc-link level-1" onclick="closeToc()">📖 系统介绍</a></li>
+
+            <li class="toc-item"><a href="#mobile-guide" class="toc-link level-1" onclick="closeToc()">📱 手机端使用指南</a></li>
+            <li class="toc-item"><a href="#mobile-login" class="toc-link level-2" onclick="closeToc()">1. 登录系统</a></li>
+            <li class="toc-item"><a href="#mobile-home" class="toc-link level-2" onclick="closeToc()">2. 首页功能</a></li>
+            <li class="toc-item"><a href="#mobile-workorder" class="toc-link level-2" onclick="closeToc()">3. 工单处理流程</a></li>
+            <li class="toc-item"><a href="#mobile-site" class="toc-link level-2" onclick="closeToc()">4. 查看站点信息</a></li>
+            <li class="toc-item"><a href="#mobile-material" class="toc-link level-2" onclick="closeToc()">5. 扫码领取物料</a></li>
+            <li class="toc-item"><a href="#mobile-profile" class="toc-link level-2" onclick="closeToc()">6. 个人中心</a></li>
+            <li class="toc-item"><a href="#mobile-reject" class="toc-link level-2" onclick="closeToc()">7. 处理驳回工单</a></li>
+
+            <li class="toc-item"><a href="#admin-guide" class="toc-link level-1" onclick="closeToc()">💻 电脑管理端使用指南</a></li>
+            <li class="toc-item"><a href="#admin-login" class="toc-link level-2" onclick="closeToc()">1. 登录管理端</a></li>
+            <li class="toc-item"><a href="#admin-dashboard" class="toc-link level-2" onclick="closeToc()">2. 仪表盘</a></li>
+            <li class="toc-item"><a href="#admin-site" class="toc-link level-2" onclick="closeToc()">3. 站点管理</a></li>
+            <li class="toc-item"><a href="#admin-review" class="toc-link level-2" onclick="closeToc()">4. 工单审核</a></li>
+            <li class="toc-item"><a href="#admin-equipment" class="toc-link level-2" onclick="closeToc()">5. 设备物料管理</a></li>
+            <li class="toc-item"><a href="#admin-template" class="toc-link level-2" onclick="closeToc()">6. 检查模板管理</a></li>
+            <li class="toc-item"><a href="#admin-user" class="toc-link level-2" onclick="closeToc()">7. 用户管理</a></li>
+
+            <li class="toc-item"><a href="#faq" class="toc-link level-1" onclick="closeToc()">❓ 常见问题解答</a></li>
+            <li class="toc-item"><a href="#best-practice" class="toc-link level-1" onclick="closeToc()">⭐ 最佳实践建议</a></li>
+            <li class="toc-item"><a href="#support" class="toc-link level-1" onclick="closeToc()">📞 技术支持</a></li>
+        </ul>
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1>📱 通信站点管理系统</h1>
+            <p>用户使用手册 - 移动端与管理端完整指南</p>
+        </div>
+
+        <div class="content">
+            <!-- 系统介绍 -->
+            <div class="section" id="intro">
+                <h2 class="section-title">📖 系统介绍</h2>
+
+                <div class="feature-box">
+                    <div class="feature-title">
+                        <span class="feature-icon">🎯</span>
+                        系统概述
+                    </div>
+                    <p style="color: #374151; line-height: 1.8;">
+                        本系统是专为通信行业现场作业管理设计的综合平台，包含<strong>手机端</strong>和<strong>电脑管理端</strong>两部分。
+                        现场工程师使用手机端进行检查作业，管理人员使用电脑端进行审核、物料管理和数据统计。
+                    </p>
+                </div>
+
+                <div class="subsection">
+                    <h3 class="subsection-title">用户角色说明</h3>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>角色</th>
+                                    <th>主要职责</th>
+                                    <th>使用端</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="role-badge admin">管理员</span></td>
+                                    <td>系统配置、人员管理、全局数据查看</td>
+                                    <td>电脑管理端</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="role-badge manager">项目经理</span></td>
+                                    <td>站点分配、工单审核、进度监控</td>
+                                    <td>电脑管理端 + 手机端</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="role-badge inspector">现场工程师</span></td>
+                                    <td>现场检查、拍照记录、数据填报</td>
+                                    <td>手机端</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="role-badge planner">网络规划</span></td>
+                                    <td>站点规划配置、检查项绑定</td>
+                                    <td>电脑管理端</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第一部分：手机端使用指南 -->
+            <div class="section" id="mobile-guide">
+                <h2 class="section-title">📱 第一部分：手机端使用指南（现场工程师）</h2>
+
+                <!-- 登录 -->
+                <div class="subsection" id="mobile-login">
+                    <h3 class="subsection-title">1. 登录系统</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            打开手机应用
+                        </div>
+                        <div class="step-content">
+                            在手机上找到并打开"站点管理"应用图标
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            输入账号密码
+                        </div>
+                        <div class="step-content">
+                            在登录页面输入您的用户名和密码，点击"登录"按钮
+                        </div>
+                    </div>
+
+                    <div class="feature-box">
+                        <div class="feature-title">
+                            <span class="feature-icon">🔑</span>
+                            测试账户信息
+                        </div>
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>用户名</th>
+                                        <th>密码</th>
+                                        <th>角色</th>
+                                        <th>权限说明</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td><strong>admin</strong></td>
+                                        <td>admin123</td>
+                                        <td><span class="role-badge admin">admin</span></td>
+                                        <td>系统管理员（全权限）</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>inspector</strong></td>
+                                        <td>inspector123</td>
+                                        <td><span class="role-badge inspector">inspector</span></td>
+                                        <td>现场检查员</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>tom</strong></td>
+                                        <td>tom123456</td>
+                                        <td><span class="role-badge inspector">inspector</span></td>
+                                        <td>现场检查员</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>test_user</strong></td>
+                                        <td>user123</td>
+                                        <td><span class="role-badge user">user</span></td>
+                                        <td>普通用户</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>planner</strong></td>
+                                        <td>planner123</td>
+                                        <td><span class="role-badge planner">planner</span></td>
+                                        <td>网络规划人员</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="warning-box">
+                        <strong>注意事项</strong>
+                        <p>• 首次登录请联系项目经理或管理员获取账号<br>
+                           • 以上为系统测试账户，正式使用前请修改密码<br>
+                           • 如果忘记密码，请联系管理员重置</p>
+                    </div>
+                </div>
+
+                <!-- 首页 -->
+                <div class="subsection" id="mobile-home">
+                    <h3 class="subsection-title">2. 首页功能</h3>
+
+                    <div class="feature-box">
+                        <div class="feature-title">
+                            <span class="feature-icon">🏠</span>
+                            首页内容
+                        </div>
+                        <ul class="feature-list">
+                            <li><strong>工作统计</strong>：查看您当前待办工单数量</li>
+                            <li><strong>站点数量</strong>：显示分配给您的站点总数</li>
+                            <li><strong>快捷入口</strong>：快速进入各功能模块</li>
+                            <li><strong>最近活动</strong>：查看最近的工单记录</li>
+                        </ul>
+                    </div>
+
+                    <div class="tip-box">
+                        <strong>小提示</strong>
+                        <p>首页会实时更新您的工作进度，建议每天打开应用先查看首页了解当天任务。</p>
+                    </div>
+                </div>
+
+                <!-- 工单处理 -->
+                <div class="subsection" id="mobile-workorder">
+                    <h3 class="subsection-title">3. 工单处理流程</h3>
+
+                    <div class="status-flow">
+                        <div class="status-item">
+                            <div class="status-circle pending">待接</div>
+                            <div>新分配</div>
+                        </div>
+                        <div class="status-arrow">→</div>
+                        <div class="status-item">
+                            <div class="status-circle active">进行</div>
+                            <div>现场作业</div>
+                        </div>
+                        <div class="status-arrow">→</div>
+                        <div class="status-item">
+                            <div class="status-circle submitted">提交</div>
+                            <div>等待审核</div>
+                        </div>
+                        <div class="status-arrow">→</div>
+                        <div class="status-item">
+                            <div class="status-circle completed">完成</div>
+                            <div>审核通过</div>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            查看工单列表
+                        </div>
+                        <div class="step-content">
+                            点击底部导航"工单"标签，进入工单列表页面。可以看到所有分配给您的工作任务，包括：
+                            <ul style="margin-top: 10px;">
+                                <li><strong>待接单</strong>：刚分配的新工单，需要先点击"接单"</li>
+                                <li><strong>进行中</strong>：已接单但未完成的工单</li>
+                                <li><strong>已提交</strong>：已提交等待审核的工单</li>
+                                <li><strong>已完成</strong>：审核通过的工单</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            接收工单
+                        </div>
+                        <div class="step-content">
+                            找到"待接单"状态的工单，点击工单卡片查看详情，确认工作内容后点击<span class="highlight">"接单"</span>按钮。
+                            接单后系统会自动跳转到检查页面，开始填写检查内容。
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">3</span>
+                            现场检查作业
+                        </div>
+                        <div class="step-content">
+                            进入工单详情页后，可以看到所有需要检查的项目清单：
+                            <ul style="margin-top: 10px;">
+                                <li>每个检查项显示名称、类别和当前状态</li>
+                                <li>点击"填报"按钮填写检查数据</li>
+                                <li>点击"上传照片"按钮拍照或选择照片</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="warning-box">
+                        <strong>拍照要求</strong>
+                        <p>• 现场拍照时，系统会自动在照片上添加位置、时间、检查员姓名等信息水印<br>
+                           • 请确保手机定位功能已开启，照片需要包含准确的位置信息<br>
+                           • 每个检查项建议至少拍摄1张清晰照片<br>
+                           • 拍照时请确保画面清晰、光线充足</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">4</span>
+                            填写检查数据
+                        </div>
+                        <div class="step-content">
+                            点击某个检查项的"填报"按钮后，会弹出数据填写表单：
+                            <ul style="margin-top: 10px;">
+                                <li>根据提示填写各项数据（例如：天线方位角、挂高、下倾角等）</li>
+                                <li>必填项会有红色星号标记</li>
+                                <li>数据有范围限制的会有提示（例如：方位角0-360度）</li>
+                                <li>选择检查项状态：已完成、进行中或失败</li>
+                                <li>填写完成后点击"保存"</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">5</span>
+                            上传照片
+                        </div>
+                        <div class="step-content">
+                            点击检查项下方的"上传照片"按钮：
+                            <ul style="margin-top: 10px;">
+                                <li>选择"拍照"：打开相机现场拍摄（推荐，会自动添加水印）</li>
+                                <li>选择"从相册选择"：从手机相册中选择照片</li>
+                                <li>照片上传后会显示缩略图，可以点击查看大图</li>
+                                <li>长按照片可以删除（如果拍错了）</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="tip-box">
+                        <strong>离线功能</strong>
+                        <p>如果现场网络信号不好，不用担心！系统支持离线工作，您填写的数据和拍摄的照片会暂时保存在手机上，等网络恢复后会自动上传到服务器。</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">6</span>
+                            提交工单
+                        </div>
+                        <div class="step-content">
+                            完成所有检查项后：
+                            <ul style="margin-top: 10px;">
+                                <li>检查是否所有检查项都已填写完成</li>
+                                <li>向下滚动到页面底部</li>
+                                <li>点击<span class="highlight">"完成工单"</span>按钮</li>
+                                <li>系统会提示提交成功，工单状态变为"已提交"</li>
+                                <li>等待项目经理审核</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 站点查看 -->
+                <div class="subsection" id="mobile-site">
+                    <h3 class="subsection-title">4. 查看站点信息</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            进入站点列表
+                        </div>
+                        <div class="step-content">
+                            点击底部导航"站点"标签，查看分配给您的所有站点列表
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            查看站点详情
+                        </div>
+                        <div class="step-content">
+                            点击任意站点卡片，进入站点详情页面，可以查看：
+                            <ul style="margin-top: 10px;">
+                                <li>站点名称、编码</li>
+                                <li>站点地址、城市</li>
+                                <li>站点类型和当前状态</li>
+                                <li>站点规划信息（如果已配置）</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 物料领取 -->
+                <div class="subsection" id="mobile-material">
+                    <h3 class="subsection-title">5. 扫码领取物料</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            打开扫码功能
+                        </div>
+                        <div class="step-content">
+                            在首页点击"扫码领料"图标，或通过个人中心进入扫码领料页面
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            扫描设备条码
+                        </div>
+                        <div class="step-content">
+                            使用手机摄像头扫描设备上的条码或二维码，系统会自动识别设备信息
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">3</span>
+                            确认领取
+                        </div>
+                        <div class="step-content">
+                            确认设备信息正确后，选择领取数量，点击"确认领取"。系统会记录您的领料信息。
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 个人中心 -->
+                <div class="subsection" id="mobile-profile">
+                    <h3 class="subsection-title">6. 个人中心</h3>
+
+                    <div class="feature-box">
+                        <div class="feature-title">
+                            <span class="feature-icon">👤</span>
+                            个人中心功能
+                        </div>
+                        <ul class="feature-list">
+                            <li><strong>个人信息</strong>：查看您的姓名、角色、联系方式</li>
+                            <li><strong>语言切换</strong>：支持中文/英文界面切换</li>
+                            <li><strong>退出登录</strong>：安全退出系统</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 驳回处理 -->
+                <div class="subsection" id="mobile-reject">
+                    <h3 class="subsection-title">7. 处理驳回工单</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            查看驳回原因
+                        </div>
+                        <div class="step-content">
+                            如果工单被驳回，在工单列表中会显示"已驳回"状态。点击进入工单详情，顶部会显示橙色提醒框，说明驳回的原因。
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            修改检查内容
+                        </div>
+                        <div class="step-content">
+                            根据驳回意见：
+                            <ul style="margin-top: 10px;">
+                                <li>找到需要修改的检查项（会显示审核不通过标记）</li>
+                                <li>重新填写数据或重新拍摄照片</li>
+                                <li>如果照片不合格，可以长按删除后重新拍摄</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">3</span>
+                            重新提交
+                        </div>
+                        <div class="step-content">
+                            修改完成后，点击底部<span class="highlight">"重新提交"</span>按钮，再次提交工单等待审核
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第二部分：电脑管理端使用指南 -->
+            <div class="section" id="admin-guide">
+                <h2 class="section-title">💻 第二部分：电脑管理端使用指南（管理人员）</h2>
+
+                <!-- 登录 -->
+                <div class="subsection" id="admin-login">
+                    <h3 class="subsection-title">1. 登录管理端</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            打开浏览器访问
+                        </div>
+                        <div class="step-content">
+                            在电脑浏览器中输入管理端网址，进入登录页面（推荐使用Chrome、Edge或Firefox浏览器）
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            输入管理员账号
+                        </div>
+                        <div class="step-content">
+                            输入管理员用户名和密码，点击"登录"进入系统。可使用测试账户 <strong>admin / admin123</strong> 登录
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 仪表盘 -->
+                <div class="subsection" id="admin-dashboard">
+                    <h3 class="subsection-title">2. 仪表盘（首页）</h3>
+
+                    <div class="feature-box">
+                        <div class="feature-title">
+                            <span class="feature-icon">📊</span>
+                            仪表盘内容
+                        </div>
+                        <ul class="feature-list">
+                            <li><strong>设备统计</strong>：显示设备类型数量、设备套装数量</li>
+                            <li><strong>库存概况</strong>：主设备库存总数、低库存预警数量</li>
+                            <li><strong>最近出入库</strong>：查看最近的出入库记录</li>
+                            <li><strong>库存预警</strong>：需要补货的设备列表</li>
+                            <li><strong>快捷操作</strong>：快速进入各功能模块</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 站点管理 -->
+                <div class="subsection" id="admin-site">
+                    <h3 class="subsection-title">3. 站点管理</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            查看站点列表
+                        </div>
+                        <div class="step-content">
+                            点击左侧菜单"站点管理 > 站点列表"，查看所有站点信息。可以按状态、指派人员进行筛选。
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            分配站点
+                        </div>
+                        <div class="step-content">
+                            找到需要分配的站点，点击"分配"按钮，选择要分配的工程师，点击确定。
+                            该工程师在手机端就能看到这个站点。
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">3</span>
+                            配置站点规划
+                        </div>
+                        <div class="step-content">
+                            点击站点的"规划"按钮，进入站点规划页面：
+                            <ul style="margin-top: 10px;">
+                                <li>配置站点的扇区数量（通常是3个扇区）</li>
+                                <li>为每个扇区配置频段（如n41、n78、n3等）</li>
+                                <li>绑定设备套装（系统会自动计算所需设备）</li>
+                                <li>保存后，这些信息会在检查时使用</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">4</span>
+                            批量导入规划
+                        </div>
+                        <div class="step-content">
+                            点击"规划批量导入"按钮：
+                            <ul style="margin-top: 10px;">
+                                <li>下载Excel模板</li>
+                                <li>按模板格式填写多个站点的规划信息</li>
+                                <li>上传Excel文件</li>
+                                <li>系统会自动导入并配置所有站点规划</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="tip-box">
+                        <strong>站点规划的重要性</strong>
+                        <p>站点规划配置后，系统会自动生成对应的检查项清单，工程师在现场检查时就知道需要检查哪些设备和频段。</p>
+                    </div>
+                </div>
+
+                <!-- 工单审核 -->
+                <div class="subsection" id="admin-review">
+                    <h3 class="subsection-title">4. 工单审核</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            查看待审核工单
+                        </div>
+                        <div class="step-content">
+                            点击左侧菜单"工单管理 > 工单列表"，筛选"已提交"状态的工单，点击某个工单进入审核页面
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            审核检查项
+                        </div>
+                        <div class="step-content">
+                            在工单审核页面：
+                            <ul style="margin-top: 10px;">
+                                <li>查看工单基本信息（标题、站点、工程师、时间等）</li>
+                                <li>点击"详情"查看每个检查项的填写内容和照片</li>
+                                <li>逐项审核，点击"通过"、"警告"或"不合格"</li>
+                                <li>如果不合格，需要填写具体原因</li>
+                                <li>页面顶部显示审核进度统计</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="warning-box">
+                        <strong>审核规则</strong>
+                        <p>• 必须审核完所有检查项才能进行最终审核<br>
+                           • 如果存在不合格检查项，工单无法通过<br>
+                           • 警告状态表示可以通过但需要关注</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">3</span>
+                            最终审核
+                        </div>
+                        <div class="step-content">
+                            完成所有检查项审核后：
+                            <ul style="margin-top: 10px;">
+                                <li>填写整体审核意见</li>
+                                <li>如果所有项目合格，点击<span class="highlight">"通过"</span>按钮</li>
+                                <li>如果需要修改，点击<span class="highlight">"驳回"</span>按钮，并说明驳回原因</li>
+                                <li>工程师会在手机端收到审核结果</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="tip-box">
+                        <strong>照片审核技巧</strong>
+                        <p>点击照片可以放大查看。重点检查：照片是否清晰、设备是否拍摄完整、位置水印是否正确、是否在现场拍摄。</p>
+                    </tip-box>
+                </div>
+
+                <!-- 设备管理 -->
+                <div class="subsection" id="admin-equipment">
+                    <h3 class="subsection-title">5. 设备物料管理</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            管理设备类型
+                        </div>
+                        <div class="step-content">
+                            点击"设备管理 > 设备类型"：
+                            <ul style="margin-top: 10px;">
+                                <li>查看所有设备类型（如：基站主设备、天线、电源等）</li>
+                                <li>添加新的设备类型</li>
+                                <li>编辑设备的名称、编码、单位、分类</li>
+                                <li>设置主设备标识（主设备需要序列号管理）</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            配置设备套装
+                        </div>
+                        <div class="step-content">
+                            点击"设备管理 > 设备套装"：
+                            <ul style="margin-top: 10px;">
+                                <li>创建设备套装（如：n41标准套装）</li>
+                                <li>为套装添加设备清单（每种设备及数量）</li>
+                                <li>套装可以在站点规划中引用</li>
+                                <li>便于批量管理相同配置的站点</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">3</span>
+                            设备入库
+                        </div>
+                        <div class="step-content">
+                            点击"库存管理 > 入库管理"：
+                            <br><br>
+                            <strong>方式一：手动入库</strong>
+                            <ul style="margin-top: 10px;">
+                                <li>选择入库仓库</li>
+                                <li>选择入库类型（采购入库、调拨入库、退料入库）</li>
+                                <li>添加设备明细（选择设备、输入数量、批次号等）</li>
+                                <li>点击"提交入库"</li>
+                            </ul>
+                            <br>
+                            <strong>方式二：批量导入</strong>
+                            <ul style="margin-top: 10px;">
+                                <li>选择"序列号批量导入"</li>
+                                <li>选择设备类型和目标仓库</li>
+                                <li>下载Excel模板</li>
+                                <li>填写设备序列号、MAC地址、生产日期、保修期等信息</li>
+                                <li>上传Excel文件</li>
+                                <li>系统会批量创建设备记录并入库</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">4</span>
+                            库存查询
+                        </div>
+                        <div class="step-content">
+                            点击"库存管理 > 库存列表"：
+                            <ul style="margin-top: 10px;">
+                                <li>查看所有设备的库存情况</li>
+                                <li>按仓库、设备类型筛选</li>
+                                <li>查看可用库存、已领用数量</li>
+                                <li>库存预警提示（低于安全库存会标红）</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">5</span>
+                            查看出入库历史
+                        </div>
+                        <div class="step-content">
+                            点击"库存管理 > 出入库历史"，查看所有出入库记录，包括单号、类型、操作人、时间、明细等
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 检查模板 -->
+                <div class="subsection" id="admin-template">
+                    <h3 class="subsection-title">6. 检查模板管理</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            创建检查模板
+                        </div>
+                        <div class="step-content">
+                            点击"检查管理 > 模板管理"：
+                            <ul style="margin-top: 10px;">
+                                <li>点击"新建模板"</li>
+                                <li>输入模板名称、选择检查类型</li>
+                                <li>选择是站点级还是扇区级检查</li>
+                                <li>添加检查项分类（如：设备安装、电源系统、传输链路等）</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            配置检查项
+                        </div>
+                        <div class="step-content">
+                            在模板编辑页面：
+                            <ul style="margin-top: 10px;">
+                                <li>为每个分类添加具体检查项</li>
+                                <li>设置检查项名称、要求类型（拍照、填数据或两者都要）</li>
+                                <li>配置数据字段（字段名、类型、是否必填、取值范围等）</li>
+                                <li>设置验证规则（如：方位角必须在0-360度之间）</li>
+                                <li>保存模板</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">3</span>
+                            绑定检查项到小区
+                        </div>
+                        <div class="step-content">
+                            点击"检查项绑定管理"：
+                            <ul style="margin-top: 10px;">
+                                <li>选择站点</li>
+                                <li>系统会显示该站点的所有小区（扇区+频段组合）</li>
+                                <li>为每个小区勾选需要检查的项目</li>
+                                <li>保存绑定关系</li>
+                                <li>工程师在手机端就能看到对应的检查清单</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="tip-box">
+                        <strong>模板使用建议</strong>
+                        <p>建议为不同类型的站点创建不同的检查模板。例如：新建站点模板、改造站点模板、维护巡检模板，提高检查效率。</p>
+                    </tip-box>
+                </div>
+
+                <!-- 用户管理 -->
+                <div class="subsection" id="admin-user">
+                    <h3 class="subsection-title">7. 用户管理（管理员专属）</h3>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">1</span>
+                            添加新用户
+                        </div>
+                        <div class="step-content">
+                            点击"系统管理 > 用户管理"，点击"添加用户"：
+                            <ul style="margin-top: 10px;">
+                                <li>输入用户名、密码、姓名</li>
+                                <li>选择角色（管理员、项目经理、现场工程师）</li>
+                                <li>填写联系方式（手机、邮箱）</li>
+                                <li>保存后，用户即可登录系统</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number">2</span>
+                            管理用户权限
+                        </div>
+                        <div class="step-content">
+                            在用户列表中：
+                            <ul style="margin-top: 10px;">
+                                <li>查看所有用户信息</li>
+                                <li>编辑用户资料</li>
+                                <li>重置用户密码</li>
+                                <li>修改用户角色</li>
+                                <li>停用或删除用户</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 常见问题 -->
+            <div class="section" id="faq">
+                <h2 class="section-title">❓ 常见问题解答</h2>
+
+                <div class="subsection">
+                    <h3 class="subsection-title">手机端常见问题</h3>
+
+                    <div class="feature-box">
+                        <div class="feature-title">
+                            <span class="feature-icon">🔧</span>
+                            常见问题及解决方法
+                        </div>
+
+                        <div style="margin-top: 15px;">
+                            <strong style="color: #1d4ed8;">Q1: 为什么拍照后照片上传失败？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 检查手机是否连接网络（WiFi或4G）<br>
+                                • 如果网络不好，照片会暂时保存在手机上，等网络恢复自动上传<br>
+                                • 可以在个人中心查看待上传的照片数量
+                            </p>
+
+                            <strong style="color: #1d4ed8;">Q2: 为什么获取不到位置信息？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 确保手机定位功能已开启<br>
+                                • 给应用授予位置权限<br>
+                                • 在室内或地下车库可能定位不准，建议到户外等待30秒<br>
+                                • 定位精度低于20米时，系统会提示警告
+                            </p>
+
+                            <strong style="color: #1d4ed8;">Q3: 如何删除错误上传的照片？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                在工单详情页面，找到要删除的照片，<strong>长按照片</strong>，会弹出删除确认对话框，点击确定即可删除。
+                            </p>
+
+                            <strong style="color: #1d4ed8;">Q4: 工单被驳回了怎么办？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 在工单列表找到被驳回的工单，点击进入<br>
+                                • 查看顶部的驳回原因说明<br>
+                                • 根据意见修改对应的检查项<br>
+                                • 点击底部"重新提交"按钮
+                            </p>
+
+                            <strong style="color: #1d4ed8;">Q5: 为什么有些数据填不进去？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 检查数据格式是否正确（数字、文本、选项等）<br>
+                                • 注意数据范围限制（如：方位角0-360度）<br>
+                                • 必填项必须填写完整才能保存
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="subsection">
+                    <h3 class="subsection-title">管理端常见问题</h3>
+
+                    <div class="feature-box">
+                        <div class="feature-title">
+                            <span class="feature-icon">🔧</span>
+                            常见问题及解决方法
+                        </div>
+
+                        <div style="margin-top: 15px;">
+                            <strong style="color: #1d4ed8;">Q1: 为什么工程师看不到分配的站点？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 确认是否已经在"站点列表"中点击"分配"按钮<br>
+                                • 让工程师退出登录后重新登录<br>
+                                • 检查工程师账号状态是否正常
+                            </p>
+
+                            <strong style="color: #1d4ed8;">Q2: 批量导入Excel失败怎么办？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 确保使用系统提供的模板文件<br>
+                                • 不要修改表头字段名<br>
+                                • 检查数据格式（日期、数字等）是否正确<br>
+                                • 查看错误提示，修改后重新上传
+                            </p>
+
+                            <strong style="color: #1d4ed8;">Q3: 如何查看某个站点的所有历史记录？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 进入"站点列表"，点击站点的"详情"按钮<br>
+                                • 在站点详情页面可以看到该站点的所有工单记录<br>
+                                • 点击工单可查看详细的检查结果
+                            </p>
+
+                            <strong style="color: #1d4ed8;">Q4: 审核时发现照片位置不对怎么办？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 在检查项审核时，选择"不合格"<br>
+                                • 填写具体原因（如：位置不符，请在站点现场重新拍摄）<br>
+                                • 最终审核时点击"驳回"<br>
+                                • 工程师会收到驳回通知并重新提交
+                            </p>
+
+                            <strong style="color: #1d4ed8;">Q5: 库存数据不准确怎么办？</strong>
+                            <p style="margin: 8px 0 15px 20px; color: #374151;">
+                                <strong>解决方法：</strong><br>
+                                • 查看"出入库历史"核对所有出入库记录<br>
+                                • 联系管理员进行库存盘点<br>
+                                • 必要时可以调整库存（需要管理员权限）
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 最佳实践 -->
+            <div class="section" id="best-practice">
+                <h2 class="section-title">⭐ 最佳实践建议</h2>
+
+                <div class="subsection">
+                    <h3 class="subsection-title">现场工程师建议</h3>
+
+                    <div class="tip-box">
+                        <strong>提高工作效率</strong>
+                        <p>
+                            1. <strong>出发前准备</strong>：提前在首页查看当天工单，确认站点位置<br>
+                            2. <strong>到达现场</strong>：先打开应用接单，确保定位准确<br>
+                            3. <strong>拍照技巧</strong>：按检查项顺序拍照，每张照片对应一个检查项<br>
+                            4. <strong>及时填写</strong>：现场完成数据填写，避免回去后忘记<br>
+                            5. <strong>检查完整</strong>：提交前检查所有项目是否都已完成<br>
+                            6. <strong>离线作业</strong>：网络不好时先完成检查，有网络后再同步
+                        </p>
+                    </div>
+                </div>
+
+                <div class="subsection">
+                    <h3 class="subsection-title">项目经理建议</h3>
+
+                    <div class="tip-box">
+                        <strong>管理技巧</strong>
+                        <p>
+                            1. <strong>合理分配</strong>：根据工程师位置和工作量合理分配站点<br>
+                            2. <strong>及时审核</strong>：工单提交后尽快审核，避免影响进度<br>
+                            3. <strong>详细意见</strong>：驳回时写清楚具体原因和修改要求<br>
+                            4. <strong>定期检查</strong>：每天查看仪表盘，掌握整体进度<br>
+                            5. <strong>沟通反馈</strong>：发现问题及时与工程师沟通<br>
+                            6. <strong>模板规范</strong>：建立标准化检查模板，提高数据质量
+                        </p>
+                    </div>
+                </div>
+
+                <div class="subsection">
+                    <h3 class="subsection-title">系统管理员建议</h3>
+
+                    <div class="tip-box">
+                        <strong>运维要点</strong>
+                        <p>
+                            1. <strong>模板标准化</strong>：建立统一的检查模板，提高数据质量<br>
+                            2. <strong>权限管理</strong>：定期检查用户权限，确保信息安全<br>
+                            3. <strong>数据备份</strong>：定期备份重要数据<br>
+                            4. <strong>培训指导</strong>：为新用户提供培训和指导<br>
+                            5. <strong>问题收集</strong>：记录用户反馈的问题，持续优化系统<br>
+                            6. <strong>性能监控</strong>：关注系统运行状态，及时处理异常
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 联系支持 -->
+            <div class="section" id="support">
+                <h2 class="section-title">📞 技术支持</h2>
+
+                <div class="feature-box">
+                    <div class="feature-title">
+                        <span class="feature-icon">💬</span>
+                        获取帮助
+                    </div>
+                    <p style="color: #374151; line-height: 2;">
+                        如果您在使用过程中遇到问题：<br>
+                        • 先查阅本手册的"常见问题解答"部分<br>
+                        • 联系您的项目经理或系统管理员<br>
+                        • 记录问题发生的时间、页面和操作步骤<br>
+                        • 如有必要，提供截图说明问题
+                    </p>
+                </div>
+
+                <div class="warning-box">
+                    <strong>重要提醒</strong>
+                    <p>• 请妥善保管您的登录账号和密码<br>
+                       • 不要将账号密码告诉他人<br>
+                       • 定期修改密码以确保账号安全<br>
+                       • 离开电脑时记得退出登录</p>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="footer">
+            <p style="font-size: 16px; margin-bottom: 10px; color: #111827;">
+                <strong>通信站点管理系统 - 用户使用手册</strong>
+            </p>
+            <p style="font-size: 14px; color: #6b7280;">
+                版本: 1.0 | 更新日期: 2025年 | 适用于移动端与Web管理端
+            </p>
+            <p style="font-size: 12px; color: #9ca3af; margin-top: 10px;">
+                本手册旨在帮助用户快速掌握系统使用方法，提高工作效率
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function toggleToc() {
+            const sidebar = document.querySelector('.toc-sidebar');
+            const overlay = document.querySelector('.toc-overlay');
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+        }
+
+        function closeToc() {
+            const sidebar = document.querySelector('.toc-sidebar');
+            const overlay = document.querySelector('.toc-overlay');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        }
+
+        // 平滑滚动
+        document.querySelectorAll('.toc-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const targetId = this.getAttribute('href');
+                const targetElement = document.querySelector(targetId);
+                if (targetElement) {
+                    targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1810,33 +1810,32 @@ async def check_equipment_pickup_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """验证设备是否已被当前用户领料"""
+    """验证设备是否已被当前用户领料。
+
+    放宽校验：支持已出库(ISSUED)与待检查(PENDING_INSPECTION)两种状态，
+    以兼容已完成首次绑定但再次扫描校验的场景。
+    """
     from app.models.equipment import EquipmentInstance, InventoryStatusEnum
-    
-    # 查询设备实例
+
     equipment_instance = db.query(EquipmentInstance).filter(
         EquipmentInstance.serial_number == sn
     ).first()
-    
+
     if not equipment_instance:
-        raise HTTPException(
-            status_code=404,
-            detail=f"设备序列号 {sn} 不存在"
-        )
-    
-    # 检查是否已被当前用户领料
-    if equipment_instance.status != InventoryStatusEnum.ISSUED:
-        raise HTTPException(
-            status_code=400,
-            detail="设备未出库，无法进行检查"
-        )
-    
+        raise HTTPException(status_code=404, detail=f"设备序列号 {sn} 不存在")
+
+    # 允许以下状态进入检查流程：已出库、待检查、已检查（便于复核/返检）
+    allowed_status = {
+        InventoryStatusEnum.ISSUED,
+        InventoryStatusEnum.PENDING_INSPECTION,
+        InventoryStatusEnum.INSPECTED,
+    }
+    if equipment_instance.status not in allowed_status:
+        raise HTTPException(status_code=400, detail="设备未出库，无法进行检查")
+
     if equipment_instance.issued_to != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="设备未被当前用户领料，无法进行检查"
-        )
-    
+        raise HTTPException(status_code=403, detail="设备未被当前用户领料，无法进行检查")
+
     return {
         "success": True,
         "equipment_sn": sn,
@@ -1883,9 +1882,14 @@ async def bind_equipment_to_sector(
     equipment_instance = None
     if not is_unbind:
         from app.models.equipment import EquipmentInstance, InventoryStatusEnum
+        # 允许以下状态进行绑定（同一领料人）：已出库、待检查、已检查
         equipment_instance = db.query(EquipmentInstance).filter(
             EquipmentInstance.serial_number == equipment_sn,
-            EquipmentInstance.status == InventoryStatusEnum.ISSUED,
+            EquipmentInstance.status.in_([
+                InventoryStatusEnum.ISSUED,
+                InventoryStatusEnum.PENDING_INSPECTION,
+                InventoryStatusEnum.INSPECTED,
+            ]),
             EquipmentInstance.issued_to == current_user.id
         ).first()
         
@@ -1928,6 +1932,25 @@ async def bind_equipment_to_sector(
             raise HTTPException(
                 status_code=409,
                 detail=f"扇区 {sector_id} 已绑定其他设备: {existing_binding.equipment_sn}"
+            )
+
+        # 新增：阻止同一设备SN绑定到其他小区（跨检查记录全局唯一小区）
+        from sqlalchemy import or_, func
+        conflict = db.query(InspectionCheckItem).filter(
+            InspectionCheckItem.equipment_sn == equipment_sn,
+            or_(
+                InspectionCheckItem.sector_id != sector_id,
+                func.coalesce(InspectionCheckItem.band, "") != func.coalesce(band, "")
+            )
+        ).first()
+
+        if conflict:
+            conflict_cell = conflict.sector_id
+            conflict_band = getattr(conflict, 'band', None)
+            conflict_cell_str = f"{conflict_cell}/{conflict_band}" if conflict_band else f"{conflict_cell}"
+            raise HTTPException(
+                status_code=409,
+                detail=f"设备 {equipment_sn} 已绑定至小区 {conflict_cell_str}，请先解绑后再操作"
             )
     
     # 绑定或解绑设备到所有相关检查项

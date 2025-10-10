@@ -54,10 +54,10 @@
 
     <!-- 工单选择 -->
     <view v-if="availablePackages.length > 0" class="work-order-section">
-      <view class="section-title">选择关联工单 (可选)</view>
+      <view class="section-title">{{ $t('stock.selectWorkOrderOptional') }}</view>
       <picker @change="onWorkOrderChange" :value="selectedWorkOrderIndex" :range="workOrderOptions">
         <view class="picker-input">
-          <text>{{ selectedWorkOrder ? selectedWorkOrder.title : '无关联工单' }}</text>
+          <text>{{ selectedWorkOrder ? selectedWorkOrder.title : $t('stock.noWorkOrder') }}</text>
           <text class="picker-arrow">▼</text>
         </view>
       </picker>
@@ -65,7 +65,7 @@
 
     <!-- 套装选择 -->
     <view v-if="availablePackages.length > 1" class="package-section">
-      <view class="section-title">选择设备套装</view>
+      <view class="section-title">{{ $t('stock.choosePackage') }}</view>
       <view class="package-list">
         <view 
           v-for="(pkg, index) in availablePackages" 
@@ -78,22 +78,22 @@
             <text class="package-name">{{ pkg.package_name }}</text>
             <text class="package-code">{{ pkg.package_code }}</text>
           </view>
-          <text class="package-type">适用: {{ pkg.site_type || '通用' }}</text>
+          <text class="package-type">{{ $t('stock.suitableFor') }}: {{ pkg.site_type || $t('common.all') }}</text>
         </view>
       </view>
     </view>
 
     <!-- 套装清单 -->
     <view v-if="selectedPackage" class="package-detail">
-      <view class="section-title">套装清单确认</view>
+      <view class="section-title">{{ $t('stock.packageConfirm') }}</view>
       
       <view class="package-info">
         <view class="info-row">
-          <text class="info-label">套装名称:</text>
+          <text class="info-label">{{ $t('stock.packageNameLabel') }}:</text>
           <text class="info-value">{{ selectedPackage.package_name }}</text>
         </view>
         <view class="info-row">
-          <text class="info-label">套装编码:</text>
+          <text class="info-label">{{ $t('stock.packageCodeLabel') }}:</text>
           <text class="info-value">{{ selectedPackage.package_code }}</text>
         </view>
       </view>
@@ -104,18 +104,18 @@
             <text class="item-name">{{ item.equipment_name }}</text>
             <view class="item-quantity">
               <text class="quantity-text">{{ item.quantity }} {{ item.unit }}</text>
-              <text v-if="item.is_required" class="required-tag">必需</text>
+              <text v-if="item.is_required" class="required-tag">{{ $t('stock.requiredTag') }}</text>
             </view>
           </view>
-          <text class="item-code">编码: {{ item.equipment_code }}</text>
+          <text class="item-code">{{ $t('stock.codeLabel') }}: {{ item.equipment_code }}</text>
         </view>
       </view>
       
       <!-- 确认按钮 -->
       <view class="action-buttons">
-        <button class="btn-cancel" @click="resetScan">重新扫码</button>
+        <button class="btn-cancel" @click="resetScan">{{ $t('stock.rescan') }}</button>
         <button class="btn-confirm" @click="confirmPickup" :disabled="confirming">
-          {{ confirming ? '确认中...' : '确认领料' }}
+          {{ confirming ? $t('stock.confirming') : $t('stock.confirmPickup') }}
         </button>
       </view>
     </view>
@@ -123,12 +123,12 @@
     <!-- 领料记录 -->
     <view class="history-section">
       <view class="section-title">
-        <text>我的领料记录</text>
-        <text class="refresh-btn" @click="loadPickupHistory">刷新</text>
+        <text>{{ $t('stock.myPickups') }}</text>
+        <text class="refresh-btn" @click="loadPickupHistory">{{ $t('common.refresh') }}</text>
       </view>
       
       <view v-if="pickupHistory.length === 0" class="empty-state">
-        <text>暂无领料记录</text>
+        <text>{{ $t('stock.noPickupRecords') }}</text>
       </view>
       
       <view v-else class="history-list">
@@ -138,16 +138,16 @@
             <text class="history-time">{{ formatTime(record.pickup_time) }}</text>
           </view>
           <view class="history-detail">
-            <text class="history-barcode">条码: {{ record.main_device_barcode }}</text>
+            <text class="history-barcode">{{ $t('stock.barcodeLabel') }}: {{ record.main_device_barcode }}</text>
             <text class="history-status" :class="{ 'confirmed': record.is_confirmed }">
-              {{ record.is_confirmed ? '✓ 已确认' : '待确认' }}
+              {{ record.is_returned ? $t('stock.statusReturned') : (record.is_confirmed ? $t('stock.statusConfirmed') : $t('stock.statusPending')) }}
             </text>
           </view>
           
           <!-- 显示解析后的设备信息 -->
           <view v-if="record.serial_number || record.mac_address_1 || record.mac_address_2" class="history-parsed-info">
             <view v-if="record.serial_number" class="parsed-info-item">
-              <text class="parsed-label">SN:</text>
+              <text class="parsed-label">{{ $t('stock.serialNumber') }}:</text>
               <text class="parsed-value">{{ record.serial_number }}</text>
             </view>
             <view v-if="record.mac_address_1" class="parsed-info-item">
@@ -159,6 +159,9 @@
               <text class="parsed-value">{{ formatMacAddress(record.mac_address_2) }}</text>
             </view>
           </view>
+          <view class="history-actions" v-if="showReturnAction">
+            <button v-if="!record.is_returned" class="btn-outline btn-sm" @click="confirmReturn(record)">{{ $t('stock.return') }}</button>
+          </view>
         </view>
       </view>
     </view>
@@ -166,7 +169,7 @@
     <!-- Loading遮罩 -->
     <view v-if="loading" class="loading-mask">
       <view class="loading-content">
-        <text>处理中...</text>
+        <text>{{ $t('stock.processing') }}</text>
       </view>
     </view>
   </view>
@@ -196,7 +199,9 @@ export default {
       pickupHistory: [],
       loading: false,
       confirming: false,
-      userLocation: null
+      userLocation: null,
+      // 临时隐藏“归还”功能入口，后续设计完善后再开启
+      showReturnAction: false
     }
   },
   
@@ -215,7 +220,7 @@ export default {
     },
     
     workOrderOptions() {
-      return ['无关联工单', ...this.myWorkOrders.map(workOrder => workOrder.title)]
+      return [this.$t('stock.noWorkOrder'), ...this.myWorkOrders.map(workOrder => workOrder.title)]
     }
   },
   
@@ -274,7 +279,7 @@ export default {
         if (!isValid) {
           console.log('=== 验证失败 ===')
           uni.showToast({
-            title: '条码格式不正确',
+            title: this.$t('stock.invalidBarcode'),
             icon: 'none'
           })
           return
@@ -285,7 +290,7 @@ export default {
       } catch (error) {
         console.error('扫码失败:', error)
         uni.showToast({
-          title: '扫码失败，请重试',
+          title: this.$t('stock.scanFailed'),
           icon: 'none'
         })
       }
@@ -334,7 +339,7 @@ export default {
           this.selectedPackageIndex = 0
           
           uni.showToast({
-            title: `识别到设备: ${equipmentData.equipment.name}`,
+            title: this.$t('stock.deviceRecognizedToast', { name: equipmentData.equipment.name }),
             icon: 'success'
           })
         } else {
@@ -344,21 +349,21 @@ export default {
           console.log('套装数量:', equipmentData.available_packages ? equipmentData.available_packages.length : 0)
           
           // 显示详细的设备识别信息
-          let message = `已识别设备信息：\nSN: ${parsedData.sn}`
+          let message = `${this.$t('stock.deviceNotRegisteredTitle')}\n${this.$t('stock.serialNumber')}: ${parsedData.sn}`
           if (parsedData.mac1) {
             message += `\nMAC: ${this.formatMacAddress(parsedData.mac1)}`
           }
           if (parsedData.mac2) {
             message += `\nMAC2: ${this.formatMacAddress(parsedData.mac2)}`
           }
-          message += '\n\n但该设备未在库存系统中注册。\n\n请联系管理员添加该设备到库存系统。'
+          message += `\n\n${this.$t('stock.deviceNotRegisteredHint')}`
           
           uni.showModal({
-            title: '设备识别结果',
+            title: this.$t('stock.deviceNotRegisteredTitle'),
             content: message,
             showCancel: true,
-            confirmText: '重新扫码',
-            cancelText: '复制SN',
+            confirmText: this.$t('stock.rescan'),
+            cancelText: this.$t('stock.copySn'),
             success: (res) => {
               if (res.confirm) {
                 this.resetScan()
@@ -367,10 +372,7 @@ export default {
                 uni.setClipboardData({
                   data: parsedData.sn,
                   success: () => {
-                    uni.showToast({
-                      title: 'SN已复制到剪贴板',
-                      icon: 'success'
-                    })
+                    uni.showToast({ title: this.$t('stock.copySn'), icon: 'success' })
                   }
                 })
               }
@@ -385,7 +387,7 @@ export default {
         console.error('错误消息:', error.message)
         
         uni.showToast({
-          title: '设备识别失败: ' + (error.response?.data?.detail || error.message),
+          title: this.$t('messages.operationFailed') + ': ' + (error.response?.data?.detail || error.message),
           icon: 'none'
         })
       } finally {
@@ -403,7 +405,7 @@ export default {
     
     async confirmPickup() {
       if (!this.selectedPackage) {
-        uni.showToast({ title: '请选择套装', icon: 'none' })
+        uni.showToast({ title: this.$t('stock.pleaseSelectPackage'), icon: 'none' })
         return
       }
       
@@ -440,10 +442,21 @@ export default {
         
         if (responseData.action === 'checkout_success') {
           uni.showModal({
-            title: '领料成功',
-            content: `出库单号: ${responseData.document_number}\n套装: ${responseData.package.name}`,
+            title: this.$t('stock.pickupSuccessTitle'),
+            content: `${this.$t('stock.documentNumber')}: ${responseData.document_number}\n${this.$t('stock.packageLabel')}: ${responseData.package.name}`,
             showCancel: false,
-            confirmText: '确定',
+            confirmText: this.$t('common.confirm'),
+            success: () => {
+              this.resetScan()
+              this.loadPickupHistory()
+            }
+          })
+        } else if (responseData.action === 'already_picked') {
+          uni.showModal({
+            title: this.$t('stock.pickupSuccessTitle'),
+            content: this.$t('stock.alreadyPicked', { picked_at: responseData.picked_at || '' }),
+            showCancel: false,
+            confirmText: this.$t('common.confirm'),
             success: () => {
               this.resetScan()
               this.loadPickupHistory()
@@ -451,18 +464,18 @@ export default {
           })
         } else if (responseData.action === 'insufficient_stock') {
           let shortage = responseData.shortage_items.map(item => 
-            `${item.equipment_name}: 需要${item.required}，库存${item.available}`
+            `${item.equipment_name}: ${this.$t('stock.requiredLabel')}${item.required}，${this.$t('stock.availableLabel')}${item.available}`
           ).join('\n')
           
           uni.showModal({
-            title: '库存不足',
+            title: this.$t('stock.insufficientStockTitle'),
             content: shortage,
             showCancel: false
           })
         } else {
           console.warn('🚀 [confirmPickup] 未知的响应类型:', responseData.action)
           uni.showToast({
-            title: '操作完成，但响应类型未知',
+            title: this.$t('stock.responseUnknown'),
             icon: 'none'
           })
         }
@@ -471,7 +484,7 @@ export default {
         console.error('🚀 [confirmPickup] 错误详情:', error.data)
         console.error('🚀 [confirmPickup] 错误状态码:', error.statusCode)
         
-        let errorMessage = '网络错误'
+        let errorMessage = this.$t('messages.networkError')
         if (error.data?.detail) {
           errorMessage = error.data.detail
         } else if (error.statusCode) {
@@ -479,7 +492,7 @@ export default {
         }
         
         uni.showToast({
-          title: '领料失败: ' + errorMessage,
+          title: this.$t('stock.pickupFailedPrefix') + errorMessage,
           icon: 'none',
           duration: 3000
         })
@@ -498,12 +511,12 @@ export default {
     },
     
     getFormatName(format) {
-      const formatNames = {
-        'sn_mac_comma': 'SN,MAC格式',
-        'key_value_pairs': '键值对格式',
-        'pure_sn': '纯SN格式'
+      const map = {
+        'sn_mac_comma': this.$t('stock.formatSnMacComma'),
+        'key_value_pairs': this.$t('stock.formatKeyValuePairs'),
+        'pure_sn': this.$t('stock.formatPureSn')
       }
-      return formatNames[format] || '未知格式'
+      return map[format] || this.$t('stock.formatUnknown')
     },
     
     formatMacAddress(mac) {
@@ -543,6 +556,49 @@ export default {
         this.pickupHistory = response.data?.pickup_records || []
       } catch (error) {
         console.error('加载领料记录失败:', error)
+      }
+    },
+    
+    confirmReturn(record) {
+      if (!record) return
+      uni.showModal({
+        title: this.$t('stock.returnConfirmTitle'),
+        content: this.$t('stock.returnConfirmContent'),
+        confirmText: this.$t('common.confirm'),
+        cancelText: this.$t('common.cancel'),
+        success: (res) => {
+          if (res.confirm) {
+            this.returnPickup(record)
+          }
+        },
+      })
+    },
+    
+    async returnPickup(record) {
+      if (!record || !record.id) return
+      try {
+        this.loading = true
+        const res = await new Promise((resolve, reject) => {
+          uni.request({
+            url: buildApiUrl('/api/stock/return-pickup'),
+            method: 'POST',
+            header: getAuthHeaders(this.userStore.token),
+            data: { pickup_record_id: record.id, notes: 'App端归还' },
+            success: resolve,
+            fail: reject,
+          })
+        })
+        if (res.statusCode === 200) {
+          uni.showToast({ title: this.$t('stock.returnSuccess'), icon: 'success' })
+          this.loadPickupHistory()
+        } else {
+          uni.showToast({ title: this.$t('stock.returnFailed'), icon: 'none' })
+        }
+      } catch (error) {
+        const msg = error?.data?.detail || this.$t('stock.returnFailed')
+        uni.showToast({ title: msg, icon: 'none' })
+      } finally {
+        this.loading = false
       }
     },
     
@@ -1067,5 +1123,27 @@ export default {
       color: #111827;
     }
   }
+}
+
+/* 统一按钮与动作区域样式 */
+.history-actions {
+  margin-top: 12rpx;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12rpx;
+}
+
+.btn-outline {
+  background: #ffffff;
+  color: #f97316;
+  border: 1rpx solid #f97316;
+  padding: 12rpx 20rpx;
+  border-radius: 6rpx;
+  font-size: 26rpx;
+}
+
+.btn-sm {
+  padding: 10rpx 16rpx;
+  font-size: 24rpx;
 }
 </style>
