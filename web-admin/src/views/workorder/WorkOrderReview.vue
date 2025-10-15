@@ -672,7 +672,8 @@ const showAuditHistory = async () => {
   }
   
   try {
-    const { data } = await apiClient.get(`/api/work-orders/${route.query.id}/audit-logs`)
+    // apiClient 的响应拦截器已经返回了 response.data，所以直接使用
+    const data = await apiClient.get(`/api/work-orders/${route.query.id}/audit-logs`)
     workOrderLogs.value = data.work_order_logs || []
     inspectionLogs.value = data.inspection_logs || []
     auditHistoryVisible.value = true
