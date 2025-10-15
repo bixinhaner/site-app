@@ -72,12 +72,28 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="数量" width="120">
+        <el-table-column label="序列号(SN)" width="180">
           <template #default="{ row }">
-            <el-input-number v-model="row.quantity" :min="1" size="small" @change="calculateTotal" />
+            <el-input 
+              v-model="row.serial_number" 
+              size="small" 
+              :placeholder="isMainDevice(row.equipment_id) ? '主设备必填' : '可选'"
+              :class="{ 'required-field': isMainDevice(row.equipment_id) }"
+            />
           </template>
         </el-table-column>
-        <el-table-column label="单位" width="80">
+        <el-table-column label="数量" width="100">
+          <template #default="{ row }">
+            <el-input-number 
+              v-model="row.quantity" 
+              :min="1" 
+              :max="isMainDevice(row.equipment_id) ? 1 : 9999"
+              size="small" 
+              @change="calculateTotal" 
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="单位" width="60">
           <template #default="{ row }">
             <span>{{ getEquipmentUnit(row.equipment_id) }}</span>
           </template>
@@ -332,6 +348,11 @@ const getEquipmentUnit = (equipmentId) => {
   return equipment?.unit || '台'
 }
 
+const isMainDevice = (equipmentId) => {
+  const equipment = equipmentOptions.value.find(eq => eq.id === equipmentId)
+  return equipment?.category === 'main_device'
+}
+
 const formatDateTime = (dateString) => {
   if (!dateString) return '-'
   return new Date(dateString).toLocaleString('zh-CN')
@@ -373,7 +394,8 @@ const addStockInItem = () => {
   stockInForm.value.items.push({
     equipment_id: null,
     quantity: 1,
-    batch_number: ''
+    batch_number: '',
+    serial_number: ''
   })
 }
 
@@ -406,6 +428,23 @@ const submitStockIn = async () => {
     return
   }
   
+  // 验证主设备必须填写SN
+  for (const item of stockInForm.value.items) {
+    const equipment = equipmentOptions.value.find(eq => eq.id === item.equipment_id)
+    if (equipment && equipment.category === 'main_device') {
+      if (!item.serial_number || item.serial_number.trim() === '') {
+        ElMessage.warning(`主设备 ${equipment.equipment_name} 必须填写序列号(SN)`)
+        return
+      }
+      // 主设备数量必须为1
+      if (item.quantity !== 1) {
+        ElMessage.warning(`主设备 ${equipment.equipment_name} 数量必须为1`)
+        item.quantity = 1
+        return
+      }
+    }
+  }
+  
   try {
     await ElMessageBox.confirm('确认提交入库单据？', '提交确认')
     
@@ -431,6 +470,7 @@ const resetForm = () => {
     notes: '',
     items: []
   }
+  calculateTotal()
 }
 
 // 批量导入相关方法
@@ -667,6 +707,17 @@ h3 {
 .low-stock {
   color: var(--danger-color) !important;
   font-weight: 600;
+}
+
+.required-field {
+  :deep(.el-input__wrapper) {
+    box-shadow: 0 0 0 1px #f56c6c inset;
+  }
+  
+  :deep(.el-input__inner::placeholder) {
+    color: #f56c6c;
+    font-weight: 500;
+  }
 }
 
 .method-selector {

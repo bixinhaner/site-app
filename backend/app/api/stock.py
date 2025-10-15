@@ -530,6 +530,32 @@ async def create_stock_in(
     if not items:
         raise HTTPException(status_code=400, detail="入库明细不能为空")
     
+    # 验证主设备必须填写SN
+    for item_data in items:
+        equipment_id = item_data["equipment_id"]
+        equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+        if not equipment:
+            raise HTTPException(status_code=404, detail=f"设备ID {equipment_id} 不存在")
+        
+        # 主设备必须填写SN
+        if equipment.category == "main_device":
+            serial_number = item_data.get("serial_number", "").strip()
+            if not serial_number:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"主设备 {equipment.equipment_name} 必须填写序列号(SN)"
+                )
+            
+            # 检查SN是否已存在
+            existing_instance = db.query(EquipmentInstance).filter(
+                EquipmentInstance.serial_number == serial_number
+            ).first()
+            if existing_instance:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"序列号 {serial_number} 已存在"
+                )
+    
     # 创建入库记录
     transaction_id = str(uuid.uuid4())
     document_number = f"IN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}"
@@ -549,17 +575,37 @@ async def create_stock_in(
     for item_data in items:
         equipment_id = item_data["equipment_id"]
         quantity = item_data["quantity"]
+        batch_number = item_data.get("batch_number")
+        serial_number = item_data.get("serial_number", "").strip()
+        
+        equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
         
         # 创建入库明细
         transaction_item = StockTransactionItem(
             transaction_id=transaction_id,
             equipment_id=equipment_id,
             quantity=quantity,
-            batch_number=item_data.get("batch_number")
+            batch_number=batch_number
         )
         db.add(transaction_item)
         
-        # 更新库存
+        # 主设备：创建设备实例
+        if equipment.category == "main_device":
+            equipment_instance_id = str(uuid.uuid4())
+            equipment_instance = EquipmentInstance(
+                id=equipment_instance_id,
+                equipment_id=equipment_id,
+                barcode=serial_number,  # 使用SN作为条码
+                serial_number=serial_number,
+                batch_number=batch_number,
+                warehouse_id=warehouse_id,
+                status=InventoryStatusEnum.IN_STOCK,
+                received_date=datetime.now(),
+                received_by=current_user.id
+            )
+            db.add(equipment_instance)
+        
+        # 更新库存统计
         inventory = db.query(Inventory).filter(
             and_(
                 Inventory.warehouse_id == warehouse_id,
@@ -570,6 +616,7 @@ async def create_stock_in(
         if inventory:
             inventory.current_stock += quantity
             inventory.available_stock += quantity
+            inventory.last_updated_by = current_user.id
         else:
             # 创建新的库存记录
             new_inventory = Inventory(
