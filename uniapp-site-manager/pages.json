@@ -125,6 +125,13 @@
 				"navigationBarBackgroundColor": "#f97316",
 				"navigationBarTextStyle": "white"
 			}
+		},
+		{
+			"path": "pages/map/view",
+			"style": {
+				"navigationBarTitleText": "地图",
+				"navigationStyle": "custom"
+			}
 		}
 	],
 	"globalStyle": {

@@ -191,6 +191,37 @@
 		<view class="loading-container" v-if="loading">
 			<uni-load-more status="loading"></uni-load-more>
 		</view>
+		
+		<!-- 地图选择器 -->
+		<view class="map-selector-overlay" v-if="showMapSelector" @click="showMapSelector = false">
+			<view class="map-selector" @click.stop>
+				<view class="selector-title">选择地图</view>
+				<view class="map-options">
+					<view 
+						class="map-option" 
+						@click="selectMapType('amap')"
+					>
+						<view class="option-icon">🗺️</view>
+						<view class="option-info">
+							<text class="option-name">高德地图</text>
+							<text class="option-desc">国内定位精准</text>
+						</view>
+						<text class="option-arrow">›</text>
+					</view>
+					<view 
+						class="map-option" 
+						@click="selectMapType('google')"
+					>
+						<view class="option-icon">🌏</view>
+						<view class="option-info">
+							<text class="option-name">谷歌地图</text>
+							<text class="option-desc">全球地图覆盖</text>
+						</view>
+						<text class="option-arrow">›</text>
+					</view>
+				</view>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -215,6 +246,7 @@
 	const recentInspections = ref([])
 	const planning = ref(null)
 	const planningExpanded = ref(false)
+	const showMapSelector = ref(false)
 
 	const site = computed(() => siteStore.currentSite)
 
@@ -316,11 +348,14 @@
 	
 	// 显示位置
 	const showLocation = () => {
-		uni.openLocation({
-			latitude: site.value.latitude,
-			longitude: site.value.longitude,
-			name: site.value.site_name,
-			address: site.value.address
+		showMapSelector.value = true
+	}
+	
+	// 选择地图类型并跳转
+	const selectMapType = (mapType) => {
+		showMapSelector.value = false
+		uni.navigateTo({
+			url: `/pages/map/view?latitude=${site.value.latitude}&longitude=${site.value.longitude}&name=${encodeURIComponent(site.value.site_name)}&address=${encodeURIComponent(site.value.address || '')}&mapType=${mapType}`
 		})
 	}
 
@@ -838,5 +873,96 @@
 	.loading-container {
 		padding: 40px 20px;
 		text-align: center;
+	}
+	
+	// 地图选择器
+	.map-selector-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 2000;
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+	}
+	
+	.map-selector {
+		width: 100%;
+		background: white;
+		border-radius: 30rpx 30rpx 0 0;
+		padding: 40rpx 30rpx;
+		animation: slideUp 0.3s ease-out;
+	}
+	
+	@keyframes slideUp {
+		from {
+			transform: translateY(100%);
+		}
+		to {
+			transform: translateY(0);
+		}
+	}
+	
+	.selector-title {
+		font-size: 32rpx;
+		font-weight: 600;
+		color: #111827;
+		text-align: center;
+		margin-bottom: 30rpx;
+	}
+	
+	.map-options {
+		display: flex;
+		flex-direction: column;
+		gap: 20rpx;
+	}
+	
+	.map-option {
+		display: flex;
+		align-items: center;
+		gap: 20rpx;
+		padding: 30rpx;
+		background: #f9fafb;
+		border-radius: 20rpx;
+		border: 2rpx solid transparent;
+		transition: all 0.3s ease;
+		
+		&:active {
+			background: #fef3e2;
+			border-color: #f97316;
+		}
+	}
+	
+	.option-icon {
+		font-size: 48rpx;
+		flex-shrink: 0;
+	}
+	
+	.option-info {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 4rpx;
+	}
+	
+	.option-name {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #111827;
+	}
+	
+	.option-desc {
+		font-size: 22rpx;
+		color: #6b7280;
+	}
+	
+	.option-arrow {
+		font-size: 32rpx;
+		color: #9ca3af;
+		font-weight: bold;
+		flex-shrink: 0;
 	}
 </style>
