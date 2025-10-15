@@ -1444,8 +1444,10 @@ async def submit_work_order(
     if wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="只有被分配人才能提交工单")
     
-    if wo.status != WorkOrderStatusEnum.ACTIVE:
-        raise HTTPException(status_code=400, detail=f"只能提交活跃状态的工单，当前状态：{wo.status}")
+    # 允许从ACTIVE或REJECTED状态提交
+    is_resubmit = wo.status == WorkOrderStatusEnum.REJECTED
+    if wo.status not in [WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED]:
+        raise HTTPException(status_code=400, detail=f"只能提交活跃或驳回状态的工单，当前状态：{wo.status}")
     
     # 检查关联的检查是否完成
     if wo.inspection_id:
@@ -1478,6 +1480,53 @@ async def submit_work_order(
     wo.status = WorkOrderStatusEnum.SUBMITTED
     wo.submitted_at = datetime.utcnow()
     
+    # 如果是重新提交（从驳回状态），清除旧的审核结果
+    if is_resubmit:
+        print(f"[重新提交] 工单 {work_order_id} 从驳回状态重新提交，清除旧审核结果")
+        
+        # 1. 清除工单级别的审核信息
+        wo.review_comments = None
+        wo.reviewed_by = None
+        wo.reviewed_at = None
+        
+        # 2. 清除关联检查的审核信息
+        if wo.inspection_id:
+            inspection = db.query(SiteInspection).filter(
+                SiteInspection.id == wo.inspection_id
+            ).first()
+            if inspection:
+                inspection.review_comments = None
+                inspection.reviewed_by = None
+                inspection.reviewed_at = None
+                
+                # 3. 清除所有检查项的审核结果
+                check_items = db.query(InspectionCheckItem).filter(
+                    InspectionCheckItem.inspection_id == wo.inspection_id
+                ).all()
+                
+                cleared_count = 0
+                for item in check_items:
+                    if item.review_status or item.review_comments:
+                        item.review_status = None
+                        item.review_comments = None
+                        item.reviewed_by = None
+                        item.reviewed_at = None
+                        cleared_count += 1
+                
+                print(f"[重新提交] 已清除 {cleared_count} 个检查项的审核结果")
+        
+        # 4. 清除工单项的审核结果（如果使用WorkOrderItem）
+        work_order_items = db.query(WorkOrderItem).filter(
+            WorkOrderItem.work_order_id == work_order_id
+        ).all()
+        
+        for item in work_order_items:
+            if item.review_status or item.review_comments:
+                item.review_status = None
+                item.review_comments = None
+                item.reviewed_by = None
+                item.reviewed_at = None
+    
     # 分配审核人（默认分配给分配人，即管理员）
     wo.reviewer_id = wo.assigned_by
     
@@ -1488,7 +1537,7 @@ async def submit_work_order(
     
     db.commit()
     
-    _audit(db, "work_order", wo.id, "submit", current_user.id,
+    _audit(db, "work_order", wo.id, "submit" if not is_resubmit else "resubmit", current_user.id,
            from_status=old_status.value, to_status=wo.status.value)
     
     return {
@@ -1836,4 +1885,75 @@ async def get_work_order_progress(
         "next_action": WorkOrderProgressCalculator.get_next_action(wo.status),
         "progress_color": WorkOrderProgressCalculator.get_progress_color(progress_info["progress"]),
         **progress_info
+    }
+
+
+@router.get("/{work_order_id}/audit-logs")
+async def get_work_order_audit_logs(
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取工单审核历史日志"""
+    # 验证工单存在
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    
+    # 权限检查：施工员只能查看自己的工单
+    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限访问此工单审核历史")
+    
+    # 查询工单相关的审核日志
+    audit_logs = db.query(AuditEvent).filter(
+        AuditEvent.resource_type == "work_order",
+        AuditEvent.resource_id == work_order_id
+    ).order_by(AuditEvent.created_at.desc()).all()
+    
+    # 转换为响应格式
+    logs_data = []
+    for log in audit_logs:
+        operator = db.query(User).filter(User.id == log.operator_id).first()
+        logs_data.append({
+            "id": log.id,
+            "action": log.action,
+            "from_status": log.from_status,
+            "to_status": log.to_status,
+            "operator_id": log.operator_id,
+            "operator_name": operator.full_name if operator else "未知",
+            "operator_username": operator.username if operator else "unknown",
+            "comments": log.comments,
+            "details": log.details,
+            "created_at": log.created_at.isoformat() if log.created_at else None
+        })
+    
+    # 如果有关联的检查，也获取检查的审核日志
+    inspection_logs = []
+    if wo.inspection_id:
+        from app.models.inspection import InspectionAuditLog
+        
+        insp_logs = db.query(InspectionAuditLog).filter(
+            InspectionAuditLog.inspection_id == wo.inspection_id
+        ).order_by(InspectionAuditLog.created_at.desc()).all()
+        
+        for log in insp_logs:
+            operator = db.query(User).filter(User.id == log.operator_id).first()
+            inspection_logs.append({
+                "id": log.id,
+                "action": log.action,
+                "from_status": log.from_status,
+                "to_status": log.to_status,
+                "operator_id": log.operator_id,
+                "operator_name": operator.full_name if operator else "未知",
+                "operator_username": operator.username if operator else "unknown",
+                "comments": log.comments,
+                "details": log.details,
+                "created_at": log.created_at.isoformat() if log.created_at else None
+            })
+    
+    return {
+        "work_order_id": work_order_id,
+        "work_order_logs": logs_data,
+        "inspection_logs": inspection_logs,
+        "total_count": len(logs_data) + len(inspection_logs)
     }

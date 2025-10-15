@@ -575,6 +575,35 @@ async def update_inspection(
     
     inspection.updated_at = datetime.utcnow()
     
+    # 如果从驳回状态重新提交，清除旧的审核结果
+    is_resubmit = (old_status == InspectionStatusEnum.REJECTED and 
+                   "status" in update_fields and 
+                   inspection.status == InspectionStatusEnum.SUBMITTED)
+    
+    if is_resubmit:
+        print(f"[重新提交] 检查 {inspection_id} 从驳回状态重新提交，清除旧审核结果")
+        
+        # 1. 清除检查级别的审核信息
+        inspection.review_comments = None
+        inspection.reviewed_by = None
+        inspection.reviewed_at = None
+        
+        # 2. 清除所有检查项的审核结果
+        check_items = db.query(InspectionCheckItem).filter(
+            InspectionCheckItem.inspection_id == inspection_id
+        ).all()
+        
+        cleared_count = 0
+        for item in check_items:
+            if item.review_status or item.review_comments:
+                item.review_status = None
+                item.review_comments = None
+                item.reviewed_by = None
+                item.reviewed_at = None
+                cleared_count += 1
+        
+        print(f"[重新提交] 已清除 {cleared_count} 个检查项的审核结果")
+    
     # 如果状态变更为submitted，且没有设置submitted_at，自动设置
     if "status" in update_fields and inspection.status == InspectionStatusEnum.SUBMITTED:
         if not inspection.submitted_at:
@@ -583,14 +612,18 @@ async def update_inspection(
     # 记录状态变更日志
     audit_log_to_add = None
     if "status" in update_fields and old_status != inspection.status:
+        # 区分首次提交和重新提交
+        action = "resubmit" if is_resubmit else "update_status"
+        comments = "重新提交检查（已清除旧审核结果）" if is_resubmit else "更新检查状态"
+        
         audit_log_to_add = InspectionAuditLog(
             id=str(uuid.uuid4()),
             inspection_id=inspection.id,
-            action="update_status",
+            action=action,
             from_status=old_status.value,
             to_status=inspection.status.value,
             operator_id=current_user.id,
-            comments="更新检查状态"
+            comments=comments
         )
         db.add(audit_log_to_add)
     

@@ -120,6 +120,9 @@
               <el-button type="danger" :disabled="!canReject" @click="finalReview('reject')">
                 {{ hasPendingItems ? `还有 ${pendingItemsCount} 项未审核` : '驳回' }}
               </el-button>
+              <el-button type="info" @click="showAuditHistory">
+                <el-icon><Clock /></el-icon>查看审核历史
+              </el-button>
             </el-space>
           </el-form-item>
         </el-form>
@@ -256,6 +259,83 @@
         <el-button @click="photoDetailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 审核历史弹窗 -->
+    <el-dialog v-model="auditHistoryVisible" title="审核历史" width="900px">
+      <el-tabs v-model="activeHistoryTab">
+        <el-tab-pane label="工单操作历史" name="workorder">
+          <el-timeline v-if="workOrderLogs.length > 0">
+            <el-timeline-item
+              v-for="log in workOrderLogs"
+              :key="log.id"
+              :timestamp="formatDateTime(log.created_at)"
+              placement="top"
+              :type="getLogType(log.action)"
+            >
+              <el-card>
+                <template #header>
+                  <div class="card-header">
+                    <span><strong>{{ log.operator_name }}</strong> ({{ log.operator_username }})</span>
+                    <el-tag :type="getActionTagType(log.action)" size="small">{{ getActionText(log.action) }}</el-tag>
+                  </div>
+                </template>
+                <div v-if="log.from_status || log.to_status">
+                  状态变更：
+                  <el-tag v-if="log.from_status" size="small">{{ statusText(log.from_status) }}</el-tag>
+                  <el-icon><Right /></el-icon>
+                  <el-tag v-if="log.to_status" size="small" :type="getStatusTagType(log.to_status)">{{ statusText(log.to_status) }}</el-tag>
+                </div>
+                <div v-if="log.comments" style="margin-top: 8px;">
+                  <strong>意见：</strong>{{ log.comments }}
+                </div>
+                <div v-if="log.details" style="margin-top: 8px; color: #909399; font-size: 12px;">
+                  详情：<pre style="margin: 0;">{{ JSON.stringify(log.details, null, 2) }}</pre>
+                </div>
+              </el-card>
+            </el-timeline-item>
+          </el-timeline>
+          <el-empty v-else description="暂无操作历史" />
+        </el-tab-pane>
+        
+        <el-tab-pane label="检查操作历史" name="inspection">
+          <el-timeline v-if="inspectionLogs.length > 0">
+            <el-timeline-item
+              v-for="log in inspectionLogs"
+              :key="log.id"
+              :timestamp="formatDateTime(log.created_at)"
+              placement="top"
+              :type="getLogType(log.action)"
+            >
+              <el-card>
+                <template #header>
+                  <div class="card-header">
+                    <span><strong>{{ log.operator_name }}</strong> ({{ log.operator_username }})</span>
+                    <el-tag :type="getActionTagType(log.action)" size="small">{{ getActionText(log.action) }}</el-tag>
+                  </div>
+                </template>
+                <div v-if="log.from_status || log.to_status">
+                  状态变更：
+                  <el-tag v-if="log.from_status" size="small">{{ log.from_status }}</el-tag>
+                  <el-icon><Right /></el-icon>
+                  <el-tag v-if="log.to_status" size="small">{{ log.to_status }}</el-tag>
+                </div>
+                <div v-if="log.comments" style="margin-top: 8px;">
+                  <strong>意见：</strong>{{ log.comments }}
+                </div>
+                <div v-if="log.details" style="margin-top: 8px; color: #909399; font-size: 12px;">
+                  详情：<pre style="margin: 0;">{{ JSON.stringify(log.details, null, 2) }}</pre>
+                </div>
+              </el-card>
+            </el-timeline-item>
+          </el-timeline>
+          <el-empty v-else description="暂无操作历史" />
+        </el-tab-pane>
+      </el-tabs>
+      
+      <template #footer>
+        <el-button @click="auditHistoryVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -265,7 +345,7 @@ import { useRoute } from 'vue-router'
 import apiClient from '../../api/auth'
 import config from '../../config/env.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ZoomIn, ZoomOut, FullScreen, Aim, Download } from '@element-plus/icons-vue'
+import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const loading = ref(false)
@@ -285,6 +365,10 @@ const translateY = ref(0)
 const isDragging = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const photoImage = ref(null)
+const auditHistoryVisible = ref(false)
+const workOrderLogs = ref([])
+const inspectionLogs = ref([])
+const activeHistoryTab = ref('workorder')
 
 const statuses = [
   { label: '待分配', value: 'PENDING' },
@@ -580,6 +664,65 @@ const typeText = (v) => (types.find(t => t.value === v)?.label || v)
 const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
 
+// 审核历史相关方法
+const showAuditHistory = async () => {
+  if (!route.query.id) {
+    ElMessage.warning('请先选择工单')
+    return
+  }
+  
+  try {
+    const { data } = await apiClient.get(`/api/work-orders/${route.query.id}/audit-logs`)
+    workOrderLogs.value = data.work_order_logs || []
+    inspectionLogs.value = data.inspection_logs || []
+    auditHistoryVisible.value = true
+  } catch (error) {
+    console.error('获取审核历史失败:', error)
+    ElMessage.error('获取审核历史失败：' + (error.response?.data?.detail || error.message))
+  }
+}
+
+const getActionText = (action) => {
+  const actionMap = {
+    'create': '创建',
+    'assign': '分配',
+    'accept': '接受',
+    'submit': '提交',
+    'resubmit': '重新提交',
+    'start_review': '开始审核',
+    'final_review': '最终审核',
+    'approve': '通过',
+    'reject': '驳回',
+    'update_status': '更新状态',
+    'update': '更新',
+    'delete': '删除',
+    'mark_completed': '标记完成',
+    'activate': '激活'
+  }
+  return actionMap[action] || action
+}
+
+const getActionTagType = (action) => {
+  if (['approve', 'accept'].includes(action)) return 'success'
+  if (['reject', 'delete'].includes(action)) return 'danger'
+  if (['submit', 'resubmit', 'start_review'].includes(action)) return 'warning'
+  return 'info'
+}
+
+const getLogType = (action) => {
+  if (['approve', 'accept', 'mark_completed'].includes(action)) return 'success'
+  if (['reject', 'delete'].includes(action)) return 'danger'
+  if (['submit', 'resubmit'].includes(action)) return 'primary'
+  return 'info'
+}
+
+const getStatusTagType = (status) => {
+  if (['APPROVED', 'COMPLETED'].includes(status)) return 'success'
+  if (['REJECTED'].includes(status)) return 'danger'
+  if (['SUBMITTED', 'UNDER_REVIEW'].includes(status)) return 'warning'
+  return 'info'
+}
+
 onMounted(refresh)
 </script>
 
@@ -587,6 +730,13 @@ onMounted(refresh)
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .section-header { display:flex; justify-content: space-between; align-items:center; margin: 8px 0; }
+
+/* 审核历史样式 */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 
 /* 照片查看器样式 */
 .photo-container {
