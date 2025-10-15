@@ -105,7 +105,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import apiClient from '../../api/auth'
+import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../../stores/user'
 
@@ -126,7 +126,7 @@ const historyWorkOrders = ref([])
 const load = async () => {
   try {
     loading.value = true
-    const res = await apiClient.get(`/api/sites/${route.params.id}`)
+    const res = await request.get(`/api/sites/${route.params.id}`)
     site.value = res
     await loadWorkOrders()
   } catch (e) {
@@ -139,7 +139,7 @@ const load = async () => {
 
 const loadUsers = async () => {
   try {
-    const res = await apiClient.get('/api/users/', { params: { limit: 100 } })
+    const res = await request.get('/api/users/', { params: { limit: 100 } })
     userOptions.value = res || []
   } catch (e) {
     // 可能无权限
@@ -149,7 +149,7 @@ const loadUsers = async () => {
 const loadWorkOrders = async () => {
   try {
     workOrdersLoading.value = true
-    const res = await apiClient.get('/api/work-orders/search', {
+    const res = await request.get('/api/work-orders/search', {
       params: {
         site_id: route.params.id,
         limit: 100
@@ -172,7 +172,7 @@ const showHistoryDialog = async () => {
   historyDialogVisible.value = true
   try {
     historyLoading.value = true
-    const res = await apiClient.get('/api/work-orders/search', {
+    const res = await request.get('/api/work-orders/search', {
       params: {
         site_id: route.params.id,
         limit: 100

@@ -88,7 +88,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import apiClient from '../../api/auth'
+import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
@@ -104,7 +104,7 @@ const refresh = async () => {
   if (!id) return
   try {
     loading.value = true
-    inspection.value = await apiClient.get(`/api/inspections/detail/${id}`)
+    inspection.value = await request.get(`/api/inspections/detail/${id}`)
     await Promise.all([loadItems(), loadSummary()])
   } catch (e) {
     console.error(e)
@@ -116,7 +116,7 @@ const refresh = async () => {
 
 const doReview = async (action) => {
   try {
-    await apiClient.post(`/api/inspections/detail/${inspection.value.id}/review`, {
+    await request.post(`/api/inspections/detail/${inspection.value.id}/review`, {
       action,
       comments: commentsText.value || undefined
     })
@@ -135,7 +135,7 @@ const loadItems = async () => {
   if (!id) return
   try {
     itemsLoading.value = true
-    items.value = await apiClient.get(`/api/inspections/detail/${id}/items`)
+    items.value = await request.get(`/api/inspections/detail/${id}/items`)
   } catch (e) {
     console.error(e)
     ElMessage.error('加载检查项失败')
@@ -148,7 +148,7 @@ const loadSummary = async () => {
   const id = route.query.inspectionId
   if (!id) return
   try {
-    summary.value = await apiClient.get(`/api/inspections/detail/${id}/review-summary`)
+    summary.value = await request.get(`/api/inspections/detail/${id}/review-summary`)
   } catch (e) {
     // 可忽略
   }
@@ -161,7 +161,7 @@ const reviewItem = async (row, action) => {
       cancelButtonText: '取消',
       inputPlaceholder: action === 'pass' ? '可填写通过说明' : (action === 'warning' ? '说明警告原因' : '说明不合格原因'),
     })
-    await apiClient.post(`/api/inspections/detail/${inspection.value.id}/items/${row.id}/review`, {
+    await request.post(`/api/inspections/detail/${inspection.value.id}/items/${row.id}/review`, {
       action,
       comments: value || undefined
     })
@@ -181,7 +181,7 @@ const reviewPhoto = async (photo, action) => {
       cancelButtonText: '取消',
       inputPlaceholder: action === 'approved' ? '可填写通过说明' : '说明驳回原因',
     })
-    await apiClient.post(`/api/inspections/detail/${inspection.value.id}/photos/${photo.id}/review`, {
+    await request.post(`/api/inspections/detail/${inspection.value.id}/photos/${photo.id}/review`, {
       action,
       comments: value || undefined
     })

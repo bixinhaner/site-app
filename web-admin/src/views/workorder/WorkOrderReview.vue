@@ -342,7 +342,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import apiClient from '../../api/auth'
+import request from '@/utils/request'
 import config from '../../config/env.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right } from '@element-plus/icons-vue'
@@ -422,7 +422,7 @@ const refresh = async () => {
   try {
     loading.value = true
     // 先加载工单信息
-    order.value = await apiClient.get(`/api/work-orders/${id}`)
+    order.value = await request.get(`/api/work-orders/${id}`)
     // 然后基于工单信息加载相关数据
     await Promise.all([loadItems(), loadSummary()])
   } catch (e) {
@@ -440,10 +440,10 @@ const loadItems = async () => {
     itemsLoading.value = true
     // 如果工单有关联的检查，优先加载检查的检查项
     if (order.value && order.value.inspection_id) {
-      items.value = await apiClient.get(`/api/inspections/detail/${order.value.inspection_id}/items`)
+      items.value = await request.get(`/api/inspections/detail/${order.value.inspection_id}/items`)
     } else {
       // 否则加载工单自己的检查项
-      items.value = await apiClient.get(`/api/work-orders/${id}/items`)
+      items.value = await request.get(`/api/work-orders/${id}/items`)
     }
   } catch (e) {
     console.error(e)
@@ -458,7 +458,7 @@ const loadSummary = async () => {
   const id = route.query.id
   if (!id) return
   try {
-    summary.value = await apiClient.get(`/api/work-orders/${id}/review-summary`)
+    summary.value = await request.get(`/api/work-orders/${id}/review-summary`)
   } catch (e) {
     // ignore
   }
@@ -467,7 +467,7 @@ const loadSummary = async () => {
 const startReview = async () => {
   const id = route.query.id
   try {
-    await apiClient.post(`/api/work-orders/${id}/review/start`)
+    await request.post(`/api/work-orders/${id}/review/start`)
     ElMessage.success('已进入审核中')
     await refresh()
   } catch (e) {
@@ -517,10 +517,10 @@ const reviewItem = async (row, action) => {
 
     // 如果工单有关联的检查，调用检查项审核API
     if (order.value && order.value.inspection_id) {
-      await apiClient.post(`/api/inspections/detail/${order.value.inspection_id}/items/${row.id}/review`, { action, comments: value || undefined })
+      await request.post(`/api/inspections/detail/${order.value.inspection_id}/items/${row.id}/review`, { action, comments: value || undefined })
     } else {
       // 否则调用工单项审核API
-      await apiClient.post(`/api/work-orders/${id}/items/${row.id}/review`, { action, comments: value || undefined })
+      await request.post(`/api/work-orders/${id}/items/${row.id}/review`, { action, comments: value || undefined })
     }
     ElMessage.success('已提交')
     await Promise.all([loadItems(), loadSummary()])
@@ -534,7 +534,7 @@ const reviewItem = async (row, action) => {
 const finalReview = async (action) => {
   const id = route.query.id
   try {
-    await apiClient.post(`/api/work-orders/${id}/review`, { action, comments: comments.value || undefined })
+    await request.post(`/api/work-orders/${id}/review`, { action, comments: comments.value || undefined })
     ElMessage.success('审核已提交')
     await refresh()
   } catch (e) {
@@ -672,8 +672,8 @@ const showAuditHistory = async () => {
   }
   
   try {
-    // apiClient 的响应拦截器已经返回了 response.data，所以直接使用
-    const data = await apiClient.get(`/api/work-orders/${route.query.id}/audit-logs`)
+    // request 的响应拦截器已经返回了 response.data，所以直接使用
+    const data = await request.get(`/api/work-orders/${route.query.id}/audit-logs`)
     workOrderLogs.value = data.work_order_logs || []
     inspectionLogs.value = data.inspection_logs || []
     auditHistoryVisible.value = true

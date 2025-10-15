@@ -30,7 +30,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import apiClient from '../../api/auth'
+import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 
@@ -50,7 +50,7 @@ const statuses = [
 const load = async () => {
   try {
     loading.value = true
-    const res = await apiClient.get('/api/inspections/', { params: status.value ? { status: status.value } : {} })
+    const res = await request.get('/api/inspections/', { params: status.value ? { status: status.value } : {} })
     items.value = res || []
   } catch (e) {
     console.error(e)

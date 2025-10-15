@@ -89,7 +89,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import apiClient from '../../api/auth'
+import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../../stores/user'
@@ -123,7 +123,7 @@ const reload = async () => {
     }
     if (statusFilter.value) params.status = statusFilter.value
     if (assigneeFilter.value) params.assigned_to = assigneeFilter.value
-    const res = await apiClient.get('/api/sites/', { params })
+    const res = await request.get('/api/sites/', { params })
     // 后端未返回总数，这里用近似：以当前页数据长度替代
     sites.value = Array.isArray(res) ? res : []
     total.value = (currentPage.value - 1) * pageSize.value + sites.value.length + (sites.value.length === pageSize.value ? pageSize.value : 0)
@@ -161,7 +161,7 @@ const confirmAssign = async () => {
   }
   try {
     assigning.value = true
-    await apiClient.put(`/api/sites/${siteToAssign.value.id}`, { assigned_to: selectedAssignee.value })
+    await request.put(`/api/sites/${siteToAssign.value.id}`, { assigned_to: selectedAssignee.value })
     ElMessage.success('分配成功')
     assignVisible.value = false
     await reload()
@@ -176,7 +176,7 @@ const confirmAssign = async () => {
 const loadUsers = async () => {
   if (usersLoaded.value) return
   try {
-    const res = await apiClient.get('/api/users/', { params: { limit: 100 } })
+    const res = await request.get('/api/users/', { params: { limit: 100 } })
     userOptions.value = res || []
     usersLoaded.value = true
   } catch (e) {

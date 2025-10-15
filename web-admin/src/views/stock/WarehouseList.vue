@@ -53,7 +53,7 @@
 import { ref, onMounted } from 'vue'
 import { stockApi } from '../../api/stock'
 import { ElMessage } from 'element-plus'
-import apiClient from '../../api/auth'
+import request from '@/utils/request'
 
 const loading = ref(false)
 const warehouses = ref([])
@@ -89,7 +89,7 @@ const load = async () => {
 
 const loadUsers = async () => {
   try {
-    const res = await apiClient.get('/api/users/', { params: { limit: 100 } })
+    const res = await request.get('/api/users/', { params: { limit: 100 } })
     userOptions.value = res || []
   } catch (e) {
     // 可能无权限

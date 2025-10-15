@@ -228,7 +228,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import apiClient from '../../api/auth'
+import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Edit, Delete, Search, Refresh, Plus } from '@element-plus/icons-vue'
@@ -281,7 +281,7 @@ const load = async () => {
       const response = await workOrderAPI.searchWorkOrders(params)
       items.value = response.work_orders || []
     } else {
-      items.value = await apiClient.get('/api/work-orders', { params })
+      items.value = await request.get('/api/work-orders', { params })
     }
   } catch (e) {
     console.error(e)
@@ -325,7 +325,7 @@ const openCreate = () => {
 
 const loadSites = async () => {
   try {
-    const res = await apiClient.get('/api/sites/', { params: { limit: 100 } })
+    const res = await request.get('/api/sites/', { params: { limit: 100 } })
     siteOptions.value = Array.isArray(res) ? res : []
   } catch (e) {
     // ignore
@@ -334,7 +334,7 @@ const loadSites = async () => {
 
 const loadUsers = async () => {
   try {
-    const res = await apiClient.get('/api/users/', { params: { limit: 100 } })
+    const res = await request.get('/api/users/', { params: { limit: 100 } })
     userOptions.value = Array.isArray(res) ? res : []
   } catch (e) {
     // ignore (权限不足时隐藏选项)
@@ -345,7 +345,7 @@ const loadTemplates = async () => {
   if (!createForm.value.type) return
   try {
     const params = { task_type: createForm.value.type, limit: 100 }
-    const list = await apiClient.get('/api/inspections/templates', { params })
+    const list = await request.get('/api/inspections/templates', { params })
     templateOptions.value = Array.isArray(list) ? list : []
   } catch (e) {
     // ignore (权限不足等)
@@ -359,7 +359,7 @@ const onTypeOrSiteChange = async () => {
   if (!createForm.value.site_id || !createForm.value.type) return
   try {
     const body = { site_id: createForm.value.site_id, task_type: createForm.value.type }
-    const res = await apiClient.post('/api/inspections/templates/resolve', body)
+    const res = await request.post('/api/inspections/templates/resolve', body)
     if (res?.success && res?.result?.template_id) {
       createForm.value.template_id = res.result.template_id
       // ensure recommended template appears in options for visible label
@@ -380,7 +380,7 @@ const submitCreate = () => {
       creating.value = true
       const payload = { ...createForm.value }
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
-      await apiClient.post('/api/work-orders', payload)
+      await request.post('/api/work-orders', payload)
       ElMessage.success('创建成功')
       createVisible.value = false
       await load()
@@ -427,7 +427,7 @@ const submitUpdate = () => {
       const payload = { ...editForm.value }
       delete payload.id // 移除id字段
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
-      await apiClient.put(`/api/work-orders/${editForm.value.id}`, payload)
+      await request.put(`/api/work-orders/${editForm.value.id}`, payload)
       ElMessage.success('更新成功')
       editVisible.value = false
       await load()
@@ -461,7 +461,7 @@ const confirmDelete = async (row) => {
 
 const deleteWorkOrder = async (id) => {
   try {
-    await apiClient.delete(`/api/work-orders/${id}`)
+    await request.delete(`/api/work-orders/${id}`)
     ElMessage.success('删除成功')
     await load()
   } catch (e) {
