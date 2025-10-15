@@ -1,26 +1,26 @@
-import apiClient from './auth'
+import request from '@/utils/request'
 
 export const sitePlanningApi = {
-  getCurrent: (siteId) => apiClient.get(`/api/sites/${siteId}/planning`),
-  putPlanning: (siteId, payload) => apiClient.put(`/api/sites/${siteId}/planning`, payload),
-  listVersions: (siteId) => apiClient.get(`/api/sites/${siteId}/planning/versions`),
-  getVersion: (siteId, version) => apiClient.get(`/api/sites/${siteId}/planning/versions/${version}`),
-  restoreVersion: (siteId, version) => apiClient.post(`/api/sites/${siteId}/planning/versions/${version}/restore`),
-  listLogs: (siteId, params = {}) => apiClient.get(`/api/sites/${siteId}/planning/logs`, { params }),
+  getCurrent: (siteId) => request.get(`/api/sites/${siteId}/planning`),
+  putPlanning: (siteId, payload) => request.put(`/api/sites/${siteId}/planning`, payload),
+  listVersions: (siteId) => request.get(`/api/sites/${siteId}/planning/versions`),
+  getVersion: (siteId, version) => request.get(`/api/sites/${siteId}/planning/versions/${version}`),
+  restoreVersion: (siteId, version) => request.post(`/api/sites/${siteId}/planning/versions/${version}/restore`),
+  listLogs: (siteId, params = {}) => request.get(`/api/sites/${siteId}/planning/logs`, { params }),
   importPlanning: (siteId, file, dryRun = true) => {
     const form = new FormData()
     form.append('file', file)
     const url = `/api/sites/${siteId}/planning/upload?dry_run=${dryRun}`
-    return apiClient.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
-  downloadTemplate: () => apiClient.get('/api/sites/planning/import-template', { responseType: 'blob' }),
+  downloadTemplate: () => request.get('/api/sites/planning/import-template', { responseType: 'blob' }),
   downloadTemplateUrl: () => '/api/sites/planning/import-template',
-  downloadBatchTemplate: () => apiClient.get('/api/sites/planning/batch-template', { responseType: 'blob' }),
+  downloadBatchTemplate: () => request.get('/api/sites/planning/batch-template', { responseType: 'blob' }),
   batchImportPlanning: (file, dryRun = true) => {
     const form = new FormData()
     form.append('file', file)
     const url = `/api/sites/planning/batch-upload?dry_run=${dryRun}`
-    return apiClient.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
 }
 

@@ -2,7 +2,7 @@
  * 检查模板管理 API
  */
 
-import apiClient from './auth'
+import request from '@/utils/request'
 
 const API_BASE = '/api/inspections'
 
@@ -21,27 +21,27 @@ export const templateAPI = {
     if (task_type) searchParams.append('task_type', task_type)
     if (q) searchParams.append('q', q)
     
-    return apiClient.get(`${API_BASE}/templates?${searchParams}`)
+    return request.get(`${API_BASE}/templates?${searchParams}`)
   },
 
   // 获取模板详情
   async getTemplate(templateId) {
-    return apiClient.get(`${API_BASE}/templates/${templateId}`)
+    return request.get(`${API_BASE}/templates/${templateId}`)
   },
 
   // 创建模板
   async createTemplate(templateData) {
-    return apiClient.post(`${API_BASE}/templates`, templateData)
+    return request.post(`${API_BASE}/templates`, templateData)
   },
 
   // 更新模板
   async updateTemplate(templateId, templateData) {
-    return apiClient.put(`${API_BASE}/templates/${templateId}`, templateData)
+    return request.put(`${API_BASE}/templates/${templateId}`, templateData)
   },
 
   // 删除模板
   async deleteTemplate(templateId) {
-    return apiClient.delete(`${API_BASE}/templates/${templateId}`)
+    return request.delete(`${API_BASE}/templates/${templateId}`)
   }
 }
 
@@ -56,27 +56,27 @@ export const bindingAPI = {
       active_only: active_only.toString()
     })
     
-    return apiClient.get(`${API_BASE}/templates/${templateId}/bindings?${searchParams}`)
+    return request.get(`${API_BASE}/templates/${templateId}/bindings?${searchParams}`)
   },
 
   // 创建模板绑定
   async createBinding(templateId, bindingData) {
-    return apiClient.post(`${API_BASE}/templates/${templateId}/bindings`, bindingData)
+    return request.post(`${API_BASE}/templates/${templateId}/bindings`, bindingData)
   },
 
   // 更新模板绑定
   async updateBinding(templateId, bindingId, bindingData) {
-    return apiClient.put(`${API_BASE}/templates/${templateId}/bindings/${bindingId}`, bindingData)
+    return request.put(`${API_BASE}/templates/${templateId}/bindings/${bindingId}`, bindingData)
   },
 
   // 删除模板绑定
   async deleteBinding(templateId, bindingId) {
-    return apiClient.delete(`${API_BASE}/templates/${templateId}/bindings/${bindingId}`)
+    return request.delete(`${API_BASE}/templates/${templateId}/bindings/${bindingId}`)
   },
 
   // 批量更新绑定优先级
   async batchUpdatePriority(templateId, bindingUpdates) {
-    return apiClient.post(`${API_BASE}/templates/${templateId}/bindings/batch-update`, { binding_updates: bindingUpdates })
+    return request.post(`${API_BASE}/templates/${templateId}/bindings/batch-update`, { binding_updates: bindingUpdates })
   }
 }
 
@@ -86,7 +86,7 @@ export const resolverAPI = {
   async resolveTemplate(context, showAll = false) {
     const params = new URLSearchParams({ show_all: showAll.toString() })
     
-    return apiClient.post(`${API_BASE}/templates/resolve?${params}`, context)
+    return request.post(`${API_BASE}/templates/resolve?${params}`, context)
   }
 }
 

@@ -140,3 +140,24 @@ async def get_current_user_info(
     """
     raw = get_user_by_username(db, current_user.username)
     return UserResponse.from_orm(raw)
+
+@router.post("/refresh", response_model=Token)
+async def refresh_token(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """刷新访问令牌
+    
+    使用当前有效的token换取新的token，延长登录时间
+    """
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        subject=current_user.username, expires_delta=access_token_expires
+    )
+    
+    raw = get_user_by_username(db, current_user.username)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": UserResponse.from_orm(raw)
+    }
