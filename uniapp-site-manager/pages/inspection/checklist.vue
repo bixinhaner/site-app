@@ -81,10 +81,10 @@
 						<view class="item-info">
 							<text class="item-name">{{ item.item_name }}</text>
 							<text class="item-id" v-if="item.sector_id">{{ $t('inspection.sector') }} {{ item.sector_id }}</text>
-							<text class="equipment-binding" v-if="item.sector_id && isCellBound(item)">
+							<text class="equipment-binding" v-if="item.sector_id && item.band && isCellBound(item)">
 								📱 {{ $t('inspection.bound') }}: {{ getCellEquipmentSn(item) }}
 							</text>
-							<text class="equipment-binding pending" v-else-if="item.sector_id && !isCellBound(item)">
+							<text class="equipment-binding pending" v-else-if="item.sector_id && item.band && !isCellBound(item)">
 								🔗 {{ $t('inspection.needBinding') }}
 							</text>
 						</view>
@@ -166,7 +166,7 @@
 				
 				<scroll-view class="modal-content" scroll-y>
 					<!-- 设备绑定部分 (仅小区级检查项显示) -->
-					<view class="modal-section" v-if="currentItem.sector_id">
+					<view class="modal-section" v-if="currentItem.sector_id && currentItem.band">
 						<text class="section-label">{{ $t('inspection.equipmentBinding') }}</text>
 						<view class="equipment-binding-section">
 							<view v-if="currentItem.equipment_sn" class="bound-equipment">
@@ -313,7 +313,7 @@
 				
 				<view class="modal-actions">
 					<button class="modal-btn cancel-btn" @click="closeItemModal">{{ $t('inspection.cancel') }}</button>
-					<button class="modal-btn save-btn" @click="saveCurrentItem" :disabled="savingItem || (currentItem?.sector_id && !currentItem?.equipment_sn)">
+					<button class="modal-btn save-btn" @click="saveCurrentItem" :disabled="savingItem">
 						{{ savingItem ? $t('inspection.savingInProgress') : $t('inspection.save') }}
 					</button>
 				</view>
@@ -662,9 +662,14 @@
 		return checkItems.value.filter(item => item.category_id === categoryId).length
 	}
 	
+	// 判断是否是小区级检查项（需要绑定设备）
+	const isCellLevelItem = (item) => {
+		return item.sector_id && item.band  // 同时有扇区和频段才是小区级
+	}
+	
 	// 检查小区是否已绑定设备
 	const isCellBound = (item) => {
-		if (!item.sector_id) return true // 站点级检查项不需要绑定
+		if (!isCellLevelItem(item)) return true  // 非小区级（站点级、扇区级）不需要绑定
 		
 		// 检查同一小区的任意检查项是否已绑定设备
 		const cellItems = checkItems.value.filter(checkItem => 
@@ -690,14 +695,14 @@
 
 	const openCheckItem = async (item) => {
 		// 如果是小区级检查项且该小区未绑定设备，先要求绑定设备
-		if (item.sector_id && !isCellBound(item)) {
-			const cellId = item.band ? `${item.sector_id}_${item.band}` : item.sector_id
-		// 显示绑定设备提示
-		uni.showModal({
-			title: $t('inspection.needBindTitle'),
-			content: $t('inspection.needBindContent'),
-			confirmText: $t('inspection.scanBindButton'),
-			cancelText: $t('inspection.laterBindButton'),
+		if (isCellLevelItem(item) && !isCellBound(item)) {
+			const cellId = `${item.sector_id}_${item.band}`
+			// 显示绑定设备提示
+			uni.showModal({
+				title: $t('inspection.needBindTitle'),
+				content: $t('inspection.needBindContent'),
+				confirmText: $t('inspection.scanBindButton'),
+				cancelText: $t('inspection.laterBindButton'),
 				success: (res) => {
 					if (res.confirm) {
 						// 直接调用扫码绑定
@@ -714,7 +719,7 @@
 			// 正常打开检查项
 			currentItem.value = { ...item }
 			// 如果是小区级检查项，确保显示正确的绑定状态
-			if (item.sector_id) {
+			if (isCellLevelItem(item)) {
 				currentItem.value.equipment_sn = getCellEquipmentSn(item)
 			}
 		}
@@ -1312,8 +1317,8 @@
 	}
 	
 	const saveCurrentItem = async () => {
-		// 小区级检查项必须先绑定设备，防止误保存
-		if (currentItem.value?.sector_id && !currentItem.value?.equipment_sn) {
+		// 小区级检查项必须先绑定设备，防止误保存（只检查同时有sector_id和band的小区级）
+		if (isCellLevelItem(currentItem.value) && !currentItem.value?.equipment_sn) {
 			uni.showModal({
 				title: $t('inspection.needBindTitle') || '需要绑定设备',
 				content: $t('inspection.needBindContent') || '需要先绑定设备才能进行检查，是否现在扫码绑定？',
@@ -1653,10 +1658,12 @@
 	// 扫码绑定设备功能
 	const scanEquipmentForBinding = async (item = null) => {
 		const targetItem = item || currentItem.value
-		if (!targetItem || !targetItem.sector_id) {
+		// 只有小区级检查项才能绑定设备
+		if (!targetItem || !isCellLevelItem(targetItem)) {
 			uni.showToast({
-				title: $t('inspection.invalidCheckItem') || 'Invalid check item',
-				icon: 'none'
+				title: $t('inspection.invalidCheckItem') || '无效的检查项，只有小区级检查项才需要绑定设备',
+				icon: 'none',
+				duration: 3000
 			})
 			return
 		}
