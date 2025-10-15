@@ -428,14 +428,16 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
+	import { ref, computed, onMounted, watch, getCurrentInstance } from 'vue'
 	import { onLoad, onShow } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
+	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl } from '@/config/api.js'
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
+	const languageStore = useLanguageStore()
 	
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
@@ -508,6 +510,13 @@
 			loadInspectionDetail()
 		}
 		isPageVisible.value = true
+	})
+	
+	// 监听语言变化，更新页面标题
+	watch(() => languageStore.currentLocale, () => {
+		uni.setNavigationBarTitle({
+			title: $t('inspection.detail')
+		})
 	})
 	
 	onMounted(() => {

@@ -66,11 +66,11 @@ export const useUserStore = defineStore('user', () => {
 				console.log('登录成功:', user)
 				return { success: true }
 			} else if (response.statusCode === 401) {
-				return { success: false, error: '用户名或密码错误' }
+				return { success: false, errorCode: 'INVALID_CREDENTIALS' }
 			} else {
 				console.error('登录失败:', response)
 				const errorMsg = response.data?.detail || `服务器错误 (${response.statusCode})`
-				return { success: false, error: errorMsg }
+				return { success: false, error: errorMsg, errorCode: 'SERVER_ERROR' }
 			}
 		} catch (error) {
 			console.error('Login error:', error)
@@ -78,13 +78,13 @@ export const useUserStore = defineStore('user', () => {
 			// 网络相关错误处理
 			if (error.errMsg) {
 				if (error.errMsg.includes('timeout')) {
-					return { success: false, error: '请求超时，请检查网络连接' }
+					return { success: false, errorCode: 'NETWORK_TIMEOUT' }
 				} else if (error.errMsg.includes('fail')) {
-					return { success: false, error: '网络连接失败，请检查服务器状态' }
+					return { success: false, errorCode: 'NETWORK_FAIL' }
 				}
 			}
 			
-			return { success: false, error: error.message || '网络异常' }
+			return { success: false, errorCode: 'NETWORK_ERROR', error: error.message }
 		}
 	}
 	

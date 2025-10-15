@@ -1,5 +1,5 @@
 <template>
-	<view class="profile-container">
+	<view class="profile-container" :key="languageStore.currentLocale">
 		<!-- 用户信息头部 -->
 		<view class="profile-header">
 			<view class="avatar-section">
@@ -192,7 +192,7 @@
 </template>
 
 <script setup>
-	import { ref, reactive, computed, onMounted, getCurrentInstance } from 'vue'
+	import { ref, reactive, computed, onMounted, watch, getCurrentInstance } from 'vue'
 import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
@@ -204,7 +204,14 @@ import { useUserStore } from '@/stores/user'
 	const languageStore = useLanguageStore()
 	
 	const instance = getCurrentInstance()
-	const t = (key) => instance.appContext.config.globalProperties.$t(key)
+	const $t = instance.appContext.config.globalProperties.$t
+	
+	// 使用computed创建响应式的t函数
+	const t = (key) => {
+		// 添加对currentLocale的依赖，使其成为响应式
+		const _ = languageStore.currentLocale
+		return $t(key)
+	}
 	
 	const showLanguageModal = ref(false)
 	
@@ -400,8 +407,8 @@ const isAdmin = computed(() => userStore.isAdmin)
 	// 退出登录
 	const handleLogout = () => {
 		uni.showModal({
-			title: t('messages.confirmLogout'),
-			content: languageStore.isZh ? '确定要退出登录吗？' : 'Are you sure you want to logout?',
+			title: $t('messages.confirmLogout'),
+			content: $t('messages.confirmLogout'),
 			success: (res) => {
 				if (res.confirm) {
 					userStore.logout()
@@ -440,10 +447,17 @@ const isAdmin = computed(() => userStore.isAdmin)
 		}
 	}
 	
+	// 监听语言变化，更新页面标题
+	watch(() => languageStore.currentLocale, () => {
+		uni.setNavigationBarTitle({
+			title: $t('profile.title')
+		})
+	})
+	
 	onMounted(() => {
 		// 动态设置页面标题
 		uni.setNavigationBarTitle({
-			title: t('profile.title')
+			title: $t('profile.title')
 		})
 		if (userInfo.value) {
 			loadUserStats()

@@ -1,5 +1,5 @@
 <template>
-	<view class="home-container">
+	<view class="home-container" :key="languageStore.currentLocale">
 		<!-- 自定义导航栏 -->
 		<view class="custom-navbar">
 			<view class="navbar-content">
@@ -134,7 +134,7 @@
 </template>
 
 <script setup>
-	import { ref, reactive, computed, onMounted, getCurrentInstance } from 'vue'
+	import { ref, reactive, computed, onMounted, watch, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useWorkOrderStore } from '@/stores/workorder'

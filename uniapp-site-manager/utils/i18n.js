@@ -478,6 +478,10 @@ const messages = {
     messages: {
       loginSuccess: '登录成功',
       loginFailed: '登录失败',
+      success: '成功',
+      invalidCredentials: '用户名或密码错误',
+      networkTimeout: '请求超时，请检查网络连接',
+      networkFail: '网络连接失败，请检查服务器状态',
       networkError: '网络错误',
       dataLoadFailed: '数据加载失败',
       operationSuccess: '操作成功',
@@ -965,8 +969,12 @@ const messages = {
       myTasks: 'My Tasks'
     },
     messages: {
-      loginSuccess: 'Login successful',
+      loginSuccess: 'Login success',
       loginFailed: 'Login failed',
+      success: 'Success',
+      invalidCredentials: 'Invalid username or password',
+      networkTimeout: 'Request timeout, please check your network connection',
+      networkFail: 'Network connection failed, please check server status',
       networkError: 'Network error',
       dataLoadFailed: 'Failed to load data',
       operationSuccess: 'Operation successful',

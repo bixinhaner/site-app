@@ -1,5 +1,5 @@
 <template>
-  <view class="list-container">
+  <view class="list-container" :key="languageStore.currentLocale">
     <view class="custom-navbar">
       <view class="navbar-content">
         <text class="navbar-title">{{ $t('workorder.title') }}</text>
@@ -48,11 +48,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, getCurrentInstance } from 'vue'
+import { ref, onMounted, watch, getCurrentInstance } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
+import { useLanguageStore } from '@/stores/language'
 
 const store = useWorkOrderStore()
+const languageStore = useLanguageStore()
 const orders = ref([])
 const status = ref('')
 const refreshing = ref(false)
@@ -164,6 +166,13 @@ const handleContinue = async (wo) => {
     uni.hideLoading()
   }
 }
+
+// 监听语言变化，更新页面标题
+watch(() => languageStore.currentLocale, () => {
+  uni.setNavigationBarTitle({
+    title: $t('workorder.title')
+  })
+})
 
 // 页面初次加载
 onMounted(() => {

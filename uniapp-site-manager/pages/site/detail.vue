@@ -195,16 +195,18 @@
 </template>
 
 <script setup>
-	import { ref, computed, getCurrentInstance, onMounted } from 'vue'
+	import { ref, computed, getCurrentInstance, onMounted, watch } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
+	import { useLanguageStore } from '@/stores/language'
 	import { API_ENDPOINTS, buildApiUrl, getAuthHeaders, createRequestConfig } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const inspectionStore = useInspectionStore()
+	const languageStore = useLanguageStore()
 	
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
@@ -395,6 +397,13 @@
 				uni.navigateBack()
 			}, 1500)
 		}
+	})
+	
+	// 监听语言变化，更新页面标题
+	watch(() => languageStore.currentLocale, () => {
+		uni.setNavigationBarTitle({
+			title: $t('site.detail')
+		})
 	})
 	
 	onMounted(() => {

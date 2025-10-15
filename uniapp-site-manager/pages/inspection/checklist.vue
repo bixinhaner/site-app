@@ -314,17 +314,19 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
+	import { ref, computed, onMounted, watch, getCurrentInstance } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
 	import { useWorkOrderStore } from '@/stores/workorder'
+	import { useLanguageStore } from '@/stores/language'
 	import { buildImageUrl, buildApiUrl, getAuthHeaders } from '@/config/api.js'
 	import { parseBarcode, formatMacAddress, isValidParseResult } from '@/utils/barcode-parser.js'
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
 	const workOrderStore = useWorkOrderStore()
+	const languageStore = useLanguageStore()
 	
 	// 获取翻译函数
 	const { $t } = getCurrentInstance().appContext.config.globalProperties

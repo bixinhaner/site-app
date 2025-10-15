@@ -1,5 +1,5 @@
 <template>
-	<view class="site-list-container">
+	<view class="site-list-container" :key="languageStore.currentLocale">
 		<!-- 搜索和过滤 -->
 		<view class="search-filter">
 			<view class="search-box">
@@ -86,14 +86,16 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
+	import { ref, computed, onMounted, watch, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useWorkOrderStore } from '@/stores/workorder'
+	import { useLanguageStore } from '@/stores/language'
 
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const workOrderStore = useWorkOrderStore()
+	const languageStore = useLanguageStore()
 	
 	const searchText = ref('')
 	const currentFilter = ref('all')
@@ -254,6 +256,13 @@
 			})
 		}
 	}
+	
+	// 监听语言变化，更新页面标题
+	watch(() => languageStore.currentLocale, () => {
+		uni.setNavigationBarTitle({
+			title: $t('site.list')
+		})
+	})
 	
 	onMounted(() => {
 		// 动态设置页面标题
