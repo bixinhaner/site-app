@@ -263,6 +263,7 @@ async def create_inspection(
         for j, item in enumerate(items):
             item_name = item.get("item_name", "未知检查项")
             item_id = item.get("item_id", "unknown")
+            item_description = item.get("description", "")  # 获取检查项描述
             required_type = item.get("required_type", "unknown")
             print(f"DEBUG:   --- 处理检查项 {j+1}: {item_name} (ID: {item_id}) ---")
             print(f"DEBUG:     required_type: {required_type}")
@@ -292,6 +293,7 @@ async def create_inspection(
                             inspection_id=inspection.id,
                             item_id=cell_item_id,
                             item_name=cell_item_name,
+                            description=item_description,
                             category_id=category_id,
                             category_name=category_name,
                             sector_id=cell.sector_id,
@@ -326,6 +328,7 @@ async def create_inspection(
                             inspection_id=inspection.id,
                             item_id=sector_item_id,
                             item_name=sector_item_name,
+                            description=item_description,
                             category_id=category_id,
                             category_name=category_name,
                             sector_id=sector_id,
@@ -354,6 +357,7 @@ async def create_inspection(
                         inspection_id=inspection.id,
                         item_id=site_item_id,
                         item_name=site_item_name,
+                        description=item_description,
                         category_id=category_id,
                         category_name=category_name,
                         required_type=required_type,

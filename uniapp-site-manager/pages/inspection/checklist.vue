@@ -212,6 +212,15 @@
 								</text>
 							</view>
 						</view>
+						
+						<!-- 检查项描述 -->
+						<view class="item-description" v-if="currentItem.description">
+							<view class="description-header">
+								<text class="description-icon">💡</text>
+								<text class="description-title">{{ $t('inspection.checkItemDescription') || '检查说明' }}</text>
+							</view>
+							<text class="description-content">{{ currentItem.description }}</text>
+						</view>
 					</view>
 					
 					<!-- 照片部分 -->
@@ -698,7 +707,6 @@
 						currentItem.value = { ...item }
 						// 确保显示绑定状态
 						currentItem.value.equipment_sn = getCellEquipmentSn(item)
-						showCheckModal.value = true
 					}
 				}
 			})
@@ -709,7 +717,6 @@
 			if (item.sector_id) {
 				currentItem.value.equipment_sn = getCellEquipmentSn(item)
 			}
-			showCheckModal.value = true
 		}
 	}
 	
@@ -1722,7 +1729,6 @@
 							// 如果是从外部调用，打开检查项详情
 							if (item && !currentItem.value) {
 								currentItem.value = { ...targetItem, equipment_sn: parsedBarcode.sn }
-								showCheckModal.value = true
 							}
 						}
 					})
@@ -2393,6 +2399,40 @@
 	
 	.grid-value.status-failed {
 		color: #dc3545;
+	}
+	
+	/* 检查项描述 */
+	.item-description {
+		margin-top: 25rpx;
+		padding: 20rpx;
+		background: linear-gradient(135deg, #fff9e6, #fff5d9);
+		border-left: 4rpx solid #f97316;
+		border-radius: 12rpx;
+	}
+	
+	.description-header {
+		display: flex;
+		align-items: center;
+		gap: 10rpx;
+		margin-bottom: 15rpx;
+	}
+	
+	.description-icon {
+		font-size: 32rpx;
+	}
+	
+	.description-title {
+		font-size: 28rpx;
+		font-weight: bold;
+		color: #f97316;
+	}
+	
+	.description-content {
+		font-size: 26rpx;
+		line-height: 1.6;
+		color: #666;
+		word-break: break-word;
+		white-space: pre-wrap;
 	}
 	
 	/* 照片网格 */

@@ -157,6 +157,7 @@ class InspectionCheckItem(Base):
     # 检查项信息
     item_id = Column(String(50), nullable=False)  # 对应模板中的item_id
     item_name = Column(String(200), nullable=False)
+    description = Column(Text)  # 检查项描述，用于说明填写要求和示例
     category_id = Column(String(50))  # site_level, sector_level
     category_name = Column(String(100))
     

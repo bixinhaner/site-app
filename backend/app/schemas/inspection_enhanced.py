@@ -160,6 +160,7 @@ class InspectionCheckItemResponse(BaseModel):
     inspection_id: str
     item_id: str
     item_name: str
+    description: Optional[str] = None  # 检查项描述
     category_id: Optional[str]
     category_name: Optional[str]
     sector_id: Optional[str]
