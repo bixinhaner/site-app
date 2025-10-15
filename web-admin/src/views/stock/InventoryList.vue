@@ -353,6 +353,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { stockApi } from '../../api/stock'
+import * as XLSX from 'xlsx'
 
 const loading = ref(false)
 const inventoryList = ref([])
@@ -463,9 +464,96 @@ const viewDetails = (inventory) => {
   showDetailDialog.value = true
 }
 
-// 导出Excel (待实现)
+// 导出Excel
 const exportInventory = () => {
-  ElMessage.info('导出功能开发中...')
+  try {
+    // 根据当前选中的Tab确定导出数据
+    let dataToExport = []
+    let sheetName = ''
+    let fileName = ''
+    
+    if (activeTab.value === 'main_device') {
+      dataToExport = mainDeviceList.value
+      sheetName = '主设备库存'
+      fileName = `主设备库存_${formatExportDate()}.xlsx`
+    } else {
+      dataToExport = auxiliaryList.value
+      sheetName = '辅材库存'
+      fileName = `辅材库存_${formatExportDate()}.xlsx`
+    }
+    
+    if (dataToExport.length === 0) {
+      ElMessage.warning('暂无数据可导出')
+      return
+    }
+    
+    // 格式化导出数据
+    const exportData = dataToExport.map((item, index) => {
+      const baseData = {
+        '序号': index + 1,
+        '设备编码': item.equipment_code || '',
+        '设备名称': item.equipment_name || '',
+        '仓库': item.warehouse_name || '',
+        '当前库存': item.current_stock || 0,
+        '可用库存': item.available_stock || 0,
+        '已分配': item.allocated_stock || 0,
+        '单位': item.unit || '',
+        '库存状态': getStockStatusText(item),
+        '最后更新': formatDateTime(item.last_updated_at)
+      }
+      
+      // 辅材增加最低库存字段
+      if (activeTab.value === 'auxiliary') {
+        baseData['最低库存'] = item.min_stock || 0
+      }
+      
+      return baseData
+    })
+    
+    // 创建工作簿
+    const worksheet = XLSX.utils.json_to_sheet(exportData)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName)
+    
+    // 设置列宽
+    const columnWidths = [
+      { wch: 6 },  // 序号
+      { wch: 15 }, // 设备编码
+      { wch: 25 }, // 设备名称
+      { wch: 12 }, // 仓库
+      { wch: 10 }, // 当前库存
+      { wch: 10 }, // 可用库存
+      { wch: 10 }, // 已分配
+      { wch: 8 },  // 单位
+      { wch: 10 }, // 库存状态
+      { wch: 18 }  // 最后更新
+    ]
+    
+    if (activeTab.value === 'auxiliary') {
+      columnWidths.splice(8, 0, { wch: 10 }) // 最低库存
+    }
+    
+    worksheet['!cols'] = columnWidths
+    
+    // 导出文件
+    XLSX.writeFile(workbook, fileName)
+    
+    ElMessage.success(`成功导出 ${dataToExport.length} 条数据`)
+  } catch (error) {
+    console.error('导出Excel失败:', error)
+    ElMessage.error('导出失败: ' + error.message)
+  }
+}
+
+// 格式化导出日期
+const formatExportDate = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hours = String(now.getHours()).padStart(2, '0')
+  const minutes = String(now.getMinutes()).padStart(2, '0')
+  return `${year}${month}${day}_${hours}${minutes}`
 }
 
 // Tab切换处理
