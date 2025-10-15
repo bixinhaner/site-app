@@ -119,7 +119,7 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="goToLoggingTest" v-if="userInfo?.role === 'admin'">
+				<view class="menu-item" @click="goToLoggingTest" v-if="isAdmin">
 					<view class="menu-left">
 						<text class="menu-icon">🔍</text>
 						<text class="menu-text">日志测试</text>
@@ -127,7 +127,7 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="goToLocationPluginTest" v-if="userInfo?.role === 'admin'">
+				<view class="menu-item" @click="goToLocationPluginTest" v-if="isAdmin">
 					<view class="menu-left">
 						<text class="menu-icon">📍</text>
 						<text class="menu-text">定位插件测试</text>
@@ -135,7 +135,7 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="goToBuiltinLocationTest" v-if="userInfo?.role === 'admin'">
+				<view class="menu-item" @click="goToBuiltinLocationTest" v-if="isAdmin">
 					<view class="menu-left">
 						<text class="menu-icon">🌍</text>
 						<text class="menu-text">内置定位测试</text>
@@ -193,7 +193,7 @@
 
 <script setup>
 	import { ref, reactive, computed, onMounted, getCurrentInstance } from 'vue'
-	import { useUserStore } from '@/stores/user'
+import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useLanguageStore } from '@/stores/language'
@@ -214,7 +214,8 @@
 		pendingTasks: 0
 	})
 	
-	const userInfo = computed(() => userStore.userInfo)
+const userInfo = computed(() => userStore.userInfo)
+const isAdmin = computed(() => userStore.isAdmin)
 	
 	// 权限控制
 	const canViewSites = computed(() => {

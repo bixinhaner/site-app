@@ -44,9 +44,8 @@
 				{{ loading ? $t('login.loggingIn') : $t('login.loginBtn') }}
 			</button>
 			
-			<view class="register-link">
-				<text>{{ $t('login.noAccount') }}</text>
-				<text class="link" @click="goToRegister">{{ $t('login.register') }}</text>
+			<view class="support-text">
+				<text>{{ $t('login.contactAdmin') }}</text>
 			</view>
 		</view>
 		
@@ -58,7 +57,7 @@
 </template>
 
 <script setup>
-	import { ref, reactive, onMounted, getCurrentInstance } from 'vue'
+	import { ref, reactive, onMounted } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
@@ -66,9 +65,6 @@
 	const userStore = useUserStore()
 	const logger = useLoggerStore()
 	const languageStore = useLanguageStore()
-	
-	const instance = getCurrentInstance()
-	const t = (key) => instance.appContext.config.globalProperties.$t(key)
 	
 	const loading = ref(false)
 	const loginForm = reactive({
@@ -181,18 +177,6 @@
 	// 切换语言
 	const toggleLanguage = () => {
 		languageStore.toggleLocale()
-	}
-	
-	// 跳转到注册页
-	const goToRegister = () => {
-		// logger.logUserInteraction('register-link', 'click')
-		// logger.logAction('REGISTER_LINK_CLICKED')
-		
-		uni.showModal({
-			title: t('login.register'),
-			content: languageStore.isZh ? '注册功能正在开发中，请联系管理员获取账号' : 'Registration feature is under development, please contact the administrator for an account',
-			showCancel: false
-		})
 	}
 	
 	// 初始化语言
@@ -323,15 +307,10 @@
 		}
 	}
 	
-	.register-link {
+	.support-text {
 		text-align: center;
 		font-size: 14px;
 		color: #6b7280;
-	}
-	
-	.link {
-		color: #f97316;
-		margin-left: 8px;
 	}
 	
 	.version-info {

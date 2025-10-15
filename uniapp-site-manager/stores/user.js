@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+import { buildApiUrl, API_ENDPOINTS, createRequestConfig } from '@/config/api.js'
 
 export const useUserStore = defineStore('user', () => {
 	const token = ref('')
@@ -8,7 +8,8 @@ export const useUserStore = defineStore('user', () => {
 	const isLoggedIn = computed(() => !!token.value)
 	
 	// 权限相关的计算属性
-	const isAdmin = computed(() => userInfo.value?.role === 'admin')
+	// 将 manager 视作 admin 等同的权限
+	const isAdmin = computed(() => ['admin', 'manager'].includes(userInfo.value?.role))
 	const isInspector = computed(() => userInfo.value?.role === 'inspector')
 	const isUser = computed(() => userInfo.value?.role === 'user')
 	
@@ -84,28 +85,6 @@ export const useUserStore = defineStore('user', () => {
 			}
 			
 			return { success: false, error: error.message || '网络异常' }
-		}
-	}
-	
-	// 注册
-	const register = async (userData) => {
-		try {
-			const response = await uni.request({
-				url: buildApiUrl(API_ENDPOINTS.AUTH.REGISTER),
-				...createRequestConfig({
-					method: 'POST',
-					data: userData
-				})
-			})
-			
-			if (response.statusCode === 200) {
-				return { success: true, data: response.data }
-			} else {
-				throw new Error(response.data.detail || '注册失败')
-			}
-		} catch (error) {
-			console.error('Register error:', error)
-			return { success: false, error: error.message || '网络错误' }
 		}
 	}
 	
@@ -219,7 +198,6 @@ export const useUserStore = defineStore('user', () => {
 		canViewAllInspections,
 		// 方法
 		login,
-		register,
 		logout,
 		checkLoginStatus,
 		getCurrentUser,

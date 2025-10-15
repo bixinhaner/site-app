@@ -221,23 +221,17 @@ const passwordRules = {
 // 权限计算
 const canEdit = computed(() => {
   const currentUser = userStore.currentUser
-  return currentUser?.role === 'admin' || 
-         (currentUser?.role === 'manager' && props.user.role !== 'admin') ||
-         currentUser?.id === props.user.id
+  return userStore.isAdmin || currentUser?.id === props.user.id
 })
 
 const canToggleStatus = computed(() => {
-  const currentUser = userStore.currentUser
-  return currentUser?.role === 'admin' && currentUser?.id !== props.user.id
+  return userStore.isAdmin && userStore.currentUser?.id !== props.user.id
 })
 
-const canResetPassword = computed(() => {
-  return userStore.currentUser?.role === 'admin'
-})
+const canResetPassword = computed(() => userStore.isAdmin)
 
 const canDelete = computed(() => {
-  const currentUser = userStore.currentUser
-  return currentUser?.role === 'admin' && currentUser?.id !== props.user.id
+  return userStore.isAdmin && userStore.currentUser?.id !== props.user.id
 })
 
 const hasActions = computed(() => {

@@ -319,21 +319,18 @@ const passwordRules = {
   ]
 }
 
-// 权限计算
-const canCreate = computed(() => userStore.currentUser?.role === 'admin')
-const canBatchOperate = computed(() => userStore.currentUser?.role === 'admin')
-const canResetPassword = computed(() => userStore.currentUser?.role === 'admin')
+// 权限计算（将 manager 视为 admin 等同）
+const canCreate = computed(() => userStore.isAdmin)
+const canBatchOperate = computed(() => userStore.isAdmin)
+const canResetPassword = computed(() => userStore.isAdmin)
 
 const canEdit = (user) => {
   const currentUser = userStore.currentUser
-  return currentUser?.role === 'admin' || 
-         (currentUser?.role === 'manager' && user.role !== 'admin') ||
-         currentUser?.id === user.id
+  return userStore.isAdmin || currentUser?.id === user.id
 }
 
 const canDelete = (user) => {
-  const currentUser = userStore.currentUser
-  return currentUser?.role === 'admin' && currentUser?.id !== user.id
+  return userStore.isAdmin && userStore.currentUser?.id !== user.id
 }
 
 // 角色相关

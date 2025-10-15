@@ -89,8 +89,7 @@ const messages = {
       password: '密码',
       loginBtn: '登录',
       loggingIn: '登录中...',
-      noAccount: '还没有账号？',
-      register: '立即注册',
+      contactAdmin: '如需账号请联系管理后台',
       version: '版本'
     },
     home: {
@@ -579,8 +578,7 @@ const messages = {
       password: 'Password',
       loginBtn: 'Login',
       loggingIn: 'Logging in...',
-      noAccount: "Don't have an account?",
-      register: 'Register Now',
+      contactAdmin: 'Accounts are managed by the admin console',
       version: 'Version'
     },
     home: {

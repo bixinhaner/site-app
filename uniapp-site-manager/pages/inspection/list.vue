@@ -529,7 +529,7 @@
 	
 	const canReview = (inspection) => {
 		return inspection.status === 'submitted' &&
-			['admin', 'reviewer'].includes(userStore.userInfo?.role)
+			(['admin', 'manager', 'reviewer'].includes(userStore.userInfo?.role))
 	}
 	
 	const isOfflineInspection = (inspection) => {

@@ -64,7 +64,9 @@
           <el-form-item label="手机号" prop="phone">
             <el-input
               v-model="form.phone"
-              placeholder="请输入手机号码"
+              placeholder="请输入国际电话号码（E.164，例如 +14155550132）"
+              maxlength="20"
+              show-word-limit
             />
           </el-form-item>
         </el-col>
@@ -167,9 +169,9 @@ const form = reactive({
 
 // 计算属性
 const isEditing = computed(() => !!props.user)
-const canChangeRole = computed(() => userStore.currentUser?.role === 'admin')
+const canChangeRole = computed(() => userStore.isAdmin)
 const canChangeStatus = computed(() => {
-  if (userStore.currentUser?.role !== 'admin') return false
+  if (!userStore.isAdmin) return false
   if (isEditing.value && props.user?.id === userStore.currentUser?.id) return false
   return true
 })
@@ -190,7 +192,17 @@ const rules = computed(() => {
       { max: 100, message: '姓名不能超过100个字符', trigger: 'blur' }
     ],
     phone: [
-      { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的手机号码', trigger: 'blur' }
+      {
+        validator: (rule, value, callback) => {
+          if (!value || value.toString().trim() === '') return callback()
+          const normalized = value.toString().replace(/\s+/g, '')
+          // E.164: "+" 开头，国家码非0，最多15位数字
+          const ok = /^\+[1-9]\d{1,14}$/.test(normalized)
+          if (!ok) return callback(new Error('请输入国际号码（E.164，例如 +14155550132）'))
+          callback()
+        },
+        trigger: 'blur'
+      }
     ],
     role: [
       { required: true, message: '请选择角色', trigger: 'change' }
@@ -272,7 +284,7 @@ const handleSubmit = async () => {
       const updateData = {
         email: form.email,
         full_name: form.full_name || null,
-        phone: form.phone || null,
+        phone: form.phone ? form.phone.replace(/\s+/g, '') : null,
         department: form.department || null,
         position: form.position || null,
         is_active: form.is_active
@@ -292,7 +304,7 @@ const handleSubmit = async () => {
         email: form.email,
         password: form.password,
         full_name: form.full_name || null,
-        phone: form.phone || null,
+        phone: form.phone ? form.phone.replace(/\s+/g, '') : null,
         role: form.role,
         department: form.department || null,
         position: form.position || null

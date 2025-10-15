@@ -481,7 +481,7 @@
 	const canReview = computed(() => {
 		return inspectionData.value && 
 			   inspectionData.value.status === 'submitted' &&
-			   ['admin', 'reviewer'].includes(userStore.userInfo?.role)
+			   (['admin', 'manager', 'reviewer'].includes(userStore.userInfo?.role))
 	})
 	
 	// 生命周期

@@ -10,6 +10,30 @@ from app.core.security import create_access_token, verify_password, get_password
 from app.models.user import User
 from app.schemas.user import UserLogin, Token, UserResponse, UserCreate
 
+
+class _EffectiveRoleUser:
+    """A lightweight proxy that treats 'manager' as 'admin' for permission checks.
+
+    This avoids touching persisted DB state while making admin/manager identical
+    for all `current_user.role` comparisons across the API layer.
+    """
+
+    __slots__ = ("_u",)
+
+    def __init__(self, orm_user: User):
+        object.__setattr__(self, "_u", orm_user)
+
+    def __getattr__(self, name):
+        if name == "role":
+            r = getattr(self._u, "role", None)
+            # Make 'manager' behave exactly like 'admin' at runtime
+            return "admin" if r == "manager" else r
+        return getattr(self._u, name)
+
+    def __setattr__(self, name, value):
+        # Forward any mutation to the underlying ORM instance
+        setattr(self._u, name, value)
+
 router = APIRouter()
 security = HTTPBearer()
 
@@ -46,7 +70,8 @@ def get_current_user(
     user = get_user_by_username(db, username=username)
     if user is None:
         raise credentials_exception
-    return user
+    # Return a proxy so that role checks treat 'manager' the same as 'admin'
+    return _EffectiveRoleUser(user)
 
 @router.post("/login", response_model=Token)
 async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
@@ -104,5 +129,14 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     return UserResponse.from_orm(db_user)
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
-    return UserResponse.from_orm(current_user)
+async def get_current_user_info(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """返回真实存储的用户信息（不对role做admin映射），用于前端展示。
+
+    鉴权依然通过上游的 get_current_user 完成；此处仅为展示一致性，
+    例如让 manager 在UI上仍显示“项目经理”。
+    """
+    raw = get_user_by_username(db, current_user.username)
+    return UserResponse.from_orm(raw)

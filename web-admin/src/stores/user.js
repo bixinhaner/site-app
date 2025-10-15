@@ -7,7 +7,8 @@ export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('access_token'))
 
   const isLoggedIn = computed(() => !!token.value && !!user.value)
-  const isAdmin = computed(() => user.value?.role === 'admin')
+  // Treat manager as admin-equivalent for UI gating
+  const isAdmin = computed(() => ['admin', 'manager'].includes(user.value?.role))
   const isManager = computed(() => user.value?.role === 'manager')
   const isPlanner = computed(() => user.value?.role === 'planner')
   const isWarehouseManager = computed(() => 

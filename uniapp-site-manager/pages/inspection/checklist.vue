@@ -730,24 +730,18 @@
 					if (isCamera) {
 						uni.showLoading({ title: $t('inspection.gettingLocation') || 'Getting location...' })
 						
-						try {
-							gpsData = await getHighAccuracyLocation()
-							// 验证GPS坐标的有效性
-							if (gpsData.latitude === 0 && gpsData.longitude === 0) {
-								throw new Error($t('inspection.gpsFetchFailedShort') || 'GPS fetch failed')
-							}
-						} catch (gpsError) {
-							console.warn('GPS获取失败:', gpsError)
-							uni.hideLoading()
-							uni.showModal({
-								title: $t('inspection.gpsFetchFailedTitle') || 'GPS failed',
-								content: $t('inspection.gpsFetchFailedContent') || 'GPS fetch failed, cannot add location watermark. Check permission or move to better signal and retry.',
-								showCancel: false
-							})
-							return // 直接返回，不继续拍照流程
-						} finally {
-							uni.hideLoading()
-						}
+				try {
+					gpsData = await getHighAccuracyLocation()
+					// 验证GPS坐标的有效性
+					if (gpsData.latitude === 0 && gpsData.longitude === 0) {
+						throw new Error($t('inspection.gpsFetchFailedShort') || 'GPS fetch failed')
+					}
+				} catch (gpsError) {
+					await handleGpsFailure(gpsError)
+					return // 直接返回，不继续拍照流程
+				} finally {
+					uni.hideLoading()
+				}
 					}
 					
 					// 选择图片
@@ -854,7 +848,136 @@
 			}
 		})
 	}
-	
+
+	const handleGpsFailure = async (error) => {
+		console.warn('GPS获取失败:', error)
+		const title = $t('inspection.gpsFetchFailedTitle') || 'GPS failed'
+		const content = $t('inspection.gpsFetchFailedContent') || 'GPS fetch failed, cannot add location watermark. Check permission or move to better signal and retry.'
+
+		const permissionReady = await ensureLocationAuthorization()
+
+		if (!permissionReady) {
+			await showLocationPermissionModal(title, content, true)
+			return
+		}
+
+		await showLocationPermissionModal(title, content, false)
+	}
+
+	const ensureLocationAuthorization = async () => {
+		const granted = await isLocationPermissionGranted()
+		if (granted) {
+			return true
+		}
+
+		const authorized = await requestLocationPermission()
+		if (authorized) {
+			uni.showToast({
+				title: $t('inspection.locationPermissionGranted') || 'Location permission enabled, please retry.',
+				icon: 'none',
+				duration: 2000
+			})
+			return true
+		}
+
+		return false
+	}
+
+	const isLocationPermissionGranted = () => {
+		return new Promise((resolve) => {
+			if (typeof uni.getSetting !== 'function') {
+				resolve(false)
+				return
+			}
+
+			uni.getSetting({
+				success: (res) => {
+					const authSetting = res && res.authSetting ? res.authSetting : {}
+					const foreground = authSetting['scope.userLocation'] === true
+					const background = authSetting['scope.userLocationBackground'] === true
+					resolve(foreground || background)
+				},
+				fail: () => resolve(false)
+			})
+		})
+	}
+
+	const requestLocationPermission = () => {
+		return new Promise((resolve) => {
+			if (typeof uni.authorize !== 'function') {
+				resolve(false)
+				return
+			}
+
+			uni.authorize({
+				scope: 'scope.userLocation',
+				success: () => resolve(true),
+				fail: () => resolve(false)
+			})
+		})
+	}
+
+	const showLocationPermissionModal = (title, content, allowSettings) => {
+		return new Promise((resolve) => {
+			const modalOptions = {
+				title,
+				content,
+				showCancel: allowSettings,
+				confirmText: allowSettings ? ($t('inspection.enableLocationPermissionConfirm') || 'Open settings') : ($t('common.ok') || 'OK'),
+				success: (res) => {
+					if (allowSettings && res.confirm) {
+						openAppLocationSettings()
+					}
+					resolve()
+				},
+				fail: () => resolve()
+			}
+
+			if (allowSettings) {
+				modalOptions.cancelText = $t('common.cancel') || 'Cancel'
+			}
+
+			uni.showModal(modalOptions)
+		})
+	}
+
+	const openAppLocationSettings = () => {
+		let handled = false
+
+		// #ifdef APP-PLUS
+		handled = true
+		try {
+			const systemInfo = uni.getSystemInfoSync()
+			const platform = systemInfo && systemInfo.platform ? systemInfo.platform : 'android'
+
+			if (platform === 'ios') {
+				const UIApplication = plus.ios.import('UIApplication')
+				const application = UIApplication.sharedApplication()
+				const NSURL = plus.ios.import('NSURL')
+				const settingsURL = NSURL.URLWithString('app-settings:')
+				application.openURL(settingsURL)
+				plus.ios.deleteObject(settingsURL)
+				plus.ios.deleteObject(application)
+			} else {
+				const mainActivity = plus.android.runtimeMainActivity()
+				const Intent = plus.android.importClass('android.content.Intent')
+				const Settings = plus.android.importClass('android.provider.Settings')
+				const Uri = plus.android.importClass('android.net.Uri')
+				const intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+				const uri = Uri.fromParts('package', mainActivity.getPackageName(), null)
+				intent.setData(uri)
+				mainActivity.startActivity(intent)
+			}
+		} catch (nativeError) {
+			console.error('打开系统定位设置失败:', nativeError)
+		}
+		// #endif
+
+		if (!handled && typeof uni.openSetting === 'function') {
+			uni.openSetting({})
+		}
+	}
+
 	// 使用原生插件的GPS高精度定位函数
 	const getHighAccuracyLocation = () => {
 		return new Promise((resolve, reject) => {
