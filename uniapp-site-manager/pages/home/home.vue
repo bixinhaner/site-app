@@ -13,6 +13,16 @@
 			</view>
 		</view>
 		
+		<!-- 滚动容器支持下拉刷新 -->
+		<scroll-view 
+			class="home-scroll" 
+			scroll-y 
+			refresher-enabled 
+			:refresher-triggered="refreshing" 
+			@refresherrefresh="handleRefresh"
+			refresher-background="#f5f5f5"
+		>
+		
 		<!-- 统计卡片 -->
 		<view class="stats-container">
 			<view class="stats-grid">
@@ -130,17 +140,21 @@
 				</view>
 			</view>
 		</view>
+		
+		</scroll-view>
 	</view>
 </template>
 
 <script setup>
 	import { ref, reactive, computed, onMounted, watch, getCurrentInstance } from 'vue'
+	import { onShow } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+	import { formatTimeAgo } from '@/utils/time.js'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
@@ -166,6 +180,7 @@
 	})
 	
 	const recentActivities = ref([])
+	const refreshing = ref(false)
 	
 	
 	// 权限控制计算属性
@@ -186,7 +201,10 @@
 	}
 
 	// 加载数据
-	const loadData = async () => {
+	const loadData = async (showLoading = false) => {
+		if (showLoading) {
+			refreshing.value = true
+		}
 		// 检查登录状态
 		if (!userStore || !userStore.isLoggedIn) {
 			uni.reLaunch({
@@ -245,21 +263,25 @@
 
 		} catch (error) {
 			console.error('Load data error:', error)
+		} finally {
+			if (showLoading) {
+				refreshing.value = false
+			}
 		}
+	}
+	
+	// 下拉刷新处理
+	const handleRefresh = async () => {
+		console.log('🔄 首页数据刷新中...')
+		await loadData(true)
+		console.log('✅ 首页数据刷新完成')
 	}
 	
 
 	
 	// 格式化时间
 	const formatTime = (timeStr) => {
-		const time = new Date(timeStr)
-		const now = new Date()
-		const diff = now - time
-		
-		if (diff < 60000) return t('common.justNow')
-		if (diff < 3600000) return t('common.minutesAgo', {minutes: Math.floor(diff / 60000)})
-		if (diff < 86400000) return t('common.hoursAgo', {hours: Math.floor(diff / 3600000)})
-		return t('common.daysAgo', {days: Math.floor(diff / 86400000)})
+		return formatTimeAgo(timeStr, t)
 	}
 	
 	// 获取活动图标
@@ -356,12 +378,26 @@
 			loadData()
 		}, 100)
 	})
+	
+	// 页面显示时刷新数据
+	onShow(() => {
+		console.log('📱 首页显示，刷新数据')
+		loadData()
+	})
 </script>
 
 <style lang="scss" scoped>
 	.home-container {
-		min-height: 100vh;
+		display: flex;
+		flex-direction: column;
+		height: 100vh;
 		background-color: #f5f5f5;
+	}
+	
+	// 滚动容器
+	.home-scroll {
+		flex: 1;
+		height: 100%;
 	}
 	
 	// 自定义导航栏
