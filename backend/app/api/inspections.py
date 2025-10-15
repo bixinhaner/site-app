@@ -1966,7 +1966,11 @@ async def bind_equipment_to_sector(
 
         # 新增：阻止同一设备SN绑定到其他小区（跨检查记录全局唯一小区）
         from sqlalchemy import or_, func
-        conflict = db.query(InspectionCheckItem).filter(
+        from sqlalchemy.orm import joinedload
+        conflict = db.query(InspectionCheckItem).options(
+            joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.site),
+            joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.inspector)
+        ).filter(
             InspectionCheckItem.equipment_sn == equipment_sn,
             or_(
                 InspectionCheckItem.sector_id != sector_id,
@@ -1977,10 +1981,33 @@ async def bind_equipment_to_sector(
         if conflict:
             conflict_cell = conflict.sector_id
             conflict_band = getattr(conflict, 'band', None)
-            conflict_cell_str = f"{conflict_cell}/{conflict_band}" if conflict_band else f"{conflict_cell}"
+            conflict_cell_str = f"{conflict_cell}_{conflict_band}" if conflict_band else f"{conflict_cell}"
+            
+            # 获取站点信息
+            conflict_inspection = conflict.inspection
+            site_name = conflict_inspection.site.site_name if conflict_inspection and conflict_inspection.site else "未知站点"
+            site_id = conflict_inspection.site_id if conflict_inspection else "N/A"
+            
+            # 获取绑定人信息（优先使用检查项的checked_by，否则使用检查记录的inspector）
+            binder_id = conflict.checked_by if conflict.checked_by else (conflict_inspection.inspector_id if conflict_inspection else None)
+            binder_name = "未知用户"
+            if binder_id:
+                binder = db.query(User).filter(User.id == binder_id).first()
+                if binder:
+                    binder_name = binder.full_name or binder.username
+            
+            # 构造丰富的错误提示
+            detail_msg = (
+                f"设备 {equipment_sn} 已被使用，无法绑定！\n"
+                f"已绑定站点：{site_name} (ID: {site_id})\n"
+                f"已绑定小区：扇区{conflict_cell}{'的' + conflict_band + '频段' if conflict_band else ''} (小区ID: {conflict_cell_str})\n"
+                f"绑定操作人：{binder_name}\n"
+                f"请先解绑该设备后再进行绑定操作"
+            )
+            
             raise HTTPException(
                 status_code=409,
-                detail=f"设备 {equipment_sn} 已绑定至小区 {conflict_cell_str}，请先解绑后再操作"
+                detail=detail_msg
             )
     
     # 绑定或解绑设备到所有相关检查项
