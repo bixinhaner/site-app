@@ -53,7 +53,8 @@ export const API_ENDPOINTS = {
     CREATE: '/api/inspections/',
     UPDATE: (id) => `/api/inspections/detail/${id}`,
     DELETE: (id) => `/api/inspections/${id}`,
-    PHOTOS: (id) => `/api/inspections/detail/${id}/photos`
+    PHOTOS: (id) => `/api/inspections/detail/${id}/photos`,
+    DELETE_PHOTO: (photoId) => `/api/inspections/photos/${photoId}`
   },
   
   // 工单（统一工作流）

@@ -687,21 +687,14 @@ async def upload_inspection_photo(
             detail="只支持图片文件"
         )
     
-    # 照片逻辑：驳回状态默认替换，其他情况明确指定才替换
+    # 照片逻辑：只在明确指定replace_existing=True时才替换
     import os
     
-    # 默认逻辑：如果检查是驳回状态且该检查项已有照片，则自动启用替换模式
+    # 注意：前端现在会主动调用删除API删除不需要的照片
+    # 因此这里只在明确指定时才启用替换模式，避免误删其他照片
     should_replace = replace_existing
-    if not should_replace and inspection.status == InspectionStatusEnum.REJECTED and check_item_id:
-        existing_count = db.query(InspectionPhoto).filter(
-            InspectionPhoto.inspection_id == inspection_id,
-            InspectionPhoto.check_item_id == check_item_id
-        ).count()
-        if existing_count > 0:
-            should_replace = True
-            print(f"检查驳回状态，检查项 {check_item_id} 已有 {existing_count} 张照片，自动启用替换模式")
     
-    # 执行照片替换逻辑
+    # 执行照片替换逻辑（仅在明确指定时）
     if should_replace and check_item_id:
         # 删除同一检查项的已有照片
         existing_photos = db.query(InspectionPhoto).filter(

@@ -1219,13 +1219,49 @@
 		})
 	}
 	
-	const deletePhoto = (index) => {
+	const deletePhoto = async (index) => {
+		const photo = currentItem.value.photos[index]
+		
 		uni.showModal({
 			title: $t('inspection.confirmDeleteTitle') || 'Confirm Delete',
 			content: $t('inspection.confirmDeleteContent') || 'Delete this photo?',
-			success: (res) => {
+			success: async (res) => {
 				if (res.confirm) {
-					currentItem.value.photos.splice(index, 1)
+					// 如果是已上传的照片（服务器路径），需要调用后端API删除
+					if (photo.file_path && photo.file_path.startsWith('uploads/') && photo.id) {
+						uni.showLoading({ title: '删除照片中...' })
+						
+						try {
+							const result = await inspectionStore.deleteInspectionPhoto(photo.id)
+							
+							if (result.success) {
+								// 从数组中移除
+								currentItem.value.photos.splice(index, 1)
+								uni.showToast({
+									title: '照片已删除',
+									icon: 'success'
+								})
+							} else {
+								throw new Error(result.error || '删除失败')
+							}
+						} catch (error) {
+							console.error('删除照片失败:', error)
+							uni.showToast({
+								title: `删除失败: ${error.message}`,
+								icon: 'error',
+								duration: 3000
+							})
+						} finally {
+							uni.hideLoading()
+						}
+					} else {
+						// 未上传的临时照片，直接从数组移除
+						currentItem.value.photos.splice(index, 1)
+						uni.showToast({
+							title: '照片已移除',
+							icon: 'success'
+						})
+					}
 				}
 			}
 		})
@@ -1339,7 +1375,14 @@
 				try {
 					for (const photo of currentItem.value.photos) {
 						console.log('检查照片路径:', photo.file_path)
-						// 上传所有照片（可能是新拍摄的临时文件）
+						
+						// 跳过已上传的照片（服务器路径通常以uploads/开头）
+						if (photo.file_path && photo.file_path.startsWith('uploads/')) {
+							console.log('跳过已上传的照片（服务器路径）:', photo.file_path)
+							continue
+						}
+						
+						// 上传新拍摄的临时文件
 						// UniApp的临时文件路径通常包含 temp、tmp、_tmp_ 等标识
 						if (photo.file_path && (
 							photo.file_path.includes('temp') || 
@@ -1350,14 +1393,21 @@
 						)) {
 							console.log('开始上传照片:', photo.file_path)
 							
-							// 将参数分解为单独的字段，适配后端Form参数接收方式
+							// 构建照片上传数据，只传递有效字段（过滤undefined）
 							const photoData = {
 								check_item_id: currentItem.value.id,
-								gps_latitude: photo.latitude,
-								gps_longitude: photo.longitude,
-								gps_accuracy: photo.gps_accuracy,
 								has_watermark: photo.has_watermark || false
-								// 其他复杂数据暂时不传，后端会自动处理
+							}
+							
+							// 只在有效时添加GPS相关字段
+							if (photo.latitude !== undefined && photo.latitude !== null) {
+								photoData.gps_latitude = photo.latitude
+							}
+							if (photo.longitude !== undefined && photo.longitude !== null) {
+								photoData.gps_longitude = photo.longitude
+							}
+							if (photo.gps_accuracy !== undefined && photo.gps_accuracy !== null) {
+								photoData.gps_accuracy = photo.gps_accuracy
 							}
 							
 							console.log('照片上传数据:', photoData)
