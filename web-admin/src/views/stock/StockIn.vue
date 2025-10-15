@@ -527,15 +527,81 @@ const handleFileRemove = () => {
   importResult.value = null
 }
 
+// 辅助函数：将Excel日期序列号或各种日期格式转换为标准日期格式
+const excelDateToJSDate = (excelDate) => {
+  if (!excelDate) return ''
+  
+  // Excel日期序列号转换（Excel的日期是从1900年1月1日开始计数）
+  if (typeof excelDate === 'number') {
+    // Excel将1900-01-01视为第1天，但实际上有一个已知的bug（将1900年错误地视为闰年）
+    const excelEpoch = new Date(1899, 11, 30) // 1899年12月30日
+    const jsDate = new Date(excelEpoch.getTime() + excelDate * 86400000)
+    
+    // 格式化为 YYYY-MM-DD
+    const year = jsDate.getFullYear()
+    const month = String(jsDate.getMonth() + 1).padStart(2, '0')
+    const day = String(jsDate.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  
+  // 处理字符串格式的日期
+  if (typeof excelDate === 'string') {
+    const dateStr = excelDate.trim()
+    
+    // 已经是 YYYY-MM-DD 格式，直接返回
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return dateStr
+    }
+    
+    // 处理 M/D/YY 或 MM/DD/YY 或 M/D/YYYY 或 MM/DD/YYYY 格式
+    const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
+    if (slashMatch) {
+      let [, month, day, year] = slashMatch
+      
+      // 处理两位数年份，假设00-49为2000-2049，50-99为1950-1999
+      if (year.length === 2) {
+        const yy = parseInt(year)
+        year = yy < 50 ? `20${year}` : `19${year}`
+      }
+      
+      month = month.padStart(2, '0')
+      day = day.padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+    
+    // 处理 YYYY/MM/DD 格式
+    const slashMatch2 = dateStr.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/)
+    if (slashMatch2) {
+      const [, year, month, day] = slashMatch2
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+    }
+    
+    // 尝试使用 Date 对象解析
+    try {
+      const parsedDate = new Date(dateStr)
+      if (!isNaN(parsedDate.getTime())) {
+        const year = parsedDate.getFullYear()
+        const month = String(parsedDate.getMonth() + 1).padStart(2, '0')
+        const day = String(parsedDate.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+      }
+    } catch (e) {
+      console.warn('日期解析失败:', dateStr, e)
+    }
+  }
+  
+  return ''
+}
+
 const parseExcelFile = async (file) => {
   try {
     const reader = new FileReader()
     reader.onload = (e) => {
       const data = new Uint8Array(e.target.result)
-      const workbook = XLSX.read(data, { type: 'array' })
+      const workbook = XLSX.read(data, { type: 'array', cellDates: true })
       const sheetName = workbook.SheetNames[0]
       const worksheet = workbook.Sheets[sheetName]
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 })
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' })
       
       // 解析数据（跳过标题行）- 简化版字段
       const parsedData = []
@@ -556,13 +622,13 @@ const parseExcelFile = async (file) => {
           
           parsedData.push({
             sn: sn,
-            mac_address: row[1] || '',
-            manufacture_date: row[2] || '',
-            warranty_start_date: row[3] || '',
-            warranty_end_date: row[4] || '',
-            vendor: row[5] || '',
-            batch_number: row[6] || '',
-            notes: row[7] || ''
+            mac_address: row[1] ? String(row[1]).trim() : '',
+            manufacture_date: excelDateToJSDate(row[2]),
+            warranty_start_date: excelDateToJSDate(row[3]),
+            warranty_end_date: excelDateToJSDate(row[4]),
+            vendor: row[5] ? String(row[5]).trim() : '',
+            batch_number: row[6] ? String(row[6]).trim() : '',
+            notes: row[7] ? String(row[7]).trim() : ''
           })
         }
       }
