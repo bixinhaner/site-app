@@ -11,20 +11,92 @@
         <div class="item"><span class="label">类型</span><span class="value">{{ site.site_type || '-' }}</span></div>
         <div class="item"><span class="label">状态</span><span class="value">{{ site.status }}</span></div>
         <div class="item"><span class="label">地址</span><span class="value">{{ site.address || '-' }}</span></div>
-        <div class="item"><span class="label">指派给</span><span class="value">{{ assigneeName }}</span></div>
-      </div>
-      <div class="actions">
-        <el-button type="primary" @click="openAssign" :disabled="!canAssign"><el-icon><User /></el-icon>分配/变更负责人</el-button>
       </div>
     </el-card>
 
-    <el-dialog v-model="assignVisible" title="分配站点" width="420px">
-      <el-select v-model="selectedAssignee" placeholder="选择人员" style="width: 100%" filterable @visible-change="v=> v && loadUsers()">
-        <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
-      </el-select>
+    <!-- 当前工单 -->
+    <el-card class="mt16" v-loading="workOrdersLoading">
+      <template #header>
+        <div class="card-header">
+          <span>当前工单</span>
+          <el-button type="primary" size="small" @click="showHistoryDialog">
+            <el-icon><Document /></el-icon>查看历史工单
+          </el-button>
+        </div>
+      </template>
+      <el-empty v-if="!currentWorkOrders.length" description="暂无进行中的工单" />
+      <el-table v-else :data="currentWorkOrders" stripe>
+        <el-table-column prop="title" label="工单标题" min-width="180" />
+        <el-table-column prop="type" label="类型" width="120">
+          <template #default="{ row }">
+            <el-tag>{{ formatWorkOrderType(row.type) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="getStatusTagType(row.status)">{{ formatWorkOrderStatus(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priority" label="优先级" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getPriorityTagType(row.priority)">{{ formatPriority(row.priority) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="指派给" width="120">
+          <template #default="{ row }">
+            {{ getUserName(row.assigned_to) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="assigned_at" label="分配时间" width="160">
+          <template #default="{ row }">
+            {{ formatDate(row.assigned_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="viewWorkOrder(row)">查看</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <!-- 历史工单对话框 -->
+    <el-dialog v-model="historyDialogVisible" title="历史工单" width="80%" :close-on-click-modal="false">
+      <el-table :data="historyWorkOrders" v-loading="historyLoading" stripe max-height="500">
+        <el-table-column prop="title" label="工单标题" min-width="180" />
+        <el-table-column prop="type" label="类型" width="120">
+          <template #default="{ row }">
+            <el-tag>{{ formatWorkOrderType(row.type) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="getStatusTagType(row.status)">{{ formatWorkOrderStatus(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priority" label="优先级" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getPriorityTagType(row.priority)">{{ formatPriority(row.priority) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="指派给" width="120">
+          <template #default="{ row }">
+            {{ getUserName(row.assigned_to) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="completed_at" label="完成时间" width="160">
+          <template #default="{ row }">
+            {{ formatDate(row.completed_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="viewWorkOrder(row)">查看</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
       <template #footer>
-        <el-button @click="assignVisible = false">取消</el-button>
-        <el-button type="primary" :loading="assigning" @click="confirmAssign">确定</el-button>
+        <el-button @click="historyDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -32,25 +104,31 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import apiClient from '../../api/auth'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../../stores/user'
 
 const route = useRoute()
+const router = useRouter()
 const loading = ref(false)
 const site = ref(null)
 const userStore = useUserStore()
 const userOptions = ref([])
-const assignVisible = ref(false)
-const assigning = ref(false)
-const selectedAssignee = ref(null)
+
+// 工单相关
+const workOrdersLoading = ref(false)
+const currentWorkOrders = ref([])
+const historyDialogVisible = ref(false)
+const historyLoading = ref(false)
+const historyWorkOrders = ref([])
 
 const load = async () => {
   try {
     loading.value = true
     const res = await apiClient.get(`/api/sites/${route.params.id}`)
     site.value = res
+    await loadWorkOrders()
   } catch (e) {
     console.error(e)
     ElMessage.error('加载站点详情失败')
@@ -68,40 +146,130 @@ const loadUsers = async () => {
   }
 }
 
-const assigneeName = computed(() => {
-  if (!site.value || !site.value.assigned_to) return '-'
-  const u = userOptions.value.find(u => u.id === site.value.assigned_to)
-  return u ? (u.full_name || u.username) : site.value.assigned_to
-})
-
-const canAssign = computed(() => userStore.isAdmin || userStore.user?.role === 'manager')
-
-const openAssign = () => {
-  selectedAssignee.value = site.value?.assigned_to || null
-  assignVisible.value = true
-  loadUsers()
-}
-
-const confirmAssign = async () => {
-  if (!selectedAssignee.value) {
-    ElMessage.warning('请选择人员')
-    return
-  }
+const loadWorkOrders = async () => {
   try {
-    assigning.value = true
-    await apiClient.put(`/api/sites/${route.params.id}` , { assigned_to: selectedAssignee.value })
-    ElMessage.success('分配成功')
-    assignVisible.value = false
-    await load()
+    workOrdersLoading.value = true
+    const res = await apiClient.get('/api/work-orders/search', {
+      params: {
+        site_id: route.params.id,
+        limit: 100
+      }
+    })
+    const allWorkOrders = res.work_orders || []
+    // 过滤出当前进行中的工单（未完成的）
+    currentWorkOrders.value = allWorkOrders.filter(wo => 
+      wo.status !== 'COMPLETED' && wo.status !== 'CANCELLED'
+    )
   } catch (e) {
     console.error(e)
-    ElMessage.error('分配失败')
+    ElMessage.error('加载工单失败')
   } finally {
-    assigning.value = false
+    workOrdersLoading.value = false
   }
 }
 
-onMounted(load)
+const showHistoryDialog = async () => {
+  historyDialogVisible.value = true
+  try {
+    historyLoading.value = true
+    const res = await apiClient.get('/api/work-orders/search', {
+      params: {
+        site_id: route.params.id,
+        limit: 100
+      }
+    })
+    const allWorkOrders = res.work_orders || []
+    // 历史工单包括已完成和已取消的
+    historyWorkOrders.value = allWorkOrders.filter(wo => 
+      wo.status === 'COMPLETED' || wo.status === 'CANCELLED'
+    )
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('加载历史工单失败')
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+const getUserName = (userId) => {
+  if (!userId) return '-'
+  const user = userOptions.value.find(u => u.id === userId)
+  return user ? (user.full_name || user.username) : userId
+}
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '-'
+  return new Date(dateStr).toLocaleString('zh-CN')
+}
+
+const formatWorkOrderType = (type) => {
+  const map = {
+    'INSPECTION': '检查',
+    'INSTALLATION': '安装',
+    'MAINTENANCE': '维护',
+    'REPAIR': '维修'
+  }
+  return map[type] || type
+}
+
+const formatWorkOrderStatus = (status) => {
+  const map = {
+    'PENDING': '待分配',
+    'ASSIGNED': '已分配',
+    'ACCEPTED': '已接受',
+    'IN_PROGRESS': '进行中',
+    'SUBMITTED': '已提交',
+    'UNDER_REVIEW': '审核中',
+    'APPROVED': '已批准',
+    'REJECTED': '已拒绝',
+    'COMPLETED': '已完成',
+    'CANCELLED': '已取消'
+  }
+  return map[status] || status
+}
+
+const formatPriority = (priority) => {
+  const map = {
+    'HIGH': '高',
+    'NORMAL': '普通',
+    'LOW': '低'
+  }
+  return map[priority] || priority
+}
+
+const getStatusTagType = (status) => {
+  const map = {
+    'PENDING': 'info',
+    'ASSIGNED': 'warning',
+    'ACCEPTED': 'primary',
+    'IN_PROGRESS': 'primary',
+    'SUBMITTED': 'success',
+    'UNDER_REVIEW': 'warning',
+    'APPROVED': 'success',
+    'REJECTED': 'danger',
+    'COMPLETED': 'success',
+    'CANCELLED': 'info'
+  }
+  return map[status] || 'info'
+}
+
+const getPriorityTagType = (priority) => {
+  const map = {
+    'HIGH': 'danger',
+    'NORMAL': 'primary',
+    'LOW': 'info'
+  }
+  return map[priority] || 'info'
+}
+
+const viewWorkOrder = (workOrder) => {
+  router.push({ name: 'WorkOrderReview', query: { id: workOrder.id } })
+}
+
+onMounted(() => {
+  load()
+  loadUsers()
+})
 </script>
 
 <style scoped>
@@ -110,5 +278,6 @@ onMounted(load)
 .info-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .item .label { color: var(--text-secondary); margin-right:8px; }
 .item .value { color: var(--text-primary); font-weight: 500; }
-.actions { margin-top: 16px; }
+.mt16 { margin-top: 16px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; }
 </style>

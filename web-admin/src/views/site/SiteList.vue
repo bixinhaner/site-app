@@ -10,9 +10,9 @@
           <el-option label="已开通" value="operational" />
           <el-option label="维护中" value="maintenance" />
         </el-select>
-        <el-select v-model="assigneeFilter" placeholder="指派给" clearable style="width: 200px" filterable @visible-change="v=> v && loadUsers()" @change="reload">
+        <!-- <el-select v-model="assigneeFilter" placeholder="指派给" clearable style="width: 200px" filterable @visible-change="v=> v && loadUsers()" @change="reload">
           <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
-        </el-select>
+        </el-select> -->
         <el-button v-if="canManagePlanning" type="success" @click="openBatchPlanning">
           <el-icon><Operation /></el-icon>
           规划批量导入
@@ -35,11 +35,11 @@
             <el-tag>{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="assigned_to" label="指派给" width="140">
+        <!-- <el-table-column prop="assigned_to" label="指派给" width="140">
           <template #default="{ row }">
             <span>{{ userName(row.assigned_to) }}</span>
           </template>
-        </el-table-column>
+        </el-table-column> -->
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="viewDetail(row)">
@@ -50,10 +50,10 @@
               <el-icon><Operation /></el-icon>
               规划
             </el-button>
-            <el-button link type="success" size="small" @click="openAssign(row)">
+            <!-- <el-button link type="success" size="small" @click="openAssign(row)">
               <el-icon><User /></el-icon>
               分配
-            </el-button>
+            </el-button> -->
           </template>
         </el-table-column>
       </el-table>

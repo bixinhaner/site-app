@@ -29,6 +29,82 @@ from app.utils.gps_utils import reverse_geocode
 router = APIRouter()
 
 
+# 站点状态自动更新辅助函数
+def _audit_site_status_change(db: Session, site_id: int, old_status: str, new_status: str, reason: str):
+    """记录站点状态变更的审计日志"""
+    try:
+        # 获取系统管理员用户ID（用于系统自动操作）
+        admin_user = db.query(User).filter(User.username == "admin").first()
+        operator_id = admin_user.id if admin_user else 1
+        
+        audit_log = AuditEvent(
+            id=str(uuid.uuid4()),
+            resource_type="site",
+            resource_id=str(site_id),
+            action="status_change",
+            operator_id=operator_id,  # 使用系统管理员ID
+            from_status=old_status,
+            to_status=new_status,
+            comments=f"系统自动更新: {reason}",
+            details={"reason": reason, "old_status": old_status, "new_status": new_status}
+        )
+        db.add(audit_log)
+    except Exception as e:
+        print(f"[警告] 记录站点状态变更审计日志失败: {e}")
+
+
+def _update_site_status_on_work_order_create(db: Session, site_id: int, work_order_type: WorkOrderTypeEnum):
+    """
+    工单创建时自动更新站点状态
+    - 如果是安装工单(opening_inspection)，将站点状态改为construction
+    """
+    if work_order_type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        site = db.query(Site).filter(Site.id == site_id).first()
+        if site and site.status == "planning":
+            old_status = site.status
+            site.status = "construction"
+            print(f"[站点状态自动更新] 站点 {site_id} ({site.site_name}) 状态从 {old_status} 更新为 {site.status}")
+            
+            # 记录审计日志
+            _audit_site_status_change(
+                db, site_id, old_status, site.status,
+                f"创建安装工单，站点进入建设阶段"
+            )
+
+
+def _update_site_status_on_work_order_complete(db: Session, site_id: int, work_order_type: WorkOrderTypeEnum):
+    """
+    工单完成时自动更新站点状态
+    - 如果是安装工单(opening_inspection)完成，检查该站点的所有安装工单
+    - 如果所有安装工单都已完成，将站点状态改为operational
+    """
+    if work_order_type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        # 查询该站点下所有安装工单
+        opening_work_orders = db.query(WorkOrder).filter(
+            WorkOrder.site_id == site_id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION
+        ).all()
+        
+        # 检查是否所有安装工单都已完成
+        all_completed = all(
+            wo.status == WorkOrderStatusEnum.COMPLETED 
+            for wo in opening_work_orders
+        )
+        
+        if all_completed and opening_work_orders:
+            site = db.query(Site).filter(Site.id == site_id).first()
+            if site and site.status != "operational":
+                old_status = site.status
+                site.status = "operational"
+                print(f"[站点状态自动更新] 站点 {site_id} ({site.site_name}) 所有安装工单已完成，状态从 {old_status} 更新为 {site.status}")
+                
+                # 记录审计日志
+                _audit_site_status_change(
+                    db, site_id, old_status, site.status,
+                    f"所有{len(opening_work_orders)}个安装工单已完成，站点投入运营"
+                )
+
+
 def _get_template_id_from_extra_data(extra_data):
     """从extra_data中安全地提取template_id"""
     default_template_id = "266d3253-13d8-46af-9fd3-f417566428cf"  # 默认维护模板
@@ -57,6 +133,7 @@ async def search_work_orders(
     type: Optional[WorkOrderTypeEnum] = None,
     assigned_to: Optional[int] = None,
     priority: Optional[WorkOrderPriorityEnum] = None,
+    site_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
@@ -100,6 +177,10 @@ async def search_work_orders(
     # 优先级筛选
     if priority:
         query = query.filter(WorkOrder.priority == priority)
+    
+    # 站点筛选
+    if site_id:
+        query = query.filter(WorkOrder.site_id == site_id)
     
     # 计算总数
     total = query.count()
@@ -222,6 +303,9 @@ async def create_work_order(
     db.flush()
 
     # 工单创建成功，检查实例将在接受时创建
+    
+    # 自动更新站点状态
+    _update_site_status_on_work_order_create(db, data.site_id, data.type)
 
     db.commit()
     db.refresh(wo)
@@ -538,6 +622,9 @@ async def complete_work_order(
     old_status = wo.status
     wo.status = WorkOrderStatusEnum.COMPLETED
     wo.completed_at = datetime.utcnow()
+    
+    # 自动更新站点状态
+    _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
     
     db.commit()
     _audit(db, "work_order", wo.id, "complete", current_user.id,
@@ -1573,6 +1660,9 @@ async def review_work_order(
         wo.status = WorkOrderStatusEnum.COMPLETED
         wo.completed_at = datetime.utcnow()
         
+        # 自动更新站点状态
+        _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
+        
         # 同步检查状态
         if wo.inspection_id:
             inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
@@ -1848,6 +1938,9 @@ async def mark_work_order_completed(
     old_status = wo.status
     wo.status = WorkOrderStatusEnum.COMPLETED
     wo.completed_at = datetime.utcnow()
+    
+    # 自动更新站点状态
+    _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
     
     db.commit()
     
