@@ -32,7 +32,7 @@
         <span>已选择 {{ selectedWorkOrders.length }} 个工单</span>
         <div class="batch-actions">
           <el-button size="small" @click="clearSelection">取消选择</el-button>
-          <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button>
+          <!-- <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button> -->
           <el-button size="small" type="warning" @click="showBatchAssignDialog = true">批量重新分配</el-button>
           <el-button size="small" type="info" @click="showBatchPriorityDialog = true">批量修改优先级</el-button>
           <el-button size="small" type="danger" @click="confirmBatchDelete">批量删除</el-button>
@@ -176,8 +176,8 @@
     </template>
   </el-dialog>
 
-  <!-- 批量修改状态对话框 -->
-  <el-dialog v-model="showBatchStatusDialog" title="批量修改状态" width="400px">
+  <!-- 批量修改状态对话框（暂时隐藏） -->
+  <!-- <el-dialog v-model="showBatchStatusDialog" title="批量修改状态" width="400px">
     <el-form label-width="80px">
       <el-form-item label="新状态">
         <el-select v-model="batchStatusValue" placeholder="选择状态" style="width: 100%">
@@ -189,7 +189,7 @@
       <el-button @click="showBatchStatusDialog = false">取消</el-button>
       <el-button type="primary" :loading="batchLoading" @click="executeBatchStatus">确认修改</el-button>
     </template>
-  </el-dialog>
+  </el-dialog> -->
 
   <!-- 批量重新分配对话框 -->
   <el-dialog v-model="showBatchAssignDialog" title="批量重新分配" width="400px">
@@ -223,6 +223,37 @@
       <el-button type="primary" :loading="batchLoading" @click="executeBatchPriority">确认修改</el-button>
     </template>
   </el-dialog>
+
+  <!-- 批量操作错误详情对话框 -->
+  <el-dialog v-model="showErrorDialog" title="批量操作结果" width="600px">
+    <el-alert 
+      v-if="batchResult.updated_count > 0"
+      :title="`成功处理 ${batchResult.updated_count} 个工单`" 
+      type="success" 
+      :closable="false"
+      style="margin-bottom: 16px"
+    />
+    <el-alert 
+      v-if="batchResult.error_count > 0"
+      :title="`失败 ${batchResult.error_count} 个工单`" 
+      type="error" 
+      :closable="false"
+      style="margin-bottom: 16px"
+    />
+    <div v-if="batchResult.errors && batchResult.errors.length > 0" style="margin-top: 16px">
+      <div style="font-weight: bold; margin-bottom: 8px; color: #606266;">失败详情：</div>
+      <el-scrollbar max-height="300px">
+        <ul style="margin: 0; padding-left: 20px; color: #909399; font-size: 14px;">
+          <li v-for="(error, index) in batchResult.errors" :key="index" style="margin-bottom: 8px;">
+            {{ error }}
+          </li>
+        </ul>
+      </el-scrollbar>
+    </div>
+    <template #footer>
+      <el-button type="primary" @click="showErrorDialog = false">确定</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
@@ -249,6 +280,8 @@ const showBatchPriorityDialog = ref(false)
 const batchStatusValue = ref('')
 const batchAssignValue = ref('')
 const batchPriorityValue = ref('')
+const showErrorDialog = ref(false)
+const batchResult = ref({ updated_count: 0, error_count: 0, errors: [] })
 
 const statuses = [
   { label: '待分配', value: 'PENDING' },
@@ -487,7 +520,7 @@ const clearSelection = () => {
 const confirmBatchDelete = async () => {
   try {
     await ElMessageBox.confirm(
-      `确定要删除选中的 ${selectedWorkOrders.value.length} 个工单吗？只能删除待分配或已分配状态的工单。`,
+      `确定要删除选中的 ${selectedWorkOrders.value.length} 个工单吗？\n\n注意：只能删除"待分配"或"已分配"状态的工单。`,
       '确认批量删除',
       {
         confirmButtonText: '删除',
@@ -507,12 +540,14 @@ const executeBatchDelete = async () => {
     const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
     const result = await workOrderAPI.batchOperation(workOrderIds, 'delete')
     
+    // 保存结果用于详情对话框
+    batchResult.value = result
+    
     if (result.error_count > 0) {
-      ElMessage.warning(`批量删除完成：成功 ${result.updated_count} 个，失败 ${result.error_count} 个`)
-      if (result.errors) {
-        console.warn('删除失败的工单:', result.errors)
-      }
+      // 有失败的工单，显示详情对话框
+      showErrorDialog.value = true
     } else {
+      // 全部成功
       ElMessage.success(`成功删除 ${result.updated_count} 个工单`)
     }
     
@@ -537,9 +572,14 @@ const executeBatchStatus = async () => {
     const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
     const result = await workOrderAPI.batchOperation(workOrderIds, 'change_status', batchStatusValue.value)
     
+    // 保存结果用于详情对话框
+    batchResult.value = result
+    
     if (result.error_count > 0) {
-      ElMessage.warning(`批量修改状态完成：成功 ${result.updated_count} 个，失败 ${result.error_count} 个`)
+      // 有失败的工单，显示详情对话框
+      showErrorDialog.value = true
     } else {
+      // 全部成功
       ElMessage.success(`成功修改 ${result.updated_count} 个工单状态`)
     }
     
@@ -562,13 +602,28 @@ const executeBatchAssign = async () => {
   }
   
   try {
+    await ElMessageBox.confirm(
+      `确定要重新分配选中的 ${selectedWorkOrders.value.length} 个工单吗？\n\n注意：只能重新分配"待分配"或"已分配"状态的工单。`,
+      '确认批量重新分配',
+      {
+        confirmButtonText: '确认',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
     batchLoading.value = true
     const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
     const result = await workOrderAPI.batchOperation(workOrderIds, 'change_assignee', batchAssignValue.value.toString())
     
+    // 保存结果用于详情对话框
+    batchResult.value = result
+    
     if (result.error_count > 0) {
-      ElMessage.warning(`批量重新分配完成：成功 ${result.updated_count} 个，失败 ${result.error_count} 个`)
+      // 有失败的工单，显示详情对话框
+      showErrorDialog.value = true
     } else {
+      // 全部成功
       ElMessage.success(`成功重新分配 ${result.updated_count} 个工单`)
     }
     
@@ -577,8 +632,10 @@ const executeBatchAssign = async () => {
     clearSelection()
     await load()
   } catch (e) {
-    console.error(e)
-    ElMessage.error('批量重新分配失败: ' + e.message)
+    if (e !== 'cancel') {
+      console.error(e)
+      ElMessage.error('批量重新分配失败: ' + (e.message || e))
+    }
   } finally {
     batchLoading.value = false
   }
@@ -595,9 +652,14 @@ const executeBatchPriority = async () => {
     const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
     const result = await workOrderAPI.batchOperation(workOrderIds, 'change_priority', batchPriorityValue.value)
     
+    // 保存结果用于详情对话框
+    batchResult.value = result
+    
     if (result.error_count > 0) {
-      ElMessage.warning(`批量修改优先级完成：成功 ${result.updated_count} 个，失败 ${result.error_count} 个`)
+      // 有失败的工单，显示详情对话框
+      showErrorDialog.value = true
     } else {
+      // 全部成功
       ElMessage.success(`成功修改 ${result.updated_count} 个工单优先级`)
     }
     

@@ -1777,6 +1777,12 @@ async def batch_work_order_operation(
                     
             elif operation.operation == "change_assignee" and operation.value:
                 try:
+                    # 检查工单状态：只能重新分配待分配或已分配状态的工单
+                    if wo.status not in [WorkOrderStatusEnum.PENDING, WorkOrderStatusEnum.ACTIVE]:
+                        errors.append(f"工单 {wo.id} 状态不允许重新分配: {wo.status}")
+                        error_count += 1
+                        continue
+                    
                     new_assignee_id = int(operation.value)
                     # 检查用户是否存在
                     assignee = db.query(User).filter(User.id == new_assignee_id).first()
