@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>站点地图</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* 自定义标记样式 */
+        .custom-marker {
+            background: none;
+            border: none;
+        }
+        
+        .marker-pin {
+            width: 30px;
+            height: 30px;
+            border-radius: 50% 50% 50% 0;
+            background: #f97316;
+            position: absolute;
+            transform: rotate(-45deg);
+            left: 50%;
+            top: 50%;
+            margin: -15px 0 0 -15px;
+        }
+        
+        .marker-pin::after {
+            content: '';
+            width: 14px;
+            height: 14px;
+            margin: 8px 0 0 8px;
+            background: #fff;
+            position: absolute;
+            border-radius: 50%;
+        }
+        
+        /* 不同状态的标记颜色 */
+        .marker-operational .marker-pin {
+            background: #10b981;
+        }
+        
+        .marker-construction .marker-pin {
+            background: #f59e0b;
+        }
+        
+        .marker-maintenance .marker-pin {
+            background: #ef4444;
+        }
+        
+        .marker-planning .marker-pin {
+            background: #6b7280;
+        }
+        
+        /* 弹出窗口样式 */
+        .leaflet-popup-content-wrapper {
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .popup-content {
+            padding: 8px;
+            min-width: 200px;
+        }
+        
+        .popup-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 8px;
+        }
+        
+        .popup-info {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        
+        .popup-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-top: 8px;
+        }
+        
+        .status-operational {
+            background: #d1fae5;
+            color: #059669;
+        }
+        
+        .status-construction {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        
+        .status-maintenance {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .status-planning {
+            background: #e5e7eb;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // 初始化地图（默认中心点：北京）
+        const map = L.map('map', {
+            center: [39.9042, 116.4074],
+            zoom: 12,
+            zoomControl: true,
+            attributionControl: true
+        });
+        
+        // 使用OpenStreetMap瓦片
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+            maxZoom: 19
+        }).addTo(map);
+        
+        // 存储标记对象
+        const markers = {};
+        
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                operational: '运营中',
+                construction: '建设中',
+                maintenance: '维护中',
+                planning: '规划中'
+            };
+            return statusMap[status] || status;
+        }
+        
+        // 创建自定义标记图标
+        function createCustomIcon(status) {
+            return L.divIcon({
+                className: `custom-marker marker-${status}`,
+                html: '<div class="marker-pin"></div>',
+                iconSize: [30, 30],
+                iconAnchor: [15, 30],
+                popupAnchor: [0, -30]
+            });
+        }
+        
+        // 添加站点标记
+        function addSiteMarker(site) {
+            const { id, latitude, longitude, site_name, address, status } = site;
+            
+            // 创建标记
+            const marker = L.marker([latitude, longitude], {
+                icon: createCustomIcon(status),
+                title: site_name
+            });
+            
+            // 创建弹出窗口内容
+            const popupContent = `
+                <div class="popup-content">
+                    <div class="popup-title">${site_name}</div>
+                    <div class="popup-info">${address || '暂无地址'}</div>
+                    <div class="popup-status status-${status}">${getStatusText(status)}</div>
+                </div>
+            `;
+            
+            marker.bindPopup(popupContent);
+            
+            // 点击标记时通知父页面
+            marker.on('click', function() {
+                notifyParent('markerClick', { siteId: id });
+            });
+            
+            marker.addTo(map);
+            markers[id] = marker;
+        }
+        
+        // 移除站点标记
+        function removeSiteMarker(siteId) {
+            if (markers[siteId]) {
+                map.removeLayer(markers[siteId]);
+                delete markers[siteId];
+            }
+        }
+        
+        // 清除所有标记
+        function clearAllMarkers() {
+            Object.values(markers).forEach(marker => {
+                map.removeLayer(marker);
+            });
+            markers = {};
+        }
+        
+        // 设置地图中心和缩放
+        function setMapView(lat, lon, zoom) {
+            map.setView([lat, lon], zoom);
+        }
+        
+        // 适应所有标记
+        function fitBounds() {
+            const markerList = Object.values(markers);
+            if (markerList.length > 0) {
+                const group = L.featureGroup(markerList);
+                map.fitBounds(group.getBounds(), { padding: [50, 50] });
+            }
+        }
+        
+        // 通知父页面
+        function notifyParent(type, data) {
+            // 通过postMessage与UniApp通信
+            if (window.parent) {
+                window.parent.postMessage({
+                    type: type,
+                    data: data
+                }, '*');
+            }
+            
+            // UniApp的通信方式
+            if (window.uni) {
+                uni.postMessage({
+                    data: {
+                        type: type,
+                        data: data
+                    }
+                });
+            }
+        }
+        
+        // 监听来自父页面的消息
+        window.addEventListener('message', function(event) {
+            const { action, data } = event.data;
+            
+            switch(action) {
+                case 'addMarker':
+                    addSiteMarker(data);
+                    break;
+                case 'removeMarker':
+                    removeSiteMarker(data.siteId);
+                    break;
+                case 'clearMarkers':
+                    clearAllMarkers();
+                    break;
+                case 'setView':
+                    setMapView(data.lat, data.lon, data.zoom);
+                    break;
+                case 'fitBounds':
+                    fitBounds();
+                    break;
+            }
+        });
+        
+        // 页面加载完成，通知父页面
+        window.addEventListener('load', function() {
+            notifyParent('mapReady', {});
+        });
+    </script>
+</body>
+</html>

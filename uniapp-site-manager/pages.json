@@ -132,6 +132,13 @@
 				"navigationBarTitleText": "地图",
 				"navigationStyle": "custom"
 			}
+		},
+		{
+			"path": "pages/map/sites",
+			"style": {
+				"navigationBarTitleText": "站点分布地图",
+				"navigationStyle": "custom"
+			}
 		}
 	],
 	"globalStyle": {

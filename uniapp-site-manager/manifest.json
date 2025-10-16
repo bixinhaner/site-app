@@ -22,7 +22,8 @@
             "Contacts" : {},
             "Barcode" : {},
             "Bluetooth" : {},
-            "Geolocation" : {}
+            "Geolocation" : {},
+            "Maps" : {}
         },
         "nativePlugins" : {
             "my-location-plugin" : {
@@ -65,13 +66,7 @@
                         "__platform__" : [ "android" ]
                     }
                 },
-                "maps" : {
-                    "amap" : {
-                        "name" : "amap_15686172592SNmFErh7",
-                        "appkey_ios" : "",
-                        "appkey_android" : ""
-                    }
-                },
+                "maps" : {},
                 "speech" : {},
                 "push" : {}
             }

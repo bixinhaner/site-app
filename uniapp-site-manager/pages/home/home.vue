@@ -319,7 +319,7 @@
 	}
 	
 	const goToMap = () => {
-		uni.showToast({ title: '地图功能开发中', icon: 'none' })
+		uni.navigateTo({ url: '/pages/map/sites' })
 	}
 	
 	const goToReports = () => {
