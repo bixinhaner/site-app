@@ -35,7 +35,7 @@
 			roles: ['admin', 'manager'] // 管理员与项目经理可管理站点
 		},
 		{
-			pagePath: 'pages/inspection/list',
+			pagePath: 'pages/workorder/list',
 			icon: '🔍',
 			text: 'navigation.inspection',
 			roles: ['admin', 'manager', 'inspector'] // 管理员、经理和检查员可见

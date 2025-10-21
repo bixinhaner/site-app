@@ -323,7 +323,7 @@ const isAdmin = computed(() => userStore.isAdmin)
 	// 查看我的检查记录
 	const viewMyInspections = () => {
 		uni.switchTab({
-			url: '/pages/inspection/list'
+			url: '/pages/workorder/list'
 		})
 	}
 	
