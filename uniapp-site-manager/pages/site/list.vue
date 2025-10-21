@@ -1,5 +1,12 @@
 <template>
 	<view class="site-list-container" :key="languageStore.currentLocale">
+		<!-- 自定义导航栏 -->
+		<view class="custom-navbar">
+			<view class="navbar-content">
+				<text class="navbar-title">{{ $t('site.list') }}</text>
+			</view>
+		</view>
+		
 		<!-- 搜索和过滤 -->
 		<view class="search-filter">
 			<view class="search-box">
@@ -278,6 +285,30 @@
 		min-height: 100vh;
 		background-color: var(--bg-page);
 		padding-bottom: 80px;
+		display: flex;
+		flex-direction: column;
+	}
+	
+	// 自定义导航栏
+	.custom-navbar {
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+		padding: 44rpx 30rpx 20rpx;
+		color: #fff;
+	}
+	
+	.navbar-content {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		height: 88rpx;
+	}
+	
+	.navbar-title {
+		font-size: 36rpx;
+		font-weight: bold;
+		color: white;
+		text-align: center;
+		flex: 1;
 	}
 	
 	// 搜索和过滤

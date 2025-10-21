@@ -403,7 +403,7 @@
 	// 自定义导航栏
 	.custom-navbar {
 		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-		padding: 44px 20px 20px;
+		padding: 44rpx 30rpx 20rpx;
 		color: #fff;
 	}
 	
@@ -411,11 +411,12 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		height: 88rpx;
 	}
 	
 	.navbar-title {
-		font-size: 20px;
-		font-weight: 600;
+		font-size: 36rpx;
+		font-weight: bold;
 	}
 	
 	.user-info { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 6px; border-radius: 12px; }

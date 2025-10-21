@@ -589,6 +589,7 @@
 	.back-icon {
 		font-size: 36rpx;
 		color: white;
+		font-weight: bold;
 	}
 	
 	.navbar-title {
@@ -596,6 +597,7 @@
 		font-weight: bold;
 		flex: 1;
 		text-align: center;
+		color: white;
 	}
 	
 	.navbar-right {

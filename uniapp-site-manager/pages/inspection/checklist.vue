@@ -1925,13 +1925,15 @@
 	.back-icon {
 		font-size: 36rpx;
 		color: white;
+		font-weight: bold;
 	}
 	
 	.navbar-title {
-		font-size: 32rpx;
+		font-size: 36rpx;
 		font-weight: bold;
 		flex: 1;
 		text-align: center;
+		color: white;
 	}
 	
 	.navbar-actions { width: 88rpx; display: flex; justify-content: flex-end; }
@@ -1947,7 +1949,7 @@
 	}
 	
 	.save-icon {
-		font-size: 32rpx;
+		font-size: 36rpx;
 		color: white;
 	}
 	

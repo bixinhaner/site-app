@@ -19,16 +19,14 @@
 			"path": "pages/site/list",
 			"style": {
 				"navigationBarTitleText": "站点列表",
-				"navigationBarBackgroundColor": "#f97316",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/site/detail",
 			"style": {
 				"navigationBarTitleText": "站点详情",
-				"navigationBarBackgroundColor": "#f97316",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom"
 			}
 		},
 		{
@@ -50,47 +48,42 @@
 			"path": "pages/inspection/checklist",
 			"style": {
 				"navigationBarTitleText": "检查清单",
-				"navigationBarBackgroundColor": "#667eea",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/workorder/detail",
 			"style": {
 				"navigationBarTitleText": "工单详情",
-				"navigationBarBackgroundColor": "#f97316",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/inspection/review",
 			"style": {
 				"navigationBarTitleText": "检查审核",
-				"navigationBarBackgroundColor": "#667eea",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/inspection/site-select",
 			"style": {
 				"navigationBarTitleText": "选择站点",
-				"navigationBarBackgroundColor": "#667eea",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/inspection/detail",
 			"style": {
 				"navigationBarTitleText": "检查详情",
-				"navigationBarBackgroundColor": "#667eea",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/profile/profile",
 			"style": {
 				"navigationBarTitleText": "个人中心",
-				"navigationBarBackgroundColor": "#f97316",
+				"navigationStyle": "custom",
 				"navigationBarTextStyle": "white"
 			}
 		},

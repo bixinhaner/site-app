@@ -1002,6 +1002,7 @@
 	.back-icon, .share-icon {
 		font-size: 36rpx;
 		color: white;
+		font-weight: bold;
 	}
 	
 	.navbar-title {
@@ -1009,9 +1010,14 @@
 		font-weight: bold;
 		flex: 1;
 		text-align: center;
+		color: white;
 	}
 	
-	.navbar-actions { width: 88rpx; display: flex; justify-content: flex-end; }
+	.navbar-actions { 
+		width: 88rpx; 
+		display: flex; 
+		justify-content: flex-end; 
+	}
 	
 	/* 检查头部 */
 	.inspection-header {

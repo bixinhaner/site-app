@@ -681,13 +681,20 @@ onShow(() => {
 	// 自定义导航栏 - 统一风格
 	.custom-navbar {
 		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-		padding: 44rpx 32rpx 24rpx;
+		padding: 44rpx 30rpx 20rpx;
 		color: #fff;
+	}
+	
+	.navbar-content {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		height: 88rpx;
 	}
 	
 	.navbar-title {
 		font-size: 36rpx;
-		font-weight: 600;
+		font-weight: bold;
 	}
 	
 	// 内容区域
