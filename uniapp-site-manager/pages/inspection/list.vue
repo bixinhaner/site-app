@@ -227,16 +227,16 @@
 	
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 
-	// 筛选器配置
-	const filters = computed(() => [
-		{ label: $t('common.all'), value: 'all', count: 0 },
-		{ label: $t('inspection.draft'), value: 'draft', count: 0 },
-		{ label: $t('workorder.inProgress'), value: 'in_progress', count: 0 },
-		{ label: $t('workorder.submitted'), value: 'submitted', count: 0 },
-		{ label: $t('workorder.underReview'), value: 'under_review', count: 0 },
-		{ label: $t('workorder.approved'), value: 'approved', count: 0 },
-		{ label: $t('workorder.rejected'), value: 'rejected', count: 0 }
-	])
+    // 筛选器配置（可写，以便更新count）
+    const filters = ref([
+        { label: $t('common.all'), value: 'all', count: 0 },
+        { label: $t('inspection.draft'), value: 'draft', count: 0 },
+        { label: $t('workorder.inProgress'), value: 'in_progress', count: 0 },
+        { label: $t('workorder.submitted'), value: 'submitted', count: 0 },
+        { label: $t('workorder.underReview'), value: 'under_review', count: 0 },
+        { label: $t('workorder.approved'), value: 'approved', count: 0 },
+        { label: $t('workorder.rejected'), value: 'rejected', count: 0 }
+    ])
 	
 	// 计算属性
 	const filteredInspections = computed(() => {
@@ -628,19 +628,19 @@
 </script>
 
 <style scoped>
-	.inspection-list-container {
-		height: 100vh;
-		background: #f5f5f5;
-		display: flex;
-		flex-direction: column;
-	}
+    .inspection-list-container {
+        height: 100vh;
+        background: var(--bg-page);
+        display: flex;
+        flex-direction: column;
+    }
 	
 	/* 导航栏 */
-	.custom-navbar {
-		background: linear-gradient(135deg, #f97316, #fb923c);
-		padding: 44rpx 30rpx 20rpx;
-		color: white;
-	}
+    .custom-navbar {
+        background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+        padding: 44rpx 30rpx 20rpx;
+        color: #fff;
+    }
 	
 	.navbar-content {
 		display: flex;
@@ -653,15 +653,7 @@
 		font-weight: bold;
 	}
 	
-	.sync-status {
-		display: flex;
-		align-items: center;
-		gap: 10rpx;
-		padding: 10rpx 20rpx;
-		background: rgba(255, 255, 255, 0.2);
-		border-radius: 20rpx;
-		font-size: 24rpx;
-	}
+	.sync-status { display: inline-flex; align-items: center; gap: 12rpx; min-height: 88rpx; padding: 0 24rpx; background: rgba(255, 255, 255, 0.2); border-radius: 28rpx; font-size: 26rpx; }
 	
 	.sync-icon {
 		font-size: 28rpx;
@@ -677,14 +669,14 @@
 	}
 	
 	/* 统计卡片 */
-	.stats-container {
-		display: flex;
-		background: white;
-		margin: 20rpx;
-		border-radius: 20rpx;
-		padding: 30rpx 20rpx;
-		box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.1);
-	}
+    .stats-container {
+        display: flex;
+        background: var(--bg-elevated);
+        margin: 20rpx;
+        border-radius: 20rpx;
+        padding: 30rpx 20rpx;
+        box-shadow: var(--shadow-card);
+    }
 	
 	.stat-item {
 		flex: 1;
@@ -694,24 +686,12 @@
 		gap: 10rpx;
 	}
 	
-	.stat-number {
-		font-size: 48rpx;
-		font-weight: bold;
-		color: #333;
-	}
+    .stat-number { font-size: 48rpx; font-weight: bold; color: var(--text-primary); }
 	
-	.stat-label {
-		font-size: 24rpx;
-		color: #999;
-	}
+    .stat-label { font-size: 24rpx; color: #9ca3af; }
 	
 	/* 筛选器 */
-	.filter-container {
-		background: white;
-		margin: 0 20rpx 20rpx;
-		border-radius: 20rpx;
-		overflow: hidden;
-	}
+    .filter-container { background: var(--bg-elevated); margin: 0 20rpx 20rpx; border-radius: 20rpx; overflow: hidden; }
 	
 	.filter-scroll {
 		white-space: nowrap;
@@ -724,19 +704,20 @@
 	}
 	
 	.filter-tab {
-		padding: 15rpx 25rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88rpx; /* >=44px touch target */
+		padding: 0 28rpx;
 		background: #f8f9fa;
 		color: #666;
-		border-radius: 25rpx;
+		border-radius: 28rpx;
 		font-size: 28rpx;
 		white-space: nowrap;
 		transition: all 0.3s ease;
 	}
 	
-	.filter-tab.active {
-		background: linear-gradient(135deg, #f97316, #fb923c);
-		color: white;
-	}
+    .filter-tab.active { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); color: #fff; }
 	
 	.filter-count {
 		margin-left: 5rpx;
@@ -750,14 +731,7 @@
 		padding: 0 20rpx;
 	}
 	
-	.inspection-item {
-		background: white;
-		border-radius: 20rpx;
-		margin-bottom: 20rpx;
-		padding: 30rpx;
-		box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.08);
-		transition: transform 0.2s ease;
-	}
+    .inspection-item { background: var(--bg-elevated); border-radius: 20rpx; margin-bottom: 20rpx; padding: 30rpx; box-shadow: var(--shadow-card); transition: transform 0.2s ease; }
 	
 	.inspection-item:active {
 		transform: scale(0.98);
@@ -770,17 +744,9 @@
 		margin-bottom: 20rpx;
 	}
 	
-	.site-name {
-		font-size: 32rpx;
-		font-weight: bold;
-		color: #333;
-		margin-bottom: 5rpx;
-	}
+    .site-name { font-size: 32rpx; font-weight: bold; color: var(--text-primary); margin-bottom: 5rpx; }
 	
-	.site-code {
-		font-size: 24rpx;
-		color: #999;
-	}
+    .site-code { font-size: 24rpx; color: #9ca3af; }
 	
 	.status-badge {
 		padding: 8rpx 16rpx;
@@ -826,19 +792,10 @@
 		width: 40rpx;
 	}
 	
-	.content-text {
-		font-size: 28rpx;
-		color: #666;
-		flex: 1;
-	}
+    .content-text { font-size: 28rpx; color: #6b7280; flex: 1; }
 	
 	/* 进度条 */
-	.progress-container {
-		margin-top: 20rpx;
-		padding: 20rpx;
-		background: #f8f9fa;
-		border-radius: 15rpx;
-	}
+    .progress-container { margin-top: 20rpx; padding: 20rpx; background: #f8f9fa; border-radius: 15rpx; }
 	
 	.progress-info {
 		display: flex;
@@ -846,16 +803,9 @@
 		margin-bottom: 15rpx;
 	}
 	
-	.progress-text {
-		font-size: 26rpx;
-		color: #666;
-	}
+    .progress-text { font-size: 26rpx; color: #6b7280; }
 	
-	.progress-rate {
-		font-size: 26rpx;
-		font-weight: bold;
-		color: #333;
-	}
+    .progress-rate { font-size: 26rpx; font-weight: bold; color: var(--text-primary); }
 	
 	.progress-bar {
 		height: 8rpx;
@@ -927,14 +877,7 @@
 	}
 	
 	/* 操作区域 */
-	.inspection-actions {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-top: 25rpx;
-		padding-top: 20rpx;
-		border-top: 1rpx solid #f0f0f0;
-	}
+    .inspection-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 25rpx; padding-top: 20rpx; border-top: 1rpx solid var(--border-soft); }
 	
 	.action-info {
 		display: flex;
@@ -942,10 +885,7 @@
 		gap: 15rpx;
 	}
 	
-	.create-time {
-		font-size: 24rpx;
-		color: #999;
-	}
+    .create-time { font-size: 24rpx; color: #9ca3af; }
 	
 	.offline-indicator {
 		font-size: 22rpx;
@@ -961,27 +901,16 @@
 		gap: 15rpx;
 	}
 	
-	.action-btn {
-		padding: 10rpx 20rpx;
-		border-radius: 15rpx;
-		font-size: 24rpx;
-		border: none;
-	}
+    .action-btn { padding: 10rpx 20rpx; border-radius: 15rpx; font-size: 24rpx; border: none; }
 	
-	.continue-btn {
-		background: #007bff;
-		color: white;
-	}
+    .continue-btn { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); color: #fff; }
 	
 	.review-btn {
 		background: #28a745;
 		color: white;
 	}
 	
-	.action-arrow {
-		font-size: 32rpx;
-		color: #ccc;
-	}
+    .action-arrow { font-size: 32rpx; color: #d1d5db; }
 	
 	/* 空状态 */
 	.empty-state {
@@ -1011,32 +940,18 @@
 	/* 浮动按钮 */
 	.fab-container {
 		position: fixed;
-		bottom: 40rpx;
+		bottom: calc(40rpx + env(safe-area-inset-bottom));
 		right: 40rpx;
 		z-index: 999;
 	}
 	
-	.fab {
-		width: 120rpx;
-		height: 120rpx;
-		border-radius: 60rpx;
-		background: linear-gradient(135deg, #f97316, #fb923c);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		box-shadow: 0 8rpx 24rpx rgba(102, 126, 234, 0.4);
-		transition: transform 0.2s ease;
-	}
+    .fab { width: 120rpx; height: 120rpx; border-radius: 60rpx; background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); display: flex; align-items: center; justify-content: center; box-shadow: 0 8rpx 24rpx rgba(249, 115, 22, 0.28); transition: transform 0.2s ease; }
 	
 	.fab:active {
 		transform: scale(0.95);
 	}
 	
-	.fab-icon {
-		font-size: 48rpx;
-		color: white;
-		font-weight: bold;
-	}
+    .fab-icon { font-size: 48rpx; color: #fff; font-weight: bold; }
 	
 	/* 创建选项弹窗 */
 	.create-options-overlay {
@@ -1053,13 +968,7 @@
 		padding: 40rpx;
 	}
 	
-	.create-options {
-		background: white;
-		border-radius: 20rpx;
-		padding: 40rpx;
-		width: 100%;
-		max-width: 600rpx;
-	}
+    .create-options { background: var(--bg-elevated); border-radius: 20rpx; padding: 40rpx; width: 100%; max-width: 600rpx; }
 	
 	.create-title {
 		font-size: 36rpx;
@@ -1070,12 +979,14 @@
 	}
 	
 	.create-item {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
-		padding: 30rpx;
+		justify-content: space-between;
+		min-height: 88rpx;
+		padding: 0 30rpx;
 		margin-bottom: 20rpx;
 		background: #f8f9fa;
-		border-radius: 15rpx;
+		border-radius: 20rpx;
 		gap: 25rpx;
 	}
 	
@@ -1101,16 +1012,7 @@
 		display: block;
 	}
 	
-	.create-cancel {
-		width: 100%;
-		padding: 25rpx;
-		background: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 15rpx;
-		font-size: 30rpx;
-		margin-top: 20rpx;
-	}
+	.create-cancel { width: 100%; min-height: 88rpx; padding: 0 24rpx; background: #6c757d; color: #fff; border: none; border-radius: 22rpx; font-size: 30rpx; margin-top: 20rpx; display: inline-flex; align-items: center; justify-content: center; }
 	
 	/* 加载更多 */
 	.load-more {

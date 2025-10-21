@@ -468,15 +468,15 @@ const isAdmin = computed(() => userStore.isAdmin)
 <style lang="scss" scoped>
 	.profile-container {
 		min-height: 100vh;
-		background-color: #f5f5f5;
+		background-color: var(--bg-page);
 		padding-bottom: 20px;
 	}
 	
 	// 用户信息头部
 	.profile-header {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding: 60px 20px 30px;
-		color: white;
+		color: #fff;
 		display: flex;
 		align-items: center;
 		gap: 20px;
@@ -515,8 +515,8 @@ const isAdmin = computed(() => userStore.isAdmin)
 		width: 32px;
 		height: 32px;
 		border-radius: 50%;
-		background: white;
-		border: 2px solid #f97316;
+		background: #fff;
+		border: 2px solid var(--color-primary);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -548,13 +548,13 @@ const isAdmin = computed(() => userStore.isAdmin)
 	
 	// 统计信息
 	.stats-section {
-		background: white;
+		background: var(--bg-elevated);
 		margin: -10px 20px 20px;
-		border-radius: 12px;
+		border-radius: var(--radius-md);
 		padding: 20px;
 		display: flex;
 		align-items: center;
-		box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+		box-shadow: var(--shadow-card);
 	}
 	
 	.stat-item {
@@ -565,17 +565,9 @@ const isAdmin = computed(() => userStore.isAdmin)
 		align-items: center;
 	}
 	
-	.stat-number {
-		font-size: 24px;
-		font-weight: 600;
-		color: #f97316;
-		margin-bottom: 4px;
-	}
+	.stat-number { font-size: 24px; font-weight: 600; color: var(--color-primary); margin-bottom: 4px; }
 	
-	.stat-label {
-		font-size: 12px;
-		color: #6b7280;
-	}
+	.stat-label { font-size: 12px; color: var(--text-secondary); }
 	
 	.stat-divider {
 		width: 1px;
@@ -585,35 +577,17 @@ const isAdmin = computed(() => userStore.isAdmin)
 	}
 	
 	// 功能菜单
-	.menu-section {
-		padding: 0 20px;
-	}
+	.menu-section { padding: 0 20px; }
 	
 	.menu-group {
-		background: white;
-		border-radius: 12px;
+		background: var(--bg-elevated);
+		border-radius: var(--radius-md);
 		margin-bottom: 16px;
 		overflow: hidden;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+		box-shadow: var(--shadow-card);
 	}
 	
-	.menu-item {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 16px 20px;
-		border-bottom: 1px solid #f8f9fa;
-		
-		&:last-child {
-			border-bottom: none;
-		}
-		
-		&.logout {
-			.menu-text {
-				color: #dc2626;
-			}
-		}
-	}
+.menu-item { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 12px 20px; border-bottom: 1px solid var(--border-soft); &:last-child { border-bottom: none; } &.logout { .menu-text { color: #dc2626; } } }
 	
 	.menu-left {
 		display: flex;
@@ -627,15 +601,9 @@ const isAdmin = computed(() => userStore.isAdmin)
 		text-align: center;
 	}
 	
-	.menu-text {
-		font-size: 15px;
-		color: #111827;
-	}
+	.menu-text { font-size: 15px; color: var(--text-primary); }
 	
-	.menu-arrow {
-		font-size: 18px;
-		color: #d1d5db;
-	}
+	.menu-arrow { font-size: 18px; color: #d1d5db; }
 	
 	.menu-right {
 		display: flex;
@@ -643,10 +611,7 @@ const isAdmin = computed(() => userStore.isAdmin)
 		gap: 8px;
 	}
 	
-	.menu-value {
-		font-size: 14px;
-		color: #6b7280;
-	}
+	.menu-value { font-size: 14px; color: var(--text-secondary); }
 	
 	// 语言设置弹窗
 	.language-modal {
@@ -663,9 +628,9 @@ const isAdmin = computed(() => userStore.isAdmin)
 	}
 	
 	.language-popup {
-		background: white;
+		background: var(--bg-elevated);
 		border-radius: 16px 16px 0 0;
-		padding: 0;
+		padding: 0 0 calc(16px + env(safe-area-inset-bottom));
 		min-height: 200px;
 		width: 100%;
 		max-width: 500px;
@@ -676,30 +641,24 @@ const isAdmin = computed(() => userStore.isAdmin)
 		justify-content: space-between;
 		align-items: center;
 		padding: 20px;
-		border-bottom: 1px solid #f3f4f6;
+		border-bottom: 1px solid var(--border-soft);
 	}
 	
-	.popup-title {
-		font-size: 18px;
-		font-weight: 600;
-		color: #1f2937;
-	}
+	.popup-title { font-size: 18px; font-weight: 600; color: #1f2937; }
 	
 	.popup-close {
-		width: 32px;
-		height: 32px;
+		width: 44px;
+		height: 44px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		background: #f9fafb;
 		border-radius: 50%;
 		color: #6b7280;
-		font-size: 16px;
+		font-size: 18px;
 		cursor: pointer;
 		
-		&:active {
-			background: #f3f4f6;
-		}
+		&:active { background: #f3f4f6; }
 	}
 	
 	.language-options {
@@ -714,46 +673,26 @@ const isAdmin = computed(() => userStore.isAdmin)
 		cursor: pointer;
 		transition: background-color 0.2s;
 		
-		&:active {
-			background: #f9fafb;
-		}
+		&:active { background: #f9fafb; }
 		
 		&.active {
 			background: #fef3e2;
 			
 			.language-name {
-				color: #ea580c;
+				color: var(--color-primary-dark);
 				font-weight: 500;
 			}
 		}
 	}
 	
-	.language-name {
-		font-size: 16px;
-		color: #374151;
-	}
+	.language-name { font-size: 16px; color: #374151; }
 	
-	.language-check {
-		color: #ea580c;
-		font-size: 18px;
-		font-weight: bold;
-	}
+	.language-check { color: var(--color-primary-dark); font-size: 18px; font-weight: bold; }
 	
 	// 版本信息
-	.version-info {
-		text-align: center;
-		padding: 20px;
-		color: #9ca3af;
-	}
+	.version-info { text-align: center; padding: 20px; color: #9ca3af; }
 	
-	.version-text {
-		font-size: 14px;
-		display: block;
-		margin-bottom: 4px;
-	}
+	.version-text { font-size: 14px; display: block; margin-bottom: 4px; }
 	
-	.build-text {
-		font-size: 12px;
-		opacity: 0.8;
-	}
+	.build-text { font-size: 12px; opacity: 0.8; }
 </style>

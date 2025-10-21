@@ -675,14 +675,14 @@ onShow(() => {
 <style lang="scss" scoped>
 	.detail-container {
 		min-height: 100vh;
-		background-color: #f5f5f5;
+		background-color: var(--bg-page);
 	}
 	
 	// 自定义导航栏 - 统一风格
 	.custom-navbar {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding: 44rpx 32rpx 24rpx;
-		color: white;
+		color: #fff;
 	}
 	
 	.navbar-title {
@@ -698,11 +698,11 @@ onShow(() => {
 	
 	// 卡片样式 - 统一APP卡片风格
 	.card {
-		background: white;
+		background: var(--bg-elevated);
 		border-radius: 24rpx;
 		padding: 24rpx;
 		margin-bottom: 20rpx;
-		box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08);
+		box-shadow: var(--shadow-card);
 	}
 	
 	.row {
@@ -713,13 +713,10 @@ onShow(() => {
 		font-size: 28rpx;
 	}
 	
-	.label {
-		color: #6b7280;
-		font-weight: 500;
-	}
+	.label { color: var(--text-secondary); font-weight: 500; }
 	
 	.value {
-		color: #111827;
+		color: var(--text-primary);
 		font-weight: 600;
 		
 		&.status {
@@ -764,17 +761,12 @@ onShow(() => {
 		}
 	}
 	
-	.section-title {
-		font-weight: 600;
-		color: #111827;
-		margin-bottom: 16rpx;
-		font-size: 32rpx;
-	}
+	.section-title { font-weight: 600; color: var(--text-primary); margin-bottom: 16rpx; font-size: 32rpx; }
 	
 	// 检查项目样式
 	.item {
 		padding: 16rpx 0;
-		border-bottom: 1rpx solid #f3f4f6;
+		border-bottom: 1rpx solid var(--border-soft);
 		
 		&:last-child {
 			border-bottom: none;
@@ -788,12 +780,7 @@ onShow(() => {
 		margin-bottom: 8rpx;
 	}
 	
-	.name {
-		color: #111827;
-		font-size: 28rpx;
-		font-weight: 500;
-		flex: 1;
-	}
+	.name { color: var(--text-primary); font-size: 28rpx; font-weight: 500; flex: 1; }
 	
 	.status-group {
 		display: flex;
@@ -871,11 +858,7 @@ onShow(() => {
 		}
 	}
 	
-	.meta {
-		color: #6b7280;
-		font-size: 24rpx;
-		margin-bottom: 12rpx;
-	}
+	.meta { color: var(--text-secondary); font-size: 24rpx; margin-bottom: 12rpx; }
 	
 	// 照片展示区域
 	.photos {
@@ -924,18 +907,20 @@ onShow(() => {
 	}
 	
 	.mini {
-		font-size: 24rpx;
-		padding: 12rpx 20rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88rpx; /* >=44px */
+		padding: 0 24rpx;
 		border: none;
-		border-radius: 16rpx;
-		background: linear-gradient(135deg, #f97316, #fb923c);
-		color: white;
-		font-weight: 500;
-		box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.3);
+		border-radius: 20rpx;
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+		color: #fff;
+		font-size: 26rpx;
+		font-weight: 600;
+		box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.28);
 		
-		&:active {
-			transform: translateY(1rpx);
-		}
+		&:active { transform: translateY(1rpx); }
 	}
 	
 	// 底部操作栏
@@ -944,13 +929,13 @@ onShow(() => {
 		bottom: 0;
 		left: 0;
 		right: 0;
-		background: white;
-		padding: 24rpx 32rpx;
-		border-top: 1rpx solid #f0f0f0;
+		background: var(--bg-elevated);
+		padding: 24rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
+		border-top: 1rpx solid var(--border-soft);
 		display: flex;
 		gap: 24rpx;
 		z-index: 100;
-		box-shadow: 0 -2rpx 16rpx rgba(0, 0, 0, 0.1);
+		box-shadow: 0 -2rpx 16rpx rgba(0, 0, 0, 0.06);
 	}
 	
 	.action-btn {
@@ -959,14 +944,14 @@ onShow(() => {
 		border-radius: 20rpx;
 		font-size: 32rpx;
 		border: none;
-		color: white;
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		color: #fff;
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		font-weight: 600;
-		box-shadow: 0 4rpx 12rpx rgba(249, 115, 22, 0.4);
+		box-shadow: 0 4rpx 12rpx rgba(249, 115, 22, 0.36);
 		
 		&:active {
 			transform: translateY(2rpx);
-			box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.4);
+			box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.36);
 		}
 	}
 	
@@ -985,7 +970,7 @@ onShow(() => {
 	
 	.edit-panel {
 		width: 100%;
-		background: white;
+		background: var(--bg-elevated);
 		border-top-left-radius: 32rpx;
 		border-top-right-radius: 32rpx;
 		padding: 32rpx;
@@ -993,13 +978,7 @@ onShow(() => {
 		overflow-y: auto;
 	}
 	
-	.panel-title {
-		font-weight: 600;
-		color: #111827;
-		margin-bottom: 24rpx;
-		font-size: 32rpx;
-		text-align: center;
-	}
+	.panel-title { font-weight: 600; color: var(--text-primary); margin-bottom: 24rpx; font-size: 32rpx; text-align: center; }
 	
 	.form-row {
 		margin-bottom: 20rpx;
@@ -1016,16 +995,17 @@ onShow(() => {
 	.textarea, .input {
 		width: 100%;
 		min-height: 80rpx;
-		background: #f8f9fa;
+		background: #fafafa;
 		border: 1rpx solid #e9ecef;
 		border-radius: 16rpx;
 		padding: 16rpx;
 		font-size: 28rpx;
-		color: #111827;
+		color: var(--text-primary);
 		
 		&:focus {
-			border-color: #f97316;
-			box-shadow: 0 0 0 6rpx rgba(249, 115, 22, 0.1);
+			border-color: var(--color-primary);
+			box-shadow: 0 0 0 6rpx rgba(249, 115, 22, 0.12);
+			background: #fff;
 		}
 	}
 	
@@ -1034,14 +1014,7 @@ onShow(() => {
 		resize: none;
 	}
 	
-	.picker {
-		background: #f8f9fa;
-		border: 1rpx solid #e9ecef;
-		border-radius: 16rpx;
-		padding: 16rpx;
-		font-size: 28rpx;
-		color: #111827;
-	}
+	.picker { background: #fafafa; border: 1rpx solid #e9ecef; border-radius: 16rpx; padding: 16rpx; font-size: 28rpx; color: var(--text-primary); }
 	
 	.radio-row {
 		display: flex;
@@ -1078,25 +1051,9 @@ onShow(() => {
 		font-size: 28rpx;
 		font-weight: 600;
 		
-		&.cancel {
-			background: #f3f4f6;
-			color: #6b7280;
-		}
-		
-		&.save {
-			background: linear-gradient(135deg, #f97316, #fb923c);
-			color: white;
-			box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.3);
-		}
-		
-		&.rejected {
-			background: linear-gradient(135deg, #dc2626, #ef4444);
-			color: white;
-			box-shadow: 0 4rpx 12rpx rgba(220, 38, 38, 0.4);
-		}
-		
-		&:active {
-			transform: translateY(1rpx);
-		}
+		&.cancel { background: #f3f4f6; color: #6b7280; }
+		&.save { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); color: #fff; box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.28); }
+		&.rejected { background: linear-gradient(135deg, #dc2626, #ef4444); color: #fff; box-shadow: 0 4rpx 12rpx rgba(220, 38, 38, 0.4); }
+		&:active { transform: translateY(1rpx); }
 	}
 </style>

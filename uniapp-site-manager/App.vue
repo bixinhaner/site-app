@@ -88,58 +88,61 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 <style lang="scss">
 	/* 全局样式 */
 	page {
-		background-color: #f5f5f5;
+		background-color: var(--bg-page);
 		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+		color: var(--text-primary);
 	}
 	
 	/* 橙色主题色彩 */
-	.primary-color { color: #f97316; }
-	.primary-bg { background-color: #f97316; }
-	.secondary-color { color: #fb923c; }
-	.secondary-bg { background-color: #fb923c; }
+	.primary-color { color: var(--color-primary); }
+	.primary-bg { background-color: var(--color-primary); }
+	.secondary-color { color: var(--color-primary-light); }
+	.secondary-bg { background-color: var(--color-primary-light); }
 	
 	/* 通用按钮样式 */
 	.btn-primary {
-		background: linear-gradient(135deg, #f97316, #fb923c);
-		color: white;
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+		color: #fff;
 		border: none;
-		border-radius: 8px;
+		border-radius: var(--radius-sm);
 		padding: 12px 24px;
 		font-weight: 600;
-		box-shadow: 0 2px 8px rgba(249, 115, 22, 0.3);
+		box-shadow: 0 2px 10px rgba(249, 115, 22, 0.28);
 	}
 	
 	.btn-primary:active {
 		transform: translateY(1px);
-		box-shadow: 0 1px 4px rgba(249, 115, 22, 0.3);
+		box-shadow: 0 1px 6px rgba(249, 115, 22, 0.24);
 	}
 	
 	/* 卡片样式 */
 	.card {
-		background: white;
-		border-radius: 12px;
+		background: var(--bg-elevated);
+		border-radius: var(--radius-md);
 		padding: 16px;
 		margin: 8px;
-		box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+		box-shadow: var(--shadow-card);
 	}
 	
 	/* 输入框样式 */
 	.input-field {
-		background: #f8f9fa;
-		border: 1px solid #e9ecef;
-		border-radius: 8px;
+		background: #fafafa;
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius-sm);
 		padding: 12px 16px;
 		font-size: 16px;
 	}
 	
 	.input-field:focus {
-		border-color: #f97316;
-		box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+		border-color: var(--color-primary);
+		box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
 	}
 	
 	/* 状态颜色 */
 	.status-planning { color: #6b7280; }
-	.status-construction { color: #f59e0b; }
-	.status-operational { color: #10b981; }
-	.status-maintenance { color: #ef4444; }
+	.status-construction { color: #d97706; }
+	.status-operational { color: var(--color-success); }
+	.status-maintenance { color: var(--color-error); }
 </style>

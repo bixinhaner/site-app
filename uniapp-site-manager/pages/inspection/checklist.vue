@@ -1888,23 +1888,23 @@
 </script>
 
 <style scoped>
-	.checklist-container {
-		height: 100vh;
-		width: 100vw;
-		max-width: 100vw;
-		background: #f5f5f5;
-		display: flex;
-		flex-direction: column;
-		overflow-x: hidden;
-		box-sizing: border-box;
-	}
+    .checklist-container {
+        height: 100vh;
+        width: 100vw;
+        max-width: 100vw;
+        background: var(--bg-page);
+        display: flex;
+        flex-direction: column;
+        overflow-x: hidden;
+        box-sizing: border-box;
+    }
 	
 	/* 导航栏 */
-	.custom-navbar {
-		background: linear-gradient(135deg, #f97316, #fb923c);
-		padding: 44rpx 30rpx 20rpx;
-		color: white;
-	}
+    .custom-navbar {
+        background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+        padding: 44rpx 30rpx 20rpx;
+        color: #fff;
+    }
 	
 	.navbar-content {
 		display: flex;
@@ -1913,12 +1913,12 @@
 	}
 	
 	.back-button {
-		width: 60rpx;
-		height: 60rpx;
+		width: 88rpx;
+		height: 88rpx;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		border-radius: 30rpx;
+		border-radius: 44rpx;
 		background: rgba(255, 255, 255, 0.2);
 	}
 	
@@ -1934,19 +1934,15 @@
 		text-align: center;
 	}
 	
-	.navbar-actions {
-		width: 60rpx;
-		display: flex;
-		justify-content: flex-end;
-	}
+	.navbar-actions { width: 88rpx; display: flex; justify-content: flex-end; }
 	
 	.save-button {
-		width: 60rpx;
-		height: 60rpx;
+		width: 88rpx;
+		height: 88rpx;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		border-radius: 30rpx;
+		border-radius: 44rpx;
 		background: rgba(255, 255, 255, 0.2);
 	}
 	
@@ -1957,11 +1953,11 @@
 	
 	/* 检查信息 */
 	.inspection-info {
-		background: white;
+		background: var(--bg-elevated);
 		margin: 20rpx;
 		border-radius: 20rpx;
 		padding: 30rpx;
-		box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.08);
+		box-shadow: var(--shadow-card);
 	}
 	
 	.info-row {
@@ -2016,16 +2012,21 @@
 	}
 	
 	.tab-item {
-		display: inline-block;
-		padding: 25rpx 30rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88rpx;
+		padding: 0 30rpx;
 		margin: 0 5rpx;
-		border-radius: 15rpx;
+		border-radius: 22rpx;
+		background: #f8f9fa;
+		color: #666;
 		transition: all 0.3s ease;
 	}
-	
+
 	.tab-item.active {
-		background: #28a745;
-		color: white;
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+		color: #fff;
 	}
 	
 	.tab-text {
@@ -2060,11 +2061,7 @@
 		padding: 0 10rpx;
 	}
 	
-	.section-title {
-		font-size: 30rpx;
-		font-weight: bold;
-		color: #333;
-	}
+	.section-title { font-size: 30rpx; font-weight: bold; color: var(--text-primary); }
 	
 	.section-count {
 		font-size: 24rpx;
@@ -2273,9 +2270,9 @@
 		bottom: 0;
 		left: 0;
 		right: 0;
-		background: white;
-		padding: 20rpx;
-		border-top: 1rpx solid #f0f0f0;
+		background: var(--bg-elevated);
+		padding: 20rpx 20rpx calc(20rpx + env(safe-area-inset-bottom));
+		border-top: 1rpx solid var(--border-soft);
 		display: flex;
 		gap: 20rpx;
 		z-index: 100;
@@ -2324,7 +2321,7 @@
 	}
 	
 	.item-modal {
-		background: white;
+		background: var(--bg-elevated);
 		border-radius: 20rpx;
 		width: 100%;
 		max-width: 700rpx;
@@ -2340,23 +2337,23 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 30rpx;
-		border-bottom: 1rpx solid #f0f0f0;
+		border-bottom: 1rpx solid var(--border-soft);
 	}
 	
 	.modal-title {
 		font-size: 32rpx;
 		font-weight: bold;
-		color: #333;
+		color: var(--text-primary);
 		flex: 1;
 	}
 	
 	.modal-close {
-		width: 60rpx;
-		height: 60rpx;
+		width: 88rpx;
+		height: 88rpx;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		border-radius: 30rpx;
+		border-radius: 44rpx;
 		background: #f8f9fa;
 	}
 	
@@ -2399,15 +2396,17 @@
 	}
 	
 	.add-photo-btn {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
-		gap: 10rpx;
-		padding: 15rpx 20rpx;
+		justify-content: center;
+		gap: 12rpx;
+		min-height: 88rpx;
+		padding: 0 24rpx;
 		background: #007bff;
-		color: white;
+		color: #fff;
 		border: none;
-		border-radius: 15rpx;
-		font-size: 24rpx;
+		border-radius: 22rpx;
+		font-size: 26rpx;
 	}
 	
 	.info-grid {
@@ -2691,20 +2690,9 @@
 	}
 	
 	/* 弹窗操作 */
-	.modal-actions {
-		display: flex;
-		gap: 20rpx;
-		padding: 30rpx;
-		border-top: 1rpx solid #f0f0f0;
-	}
+	.modal-actions { display: flex; gap: 20rpx; padding: 30rpx; border-top: 1rpx solid var(--border-soft); }
 	
-	.modal-btn {
-		flex: 1;
-		padding: 25rpx;
-		border-radius: 15rpx;
-		font-size: 30rpx;
-		border: none;
-	}
+	.modal-btn { flex: 1; min-height: 88rpx; padding: 0 24rpx; border-radius: 22rpx; font-size: 30rpx; border: none; display: inline-flex; align-items: center; justify-content: center; }
 	
 	.cancel-btn {
 		background: #6c757d;
@@ -2771,14 +2759,7 @@
 		display: block;
 	}
 	
-	.unbind-btn {
-		background: #fee2e2;
-		color: #dc2626;
-		border: 1rpx solid #fca5a5;
-		padding: 12rpx 20rpx;
-		border-radius: 8rpx;
-		font-size: 24rpx;
-	}
+	.unbind-btn { background: #fee2e2; color: #dc2626; border: 1rpx solid #fca5a5; display: inline-flex; align-items: center; justify-content: center; min-height: 88rpx; padding: 0 24rpx; border-radius: 16rpx; font-size: 26rpx; }
 	
 	.unbind-equipment {
 		display: flex;
@@ -2812,17 +2793,7 @@
 		display: block;
 	}
 	
-	.bind-btn {
-		background: linear-gradient(135deg, #f97316, #ea580c);
-		color: white;
-		border: none;
-		padding: 12rpx 20rpx;
-		border-radius: 8rpx;
-		font-size: 24rpx;
-		display: flex;
-		align-items: center;
-		gap: 8rpx;
-	}
+	.bind-btn { background: linear-gradient(135deg, #f97316, #ea580c); color: #fff; border: none; display: inline-flex; align-items: center; justify-content: center; gap: 10rpx; min-height: 88rpx; padding: 0 24rpx; border-radius: 16rpx; font-size: 26rpx; }
 	
 	.btn-icon {
 		font-size: 24rpx;

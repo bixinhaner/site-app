@@ -654,23 +654,19 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.container {
-  background-color: #f8fafc;
-  min-height: 100vh;
-  padding: 20rpx;
-}
+.container { background-color: var(--bg-page); min-height: 100vh; padding: 20rpx; }
 
 .header {
-  background: white;
+  background: var(--bg-elevated);
   padding: 30rpx;
   border-radius: 12rpx;
   margin-bottom: 20rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card);
   
   .title {
     font-size: 36rpx;
     font-weight: 600;
-    color: #111827;
+    color: var(--text-primary);
     display: block;
     margin-bottom: 16rpx;
   }
@@ -678,21 +674,21 @@ export default {
   .scan-info {
     .info-text {
       font-size: 28rpx;
-      color: #6b7280;
+      color: var(--text-secondary);
     }
   }
 }
 
 .scan-section {
-  background: white;
+  background: var(--bg-elevated);
   padding: 40rpx;
   border-radius: 12rpx;
   margin-bottom: 20rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card);
   text-align: center;
   
   .scan-button {
-    background: linear-gradient(135deg, #f97316, #ea580c);
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
     color: white;
     padding: 60rpx 40rpx;
     border-radius: 12rpx;
@@ -822,23 +818,24 @@ export default {
 }
 
 .work-order-section, .package-section {
-  background: white;
+  background: var(--bg-elevated);
   padding: 30rpx;
   border-radius: 12rpx;
   margin-bottom: 20rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card);
 }
 
 .section-title {
   font-size: 32rpx;
   font-weight: 600;
-  color: #111827;
+  color: var(--text-primary);
   margin-bottom: 20rpx;
   display: block;
 }
 
 .picker-input {
-  padding: 20rpx;
+  min-height: 88rpx;
+  padding: 0 20rpx;
   border: 2rpx solid #e5e7eb;
   border-radius: 8rpx;
   display: flex;
@@ -859,10 +856,7 @@ export default {
     margin-bottom: 16rpx;
     transition: all 0.3s;
     
-    &.selected {
-      border-color: #f97316;
-      background: #fff7ed;
-    }
+    &.selected { border-color: var(--color-primary); background: #fff7ed; }
     
     .package-header {
       display: flex;
@@ -872,7 +866,7 @@ export default {
       .package-name {
         font-size: 30rpx;
         font-weight: 500;
-        color: #111827;
+        color: var(--text-primary);
       }
       
       .package-code {
@@ -882,18 +876,17 @@ export default {
     }
     
     .package-type {
-      font-size: 26rpx;
-      color: #f97316;
+      font-size: 26rpx; color: var(--color-primary);
     }
   }
 }
 
 .package-detail {
-  background: white;
+  background: var(--bg-elevated);
   padding: 30rpx;
   border-radius: 12rpx;
   margin-bottom: 20rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card);
   
   .package-info {
     margin-bottom: 30rpx;
@@ -908,11 +901,7 @@ export default {
         color: #6b7280;
       }
       
-      .info-value {
-        font-size: 28rpx;
-        color: #111827;
-        font-weight: 500;
-      }
+      .info-value { font-size: 28rpx; color: var(--text-primary); font-weight: 500; }
     }
   }
   
@@ -940,11 +929,7 @@ export default {
           align-items: center;
           gap: 12rpx;
           
-          .quantity-text {
-            font-size: 28rpx;
-            color: #f97316;
-            font-weight: 600;
-          }
+          .quantity-text { font-size: 28rpx; color: var(--color-primary); font-weight: 600; }
           
           .required-tag {
             background: #dcfce7;
@@ -969,14 +954,7 @@ export default {
   gap: 20rpx;
   margin-top: 40rpx;
   
-  button {
-    flex: 1;
-    padding: 24rpx;
-    border-radius: 8rpx;
-    font-size: 32rpx;
-    font-weight: 500;
-    border: none;
-  }
+  button { flex: 1; min-height: 88rpx; padding: 0 24rpx; border-radius: 12rpx; font-size: 32rpx; font-weight: 500; border: none; display: inline-flex; align-items: center; justify-content: center; }
   
   .btn-cancel {
     background: #f3f4f6;
@@ -984,7 +962,7 @@ export default {
   }
   
   .btn-confirm {
-    background: #f97316;
+    background: var(--color-primary);
     color: white;
     
     &:disabled {
@@ -995,10 +973,10 @@ export default {
 }
 
 .history-section {
-  background: white;
+  background: var(--bg-elevated);
   padding: 30rpx;
   border-radius: 12rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card);
   
   .section-title {
     display: flex;
@@ -1006,13 +984,7 @@ export default {
     align-items: center;
     margin-bottom: 24rpx;
     
-    .refresh-btn {
-      font-size: 26rpx;
-      color: #f97316;
-      padding: 8rpx 16rpx;
-      border: 1rpx solid #f97316;
-      border-radius: 4rpx;
-    }
+      .refresh-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 88rpx; padding: 0 24rpx; font-size: 26rpx; color: var(--color-primary); border: 1rpx solid var(--color-primary); border-radius: 12rpx; }
   }
   
   .empty-state {
@@ -1034,11 +1006,7 @@ export default {
         justify-content: space-between;
         margin-bottom: 12rpx;
         
-        .history-package {
-          font-size: 28rpx;
-          color: #111827;
-          font-weight: 500;
-        }
+        .history-package { font-size: 28rpx; color: var(--text-primary); font-weight: 500; }
         
         .history-time {
           font-size: 24rpx;
@@ -1114,13 +1082,13 @@ export default {
   z-index: 9999;
   
   .loading-content {
-    background: white;
+    background: var(--bg-elevated);
     padding: 60rpx 80rpx;
     border-radius: 12rpx;
     
     text {
       font-size: 32rpx;
-      color: #111827;
+      color: var(--text-primary);
     }
   }
 }
@@ -1133,17 +1101,7 @@ export default {
   gap: 12rpx;
 }
 
-.btn-outline {
-  background: #ffffff;
-  color: #f97316;
-  border: 1rpx solid #f97316;
-  padding: 12rpx 20rpx;
-  border-radius: 6rpx;
-  font-size: 26rpx;
-}
+.btn-outline { background: #ffffff; color: var(--color-primary); border: 1rpx solid var(--color-primary); display: inline-flex; align-items: center; justify-content: center; min-height: 88rpx; padding: 0 24rpx; border-radius: 12rpx; font-size: 26rpx; }
 
-.btn-sm {
-  padding: 10rpx 16rpx;
-  font-size: 24rpx;
-}
+.btn-sm { min-height: 88rpx; padding: 0 20rpx; font-size: 26rpx; }
 </style>

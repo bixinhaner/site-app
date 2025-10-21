@@ -452,14 +452,14 @@
 <style lang="scss" scoped>
 	.site-detail-container {
 		min-height: 100vh;
-		background-color: #f5f5f5;
+		background-color: var(--bg-page);
 	}
 	
 	// 站点头部
 	.site-header {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding: 20px;
-		color: white;
+		color: #fff;
 	}
 	
 	.site-basic {
@@ -513,29 +513,18 @@
 	}
 	
 	.info-section {
-		background: white;
+		background: var(--bg-elevated);
 		margin-bottom: 12px;
 		padding: 20px;
+		border-radius: var(--radius-md);
+		box-shadow: var(--shadow-card);
 	}
 	
-	.section-title {
-		font-size: 16px;
-		font-weight: 600;
-		color: #111827;
-		margin-bottom: 16px;
-	}
+	.section-title { font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 16px; }
 	
-	.section-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 16px;
-	}
+.section-header { display: flex; justify-content: space-between; align-items: center; min-height: 44px; margin-bottom: 16px; }
 	
-	.see-all {
-		font-size: 14px;
-		color: #f97316;
-	}
+	.see-all { font-size: 14px; color: var(--color-primary); }
 	
 	// 基本信息网格
 	.info-grid {
@@ -549,16 +538,9 @@
 		flex-direction: column;
 	}
 	
-	.info-label {
-		font-size: 12px;
-		color: #6b7280;
-		margin-bottom: 4px;
-	}
+	.info-label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
 	
-	.info-value {
-		font-size: 14px;
-		color: #111827;
-		
+	.info-value { font-size: 14px; color: var(--text-primary);
 		&.priority-high { color: #dc2626; }
 		&.priority-normal { color: #059669; }
 		&.priority-low { color: #6b7280; }
@@ -573,18 +555,9 @@
 		margin-bottom: 16px;
 	}
 	
-	.address-label {
-		font-size: 12px;
-		color: #6b7280;
-		display: block;
-		margin-bottom: 4px;
-	}
+	.address-label { font-size: 12px; color: #6b7280; display: block; margin-bottom: 4px; }
 	
-	.address-text {
-		font-size: 14px;
-		color: #111827;
-		line-height: 1.5;
-	}
+	.address-text { font-size: 14px; color: var(--text-primary); line-height: 1.5; }
 	
 	.coordinates {
 		display: flex;
@@ -596,42 +569,18 @@
 		flex: 1;
 	}
 	
-	.coord-label {
-		font-size: 12px;
-		color: #6b7280;
-		display: block;
-		margin-bottom: 4px;
-	}
+	.coord-label { font-size: 12px; color: #6b7280; display: block; margin-bottom: 4px; }
 	
-	.coord-value {
-		font-size: 14px;
-		color: #111827;
-		font-family: 'Courier New', monospace;
-	}
+	.coord-value { font-size: 14px; color: var(--text-primary); font-family: 'Courier New', monospace; }
 	
-	.location-btn {
-		background: #f8f9fa;
-		border: 1px solid #e9ecef;
-		border-radius: 8px;
-		padding: 12px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 8px;
-		font-size: 14px;
-		color: #374151;
-	}
+	.location-btn { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; gap: 8px; font-size: 14px; color: #374151; }
 	
 	.btn-icon {
 		font-size: 16px;
 	}
 	
 	// 描述信息
-	.description-text {
-		font-size: 14px;
-		color: #374151;
-		line-height: 1.6;
-	}
+	.description-text { font-size: 14px; color: #374151; line-height: 1.6; }
 
 	// 站点规划样式
 	.expandable {
@@ -652,12 +601,7 @@
 		margin-top: 16px;
 	}
 
-	.planning-basic {
-		background: #f9fafb;
-		border-radius: 8px;
-		padding: 12px;
-		margin-bottom: 16px;
-	}
+	.planning-basic { background: #f9fafb; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
 
 	.planning-item {
 		display: flex;
@@ -700,12 +644,7 @@
 		gap: 12px;
 	}
 
-	.sector-card {
-		background: #f8f9fa;
-		border-radius: 8px;
-		padding: 12px;
-		border-left: 3px solid #f97316;
-	}
+	.sector-card { background: #f8f9fa; border-radius: 8px; padding: 12px; border-left: 3px solid var(--color-primary); }
 
 	.sector-header {
 		display: flex;
@@ -720,13 +659,7 @@
 		color: #111827;
 	}
 
-	.sector-bands {
-		font-size: 12px;
-		color: #f97316;
-		background: #fed7aa;
-		padding: 2px 8px;
-		border-radius: 4px;
-	}
+	.sector-bands { font-size: 12px; color: var(--color-primary-dark); background: #fed7aa; padding: 2px 8px; border-radius: 4px; }
 
 	.sector-params {
 		display: flex;
@@ -757,12 +690,7 @@
 		gap: 8px;
 	}
 
-	.port-item {
-		background: #f9fafb;
-		border-radius: 6px;
-		padding: 10px;
-		border: 1px solid #e5e7eb;
-	}
+	.port-item { background: #f9fafb; border-radius: 6px; padding: 10px; border: 1px solid #e5e7eb; }
 
 	.port-header {
 		display: flex;
@@ -828,7 +756,7 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 12px 0;
-		border-bottom: 1px solid #f3f4f6;
+		border-bottom: 1px solid var(--border-soft);
 		
 		&:last-child {
 			border-bottom: none;
@@ -840,16 +768,9 @@
 		flex-direction: column;
 	}
 	
-	.inspection-type {
-		font-size: 14px;
-		color: #111827;
-		margin-bottom: 2px;
-	}
+	.inspection-type { font-size: 14px; color: var(--text-primary); margin-bottom: 2px; }
 	
-	.inspection-time {
-		font-size: 12px;
-		color: #6b7280;
-	}
+	.inspection-time { font-size: 12px; color: #6b7280; }
 	
 	.inspection-status {
 		padding: 4px 8px;
@@ -870,10 +791,7 @@
 	}
 	
 	// 加载状态
-	.loading-container {
-		padding: 40px 20px;
-		text-align: center;
-	}
+	.loading-container { padding: 40px 20px; text-align: center; }
 	
 	// 地图选择器
 	.map-selector-overlay {
@@ -889,13 +807,7 @@
 		justify-content: center;
 	}
 	
-	.map-selector {
-		width: 100%;
-		background: white;
-		border-radius: 30rpx 30rpx 0 0;
-		padding: 40rpx 30rpx;
-		animation: slideUp 0.3s ease-out;
-	}
+	.map-selector { width: 100%; background: var(--bg-elevated); border-radius: 30rpx 30rpx 0 0; padding: 40rpx 30rpx; animation: slideUp 0.3s ease-out; }
 	
 	@keyframes slideUp {
 		from {
@@ -906,13 +818,7 @@
 		}
 	}
 	
-	.selector-title {
-		font-size: 32rpx;
-		font-weight: 600;
-		color: #111827;
-		text-align: center;
-		margin-bottom: 30rpx;
-	}
+	.selector-title { font-size: 32rpx; font-weight: 600; color: var(--text-primary); text-align: center; margin-bottom: 30rpx; }
 	
 	.map-options {
 		display: flex;
@@ -920,21 +826,7 @@
 		gap: 20rpx;
 	}
 	
-	.map-option {
-		display: flex;
-		align-items: center;
-		gap: 20rpx;
-		padding: 30rpx;
-		background: #f9fafb;
-		border-radius: 20rpx;
-		border: 2rpx solid transparent;
-		transition: all 0.3s ease;
-		
-		&:active {
-			background: #fef3e2;
-			border-color: #f97316;
-		}
-	}
+.map-option { display: flex; align-items: center; gap: 20rpx; min-height: 88rpx; padding: 0 30rpx; background: #f9fafb; border-radius: 20rpx; border: 2rpx solid transparent; transition: all 0.3s ease; &:active { background: #fef3e2; border-color: var(--color-primary); } }
 	
 	.option-icon {
 		font-size: 48rpx;

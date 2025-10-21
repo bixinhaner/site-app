@@ -558,16 +558,16 @@
 <style scoped>
 	.site-select-container {
 		height: 100vh;
-		background: #f5f5f5;
+		background: var(--bg-page);
 		display: flex;
 		flex-direction: column;
 	}
 	
 	/* 导航栏 */
 	.custom-navbar {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding: 44rpx 30rpx 20rpx;
-		color: white;
+		color: #fff;
 	}
 	
 	.navbar-content {
@@ -577,12 +577,12 @@
 	}
 	
 	.back-button {
-		width: 60rpx;
-		height: 60rpx;
+		width: 88rpx;
+		height: 88rpx;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		border-radius: 30rpx;
+		border-radius: 44rpx;
 		background: rgba(255, 255, 255, 0.2);
 	}
 	
@@ -645,8 +645,8 @@
 	}
 	
 	.clear-button {
-		width: 40rpx;
-		height: 40rpx;
+		width: 88rpx;
+		height: 88rpx;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -659,14 +659,14 @@
 	}
 	
 	.filter-button {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
-		gap: 10rpx;
-		padding: 0 20rpx;
+		gap: 12rpx;
+		min-height: 88rpx; /* >=44px */
+		padding: 0 24rpx;
 		background: #007bff;
-		color: white;
-		border-radius: 25rpx;
-		height: 70rpx;
+		color: #fff;
+		border-radius: 28rpx;
 		white-space: nowrap;
 	}
 	
@@ -873,15 +873,7 @@
 		color: #333;
 	}
 	
-	.filter-close {
-		width: 60rpx;
-		height: 60rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 30rpx;
-		background: #f8f9fa;
-	}
+	.filter-close { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; border-radius: 44rpx; background: #f8f9fa; }
 	
 	.close-icon {
 		font-size: 36rpx;
@@ -913,10 +905,14 @@
 	}
 	
 	.filter-option {
-		padding: 15rpx 25rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88rpx;
+		padding: 0 25rpx;
 		background: #f8f9fa;
 		color: #666;
-		border-radius: 25rpx;
+		border-radius: 28rpx;
 		font-size: 26rpx;
 		transition: all 0.3s ease;
 	}
@@ -938,32 +934,11 @@
 		margin-top: 15rpx;
 	}
 	
-	.filter-actions {
-		display: flex;
-		gap: 20rpx;
-		padding: 30rpx;
-		border-top: 1rpx solid #f0f0f0;
-	}
+	.filter-actions { display: flex; gap: 20rpx; padding: 30rpx; border-top: 1rpx solid var(--border-soft); }
 	
-	.filter-reset {
-		flex: 1;
-		padding: 25rpx;
-		background: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 15rpx;
-		font-size: 30rpx;
-	}
+	.filter-reset { flex: 1; min-height: 88rpx; padding: 0 24rpx; background: #6c757d; color: #fff; border: none; border-radius: 22rpx; font-size: 30rpx; display: inline-flex; align-items: center; justify-content: center; }
 	
-	.filter-apply {
-		flex: 1;
-		padding: 25rpx;
-		background: #007bff;
-		color: white;
-		border: none;
-		border-radius: 15rpx;
-		font-size: 30rpx;
-	}
+	.filter-apply { flex: 1; min-height: 88rpx; padding: 0 24rpx; background: #007bff; color: #fff; border: none; border-radius: 22rpx; font-size: 30rpx; display: inline-flex; align-items: center; justify-content: center; }
 	
 	/* 加载更多 */
 	.load-more {

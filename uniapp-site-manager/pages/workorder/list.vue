@@ -20,7 +20,7 @@
       refresher-enabled 
       :refresher-triggered="refreshing" 
       @refresherrefresh="handleRefresh"
-      refresher-background="#f5f5f5"
+      refresher-background="#f7f8fb"
     >
       <view class="order-list">
         <view class="order-item" v-for="wo in orders" :key="wo.id" @click="openDetail(wo)">
@@ -200,14 +200,14 @@ onShow(() => {
 <style lang="scss" scoped>
 	.list-container {
 		min-height: 100vh;
-		background-color: #f5f5f5;
+		background-color: var(--bg-page);
 	}
 	
 	// 自定义导航栏 - 统一风格
 	.custom-navbar {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding: 44rpx 32rpx 24rpx;
-		color: white;
+		color: #fff;
 	}
 	
 	.navbar-title {
@@ -220,22 +220,26 @@ onShow(() => {
 		display: flex;
 		gap: 16rpx;
 		padding: 20rpx 32rpx;
-		background: white;
-		box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.06);
+		background: var(--bg-elevated);
+		box-shadow: var(--shadow-card);
 	}
 	
 	.tab {
-		padding: 12rpx 24rpx;
-		border-radius: 20rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88rpx; /* >=44px */
+		padding: 0 28rpx;
+		border-radius: 24rpx;
 		background: #f8f9fa;
 		color: #6b7280;
 		font-size: 28rpx;
 		transition: all 0.3s ease;
 		
 		&.active {
-			background: linear-gradient(135deg, #f97316, #fb923c);
-			color: white;
-			box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.3);
+			background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+			color: #fff;
+			box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.28);
 		}
 	}
 	
@@ -250,16 +254,14 @@ onShow(() => {
 	
 	// 工单卡片 - 统一卡片样式
 	.order-item {
-		background: white;
+		background: var(--bg-elevated);
 		margin: 16rpx 0;
 		padding: 24rpx;
 		border-radius: 24rpx;
-		box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08);
+		box-shadow: var(--shadow-card);
 		transition: transform 0.2s ease;
 		
-		&:active {
-			transform: translateY(2rpx);
-		}
+		&:active { transform: translateY(2rpx); }
 	}
 	
 	.order-header {
@@ -269,13 +271,7 @@ onShow(() => {
 		margin-bottom: 16rpx;
 	}
 	
-	.order-title {
-		font-weight: 600;
-		color: #111827;
-		font-size: 32rpx;
-		flex: 1;
-		margin-right: 16rpx;
-	}
+	.order-title { font-weight: 600; color: var(--text-primary); font-size: 32rpx; flex: 1; margin-right: 16rpx; }
 	
 	// 状态标签 - 统一状态颜色
 	.order-status {
@@ -323,18 +319,12 @@ onShow(() => {
 	.order-meta {
 		display: flex;
 		justify-content: space-between;
-		color: #6b7280;
+		color: var(--text-secondary);
 		font-size: 26rpx;
 		margin-bottom: 16rpx;
 		
-		.site {
-			flex: 1;
-			margin-right: 16rpx;
-		}
-		
-		.time {
-			white-space: nowrap;
-		}
+		.site { flex: 1; margin-right: 16rpx; }
+		.time { white-space: nowrap; }
 	}
 	
 	// 操作按钮
@@ -345,17 +335,19 @@ onShow(() => {
 	}
 	
 	.accept-btn, .continue-btn, .rejected-btn {
-		font-size: 24rpx;
-		padding: 8rpx 16rpx;
-		border-radius: 16rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88rpx; /* >=44px */
+		padding: 0 24rpx;
+		border-radius: 20rpx;
 		border: none;
-		color: white;
-		font-weight: 500;
+		color: #fff;
+		font-size: 26rpx;
+		font-weight: 600;
 	}
 	
-	.accept-btn {
-		background: linear-gradient(135deg, #f97316, #fb923c);
-	}
+	.accept-btn { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); }
 	
 	.continue-btn {
 		background: linear-gradient(135deg, #1d4ed8, #3b82f6);

@@ -315,25 +315,16 @@
 	.map-header {
 		position: relative;
 		z-index: 1000;
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding: 44rpx 20rpx 20rpx;
 		display: flex;
 		align-items: center;
 		gap: 20rpx;
-		box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.1);
+		box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.06);
 		flex-shrink: 0;
 	}
 	
-	.back-btn {
-		width: 60rpx;
-		height: 60rpx;
-		border-radius: 30rpx;
-		background: rgba(255, 255, 255, 0.2);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-	}
+	.back-btn { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 	
 	.back-icon {
 		font-size: 32rpx;
@@ -348,12 +339,7 @@
 		min-width: 0;
 	}
 	
-	.location-name {
-		font-size: 28rpx;
-		font-weight: 600;
-		color: white;
-		margin-bottom: 4rpx;
-	}
+	.location-name { font-size: 28rpx; font-weight: 600; color: #fff; margin-bottom: 4rpx; }
 	
 	.coordinates {
 		font-size: 22rpx;
@@ -381,24 +367,16 @@
 		left: 0;
 		right: 0;
 		z-index: 1000;
-		background: white;
+		background: var(--bg-elevated);
 		border-radius: 30rpx 30rpx 0 0;
-		box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.1);
+		box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.06);
 		max-height: 60vh;
 		transition: max-height 0.3s ease;
 		
-		&.collapsed {
-			max-height: 120rpx;
-		}
+		&.collapsed { max-height: 120rpx; }
 	}
 	
-	.panel-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 30rpx;
-		border-bottom: 1rpx solid #f0f0f0;
-	}
+.panel-header { display: flex; justify-content: space-between; align-items: center; min-height: 88rpx; padding: 0 30rpx; border-bottom: 1rpx solid var(--border-soft); }
 	
 	.panel-title {
 		display: flex;
@@ -406,20 +384,9 @@
 		gap: 15rpx;
 	}
 	
-	.title-text {
-		font-size: 30rpx;
-		font-weight: 600;
-		color: #111827;
-	}
+	.title-text { font-size: 30rpx; font-weight: 600; color: var(--text-primary); }
 	
-	.count-badge {
-		background: #f97316;
-		color: white;
-		font-size: 20rpx;
-		padding: 4rpx 12rpx;
-		border-radius: 12rpx;
-		font-weight: 600;
-	}
+	.count-badge { background: var(--color-primary); color: #fff; font-size: 20rpx; padding: 4rpx 12rpx; border-radius: 12rpx; font-weight: 600; }
 	
 	.toggle-icon {
 		font-size: 24rpx;
@@ -429,6 +396,7 @@
 	.sites-list {
 		max-height: calc(60vh - 120rpx);
 		overflow-y: auto;
+		padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
 	}
 	
 	/* 筛选栏 */
@@ -441,18 +409,19 @@
 	}
 	
 	.filter-item {
-		padding: 10rpx 24rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88rpx; /* >=44px */
+		padding: 0 28rpx;
 		background: #f3f4f6;
-		border-radius: 20rpx;
-		font-size: 24rpx;
+		border-radius: 24rpx;
+		font-size: 26rpx;
 		color: #6b7280;
 		transition: all 0.3s ease;
 		flex-shrink: 0;
 		
-		&.active {
-			background: #f97316;
-			color: white;
-		}
+		&.active { background: var(--color-primary); color: #fff; }
 	}
 	
 	/* 站点列表项 */
@@ -486,22 +455,9 @@
 		min-width: 0;
 	}
 	
-	.site-name {
-		font-size: 28rpx;
-		font-weight: 600;
-		color: #111827;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
+	.site-name { font-size: 28rpx; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	
-	.site-address {
-		font-size: 22rpx;
-		color: #6b7280;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
+	.site-address { font-size: 22rpx; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	
 	.site-status {
 		font-size: 22rpx;

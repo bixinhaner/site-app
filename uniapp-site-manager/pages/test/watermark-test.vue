@@ -260,7 +260,7 @@
 <style scoped>
 	.test-container {
 		padding: 20rpx;
-		background: #f5f5f5;
+		background: var(--bg-page);
 		min-height: 100vh;
 	}
 	
@@ -330,11 +330,15 @@
 	}
 	
 	.test-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 88rpx;
+		padding: 0 24rpx;
 		background: #007bff;
 		color: white;
 		border: none;
-		border-radius: 10rpx;
-		padding: 25rpx;
+		border-radius: 16rpx;
 		font-size: 30rpx;
 		font-weight: bold;
 	}

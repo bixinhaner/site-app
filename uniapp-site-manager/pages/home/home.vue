@@ -20,7 +20,7 @@
 			refresher-enabled 
 			:refresher-triggered="refreshing" 
 			@refresherrefresh="handleRefresh"
-			refresher-background="#f5f5f5"
+		refresher-background="#f7f8fb"
 		>
 		
 		<!-- 统计卡片 -->
@@ -391,7 +391,7 @@
 		display: flex;
 		flex-direction: column;
 		height: 100vh;
-		background-color: #f5f5f5;
+		background-color: var(--bg-page);
 	}
 	
 	// 滚动容器
@@ -402,9 +402,9 @@
 	
 	// 自定义导航栏
 	.custom-navbar {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding: 44px 20px 20px;
-		color: white;
+		color: #fff;
 	}
 	
 	.navbar-content {
@@ -418,11 +418,7 @@
 		font-weight: 600;
 	}
 	
-	.user-info {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
+	.user-info { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 6px; border-radius: 12px; }
 	
 	.user-name {
 		font-size: 14px;
@@ -444,10 +440,7 @@
 	}
 	
 	// 统计卡片
-	.stats-container {
-		padding: 20px;
-		margin-top: -10px;
-	}
+	.stats-container { padding: 20px; margin-top: -10px; }
 	
 	.stats-grid {
 		display: grid;
@@ -456,13 +449,13 @@
 	}
 	
 	.stat-card {
-		background: white;
-		border-radius: 12px;
+		background: var(--bg-elevated);
+		border-radius: var(--radius-md);
 		padding: 16px;
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+		box-shadow: var(--shadow-card);
 	}
 	
 	.stat-icon {
@@ -485,21 +478,12 @@
 		flex-direction: column;
 	}
 	
-	.stat-number {
-		font-size: 24px;
-		font-weight: 600;
-		color: #111827;
-	}
+	.stat-number { font-size: 24px; font-weight: 600; color: var(--text-primary); }
 	
-	.stat-label {
-		font-size: 12px;
-		color: #6b7280;
-	}
+	.stat-label { font-size: 12px; color: var(--text-secondary); }
 	
 	// 快捷操作
-	.quick-actions {
-		margin: 20px;
-	}
+	.quick-actions { margin: 20px; }
 	
 	.section-header {
 		display: flex;
@@ -508,16 +492,9 @@
 		margin-bottom: 16px;
 	}
 	
-	.section-title {
-		font-size: 18px;
-		font-weight: 600;
-		color: #111827;
-	}
+	.section-title { font-size: 18px; font-weight: 600; color: var(--text-primary); }
 	
-	.see-all {
-		font-size: 14px;
-		color: #f97316;
-	}
+	.see-all { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 10px; font-size: 14px; color: var(--color-primary); }
 	
 	.actions-grid {
 		display: grid;
@@ -526,14 +503,14 @@
 	}
 	
 	.action-item {
-		background: white;
-		border-radius: 12px;
+		background: var(--bg-elevated);
+		border-radius: var(--radius-md);
 		padding: 20px 12px;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		gap: 8px;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+		box-shadow: var(--shadow-card);
 	}
 	
 	.action-icon {
@@ -548,26 +525,22 @@
 	}
 	
 	// 最近活动
-	.recent-activities {
-		margin: 20px;
-	}
+	.recent-activities { margin: 20px; }
 	
 	.activity-list {
-		background: white;
-		border-radius: 12px;
+		background: var(--bg-elevated);
+		border-radius: var(--radius-md);
 		overflow: hidden;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+		box-shadow: var(--shadow-card);
 	}
 	
 	.activity-item {
 		display: flex;
 		align-items: center;
 		padding: 16px;
-		border-bottom: 1px solid #f3f4f6;
+		border-bottom: 1px solid var(--border-soft);
 		
-		&:last-child {
-			border-bottom: none;
-		}
+		&:last-child { border-bottom: none; }
 	}
 	
 	.activity-icon {

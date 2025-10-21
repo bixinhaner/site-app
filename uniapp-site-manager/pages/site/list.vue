@@ -276,15 +276,15 @@
 <style lang="scss" scoped>
 	.site-list-container {
 		min-height: 100vh;
-		background-color: #f5f5f5;
+		background-color: var(--bg-page);
 		padding-bottom: 80px;
 	}
 	
 	// 搜索和过滤
 	.search-filter {
-		background: white;
+		background: var(--bg-elevated);
 		padding: 16px;
-		border-bottom: 1px solid #f0f0f0;
+		border-bottom: 1px solid var(--border-soft);
 	}
 	
 	.search-box {
@@ -295,14 +295,14 @@
 		width: 100%;
 		height: 40px;
 		padding: 0 16px;
-		background: #f8f9fa;
-		border: 1px solid #e9ecef;
+		background: #fafafa;
+		border: 1px solid var(--border-color);
 		border-radius: 20px;
 		font-size: 14px;
 		
 		&:focus {
-			border-color: #f97316;
-			background: white;
+			border-color: var(--color-primary);
+			background: #fff;
 		}
 	}
 	
@@ -312,16 +312,21 @@
 	}
 	
 	.filter-tab {
-		padding: 6px 16px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 44px; /* iOS touch target */
+		padding: 0 16px;
 		background: #f8f9fa;
-		border-radius: 16px;
-		font-size: 12px;
+		border-radius: 18px;
+		font-size: 14px;
 		color: #6b7280;
 		white-space: nowrap;
+		transition: background-color .2s ease, color .2s ease;
 		
 		&.active {
-			background: #f97316;
-			color: white;
+			background: var(--color-primary);
+			color: #fff;
 		}
 	}
 	
@@ -331,11 +336,12 @@
 	}
 	
 	.site-item {
-		background: white;
-		border-radius: 12px;
+		background: var(--bg-elevated);
+		border-radius: var(--radius-md);
 		padding: 16px;
 		margin-bottom: 12px;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+		box-shadow: var(--shadow-card);
+		transition: transform .1s ease;
 	}
 	
 	.site-header {
@@ -352,15 +358,12 @@
 	.site-name {
 		font-size: 16px;
 		font-weight: 600;
-		color: #111827;
+		color: var(--text-primary);
 		display: block;
 		margin-bottom: 4px;
 	}
 	
-	.site-code {
-		font-size: 12px;
-		color: #6b7280;
-	}
+	.site-code { font-size: 12px; color: var(--text-secondary); }
 	
 	.site-status {
 		padding: 4px 12px;
@@ -409,73 +412,45 @@
 		font-size: 12px;
 	}
 	
-	.detail-text {
-		font-size: 13px;
-		color: #4b5563;
-		flex: 1;
-	}
+	.detail-text { font-size: 13px; color: #4b5563; flex: 1; }
 	
 	.site-actions {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
 		padding-top: 12px;
-		border-top: 1px solid #f3f4f6;
+		border-top: 1px solid var(--border-soft);
 	}
 	
-	.action-time {
-		font-size: 12px;
-		color: #9ca3af;
-	}
+	.action-time { font-size: 12px; color: #9ca3af; }
 	
-	.action-arrow {
-		font-size: 18px;
-		color: #d1d5db;
-	}
+	.action-arrow { font-size: 18px; color: #d1d5db; }
 	
 	// 空状态
-	.empty-state {
-		text-align: center;
-		padding: 60px 20px;
-	}
+	.empty-state { text-align: center; padding: 60px 20px; }
 	
-	.empty-icon {
-		font-size: 48px;
-		display: block;
-		margin-bottom: 16px;
-		opacity: 0.3;
-	}
+	.empty-icon { font-size: 48px; display: block; margin-bottom: 16px; opacity: 0.3; }
 	
-	.empty-text {
-		font-size: 14px;
-		color: #9ca3af;
-	}
+	.empty-text { font-size: 14px; color: #9ca3af; }
 	
 	// 加载状态
-	.loading-container {
-		padding: 20px;
-		text-align: center;
-	}
+	.loading-container { padding: 20px; text-align: center; }
 	
 	// 浮动按钮
 	.fab {
 		position: fixed;
-		bottom: 100px;
+		bottom: calc(100px + env(safe-area-inset-bottom));
 		right: 20px;
 		width: 56px;
 		height: 56px;
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		border-radius: 50%;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		box-shadow: 0 4px 16px rgba(249, 115, 22, 0.3);
+		box-shadow: 0 4px 16px rgba(249, 115, 22, 0.28);
 		z-index: 100;
 	}
 	
-	.fab-icon {
-		font-size: 24px;
-		color: white;
-		font-weight: 300;
-	}
+	.fab-icon { font-size: 24px; color: #fff; font-weight: 300; }
 </style>

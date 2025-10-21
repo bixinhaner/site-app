@@ -1127,16 +1127,7 @@ export default {
 		display: block;
 	}
 	
-	.tool-btn {
-		width: 80rpx;
-		height: 80rpx;
-		border-radius: 40rpx;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		backdrop-filter: blur(10rpx);
-	}
+	.tool-btn { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10rpx); }
 	
 	.btn-icon {
 		color: white;
@@ -1406,15 +1397,7 @@ export default {
 		color: #333;
 	}
 	
-	.preview-close {
-		width: 60rpx;
-		height: 60rpx;
-		border-radius: 30rpx;
-		background: #f5f5f5;
-		border: none;
-		font-size: 24rpx;
-		color: #666;
-	}
+	.preview-close { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: var(--bg-page); border: none; font-size: 28rpx; color: #6b7280; }
 	
 	.preview-content {
 		padding: 30rpx;
