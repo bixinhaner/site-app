@@ -134,6 +134,32 @@
     </template>
   </el-dialog>
 
+  <!-- 重复安装工单提示对话框 -->
+  <el-dialog v-model="dupVisible" title="该站点已存在安装工单" width="720px">
+    <el-alert type="warning" :closable="false" show-icon style="margin-bottom:8px"
+      title="确认后仍可继续创建，但请避免重复派单。" />
+    <div style="margin-bottom:12px; color:#606266;">
+      站点：<b>{{ dupSiteDisplay }}</b>
+    </div>
+    <el-table :data="dupExisting" size="small" style="width:100%" v-if="dupExisting && dupExisting.length">
+      <el-table-column prop="title" label="标题" min-width="180" />
+      <el-table-column prop="status" label="状态" width="120">
+        <template #default="{ row }">
+          <el-tag>{{ statusText(row.status) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="assigner_name" label="创建者" width="140" />
+      <el-table-column prop="assignee_name" label="分配给" width="140" />
+      <el-table-column prop="assigned_at" label="分配时间" width="180">
+        <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
+      </el-table-column>
+    </el-table>
+    <template #footer>
+      <el-button @click="dupVisible=false">取消</el-button>
+      <el-button type="primary" :loading="creating" @click="confirmDuplicateCreate">确认继续创建</el-button>
+    </template>
+  </el-dialog>
+
   <!-- 编辑工单对话框 -->
   <el-dialog v-model="editVisible" title="编辑工单" width="560px">
     <el-form :model="editForm" label-width="96px" :rules="rules" ref="editFormRef">
@@ -257,7 +283,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
@@ -336,6 +362,17 @@ const siteOptions = ref([])
 const userOptions = ref([])
 const templateOptions = ref([])
 const formRef = ref()
+
+// 重复安装工单对话框
+const dupVisible = ref(false)
+const dupExisting = ref([])
+const dupPayload = ref(null)
+const dupSiteName = ref('')
+const dupSiteCode = ref('')
+const dupSiteDisplay = computed(() => {
+  if (dupSiteName.value && dupSiteCode.value) return `${dupSiteName.value} (${dupSiteCode.value})`
+  return dupSiteName.value || dupSiteCode.value || '-'
+})
 
 // Edit dialog state
 const editVisible = ref(false)
@@ -419,11 +456,43 @@ const submitCreate = () => {
       await load()
     } catch (e) {
       console.error(e)
-      ElMessage.error(e?.response?.data?.detail || '创建失败')
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail
+      if (status === 409 && detail?.code === 'DUPLICATE_OPENING_ORDER' && detail?.require_confirm_duplicate) {
+        dupExisting.value = Array.isArray(detail.existing_work_orders) ? detail.existing_work_orders : []
+        dupPayload.value = { ...createForm.value, confirm_duplicate: true }
+        dupSiteName.value = detail?.site_name || ''
+        dupSiteCode.value = detail?.site_code || ''
+        dupVisible.value = true
+      } else {
+        ElMessage.error((typeof detail === 'string' && detail) || '创建失败')
+      }
     } finally {
       creating.value = false
     }
   })
+}
+
+const confirmDuplicateCreate = async () => {
+  if (!dupPayload.value) {
+    dupVisible.value = false
+    return
+  }
+  try {
+    creating.value = true
+    const payload = { ...dupPayload.value }
+    if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
+    await request.post('/api/work-orders', payload)
+    ElMessage.success('创建成功')
+    dupVisible.value = false
+    createVisible.value = false
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '创建失败')
+  } finally {
+    creating.value = false
+  }
 }
 
 // 权限检查函数

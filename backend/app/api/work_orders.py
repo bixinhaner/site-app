@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 import uuid
+import json
 
 from app.core.database import get_db
 from app.api.auth import get_current_user
@@ -285,6 +286,38 @@ async def create_work_order(
     site = db.query(Site).filter(Site.id == data.site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="站点不存在")
+
+    # 重复校验：仅针对安装工单，任意状态都视为存在历史记录，需用户确认后方可继续
+    if data.type == WorkOrderTypeEnum.OPENING_INSPECTION and not (getattr(data, "confirm_duplicate", False)):
+        existing_wos = db.query(WorkOrder).filter(
+            WorkOrder.site_id == data.site_id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION
+        ).order_by(WorkOrder.assigned_at.desc()).all()
+        if existing_wos:
+            existing_brief = []
+            for e in existing_wos[:10]:  # 最多返回10条以控制响应体
+                enriched = _enrich_work_order_response(db, e)
+                existing_brief.append({
+                    "id": enriched.get("id"),
+                    "title": enriched.get("title"),
+                    "status": enriched.get("status").value if hasattr(enriched.get("status"), 'value') else str(enriched.get("status")),
+                    "assigned_to": enriched.get("assigned_to"),
+                    "assignee_name": enriched.get("assignee_name"),
+                    "assigner_name": enriched.get("assigner_name"),
+                    "assigned_at": enriched.get("assigned_at").isoformat() if enriched.get("assigned_at") else None,
+                })
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "DUPLICATE_OPENING_ORDER",
+                    "message": "该站点已存在安装工单，确认后仍可继续创建",
+                    "site_id": data.site_id,
+                    "site_name": getattr(site, "site_name", None),
+                    "site_code": getattr(site, "site_code", None),
+                    "require_confirm_duplicate": True,
+                    "existing_work_orders": existing_brief,
+                }
+            )
 
     wo = WorkOrder(
         id=str(uuid.uuid4()),

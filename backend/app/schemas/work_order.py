@@ -45,6 +45,8 @@ class WorkOrderCreate(BaseModel):
     priority: WorkOrderPriorityEnum = WorkOrderPriorityEnum.NORMAL
     due_date: Optional[datetime] = None
     template_id: Optional[str] = None
+    # 若同站点已存在安装工单，前端需提示并在确认后将其置为True以允许继续创建
+    confirm_duplicate: Optional[bool] = False
 
 
 class WorkOrderUpdate(BaseModel):
