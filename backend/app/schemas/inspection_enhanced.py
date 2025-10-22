@@ -1,7 +1,20 @@
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any, Union
-from datetime import datetime
+from datetime import datetime, date, time
 from enum import Enum
+
+# 字段类型枚举
+class FieldTypeEnum(str, Enum):
+    """字段类型枚举"""
+    TEXT = "text"                    # 文本
+    NUMBER = "number"                # 数字
+    BOOLEAN = "boolean"              # 布尔
+    SELECT_SINGLE = "select_single"  # 单选
+    SELECT_MULTI = "select_multi"    # 多选
+    DATE = "date"                    # 日期
+    TIME = "time"                    # 时间
+    DATETIME = "datetime"            # 日期时间
+    RICH_TEXT = "rich_text"          # 富文本
 
 # 枚举类型
 class InspectionStatusEnum(str, Enum):
@@ -42,6 +55,7 @@ class CheckItemTemplate(BaseModel):
     assigned_role: str
     validation_rules: Optional[Dict[str, Any]] = None
     status: str = "pending"
+    fields: Optional[List["FieldDefinition"]] = None  # 字段配置（使用前向声明）
 
 class CheckCategoryTemplate(BaseModel):
     """检查分类模板"""
@@ -111,11 +125,43 @@ class SiteInspectionUpdate(BaseModel):
     issues_found: Optional[str] = None
     recommendations: Optional[str] = None
 
+class FieldOption(BaseModel):
+    """字段选项"""
+    label: str
+    value: Union[str, int]
+
+class FieldConstraints(BaseModel):
+    """字段约束"""
+    min: Optional[Union[int, float]] = None
+    max: Optional[Union[int, float]] = None
+    min_length: Optional[int] = None
+    max_length: Optional[int] = None
+    pattern: Optional[str] = None  # 正则表达式
+
+class FieldDefinition(BaseModel):
+    """字段定义"""
+    field_id: str
+    label: str
+    type: FieldTypeEnum
+    required: bool = False
+    options: Optional[List[FieldOption]] = None  # 用于select_single和select_multi
+    constraints: Optional[FieldConstraints] = None
+    default_value: Optional[Any] = None
+    placeholder: Optional[str] = None
+    help_text: Optional[str] = None
+
 class CheckItemDataValue(BaseModel):
     """检查项数据值"""
     field_name: str
-    value: Union[str, int, float, bool]
+    value: Union[str, int, float, bool, List[Union[str, int]], date, time, datetime, None]
     unit: Optional[str] = None
+    
+    class Config:
+        json_encoders = {
+            date: lambda v: v.isoformat(),
+            time: lambda v: v.isoformat(),
+            datetime: lambda v: v.isoformat()
+        }
 
 class InspectionCheckItemUpdate(BaseModel):
     """更新检查项"""
@@ -171,6 +217,7 @@ class InspectionCheckItemResponse(BaseModel):
     status: CheckItemStatusEnum
     data_value: Optional[List[Dict[str, Any]]] = None
     validation_result: Optional[Dict[str, Any]] = None
+    fields: Optional[List[Dict[str, Any]]] = None  # 字段配置
     checked_at: Optional[datetime]
     review_status: Optional[str]
     review_comments: Optional[str]

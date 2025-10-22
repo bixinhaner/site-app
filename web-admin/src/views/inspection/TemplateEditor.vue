@@ -373,7 +373,7 @@ const loadTemplate = async () => {
       JSON.stringify(response.template_data.check_categories || [])
     )
     
-    // 为现有类别设置 level_type
+    // 为现有类别设置 level_type 和确保 fields 数组存在
     templateData.check_categories.forEach(category => {
       if (!category.level_type) {
         if (category.cell_specific) {
@@ -383,6 +383,15 @@ const loadTemplate = async () => {
         } else {
           category.level_type = 'site'
         }
+      }
+      
+      // 确保每个检查项都有fields数组，避免旧模板没有fields字段
+      if (category.items && Array.isArray(category.items)) {
+        category.items.forEach(item => {
+          if (!item.fields) {
+            item.fields = []
+          }
+        })
       }
     })
   } catch (error) {
@@ -495,7 +504,8 @@ const addItem = (categoryIndex) => {
     description: '',
     required_type: 'photo',
     assigned_role: 'inspector',
-    status: 'pending'
+    status: 'pending',
+    fields: []  // 初始化fields数组，确保字段配置能被正确保存
   }
   
   templateData.check_categories[categoryIndex].items.push(newItem)

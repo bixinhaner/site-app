@@ -217,7 +217,7 @@
 						<view class="item-description" v-if="currentItem.description">
 							<view class="description-header">
 								<text class="description-icon">💡</text>
-								<text class="description-title">{{ $t('inspection.checkItemDescription') || '检查说明' }}</text>
+								<text class="description-title">检查说明</text>
 							</view>
 							<text class="description-content">{{ currentItem.description }}</text>
 						</view>
@@ -260,19 +260,181 @@
 						<text class="section-label">{{ $t('inspection.dataEntry') }}</text>
 						<view class="data-form">
 							<view 
-								class="form-item"
+								class="form-item-wrapper"
 								v-for="(dataField, index) in currentItem.dataFields"
 								:key="index"
+								v-show="shouldShowField(dataField)"
 							>
-								<text class="form-label">{{ dataField.label }}</text>
-								<input 
-									class="form-input"
-									:type="dataField.type === 'number' ? 'digit' : 'text'"
-									:placeholder="dataField.placeholder"
-									v-model="dataField.value"
-									@input="onDataChange"
-								/>
-								<text class="form-unit" v-if="dataField.unit">{{ dataField.unit }}</text>
+								<view class="form-label-row">
+									<text class="form-label">
+										{{ dataField.label }}
+										<text v-if="dataField.required" class="required-mark">*</text>
+									</text>
+									<!-- 显示约束提示 -->
+									<text class="form-hint-inline" v-if="dataField.min !== undefined || dataField.max !== undefined">
+										({{ dataField.min }} - {{ dataField.max }}{{ dataField.unit || '' }})
+									</text>
+								</view>
+								
+								<view class="form-input-row">
+									<!-- 单选下拉框 -->
+									<picker
+										v-if="dataField.type === 'select_single'"
+										class="form-picker-field"
+										:range="dataField.options"
+										range-key="label"
+										:value="getPickerIndex(dataField)"
+										@change="(e) => { onPickerChange(e, dataField); validateSingleField(dataField); }"
+									>
+										<view class="picker-display-value">
+											<text class="picker-text" :class="{'placeholder-text': !dataField.value}">
+												{{ getPickerDisplayValue(dataField) || '请选择' }}
+											</text>
+											<text class="picker-arrow">▼</text>
+										</view>
+									</picker>
+									
+									<!-- 多选框组 -->
+									<checkbox-group 
+										v-else-if="dataField.type === 'select_multi'"
+										@change="(e) => { onCheckboxChange(e, dataField); validateSingleField(dataField); }"
+										class="checkbox-group"
+									>
+										<label 
+											v-for="option in dataField.options" 
+											:key="option.value"
+											class="checkbox-item"
+										>
+											<checkbox 
+												:value="option.value" 
+												:checked="isChecked(dataField.value, option.value)"
+												color="#f97316"
+											/>
+											<text class="checkbox-label">{{ option.label }}</text>
+										</label>
+									</checkbox-group>
+									
+									<!-- 布尔开关 -->
+									<view v-else-if="dataField.type === 'boolean'" class="switch-wrapper">
+										<switch 
+											:checked="dataField.value === true || dataField.value === 'true'"
+											@change="(e) => { onSwitchChange(e, dataField); validateSingleField(dataField); }"
+											color="#f97316"
+											class="form-switch-field"
+										/>
+										<text class="switch-label">
+											{{ (dataField.value === true || dataField.value === 'true') ? '是' : '否' }}
+										</text>
+									</view>
+									
+									<!-- 日期选择器 -->
+									<picker
+										v-else-if="dataField.type === 'date'"
+										mode="date"
+										:value="dataField.value || getCurrentDate()"
+										@change="(e) => { onDateChange(e, dataField); validateSingleField(dataField); }"
+										class="form-picker-field"
+									>
+										<view class="picker-display-value">
+											<text class="picker-text" :class="{'placeholder-text': !dataField.value}">
+												{{ dataField.value || '请选择日期' }}
+											</text>
+											<text class="picker-icon">📅</text>
+										</view>
+									</picker>
+									
+									<!-- 时间选择器 -->
+									<picker
+										v-else-if="dataField.type === 'time'"
+										mode="time"
+										:value="dataField.value || getCurrentTime()"
+										@change="(e) => { onTimeChange(e, dataField); validateSingleField(dataField); }"
+										class="form-picker-field"
+									>
+										<view class="picker-display-value">
+											<text class="picker-text" :class="{'placeholder-text': !dataField.value}">
+												{{ dataField.value || '请选择时间' }}
+											</text>
+											<text class="picker-icon">🕐</text>
+										</view>
+									</picker>
+									
+									<!-- 日期时间选择器 -->
+									<view v-else-if="dataField.type === 'datetime'" class="datetime-picker-group">
+										<picker
+											mode="date"
+											:value="getDatePart(dataField.value)"
+											@change="(e) => { onDatetimeChange(e, 'date', dataField); validateSingleField(dataField); }"
+											class="datetime-date-picker"
+										>
+											<view class="picker-display-value small">
+												<text class="picker-text" :class="{'placeholder-text': !getDatePart(dataField.value)}">
+													{{ getDatePart(dataField.value) || '日期' }}
+												</text>
+												<text class="picker-icon">📅</text>
+											</view>
+										</picker>
+										
+										<picker
+											mode="time"
+											:value="getTimePart(dataField.value)"
+											@change="(e) => { onDatetimeChange(e, 'time', dataField); validateSingleField(dataField); }"
+											class="datetime-time-picker"
+										>
+											<view class="picker-display-value small">
+												<text class="picker-text" :class="{'placeholder-text': !getTimePart(dataField.value)}">
+													{{ getTimePart(dataField.value) || '时间' }}
+												</text>
+												<text class="picker-icon">🕐</text>
+											</view>
+										</picker>
+									</view>
+									
+									<!-- 富文本区域 -->
+									<textarea 
+										v-else-if="dataField.type === 'rich_text'"
+										class="form-textarea-field"
+										:placeholder="`请输入${dataField.label}`"
+										v-model="dataField.value"
+										@input="onDataChange(dataField)"
+										@blur="validateSingleField(dataField)"
+										:maxlength="dataField.constraints?.max_length || -1"
+									/>
+									
+									<!-- 数字输入框 -->
+									<view v-else-if="dataField.type === 'number'" class="input-with-unit">
+										<input 
+											class="form-input-field"
+											type="number"
+											:placeholder="`请输入${dataField.label}`"
+											v-model="dataField.value"
+											@input="onDataChange(dataField)"
+											@blur="validateSingleField(dataField)"
+										/>
+										<text class="input-unit" v-if="dataField.unit">{{ dataField.unit }}</text>
+									</view>
+									
+									<!-- 文本输入框（默认） -->
+									<input 
+										v-else
+										class="form-input-field"
+										type="text"
+										:placeholder="`请输入${dataField.label}`"
+										v-model="dataField.value"
+										@input="onDataChange(dataField)"
+										@blur="validateSingleField(dataField)"
+									/>
+								</view>
+								
+								<!-- 字段错误提示 -->
+								<text class="field-error" v-if="dataField.error">
+									⚠️ {{ dataField.error }}
+								</text>
+								
+								<!-- 字段帮助提示 -->
+								<text class="field-hint" v-if="getFieldHint(dataField)">
+									💡 {{ getFieldHint(dataField) }}
+								</text>
 							</view>
 						</view>
 						
@@ -331,6 +493,12 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildImageUrl, buildApiUrl, getAuthHeaders } from '@/config/api.js'
 	import { parseBarcode, formatMacAddress, isValidParseResult } from '@/utils/barcode-parser.js'
+	import { validateField, validateAllFields } from '@/utils/field-validator.js'
+	import { 
+		processFieldDependencies, 
+		initializeFieldDependencies,
+		shouldShowField 
+	} from '@/utils/field-dependency.js'
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
@@ -459,7 +627,7 @@
 				checkItems.value = itemsResult.data.map(item => ({
 					...item,
 					photos: item.photos || [],
-					dataFields: generateDataFields(item),
+					dataFields: generateDataFieldsFromBackend(item),
 					notes: item.notes || ''
 				}))
 				
@@ -476,7 +644,82 @@
 		}
 	}
 	
-	const generateDataFields = (item) => {
+	const generateDataFieldsFromBackend = (item) => {
+		// 优先使用后端返回的fields配置
+		if (item.fields && Array.isArray(item.fields) && item.fields.length > 0) {
+			console.log(`使用后端返回的fields配置: ${item.item_name}`, item.fields)
+			
+			// 将后端fields格式转换为前端dataFields格式
+			const fields = item.fields.map(field => {
+				const dataField = {
+					label: field.label || '',
+					type: field.type || 'text',
+					unit: field.unit || '',
+					placeholder: field.placeholder || `请输入${field.label || ''}`,
+					value: '',
+					field_id: field.field_id
+				}
+				
+				// 处理约束条件
+				if (field.constraints) {
+					if (field.constraints.min !== undefined) {
+						dataField.min = field.constraints.min
+					}
+					if (field.constraints.max !== undefined) {
+						dataField.max = field.constraints.max
+					}
+					if (field.constraints.min_length !== undefined) {
+						dataField.min_length = field.constraints.min_length
+					}
+					if (field.constraints.max_length !== undefined) {
+						dataField.max_length = field.constraints.max_length
+					}
+					if (field.constraints.pattern) {
+						dataField.pattern = field.constraints.pattern
+					}
+				}
+				
+				// 处理帮助文本
+				if (field.help_text) {
+					dataField.help_text = field.help_text
+				}
+				
+				// 处理依赖关系
+				if (field.dependencies) {
+					dataField.dependencies = field.dependencies
+				}
+				
+				// 处理选项（下拉框等）
+				if (field.options && Array.isArray(field.options)) {
+					dataField.options = field.options
+				}
+				
+				// 处理必填项
+				if (field.required !== undefined) {
+					dataField.required = field.required
+				}
+				
+				return dataField
+			})
+			
+			// 从已有数据中恢复值
+			if (item.data_value && item.data_value.length > 0) {
+				item.data_value.forEach(dataItem => {
+					const field = fields.find(f => f.label === dataItem.field_name)
+					if (field) {
+						field.value = dataItem.value
+					}
+				})
+			}
+			
+			return fields
+		}
+		
+		// 回退到硬编码映射（兼容旧数据）
+		return generateDataFieldsFallback(item)
+	}
+	
+	const generateDataFieldsFallback = (item) => {
 		// 根据检查项类型生成数据字段
 		const fields = []
 		
@@ -722,6 +965,17 @@
 			if (isCellLevelItem(item)) {
 				currentItem.value.equipment_sn = getCellEquipmentSn(item)
 			}
+			
+			// 初始化字段依赖（保存原始状态）
+			if (currentItem.value.dataFields) {
+				currentItem.value.dataFields = initializeFieldDependencies(currentItem.value.dataFields)
+			}
+			
+			// 尝试恢复自动保存的数据
+			restoreAutoSavedData(currentItem.value)
+			
+			// 处理初始依赖关系
+			processFieldDependenciesForCurrentItem()
 		}
 	}
 	
@@ -1272,48 +1526,200 @@
 		})
 	}
 	
-	const onDataChange = () => {
-		// 验证数据
-		validateCurrentItem()
+	/**
+	 * 字段值变更处理（实时验证 + 依赖处理）
+	 * @param {Object} field - 可选，指定验证的字段（用于单字段实时验证）
+	 */
+	const onDataChange = (field = null) => {
+		// 如果指定了字段，进行单字段实时验证（内部会调用updateValidationResult）
+		if (field) {
+			validateSingleField(field)
+		} else {
+			// 验证所有字段
+			validateCurrentItem()
+		}
+		
+		// 处理字段依赖关系（字段值变化可能影响其他字段）
+		processFieldDependenciesForCurrentItem()
+		
+		// 自动保存到本地存储（防止数据丢失）
+		autoSaveFieldData()
+	}
+	
+	/**
+	 * 处理当前检查项的字段依赖关系
+	 */
+	const processFieldDependenciesForCurrentItem = () => {
+		if (!currentItem.value || !currentItem.value.dataFields) return
+		
+		// 构建字段值映射
+		const fieldValues = {}
+		currentItem.value.dataFields.forEach(field => {
+			fieldValues[field.field_id || field.label] = field.value
+		})
+		
+		// 处理依赖关系，更新字段状态
+		currentItem.value.dataFields = processFieldDependencies(
+			currentItem.value.dataFields,
+			fieldValues
+		)
 	}
 	
 	const onNotesChange = () => {
-		// 备注变化处理
+		// 备注变化处理 - 也触发自动保存
+		autoSaveFieldData()
 	}
 	
-	const validateCurrentItem = () => {
-		if (!currentItem.value || !currentItem.value.dataFields) return
+	/**
+	 * 验证单个字段（实时验证）
+	 * @param {Object} field - 字段对象
+	 */
+	const validateSingleField = (field) => {
+		if (!field) return
 		
-		const validationResult = {
-			valid: true,
-			errors: []
+		// 使用验证工具进行验证（非严格模式，允许部分填写）
+		const result = validateField(field, field.value, false)
+		
+		// 将验证结果存储在字段对象上
+		field.error = result.error
+		
+		// 如果有错误，也更新到整体验证结果中
+		if (!result.valid) {
+			console.log(`字段 ${field.label} 验证失败:`, result.error)
 		}
 		
+		// 更新整体验证结果
+		updateValidationResult()
+	}
+	
+	/**
+	 * 更新整体验证结果（汇总所有字段的错误）
+	 */
+	const updateValidationResult = () => {
+		if (!currentItem.value || !currentItem.value.dataFields) return
+		
+		// 收集所有字段的错误
+		const errors = []
+		let hasError = false
+		
 		currentItem.value.dataFields.forEach(field => {
-			if (!field.value) return
-			
-			const value = parseFloat(field.value)
-			
-			if (field.type === 'number') {
-				if (isNaN(value)) {
-					validationResult.valid = false
-					validationResult.errors.push(`${field.label}必须为数字`)
-					return
-				}
-				
-				if (field.min !== undefined && value < field.min) {
-					validationResult.valid = false
-					validationResult.errors.push(`${field.label}不能小于${field.min}${field.unit}`)
-				}
-				
-				if (field.max !== undefined && value > field.max) {
-					validationResult.valid = false
-					validationResult.errors.push(`${field.label}不能大于${field.max}${field.unit}`)
-				}
+			if (field.error) {
+				errors.push(field.error)
+				hasError = true
 			}
 		})
 		
-		currentItem.value.validation_result = validationResult
+		// 更新整体验证结果
+		currentItem.value.validation_result = {
+			valid: !hasError,
+			errors: errors
+		}
+	}
+	
+	/**
+	 * 验证当前检查项的所有字段（提交前验证）
+	 */
+	const validateCurrentItem = () => {
+		if (!currentItem.value || !currentItem.value.dataFields) return
+		
+		// 准备数据值数组
+		const dataValues = currentItem.value.dataFields.map(field => ({
+			field_name: field.field_id || field.label,
+			value: field.value
+		}))
+		
+		// 使用验证工具进行批量验证（非严格模式）
+		const validationResult = validateAllFields(
+			currentItem.value.dataFields,
+			dataValues,
+			false // 非严格模式，允许部分填写
+		)
+		
+		// 更新每个字段的错误信息
+		currentItem.value.dataFields.forEach(field => {
+			const fieldId = field.field_id || field.label
+			field.error = validationResult.errors[fieldId] || null
+		})
+		
+		// 更新整体验证结果
+		currentItem.value.validation_result = {
+			valid: validationResult.valid,
+			errors: Object.values(validationResult.errors)
+		}
+		
+		return validationResult
+	}
+	
+	/**
+	 * 自动保存字段数据到本地存储（防止数据丢失）
+	 */
+	let autoSaveTimer = null
+	const autoSaveFieldData = () => {
+		// 使用防抖，避免频繁保存
+		if (autoSaveTimer) {
+			clearTimeout(autoSaveTimer)
+		}
+		
+		autoSaveTimer = setTimeout(() => {
+			if (!currentItem.value || !inspectionId.value) return
+			
+			try {
+				const autoSaveKey = `inspection_autosave_${inspectionId.value}_${currentItem.value.id}`
+				const saveData = {
+					itemId: currentItem.value.id,
+					dataFields: currentItem.value.dataFields,
+					notes: currentItem.value.notes,
+					timestamp: new Date().toISOString()
+				}
+				
+				uni.setStorageSync(autoSaveKey, saveData)
+				console.log('✅ 字段数据已自动保存:', autoSaveKey)
+			} catch (e) {
+				console.error('自动保存失败:', e)
+			}
+		}, 1000) // 1秒后保存
+	}
+	
+	/**
+	 * 恢复自动保存的数据
+	 * @param {Object} item - 检查项
+	 */
+	const restoreAutoSavedData = (item) => {
+		try {
+			const autoSaveKey = `inspection_autosave_${inspectionId.value}_${item.id}`
+			const savedData = uni.getStorageSync(autoSaveKey)
+			
+			if (savedData && savedData.dataFields) {
+				// 恢复字段数据
+				item.dataFields = savedData.dataFields
+				item.notes = savedData.notes || item.notes
+				
+				console.log('✅ 已恢复自动保存的数据:', autoSaveKey)
+				
+				// 提示用户
+				uni.showToast({
+					title: '已恢复上次填写的数据',
+					icon: 'none',
+					duration: 2000
+				})
+			}
+		} catch (e) {
+			console.error('恢复自动保存数据失败:', e)
+		}
+	}
+	
+	/**
+	 * 清除自动保存的数据
+	 * @param {String} itemId - 检查项ID
+	 */
+	const clearAutoSavedData = (itemId) => {
+		try {
+			const autoSaveKey = `inspection_autosave_${inspectionId.value}_${itemId}`
+			uni.removeStorageSync(autoSaveKey)
+			console.log('✅ 已清除自动保存数据:', autoSaveKey)
+		} catch (e) {
+			console.error('清除自动保存数据失败:', e)
+		}
 	}
 	
 	const saveCurrentItem = async () => {
@@ -1469,6 +1875,9 @@
 				
 				// 更新检查进度
 				await updateInspectionProgress()
+				
+				// 清除自动保存的数据（保存成功后）
+				clearAutoSavedData(currentItem.value.id)
 				
 				uni.showToast({
 					title: '保存成功',
@@ -1653,6 +2062,148 @@
 			hour: '2-digit',
 			minute: '2-digit'
 		})
+	}
+	
+	// Picker相关辅助函数
+	const getPickerIndex = (dataField) => {
+		if (!dataField.options || !dataField.value) return 0
+		const index = dataField.options.findIndex(opt => opt.value === dataField.value)
+		return index >= 0 ? index : 0
+	}
+	
+	const getPickerDisplayValue = (dataField) => {
+		if (!dataField.options || !dataField.value) return ''
+		const option = dataField.options.find(opt => opt.value === dataField.value)
+		return option ? option.label : ''
+	}
+	
+	const onPickerChange = (event, dataField) => {
+		const index = event.detail.value
+		if (dataField.options && dataField.options[index]) {
+			dataField.value = dataField.options[index].value
+			onDataChange()
+		}
+	}
+	
+	// 多选框组变更
+	const onCheckboxChange = (event, dataField) => {
+		dataField.value = event.detail.value // 数组
+		onDataChange()
+	}
+	
+	// 开关变更
+	const onSwitchChange = (event, dataField) => {
+		dataField.value = event.detail.value
+		onDataChange()
+	}
+	
+	// 日期变更
+	const onDateChange = (event, dataField) => {
+		dataField.value = event.detail.value // YYYY-MM-DD
+		onDataChange()
+	}
+	
+	// 时间变更
+	const onTimeChange = (event, dataField) => {
+		dataField.value = event.detail.value // HH:MM
+		onDataChange()
+	}
+	
+	// 日期时间变更
+	const onDatetimeChange = (event, type, dataField) => {
+		const currentValue = dataField.value || ''
+		let datePart = getDatePart(currentValue)
+		let timePart = getTimePart(currentValue)
+		
+		if (type === 'date') {
+			datePart = event.detail.value
+		} else {
+			timePart = event.detail.value
+		}
+		
+		// 组合日期和时间
+		if (datePart && timePart) {
+			dataField.value = `${datePart} ${timePart}`
+		} else if (datePart) {
+			dataField.value = datePart
+		} else if (timePart) {
+			dataField.value = timePart
+		}
+		
+		onDataChange()
+	}
+	
+	// 辅助函数：获取当前日期
+	const getCurrentDate = () => {
+		const now = new Date()
+		const year = now.getFullYear()
+		const month = String(now.getMonth() + 1).padStart(2, '0')
+		const day = String(now.getDate()).padStart(2, '0')
+		return `${year}-${month}-${day}`
+	}
+	
+	// 辅助函数：获取当前时间
+	const getCurrentTime = () => {
+		const now = new Date()
+		const hours = String(now.getHours()).padStart(2, '0')
+		const minutes = String(now.getMinutes()).padStart(2, '0')
+		return `${hours}:${minutes}`
+	}
+	
+	// 辅助函数：从日期时间字符串中提取日期部分
+	const getDatePart = (datetime) => {
+		if (!datetime) return ''
+		// 支持格式: YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS 或 YYYY-MM-DD HH:MM:SS
+		const parts = String(datetime).split(/[T ]/)[0]
+		return parts || ''
+	}
+	
+	// 辅助函数：从日期时间字符串中提取时间部分
+	const getTimePart = (datetime) => {
+		if (!datetime) return ''
+		// 支持格式: YYYY-MM-DDTHH:MM:SS 或 YYYY-MM-DD HH:MM:SS
+		const parts = String(datetime).split(/[T ]/)
+		if (parts.length > 1) {
+			// 提取HH:MM部分
+			const timePart = parts[1].substring(0, 5)
+			return timePart
+		}
+		return ''
+	}
+	
+	// 辅助函数：检查多选值是否包含目标值
+	const isChecked = (values, targetValue) => {
+		return Array.isArray(values) && values.includes(targetValue)
+	}
+	
+	// 获取字段帮助提示
+	const getFieldHint = (field) => {
+		const hints = []
+		
+		// 数字约束提示
+		if (field.type === 'number' && field.constraints) {
+			if (field.constraints.min !== undefined && field.constraints.max !== undefined) {
+				hints.push(`范围: ${field.constraints.min} - ${field.constraints.max}`)
+			} else if (field.constraints.min !== undefined) {
+				hints.push(`最小: ${field.constraints.min}`)
+			} else if (field.constraints.max !== undefined) {
+				hints.push(`最大: ${field.constraints.max}`)
+			}
+		}
+		
+		// 文本长度提示
+		if ((field.type === 'text' || field.type === 'rich_text') && field.constraints) {
+			if (field.constraints.max_length) {
+				hints.push(`最多${field.constraints.max_length}字符`)
+			}
+		}
+		
+		// 帮助文本
+		if (field.help_text) {
+			hints.push(field.help_text)
+		}
+		
+		return hints.join(' | ')
 	}
 	
 	// 扫码绑定设备功能
@@ -2550,71 +3101,251 @@
 	.data-form {
 		display: flex;
 		flex-direction: column;
-		gap: 25rpx;
+		gap: 32rpx;
 		width: 100%;
 		max-width: 100%;
 		box-sizing: border-box;
 		overflow: hidden;
 	}
 	
-	.form-item {
-		display: flex;
-		align-items: stretch;
-		gap: 15rpx;
+	.form-item-wrapper {
 		width: 100%;
-		max-width: 100%;
-		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 16rpx;
 		box-sizing: border-box;
-		overflow: hidden;
-		min-height: 80rpx;
+	}
+	
+	.form-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 12rpx;
+		width: 100%;
+	}
+	
+	.form-input-row {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 16rpx;
 	}
 	
 	.form-label {
-		font-size: 28rpx;
+		font-size: 30rpx;
 		color: #333;
-		min-width: 120rpx;
-		max-width: 150rpx;
-		flex-shrink: 0;
-		word-break: break-word;
-		overflow-wrap: break-word;
-		box-sizing: border-box;
+		font-weight: 600;
 		display: flex;
 		align-items: center;
-		height: 80rpx;
+		line-height: 1.5;
 	}
 	
-	.form-input {
+	.form-hint-inline {
+		font-size: 24rpx;
+		color: #999;
+		margin-left: 8rpx;
+	}
+	
+	.form-input-field {
 		flex: 1;
-		padding: 24rpx;
-		border: 2rpx solid #e9ecef;
+		width: 100%;
+		padding: 28rpx 24rpx;
+		border: 2rpx solid #ddd;
 		border-radius: 12rpx;
-		font-size: 28rpx;
-		background: #f8f9fa;
-		min-width: 0;
-		max-width: 100%;
+		font-size: 30rpx;
+		background: white;
+		color: #333;
 		box-sizing: border-box;
-		min-height: 80rpx;
-		height: 80rpx;
-		line-height: 1.4;
-		cursor: text;
+		min-height: 88rpx;
+		line-height: 1.5;
 	}
 	
-	.form-input:focus {
-		border-color: #28a745;
+	.form-input-field:focus {
+		border-color: var(--color-primary);
 		background: white;
 		outline: none;
-		box-shadow: 0 0 0 3rpx rgba(40, 167, 69, 0.1);
-		transform: none;
+		box-shadow: 0 0 0 3rpx rgba(249, 115, 22, 0.1);
 	}
 	
-	.form-unit {
-		font-size: 26rpx;
-		color: #666;
-		min-width: 40rpx;
+	.input-with-unit {
+		flex: 1;
 		display: flex;
 		align-items: center;
-		height: 80rpx;
+		gap: 12rpx;
+		width: 100%;
+	}
+	
+	.input-unit {
+		font-size: 28rpx;
+		color: #666;
 		flex-shrink: 0;
+		font-weight: 500;
+	}
+	
+	.form-picker-field {
+		flex: 1;
+		width: 100%;
+		background: white;
+		border: 2rpx solid #ddd;
+		border-radius: 12rpx;
+		min-height: 88rpx;
+		box-sizing: border-box;
+	}
+	
+	.picker-display-value {
+		padding: 28rpx 24rpx;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		min-height: 88rpx;
+		box-sizing: border-box;
+	}
+	
+	.picker-text {
+		flex: 1;
+		font-size: 30rpx;
+		color: #333;
+		line-height: 1.5;
+	}
+	
+	.picker-text.placeholder-text {
+		color: #999;
+	}
+	
+	.picker-arrow {
+		font-size: 20rpx;
+		color: #999;
+		margin-left: 12rpx;
+		flex-shrink: 0;
+	}
+	
+	.picker-icon {
+		margin-left: 12rpx;
+		font-size: 32rpx;
+		flex-shrink: 0;
+	}
+	
+	.required-mark {
+		color: #ff4757;
+		margin-left: 4rpx;
+		font-weight: bold;
+		font-size: 32rpx;
+	}
+	
+	/* 多选框组 */
+	.checkbox-group {
+		display: flex;
+		flex-direction: column;
+		gap: 20rpx;
+	}
+	
+	.checkbox-item {
+		display: flex;
+		align-items: center;
+		padding: 24rpx;
+		background: #f8f9fa;
+		border-radius: 12rpx;
+		border: 2rpx solid #e0e0e0;
+	}
+	
+	.checkbox-item checkbox {
+		margin-right: 16rpx;
+		transform: scale(1.1);
+	}
+	
+	.checkbox-label {
+		font-size: 28rpx;
+		color: #333;
+		flex: 1;
+	}
+	
+	/* 布尔开关 */
+	.switch-wrapper {
+		display: flex;
+		align-items: center;
+		padding: 24rpx;
+		background: white;
+		border: 2rpx solid #ddd;
+		border-radius: 12rpx;
+	}
+	
+	.form-switch-field {
+		transform: scale(1.2);
+		margin-right: 20rpx;
+	}
+	
+	.switch-label {
+		font-size: 28rpx;
+		color: #333;
+		font-weight: 500;
+	}
+	
+	/* 日期时间组合选择器 */
+	.datetime-picker-group {
+		display: flex;
+		gap: 16rpx;
+	}
+	
+	.datetime-date-picker,
+	.datetime-time-picker {
+		flex: 1;
+	}
+	
+	.picker-display-value.small {
+		padding: 20rpx 16rpx;
+		min-height: 70rpx;
+	}
+	
+	.picker-display-value.small .picker-text {
+		font-size: 26rpx;
+	}
+	
+	.picker-display-value.small .picker-icon {
+		font-size: 28rpx;
+	}
+	
+	/* 富文本区域 */
+	.form-textarea-field {
+		width: 100%;
+		min-height: 200rpx;
+		padding: 24rpx;
+		background: white;
+		border: 2rpx solid #ddd;
+		border-radius: 12rpx;
+		font-size: 28rpx;
+		line-height: 1.6;
+		box-sizing: border-box;
+	}
+	
+	.form-textarea-field:focus {
+		border-color: #f97316;
+	}
+	
+	/* 字段错误提示 */
+	.field-error {
+		display: block;
+		margin-top: 12rpx;
+		padding: 12rpx 20rpx;
+		background: #ffebee;
+		border-left: 4rpx solid #f44336;
+		color: #c62828;
+		font-size: 24rpx;
+		line-height: 1.4;
+		border-radius: 6rpx;
+	}
+	
+	/* 字段帮助提示 */
+	.field-hint {
+		display: block;
+		margin-top: 12rpx;
+		padding: 12rpx 20rpx;
+		background: #e3f2fd;
+		border-left: 4rpx solid #2196f3;
+		color: #1565c0;
+		font-size: 24rpx;
+		line-height: 1.4;
+		border-radius: 6rpx;
 	}
 	
 	/* 验证结果 */

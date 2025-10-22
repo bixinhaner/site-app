@@ -328,6 +328,7 @@ async def create_work_order(
         priority=data.priority,
         assigned_by=current_user.id,
         assigned_to=data.assigned_to,
+        assigned_at=datetime.utcnow(),  # 显式设置分配时间
         due_date=data.due_date,
         status=WorkOrderStatusEnum.PENDING,
         extra_data={"template_id": data.template_id} if data.template_id else {}
@@ -368,7 +369,9 @@ async def list_work_orders(
     if current_user.role == "inspector":
         q = q.filter(WorkOrder.assigned_to == current_user.id)
 
-    orders = q.order_by(WorkOrder.assigned_at.desc()).offset(skip).limit(limit).all()
+    # 按创建时间降序排序，这样最新的工单在最前面
+    # 注意：使用created_at而不是assigned_at，因为assigned_at可能晚于created_at导致排序混乱
+    orders = q.order_by(WorkOrder.created_at.desc()).offset(skip).limit(limit).all()
     return [_enrich_work_order_response(db, o) for o in orders]
 
 
@@ -506,12 +509,14 @@ async def accept_work_order(
                 item_name = item.get("item_name", "未知检查项")
                 item_id = item.get("item_id", "unknown")
                 required_type = item.get("required_type", "unknown")
+                item_description = item.get("description")  # 获取描述
+                item_fields = item.get("fields")  # 获取字段配置
                 
                 # 检查是否是小区级检查
                 is_cell_specific = category.get("cell_specific", False)
                 is_sector_specific = category.get("sector_specific", False)
                 
-                print(f"DEBUG_WO: 检查项 {item_name}, cell_specific: {is_cell_specific}, sector_specific: {is_sector_specific}")
+                print(f"DEBUG_WO: 检查项 {item_name}, cell_specific: {is_cell_specific}, sector_specific: {is_sector_specific}, fields: {item_fields}")
                 
                 # 如果是小区级检查，为每个小区创建检查项
                 if is_cell_specific:
@@ -524,12 +529,14 @@ async def accept_work_order(
                             inspection_id=inspection.id,
                             item_id=cell_item_id,
                             item_name=cell_item_name,
+                            description=item_description,
                             category_id=category_id,
                             category_name=category_name,
                             sector_id=cell.sector_id,
                             band=cell.band,
                             cell_id=cell.cell_id,
                             required_type=required_type,
+                            fields=item_fields,
                             status=CheckItemStatusEnum.PENDING
                         )
                         db.add(check_item)
@@ -548,10 +555,12 @@ async def accept_work_order(
                             inspection_id=inspection.id,
                             item_id=sector_item_id,
                             item_name=sector_item_name,
+                            description=item_description,
                             category_id=category_id,
                             category_name=category_name,
                             sector_id=sector_id,
                             required_type=required_type,
+                            fields=item_fields,
                             status=CheckItemStatusEnum.PENDING
                         )
                         db.add(check_item)
@@ -565,9 +574,11 @@ async def accept_work_order(
                         inspection_id=inspection.id,
                         item_id=item_id,
                         item_name=item_name,
+                        description=item_description,
                         category_id=category_id,
                         category_name=category_name,
                         required_type=required_type,
+                        fields=item_fields,
                         status=CheckItemStatusEnum.PENDING
                     )
                     db.add(check_item)

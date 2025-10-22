@@ -63,6 +63,7 @@ class TemplateBinding(Base):
     # 条件维度字段（可空，多维组合）
     site_id = Column(Integer, ForeignKey("sites.id"), nullable=True)
     site_type = Column(String(50), nullable=True)  # macro, micro, indoor, etc.
+    task_type = Column(Enum(TaskTypeEnum), nullable=True)  # 任务类型
     region = Column(String(100), nullable=True)
     customer = Column(String(100), nullable=True)
     tags = Column(JSON, nullable=True)  # 数组[str]
@@ -174,6 +175,7 @@ class InspectionCheckItem(Base):
     # 检查数据
     data_value = Column(JSON)  # 存储填写的数据
     validation_result = Column(JSON)  # 验证结果
+    fields = Column(JSON)  # 字段配置（从模板继承）
     
     # 检查人员和时间
     checked_by = Column(Integer, ForeignKey("users.id"))

@@ -33,6 +33,8 @@ from app.utils.file_handler import save_uploaded_file, generate_watermark
 from app.utils.gps_utils import reverse_geocode, validate_gps_accuracy
 from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.cell_generator import CellGenerator
+from app.utils.field_validator import FieldValidator
+from app.schemas.inspection_enhanced import FieldDefinition
 
 router = APIRouter()
 
@@ -264,6 +266,7 @@ async def create_inspection(
             item_name = item.get("item_name", "未知检查项")
             item_id = item.get("item_id", "unknown")
             item_description = item.get("description", "")  # 获取检查项描述
+            item_fields = item.get("fields", [])  # 获取字段配置
             required_type = item.get("required_type", "unknown")
             print(f"DEBUG:   --- 处理检查项 {j+1}: {item_name} (ID: {item_id}) ---")
             print(f"DEBUG:     required_type: {required_type}")
@@ -300,6 +303,7 @@ async def create_inspection(
                             band=cell.band,
                             cell_id=cell.cell_id,
                             required_type=required_type,
+                            fields=item_fields,
                             status=CheckItemStatusEnum.PENDING
                         )
                         db.add(check_item)
@@ -333,6 +337,7 @@ async def create_inspection(
                             category_name=category_name,
                             sector_id=sector_id,
                             required_type=required_type,
+                            fields=item_fields,
                             status=CheckItemStatusEnum.PENDING
                         )
                         db.add(check_item)
@@ -361,6 +366,7 @@ async def create_inspection(
                         category_id=category_id,
                         category_name=category_name,
                         required_type=required_type,
+                        fields=item_fields,
                         status=CheckItemStatusEnum.PENDING
                     )
                     db.add(check_item)
@@ -1450,6 +1456,56 @@ async def update_inspection_item(
     
     # 更新检查项
     update_fields = item_update.dict(exclude_unset=True)
+    
+    # 如果更新包含data_value且检查项有字段定义，执行字段验证
+    if 'data_value' in update_fields and check_item.fields:
+        try:
+            # 将check_item.fields转换为FieldDefinition对象列表
+            field_definitions = []
+            if isinstance(check_item.fields, list):
+                for field_dict in check_item.fields:
+                    try:
+                        field_def = FieldDefinition(**field_dict)
+                        field_definitions.append(field_def)
+                    except Exception as e:
+                        print(f"WARNING: 无法解析字段定义: {field_dict}, 错误: {e}")
+            
+            # 执行验证（非严格模式，允许部分填写）
+            if field_definitions and update_fields['data_value']:
+                # 将CheckItemDataValue对象列表转换为字典列表
+                data_values_dict = []
+                for dv in update_fields['data_value']:
+                    if hasattr(dv, 'dict'):
+                        data_values_dict.append(dv.dict())
+                    elif isinstance(dv, dict):
+                        data_values_dict.append(dv)
+                
+                validation_result = FieldValidator.validate_check_item_data(
+                    field_definitions,
+                    data_values_dict,
+                    strict=False  # 非严格模式，允许部分填写
+                )
+                
+                # 存储验证结果
+                check_item.validation_result = validation_result
+                
+                # 如果有验证错误，记录但不阻止保存（允许保存草稿）
+                if not validation_result['valid']:
+                    print(f"INFO: 检查项 {item_id} 存在字段验证错误: {validation_result['errors']}")
+                    # 可以选择在检查项状态为COMPLETED时才强制验证通过
+                    if 'status' in update_fields and update_fields['status'] == CheckItemStatusEnum.COMPLETED:
+                        if validation_result['errors']:
+                            error_messages = '; '.join([f"{k}: {v}" for k, v in validation_result['errors'].items()])
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"字段验证失败，无法标记为完成: {error_messages}"
+                            )
+        except HTTPException:
+            raise  # 重新抛出HTTP异常
+        except Exception as e:
+            print(f"WARNING: 字段验证过程出错: {e}")
+            # 验证出错不阻止保存，但记录错误
+    
     for field, value in update_fields.items():
         setattr(check_item, field, value)
     
