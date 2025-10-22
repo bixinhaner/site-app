@@ -6,3 +6,17 @@ f85c552 | 2025-09-10 | Like |  | chore(backend): remove redundant test scripts; 
 9c40c53 | 2025-09-10 | cumtjiang |  | Delete daily_sales.py
 d2fd70d | 2025-09-10 | cumtjiang |  | Add files via upload
 13d52cb | 2025-09-10 | Like |  | chore: initial repository setup (docs, ignore, templates)
+--------------------------------------------------------------------------------
+2025-10-22 | Release: archive-2025-10-22 — 本版本更改内容（摘要）
+1. ✅ App端检查清单显示设备SN
+2. ✅ App端检查详情页设备信息展示
+3. ✅ App端未绑定设备提醒
+4. ✅ 国际化支持（新增23个翻译键）
+5. ✅ Web端审核页面设备列展示
+6. ✅ Web端设备SN筛选功能
+7. ✅ App端提交前核查清单
+8. ✅ 后端API筛选优化
+9. ✅ App端设备绑定历史记录
+10. ✅ 后端设备绑定历史表
+11. ✅ Web端设备反向查询
+12. ✅ Web端设备生命周期追踪
