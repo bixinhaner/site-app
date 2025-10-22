@@ -172,6 +172,23 @@
 				</view>
 			</view>
 			
+			<!-- 未绑定设备提醒卡片 -->
+			<view class="unbound-reminder" v-if="unboundCellsCount > 0 && inspectionData.status === 'in_progress'">
+				<view class="reminder-header">
+					<text class="reminder-icon">⚠️</text>
+					<text class="reminder-title">{{ $t('inspection.pendingTasks') }}</text>
+					<view class="reminder-badge">{{ unboundCellsCount }}</view>
+				</view>
+				<view class="reminder-content">
+					<text class="reminder-text">
+						{{ $t('inspection.unboundCellsHint').replace('{count}', unboundCellsCount) }}
+					</text>
+					<button class="reminder-action" @click="showUnboundList">
+						{{ $t('inspection.viewDetails') }}
+					</button>
+				</view>
+			</view>
+			
 			<!-- 检查项详情 -->
 			<view class="detail-card">
 				<view class="card-header">
@@ -206,6 +223,25 @@
 									<view class="item-meta">
 										<text class="item-category">{{ item.category_name }}</text>
 										<text class="item-sector" v-if="item.sector_id">扇区{{ item.sector_id }}</text>
+										<text class="item-cell" v-if="item.cell_id">{{ item.cell_id }}</text>
+									</view>
+									
+									<!-- 新增：设备绑定信息块 -->
+									<view class="equipment-info" v-if="item.sector_id && item.band">
+										<view v-if="item.equipment_sn" class="equipment-bound">
+											<text class="equipment-icon">📱</text>
+											<view class="equipment-detail">
+												<text class="equipment-label">{{ $t('inspection.boundDevice') }}:</text>
+												<text class="equipment-sn">{{ item.equipment_sn }}</text>
+											</view>
+											<button class="history-btn" @click.stop="showBindingHistory(item)">
+												📜 {{ $t('inspection.viewHistory') }}
+											</button>
+										</view>
+										<view v-else class="equipment-unbound">
+											<text class="warning-icon">⚠️</text>
+											<text class="warning-text">{{ $t('inspection.deviceNotBound') }}</text>
+										</view>
 									</view>
 								</view>
 								<view class="item-result">
@@ -280,6 +316,94 @@
 				</view>
 			</view>
 		</scroll-view>
+		
+		<!-- 未绑定设备列表弹窗 -->
+		<view class="modal-overlay" v-if="showUnboundModal" @click="showUnboundModal = false">
+			<view class="modal-content unbound-modal" @click.stop>
+				<view class="modal-header">
+					<text class="modal-title">{{ $t('inspection.unboundDevicesList') }}</text>
+					<text class="modal-close" @click="showUnboundModal = false">✕</text>
+				</view>
+				<scroll-view class="unbound-list" scroll-y>
+					<view class="unbound-item" 
+						  v-for="item in unboundCellsList" 
+						  :key="item.id"
+						  @click="goToCheckItem(item.id)">
+						<view class="unbound-item-info">
+							<text class="unbound-item-name">{{ item.name }}</text>
+							<text class="unbound-item-cell">{{ item.cell_id }}</text>
+						</view>
+						<text class="unbound-item-arrow">→</text>
+					</view>
+				</scroll-view>
+			</view>
+		</view>
+		
+		<!-- 设备绑定历史记录弹窗 -->
+		<view class="modal-overlay" v-if="showHistoryModal" @click="showHistoryModal = false">
+			<view class="modal-content history-modal" @click.stop>
+				<view class="modal-header">
+					<text class="modal-title">📜 {{ $t('inspection.bindingHistory') }}</text>
+					<text class="modal-close" @click="showHistoryModal = false">✕</text>
+				</view>
+				
+				<view v-if="loadingHistory" class="loading-container">
+					<text class="loading-text">{{ $t('common.loading') }}...</text>
+				</view>
+				
+				<scroll-view v-else class="history-list" scroll-y>
+					<view v-if="bindingHistory.length === 0" class="empty-history">
+						<text class="empty-icon">📭</text>
+						<text class="empty-text">{{ $t('inspection.noHistory') }}</text>
+					</view>
+					
+					<view v-for="(record, index) in bindingHistory" :key="record.id" class="history-item">
+						<view class="history-timeline">
+							<view class="timeline-dot" :class="getActionClass(record.action)"></view>
+							<view v-if="index < bindingHistory.length - 1" class="timeline-line"></view>
+						</view>
+						
+						<view class="history-content">
+							<view class="history-header">
+								<text class="history-action" :class="getActionClass(record.action)">
+									{{ getActionText(record.action) }}
+								</text>
+								<text class="history-time">{{ formatTime(record.operated_at) }}</text>
+							</view>
+							
+							<view class="history-body">
+								<view class="history-row">
+									<text class="history-label">{{ $t('inspection.equipmentSN') }}:</text>
+									<text class="history-value sn">{{ record.equipment_sn }}</text>
+								</view>
+								
+								<view v-if="record.previous_equipment_sn" class="history-row">
+									<text class="history-label">{{ $t('inspection.previousSN') }}:</text>
+									<text class="history-value sn">{{ record.previous_equipment_sn }}</text>
+								</view>
+								
+								<view class="history-row">
+									<text class="history-label">{{ $t('inspection.operator') }}:</text>
+									<text class="history-value">{{ record.operator.name }}</text>
+								</view>
+								
+								<view v-if="record.latitude && record.longitude" class="history-row">
+									<text class="history-label">{{ $t('inspection.location') }}:</text>
+									<text class="history-value location">
+										{{ record.latitude }}, {{ record.longitude }}
+									</text>
+								</view>
+								
+								<view v-if="record.notes" class="history-row">
+									<text class="history-label">{{ $t('inspection.notes') }}:</text>
+									<text class="history-value notes">{{ record.notes }}</text>
+								</view>
+							</view>
+						</view>
+					</view>
+				</scroll-view>
+			</view>
+		</view>
 		
 		<!-- 底部操作栏 -->
 		<view class="bottom-actions" v-if="inspectionData">
@@ -518,6 +642,44 @@
 			   (['admin', 'manager', 'reviewer'].includes(userStore.userInfo?.role))
 	})
 	
+	// 计算未绑定小区数量
+	const unboundCellsCount = computed(() => {
+		if (!inspectionData.value || !inspectionData.value.check_items) {
+			return 0
+		}
+		
+		// 统计小区级且未绑定设备的检查项
+		return inspectionData.value.check_items.filter(item => {
+			return item.sector_id && item.band && !item.equipment_sn
+		}).length
+	})
+	
+	// 未绑定小区列表
+	const unboundCellsList = computed(() => {
+		if (!inspectionData.value || !inspectionData.value.check_items) {
+			return []
+		}
+		
+		return inspectionData.value.check_items
+			.filter(item => item.sector_id && item.band && !item.equipment_sn)
+			.map(item => ({
+				id: item.id,
+				name: item.item_name,
+				cell_id: item.cell_id,
+				sector_id: item.sector_id,
+				band: item.band
+			}))
+	})
+	
+	// 未绑定弹窗控制
+	const showUnboundModal = ref(false)
+	
+	// 设备绑定历史记录
+	const showHistoryModal = ref(false)
+	const loadingHistory = ref(false)
+	const bindingHistory = ref([])
+	const currentHistoryItem = ref(null)
+	
 	// 生命周期
 	// 页面初次加载
 	onLoad((options) => {
@@ -559,6 +721,87 @@
 	})
 	
 	// 方法
+	// 显示未绑定列表弹窗
+	const showUnboundList = () => {
+		showUnboundModal.value = true
+	}
+	
+	// 跳转到检查清单并定位到指定检查项
+	const goToCheckItem = (itemId) => {
+		showUnboundModal.value = false
+		// 跳转到检查清单页面，并传递高亮检查项ID
+		uni.navigateTo({
+			url: `/pages/inspection/checklist?inspectionId=${inspectionData.value.id}&highlightItemId=${itemId}`
+		})
+	}
+	
+	// 显示设备绑定历史记录
+	const showBindingHistory = async (item) => {
+		currentHistoryItem.value = item
+		showHistoryModal.value = true
+		loadingHistory.value = true
+		bindingHistory.value = []
+		
+		try {
+			const response = await uni.request({
+				url: `${API_BASE_URL}/api/inspections/binding-history/${item.id}`,
+				method: 'GET',
+				header: {
+					'Authorization': `Bearer ${userStore.token}`
+				}
+			})
+			
+			if (response.statusCode === 200) {
+				bindingHistory.value = response.data.history || []
+			} else {
+				throw new Error(response.data.detail || '获取历史记录失败')
+			}
+		} catch (error) {
+			console.error('获取绑定历史失败:', error)
+			uni.showToast({
+				title: $t('common.loadFailed'),
+				icon: 'none'
+			})
+			showHistoryModal.value = false
+		} finally {
+			loadingHistory.value = false
+		}
+	}
+	
+	// 获取操作类型的样式类
+	const getActionClass = (action) => {
+		const classMap = {
+			'bind': 'action-bind',
+			'unbind': 'action-unbind',
+			'rebind': 'action-rebind'
+		}
+		return classMap[action] || ''
+	}
+	
+	// 获取操作类型的文本
+	const getActionText = (action) => {
+		const textMap = {
+			'bind': $t('inspection.actionBind'),
+			'unbind': $t('inspection.actionUnbind'),
+			'rebind': $t('inspection.actionRebind')
+		}
+		return textMap[action] || action
+	}
+	
+	// 格式化时间
+	const formatTime = (isoString) => {
+		if (!isoString) return ''
+		
+		const date = new Date(isoString)
+		const year = date.getFullYear()
+		const month = String(date.getMonth() + 1).padStart(2, '0')
+		const day = String(date.getDate()).padStart(2, '0')
+		const hours = String(date.getHours()).padStart(2, '0')
+		const minutes = String(date.getMinutes()).padStart(2, '0')
+		
+		return `${year}-${month}-${day} ${hours}:${minutes}`
+	}
+	
 	// 加载工单进度信息
 	const loadWorkOrderProgress = async (workOrderId) => {
 		try {
@@ -1438,6 +1681,87 @@
 		flex-shrink: 0;
 	}
 	
+	.item-cell {
+		padding: 4rpx 12rpx;
+		background-color: #ede9fe;
+		color: #7c3aed;
+		border-radius: 6rpx;
+		font-size: 20rpx;
+		font-weight: 500;
+		margin-left: 8rpx;
+	}
+	
+	/* 设备绑定信息样式 */
+	.equipment-info {
+		margin-top: 12rpx;
+		padding-top: 12rpx;
+		border-top: 1rpx solid #f3f4f6;
+	}
+
+	.equipment-bound {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 12rpx;
+		background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+		border-radius: 12rpx;
+		border: 1rpx solid #86efac;
+		
+		.equipment-icon {
+			font-size: 36rpx;
+			margin-right: 12rpx;
+		}
+		
+		.equipment-detail {
+			display: flex;
+			flex-direction: column;
+			flex: 1;
+		}
+		
+		.equipment-label {
+			font-size: 22rpx;
+			color: #16a34a;
+			margin-bottom: 4rpx;
+		}
+		
+		.equipment-sn {
+			font-size: 26rpx;
+			font-weight: 600;
+			color: #15803d;
+			font-family: 'Courier New', monospace;
+		}
+		
+		.history-btn {
+			padding: 8rpx 16rpx;
+			background: #16a34a;
+			color: white;
+			border-radius: 8rpx;
+			font-size: 22rpx;
+			border: none;
+			white-space: nowrap;
+			flex-shrink: 0;
+		}
+	}
+
+	.equipment-unbound {
+		display: flex;
+		align-items: center;
+		padding: 12rpx;
+		background-color: #fff7ed;
+		border-radius: 12rpx;
+		border: 1rpx solid #fdba74;
+		
+		.warning-icon {
+			font-size: 32rpx;
+			margin-right: 8rpx;
+		}
+		
+		.warning-text {
+			font-size: 22rpx;
+			color: #ea580c;
+		}
+	}
+	
 	.item-result {
 		display: flex;
 		align-items: center;
@@ -1977,5 +2301,312 @@
 		color: #9ca3af;
 		font-weight: bold;
 		flex-shrink: 0;
+	}
+	
+	/* 未绑定设备提醒卡片样式 */
+	.unbound-reminder {
+		margin: 24rpx;
+		padding: 24rpx;
+		background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+		border: 2rpx solid #fdba74;
+		border-radius: 16rpx;
+		box-shadow: 0 4rpx 12rpx rgba(249, 115, 22, 0.15);
+	}
+
+	.reminder-header {
+		display: flex;
+		align-items: center;
+		margin-bottom: 12rpx;
+		
+		.reminder-icon {
+			font-size: 36rpx;
+			margin-right: 12rpx;
+		}
+		
+		.reminder-title {
+			font-size: 30rpx;
+			font-weight: 600;
+			color: #ea580c;
+			flex: 1;
+		}
+		
+		.reminder-badge {
+			background-color: #ea580c;
+			color: white;
+			padding: 4rpx 12rpx;
+			border-radius: 20rpx;
+			font-size: 24rpx;
+			font-weight: 600;
+		}
+	}
+
+	.reminder-content {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		
+		.reminder-text {
+			font-size: 26rpx;
+			color: #c2410c;
+			flex: 1;
+			margin-right: 16rpx;
+		}
+		
+		.reminder-action {
+			padding: 12rpx 24rpx;
+			background-color: #f97316;
+			color: white;
+			border-radius: 8rpx;
+			font-size: 26rpx;
+			border: none;
+		}
+	}
+	
+	/* 未绑定列表弹窗样式 */
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 1000;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 40rpx;
+	}
+
+	.unbound-modal {
+		background: white;
+		border-radius: 20rpx;
+		width: 100%;
+		max-width: 700rpx;
+		max-height: 70vh;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		
+		.modal-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 30rpx;
+			border-bottom: 1rpx solid #f3f4f6;
+			
+			.modal-title {
+				font-size: 32rpx;
+				font-weight: 600;
+				color: #111827;
+			}
+			
+			.modal-close {
+				font-size: 48rpx;
+				color: #9ca3af;
+				cursor: pointer;
+			}
+		}
+		
+		.unbound-list {
+			max-height: 500rpx;
+			padding: 16rpx 0;
+		}
+		
+		.unbound-item {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 24rpx;
+			border-bottom: 1rpx solid #f3f4f6;
+			
+			&:active {
+				background-color: #f9fafb;
+			}
+			
+			.unbound-item-info {
+				display: flex;
+				flex-direction: column;
+			}
+			
+			.unbound-item-name {
+				font-size: 28rpx;
+				color: #111827;
+				font-weight: 500;
+				margin-bottom: 8rpx;
+			}
+			
+			.unbound-item-cell {
+				font-size: 24rpx;
+				color: #6b7280;
+				font-family: 'Courier New', monospace;
+			}
+			
+			.unbound-item-arrow {
+				font-size: 32rpx;
+				color: #f97316;
+			}
+		}
+	}
+	
+	/* 设备绑定历史记录弹窗样式 */
+	.history-modal {
+		max-width: 700rpx;
+		max-height: 80vh;
+		
+		.loading-container {
+			padding: 80rpx 30rpx;
+			text-align: center;
+			
+			.loading-text {
+				font-size: 28rpx;
+				color: #9ca3af;
+			}
+		}
+		
+		.history-list {
+			max-height: 600rpx;
+			padding: 16rpx 0;
+		}
+		
+		.empty-history {
+			padding: 80rpx 30rpx;
+			text-align: center;
+			
+			.empty-icon {
+				font-size: 80rpx;
+				display: block;
+				margin-bottom: 20rpx;
+			}
+			
+			.empty-text {
+				font-size: 28rpx;
+				color: #9ca3af;
+			}
+		}
+		
+		.history-item {
+			display: flex;
+			padding: 0 30rpx;
+			margin-bottom: 32rpx;
+			
+			&:last-child {
+				margin-bottom: 0;
+			}
+			
+			.history-timeline {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				margin-right: 24rpx;
+				padding-top: 6rpx;
+				
+				.timeline-dot {
+					width: 24rpx;
+					height: 24rpx;
+					border-radius: 50%;
+					flex-shrink: 0;
+					
+					&.action-bind {
+						background-color: #10b981;
+						box-shadow: 0 0 0 4rpx #d1fae5;
+					}
+					
+					&.action-unbind {
+						background-color: #ef4444;
+						box-shadow: 0 0 0 4rpx #fee2e2;
+					}
+					
+					&.action-rebind {
+						background-color: #f59e0b;
+						box-shadow: 0 0 0 4rpx #fef3c7;
+					}
+				}
+				
+				.timeline-line {
+					width: 2rpx;
+					flex: 1;
+					background-color: #e5e7eb;
+					margin-top: 8rpx;
+				}
+			}
+			
+			.history-content {
+				flex: 1;
+				
+				.history-header {
+					display: flex;
+					justify-content: space-between;
+					align-items: center;
+					margin-bottom: 12rpx;
+					
+					.history-action {
+						font-size: 28rpx;
+						font-weight: 600;
+						
+						&.action-bind {
+							color: #10b981;
+						}
+						
+						&.action-unbind {
+							color: #ef4444;
+						}
+						
+						&.action-rebind {
+							color: #f59e0b;
+						}
+					}
+					
+					.history-time {
+						font-size: 24rpx;
+						color: #6b7280;
+					}
+				}
+				
+				.history-body {
+					background: #f9fafb;
+					border-radius: 12rpx;
+					padding: 16rpx;
+					
+					.history-row {
+						display: flex;
+						margin-bottom: 12rpx;
+						
+						&:last-child {
+							margin-bottom: 0;
+						}
+						
+						.history-label {
+							font-size: 24rpx;
+							color: #6b7280;
+							min-width: 140rpx;
+							flex-shrink: 0;
+						}
+						
+						.history-value {
+							font-size: 24rpx;
+							color: #111827;
+							flex: 1;
+							word-break: break-all;
+							
+							&.sn {
+								font-family: 'Courier New', monospace;
+								font-weight: 600;
+								color: #059669;
+							}
+							
+							&.location {
+								font-family: 'Courier New', monospace;
+								font-size: 22rpx;
+							}
+							
+							&.notes {
+								font-style: italic;
+								color: #6b7280;
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 </style>

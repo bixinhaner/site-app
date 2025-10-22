@@ -2,7 +2,7 @@
 
 ## Rule
 - Always do not generate .md file when running tasks if user do not ask.
-- If temporary verification and test scripts or code are generated during the task, please create them in the project's temp directory. If the directory does not exist, create it. Additionally, please delete them after completing the task. Other temporary files or code that do not affect business operations during the task should also be placed in the temp directory.
+- If temporary verification and test scripts or code are generated during the task, please create them in the project's temp directory. If the directory does not exist, create it.Other temporary files or code that do not affect business operations during the task should also be placed in the temp directory.
 
 ## Project Structure & Module Organization
 - Root helpers: `start_backend.py` boots the FastAPI server; `docs/` holds reference material; DB snapshots live under `db/`.

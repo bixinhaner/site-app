@@ -81,12 +81,21 @@
 						<view class="item-info">
 							<text class="item-name">{{ item.item_name }}</text>
 							<text class="item-id" v-if="item.sector_id">{{ $t('inspection.sector') }} {{ item.sector_id }}</text>
-							<text class="equipment-binding" v-if="item.sector_id && item.band && isCellBound(item)">
-								📱 {{ $t('inspection.bound') }}: {{ getCellEquipmentSn(item) }}
-							</text>
-							<text class="equipment-binding pending" v-else-if="item.sector_id && item.band && !isCellBound(item)">
-								🔗 {{ $t('inspection.needBinding') }}
-							</text>
+							
+							<!-- 增强的设备绑定信息展示 -->
+							<view class="equipment-binding-badge" v-if="item.sector_id && item.band">
+								<view v-if="isCellBound(item)" class="binding-status bound">
+									<text class="binding-icon">✅</text>
+									<view class="binding-info">
+										<text class="binding-label">{{ $t('inspection.boundDevice') }}</text>
+										<text class="binding-sn">{{ getCellEquipmentSn(item) }}</text>
+									</view>
+								</view>
+								<view v-else class="binding-status unbound">
+									<text class="binding-icon">⚠️</text>
+									<text class="binding-label">{{ $t('inspection.needBinding') }}</text>
+								</view>
+							</view>
 						</view>
 						<view class="item-actions">
 							<text class="required-badge" v-if="item.required_type === 'both'">{{ $t('inspection.photos') }}+{{ $t('inspection.data') }}</text>
@@ -481,6 +490,45 @@
 				</view>
 			</view>
 		</view>
+		
+		<!-- 提交前核查弹窗 -->
+		<view class="modal-overlay" v-if="showPreSubmitCheckModal" @click="showPreSubmitCheckModal = false">
+			<view class="modal-content pre-submit-modal" @click.stop>
+				<view class="modal-header">
+					<text class="modal-title">⚠️ {{ $t('inspection.preSubmitCheck') }}</text>
+					<text class="modal-close" @click="showPreSubmitCheckModal = false">×</text>
+				</view>
+				
+				<view class="warning-section">
+					<text class="warning-text">
+						{{ $t('inspection.unboundCellsWarning').replace('{count}', preSubmitUnboundList.length) }}
+					</text>
+				</view>
+				
+				<scroll-view class="checklist-scroll" scroll-y>
+					<view class="checklist-item" 
+						  v-for="item in preSubmitUnboundList" 
+						  :key="item.id">
+						<view class="checklist-item-info">
+							<text class="checklist-item-name">{{ item.item_name }}</text>
+							<text class="checklist-item-cell">{{ item.cell_id || `${item.sector_id}_${item.band}` }}</text>
+						</view>
+						<button class="bind-quick-btn" @click="quickBindDevice(item)">
+							{{ $t('inspection.quickBind') }}
+						</button>
+					</view>
+				</scroll-view>
+				
+				<view class="modal-actions">
+					<button class="cancel-btn" @click="showPreSubmitCheckModal = false">
+						{{ $t('inspection.backToCheck') }}
+					</button>
+					<button class="force-submit-btn" @click="forceSubmitWithWarning">
+						{{ $t('inspection.ignoreAndSubmit') }}
+					</button>
+				</view>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -520,6 +568,10 @@
 	const saving = ref(false)
 	const submitting = ref(false)
 	const savingItem = ref(false)
+	
+	// 提交前核查弹窗控制
+	const showPreSubmitCheckModal = ref(false)
+	const preSubmitUnboundList = ref([])
 	
 	// Canvas尺寸（用于水印处理）
 	const canvasWidth = ref(400)
@@ -1947,6 +1999,18 @@
 			return
 		}
 		
+		// 检查是否有未绑定的小区级检查项
+		const unboundCells = checkItems.value.filter(item => 
+			item.sector_id && item.band && !item.equipment_sn
+		)
+		
+		if (unboundCells.length > 0) {
+			// 显示核查清单弹窗
+			showPreSubmitCheckModal.value = true
+			preSubmitUnboundList.value = unboundCells
+			return
+		}
+		
 		uni.showModal({
 			title: $t('inspection.confirmSubmitTitle') || 'Confirm Submit',
 			content: $t('inspection.confirmSubmitContent') || 'After submission it cannot be modified. Submit?',
@@ -1990,6 +2054,34 @@
 		} finally {
 			submitting.value = false
 		}
+	}
+	
+	// 快速绑定设备
+	const quickBindDevice = async (item) => {
+		// 关闭核查弹窗，打开该检查项的绑定界面
+		showPreSubmitCheckModal.value = false
+		currentItem.value = item
+		showModal.value = true
+		
+		// 自动触发扫码
+		await uni.nextTick()
+		scanEquipmentForBinding()
+	}
+	
+	// 强制提交（忽略未绑定警告）
+	const forceSubmitWithWarning = async () => {
+		uni.showModal({
+			title: $t('inspection.confirmSubmitTitle') || '确认提交',
+			content: $t('inspection.forceSubmitWarning') || '确定要在未完成设备绑定的情况下提交检查吗？',
+			confirmText: $t('common.confirm') || '确认提交',
+			cancelText: $t('common.cancel') || '取消',
+			success: async (res) => {
+				if (res.confirm) {
+					showPreSubmitCheckModal.value = false
+					await doSubmitInspection()
+				}
+			}
+		})
 	}
 	
 	const saveInspection = async () => {
@@ -3441,18 +3533,55 @@
 		background: #adb5bd;
 	}
 	
-	/* 设备绑定相关样式 */
-	.equipment-binding {
-		font-size: 22rpx;
-		margin-top: 4rpx;
+	/* 设备绑定相关样式 - 增强版 */
+	.equipment-binding-badge {
+		margin-top: 8rpx;
+	}
+
+	.binding-status {
+		display: flex;
+		align-items: center;
+		padding: 8rpx 12rpx;
+		border-radius: 8rpx;
+		font-size: 24rpx;
 		
-		&.pending {
-			color: #f59e0b;
+		&.bound {
+			background-color: #f0fdf4;
+			border: 1rpx solid #86efac;
+			
+			.binding-info {
+				display: flex;
+				flex-direction: column;
+				margin-left: 8rpx;
+			}
+			
+			.binding-label {
+				color: #16a34a;
+				font-size: 22rpx;
+			}
+			
+			.binding-sn {
+				color: #15803d;
+				font-weight: 600;
+				font-size: 26rpx;
+				margin-top: 2rpx;
+				font-family: 'Courier New', monospace;
+			}
 		}
 		
-		&:not(.pending) {
-			color: #10b981;
+		&.unbound {
+			background-color: #fff7ed;
+			border: 1rpx solid #fdba74;
+			
+			.binding-label {
+				color: #ea580c;
+				margin-left: 6rpx;
+			}
 		}
+	}
+
+	.binding-icon {
+		font-size: 28rpx;
 	}
 	
 	.equipment-binding-section {
@@ -3530,5 +3659,134 @@
 	
 	.btn-icon {
 		font-size: 24rpx;
+	}
+	
+	/* 提交前核查弹窗样式 */
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 2000;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 40rpx;
+	}
+
+	.pre-submit-modal {
+		background: white;
+		border-radius: 20rpx;
+		width: 100%;
+		max-width: 700rpx;
+		max-height: 80vh;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		
+		.modal-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 30rpx;
+			border-bottom: 1rpx solid #f3f4f6;
+			
+			.modal-title {
+				font-size: 32rpx;
+				font-weight: 600;
+				color: #ea580c;
+			}
+			
+			.modal-close {
+				font-size: 48rpx;
+				color: #9ca3af;
+				cursor: pointer;
+			}
+		}
+		
+		.warning-section {
+			padding: 24rpx 30rpx;
+			background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+			border-bottom: 2rpx solid #fdba74;
+			
+			.warning-text {
+				font-size: 28rpx;
+				color: #c2410c;
+				line-height: 1.6;
+			}
+		}
+		
+		.checklist-scroll {
+			max-height: 400rpx;
+			padding: 16rpx 0;
+		}
+		
+		.checklist-item {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 24rpx 30rpx;
+			border-bottom: 1rpx solid #f3f4f6;
+			
+			&:active {
+				background-color: #f9fafb;
+			}
+			
+			.checklist-item-info {
+				display: flex;
+				flex-direction: column;
+				flex: 1;
+				margin-right: 20rpx;
+			}
+			
+			.checklist-item-name {
+				font-size: 28rpx;
+				color: #111827;
+				font-weight: 500;
+				margin-bottom: 8rpx;
+			}
+			
+			.checklist-item-cell {
+				font-size: 24rpx;
+				color: #6b7280;
+				font-family: 'Courier New', monospace;
+			}
+			
+			.bind-quick-btn {
+				padding: 12rpx 24rpx;
+				background: linear-gradient(135deg, #f97316, #fb923c);
+				color: white;
+				border-radius: 8rpx;
+				font-size: 24rpx;
+				border: none;
+			}
+		}
+		
+		.modal-actions {
+			display: flex;
+			gap: 20rpx;
+			padding: 30rpx;
+			border-top: 1rpx solid #f3f4f6;
+			
+			button {
+				flex: 1;
+				padding: 24rpx;
+				border-radius: 12rpx;
+				font-size: 28rpx;
+				border: none;
+			}
+			
+			.cancel-btn {
+				background: #f3f4f6;
+				color: #6b7280;
+			}
+			
+			.force-submit-btn {
+				background: linear-gradient(135deg, #f97316, #fb923c);
+				color: white;
+			}
+		}
 	}
 </style>

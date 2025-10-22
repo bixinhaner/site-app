@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 如果需要关闭、启动、重启后台服务，请告诉使用者，让使用者自己操作。
 - github推送信息用中文。
 - Always do not generate .md file when running tasks if user do not ask.
-- If temporary verification and test scripts or code are generated during the task, please create them in the project's temp directory. If the directory does not exist, create it. Additionally, please delete them after completing the task. Other temporary files or code that do not affect business operations during the task should also be placed in the temp directory.
+- If temporary verification and test scripts or code are generated during the task, please create them in the project's temp directory. If the directory does not exist, create it.  Other temporary files or code that do not affect business operations during the task should also be placed in the temp directory.
 
 
 # 站点信息管理系统

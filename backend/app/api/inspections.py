@@ -1380,10 +1380,24 @@ async def get_inspection_statistics(
 @router.get("/detail/{inspection_id}/items", response_model=List[InspectionCheckItemResponse])
 async def get_inspection_items(
     inspection_id: str,
+    equipment_sn: Optional[str] = None,
+    has_equipment: Optional[bool] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取检查项列表"""
+    """
+    获取检查项列表
+    
+    Args:
+        inspection_id: 检查记录ID
+        equipment_sn: 设备SN筛选（模糊查询）
+        has_equipment: 绑定状态筛选（True=已绑定，False=未绑定）
+        db: 数据库会话
+        current_user: 当前用户
+    
+    Returns:
+        检查项列表
+    """
     # 验证检查记录存在
     inspection = db.query(SiteInspection).filter(
         SiteInspection.id == inspection_id
@@ -1406,11 +1420,28 @@ async def get_inspection_items(
     # 获取检查项，包括照片
     from sqlalchemy.orm import joinedload
     
-    check_items = db.query(InspectionCheckItem).options(
+    query = db.query(InspectionCheckItem).options(
         joinedload(InspectionCheckItem.photos)
     ).filter(
         InspectionCheckItem.inspection_id == inspection_id
-    ).all()
+    )
+    
+    # 设备SN筛选（模糊查询）
+    if equipment_sn:
+        query = query.filter(InspectionCheckItem.equipment_sn.like(f"%{equipment_sn}%"))
+    
+    # 绑定状态筛选
+    if has_equipment is True:
+        query = query.filter(InspectionCheckItem.equipment_sn.isnot(None))
+    elif has_equipment is False:
+        # 仅筛选小区级检查项中未绑定的
+        query = query.filter(
+            InspectionCheckItem.equipment_sn.is_(None),
+            InspectionCheckItem.sector_id.isnot(None),
+            InspectionCheckItem.band.isnot(None)
+        )
+    
+    check_items = query.all()
     
     return check_items
 
@@ -2068,9 +2099,38 @@ async def bind_equipment_to_sector(
     
     # 绑定或解绑设备到所有相关检查项
     try:
+        # 导入历史记录模型
+        from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+        
         for item in check_items:
+            # 记录之前的设备SN（用于历史记录）
+            previous_sn = item.equipment_sn
+            
+            # 更新设备绑定
             item.equipment_sn = equipment_sn if not is_unbind else None
             item.updated_at = datetime.utcnow()
+            
+            # 创建历史记录
+            if not is_unbind or previous_sn:  # 绑定操作或有之前设备的解绑操作才记录
+                history = EquipmentBindingHistory(
+                    inspection_id=inspection_id,
+                    check_item_id=item.id,
+                    site_id=inspection.site_id,
+                    sector_id=sector_id,
+                    band=band or "",
+                    cell_id=cell_id,
+                    equipment_sn=equipment_sn if not is_unbind else previous_sn,
+                    action=BindingActionEnum.UNBIND if is_unbind else (
+                        BindingActionEnum.REBIND if previous_sn else BindingActionEnum.BIND
+                    ),
+                    operator_id=current_user.id,
+                    previous_equipment_sn=previous_sn if not is_unbind and previous_sn else None,
+                    latitude=request_data.get("latitude"),
+                    longitude=request_data.get("longitude"),
+                    gps_accuracy=request_data.get("gps_accuracy"),
+                    notes=request_data.get("notes")
+                )
+                db.add(history)
         
         # 更新设备状态
         if not is_unbind and equipment_instance:
@@ -2111,3 +2171,155 @@ async def bind_equipment_to_sector(
             status_code=500,
             detail=f"绑定设备失败: {str(e)}"
         )
+
+
+@router.get("/binding-history/{check_item_id}")
+async def get_binding_history(
+    check_item_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取检查项的设备绑定历史记录
+    
+    Args:
+        check_item_id: 检查项ID
+        db: 数据库会话
+        current_user: 当前用户
+    
+    Returns:
+        设备绑定历史记录列表
+    """
+    from app.models.equipment_binding_history import EquipmentBindingHistory
+    from sqlalchemy.orm import joinedload
+    
+    # 验证检查项存在且有权限查看
+    check_item = db.query(InspectionCheckItem).options(
+        joinedload(InspectionCheckItem.inspection)
+    ).filter(InspectionCheckItem.id == check_item_id).first()
+    
+    if not check_item:
+        raise HTTPException(
+            status_code=404,
+            detail="检查项不存在"
+        )
+    
+    # 权限检查
+    inspection = check_item.inspection
+    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="没有权限查看此检查项的历史记录"
+        )
+    
+    # 查询历史记录
+    history_records = db.query(EquipmentBindingHistory).options(
+        joinedload(EquipmentBindingHistory.operator)
+    ).filter(
+        EquipmentBindingHistory.check_item_id == check_item_id
+    ).order_by(
+        EquipmentBindingHistory.operated_at.desc()
+    ).all()
+    
+    # 格式化返回数据
+    result = []
+    for record in history_records:
+        result.append({
+            "id": record.id,
+            "action": record.action.value,
+            "equipment_sn": record.equipment_sn,
+            "previous_equipment_sn": record.previous_equipment_sn,
+            "operator": {
+                "id": record.operator.id,
+                "name": record.operator.full_name or record.operator.username
+            },
+            "operated_at": record.operated_at.isoformat() if record.operated_at else None,
+            "latitude": record.latitude,
+            "longitude": record.longitude,
+            "gps_accuracy": record.gps_accuracy,
+            "notes": record.notes,
+            "cell_info": {
+                "sector_id": record.sector_id,
+                "band": record.band,
+                "cell_id": record.cell_id
+            }
+        })
+    
+    return {
+        "check_item_id": check_item_id,
+        "check_item_name": check_item.item_name,
+        "history": result
+    }
+
+
+@router.get("/equipment-history/{equipment_sn}")
+async def get_equipment_binding_history(
+    equipment_sn: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取设备的完整绑定历史记录（用于设备追踪）
+    
+    Args:
+        equipment_sn: 设备序列号
+        db: 数据库会话
+        current_user: 当前用户
+    
+    Returns:
+        设备的完整绑定历史
+    """
+    from app.models.equipment_binding_history import EquipmentBindingHistory
+    from sqlalchemy.orm import joinedload
+    
+    # 查询该设备的所有绑定历史
+    history_records = db.query(EquipmentBindingHistory).options(
+        joinedload(EquipmentBindingHistory.operator),
+        joinedload(EquipmentBindingHistory.site),
+        joinedload(EquipmentBindingHistory.inspection)
+    ).filter(
+        EquipmentBindingHistory.equipment_sn == equipment_sn
+    ).order_by(
+        EquipmentBindingHistory.operated_at.desc()
+    ).all()
+    
+    if not history_records:
+        return {
+            "equipment_sn": equipment_sn,
+            "history": [],
+            "message": "该设备尚无绑定历史记录"
+        }
+    
+    # 格式化返回数据
+    result = []
+    for record in history_records:
+        result.append({
+            "id": record.id,
+            "action": record.action.value,
+            "site": {
+                "id": record.site_id,
+                "name": record.site.site_name if record.site else "未知站点"
+            },
+            "cell_info": {
+                "sector_id": record.sector_id,
+                "band": record.band,
+                "cell_id": record.cell_id
+            },
+            "operator": {
+                "id": record.operator.id,
+                "name": record.operator.full_name or record.operator.username
+            },
+            "operated_at": record.operated_at.isoformat() if record.operated_at else None,
+            "previous_equipment_sn": record.previous_equipment_sn,
+            "latitude": record.latitude,
+            "longitude": record.longitude,
+            "gps_accuracy": record.gps_accuracy,
+            "notes": record.notes,
+            "inspection_id": record.inspection_id
+        })
+    
+    return {
+        "equipment_sn": equipment_sn,
+        "total_records": len(result),
+        "history": result
+    }

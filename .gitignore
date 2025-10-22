@@ -54,3 +54,6 @@ backend/uploads/*
 # PID files
 *.pid
 test.keystore
+
+# Temp workspace (do not commit archives or scratch files)
+temp/

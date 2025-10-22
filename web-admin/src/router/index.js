@@ -75,6 +75,12 @@ const routes = [
             name: 'EquipmentInstances',
             component: () => import('../views/equipment/EquipmentInstances.vue'),
             meta: { title: '设备实例清单', icon: 'Tickets' }
+          },
+          {
+            path: 'lifecycle',
+            name: 'EquipmentLifecycle',
+            component: () => import('../views/equipment/EquipmentLifecycle.vue'),
+            meta: { title: '设备生命周期', icon: 'TrendCharts' }
           }
         ]
       },

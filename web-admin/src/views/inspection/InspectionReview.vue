@@ -6,6 +6,41 @@
         <el-button @click="refresh"><el-icon><Refresh /></el-icon>刷新</el-button>
       </div>
     </div>
+    
+    <!-- 筛选表单 -->
+    <el-card style="margin-bottom: 16px;" v-if="inspection">
+      <el-form inline>
+        <el-form-item label="设备SN">
+          <el-input 
+            v-model="filterForm.equipment_sn" 
+            placeholder="输入设备序列号搜索"
+            clearable
+            @clear="handleFilter"
+            style="width: 200px;"
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
+        </el-form-item>
+        
+        <el-form-item label="绑定状态">
+          <el-select v-model="filterForm.binding_status" placeholder="全部" clearable style="width: 120px;">
+            <el-option label="全部" value="" />
+            <el-option label="已绑定" value="bound" />
+            <el-option label="未绑定" value="unbound" />
+          </el-select>
+        </el-form-item>
+        
+        <el-form-item>
+          <el-button type="primary" @click="handleFilter">
+            <el-icon><Search /></el-icon> 查询
+          </el-button>
+          <el-button @click="handleResetFilter">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+    
     <el-card v-loading="loading">
       <div v-if="inspection">
         <p><b>站点：</b>{{ inspection.site_name || inspection.site?.site_name || '-' }}</p>
@@ -36,6 +71,42 @@
         <el-table :data="items" size="small" stripe v-loading="itemsLoading">
           <el-table-column prop="item_name" label="检查项" min-width="220" />
           <el-table-column prop="required_type" label="类型" width="100" />
+          <el-table-column prop="sector_id" label="扇区" width="80" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.sector_id" size="small" type="info">
+                扇区{{ row.sector_id }}
+              </el-tag>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="band" label="频段" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.band" size="small" effect="plain">
+                {{ row.band }}
+              </el-tag>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="equipment_sn" label="设备SN" width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div v-if="row.equipment_sn" class="equipment-cell">
+                <el-icon color="#67c23a" :size="16"><CircleCheck /></el-icon>
+                <span class="equipment-sn">{{ row.equipment_sn }}</span>
+                <el-button 
+                  link 
+                  type="primary" 
+                  size="small" 
+                  @click="copyToClipboard(row.equipment_sn)"
+                >
+                  <el-icon><CopyDocument /></el-icon>
+                </el-button>
+              </div>
+              <el-tag v-else-if="row.sector_id && row.band" type="warning" size="small">
+                未绑定
+              </el-tag>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="status" label="提交状态" width="120" />
           <el-table-column prop="review_status" label="审核结果" width="120">
             <template #default="{ row }">
@@ -86,18 +157,26 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { useRoute } from 'vue-router'
 import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { CircleCheck, CopyDocument, Search } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const loading = ref(false)
 const inspection = ref(null)
 const commentsText = ref('')
 const items = ref([])
+const allItems = ref([]) // 存储所有检查项，用于筛选
 const itemsLoading = ref(false)
 const summary = ref(null)
+
+// 筛选表单
+const filterForm = reactive({
+  equipment_sn: '',
+  binding_status: ''
+})
 
 const refresh = async () => {
   const id = route.query.inspectionId
@@ -130,18 +209,61 @@ const doReview = async (action) => {
 
 const formatDateTime = (val) => val ? new Date(val).toLocaleString() : '-'
 
+const copyToClipboard = (text) => {
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success('设备SN已复制到剪贴板')
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
+}
+
 const loadItems = async () => {
   const id = route.query.inspectionId
   if (!id) return
   try {
     itemsLoading.value = true
-    items.value = await request.get(`/api/inspections/detail/${id}/items`)
+    const data = await request.get(`/api/inspections/detail/${id}/items`)
+    allItems.value = data // 保存原始数据
+    applyFilter() // 应用筛选
   } catch (e) {
     console.error(e)
     ElMessage.error('加载检查项失败')
   } finally {
     itemsLoading.value = false
   }
+}
+
+// 应用筛选
+const applyFilter = () => {
+  let filtered = [...allItems.value]
+  
+  // 按设备SN筛选
+  if (filterForm.equipment_sn) {
+    filtered = filtered.filter(item => 
+      item.equipment_sn && item.equipment_sn.toLowerCase().includes(filterForm.equipment_sn.toLowerCase())
+    )
+  }
+  
+  // 按绑定状态筛选
+  if (filterForm.binding_status === 'bound') {
+    filtered = filtered.filter(item => item.equipment_sn)
+  } else if (filterForm.binding_status === 'unbound') {
+    filtered = filtered.filter(item => item.sector_id && item.band && !item.equipment_sn)
+  }
+  
+  items.value = filtered
+}
+
+// 处理筛选
+const handleFilter = () => {
+  applyFilter()
+}
+
+// 重置筛选
+const handleResetFilter = () => {
+  filterForm.equipment_sn = ''
+  filterForm.binding_status = ''
+  applyFilter()
 }
 
 const loadSummary = async () => {
@@ -201,4 +323,16 @@ onMounted(refresh)
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .section-header { display:flex; justify-content: space-between; align-items:center; margin: 8px 0; }
+
+.equipment-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.equipment-sn {
+  font-family: 'Courier New', monospace;
+  font-weight: 500;
+  color: #409eff;
+}
 </style>
