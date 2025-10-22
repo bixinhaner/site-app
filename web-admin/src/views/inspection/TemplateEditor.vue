@@ -54,7 +54,12 @@
             <template #header>
               <div class="card-header">
                 <span>模板结构编辑</span>
-                <el-button size="small" @click="addCategory">
+                <el-button 
+                  size="small" 
+                  @click="addCategory"
+                  :disabled="isOperationDisabled('add_category')"
+                  :title="getDisabledReason('add_category')"
+                >
                   <el-icon><Plus /></el-icon>
                   添加分类
                 </el-button>
@@ -97,6 +102,8 @@
                         v-model="category.category_name" 
                         placeholder="分类名称"
                         size="small"
+                        :disabled="isFieldDisabled('category', 'category_name')"
+                        :title="getFieldTooltip('category', 'category_name')"
                       />
                       <el-select
                         v-model="category.level_type"
@@ -104,6 +111,8 @@
                         size="small"
                         style="margin-left: 12px; width: 120px;"
                         @change="onLevelTypeChange(category)"
+                        :disabled="isFieldDisabled('category', 'sector_specific')"
+                        :title="getFieldTooltip('category', 'sector_specific')"
                       >
                         <el-option label="站点级" value="site" />
                         <el-option label="扇区级" value="sector" />
@@ -123,6 +132,8 @@
                       <el-button 
                         size="small" 
                         @click="addItem(categoryIndex)"
+                        :disabled="isOperationDisabled('add_item')"
+                        :title="getDisabledReason('add_item')"
                       >
                         <el-icon><Plus /></el-icon>
                         添加检查项
@@ -131,6 +142,8 @@
                         size="small" 
                         type="danger" 
                         @click="removeCategory(categoryIndex)"
+                        :disabled="isOperationDisabled('delete_category')"
+                        :title="getDisabledReason('delete_category')"
                       >
                         <el-icon><Delete /></el-icon>
                         删除分类
@@ -143,6 +156,8 @@
                       v-model="category.description" 
                       placeholder="分类描述（可选）"
                       size="small"
+                      :disabled="isFieldDisabled('category', 'description')"
+                      :title="getFieldTooltip('category', 'description')"
                     />
                   </div>
                   
@@ -158,6 +173,8 @@
                           v-model="item.item_name" 
                           placeholder="检查项名称"
                           size="small"
+                          :disabled="isFieldDisabled('item', 'item_name')"
+                          :title="getFieldTooltip('item', 'item_name')"
                         />
                         
                         <el-select 
@@ -165,6 +182,8 @@
                           placeholder="要求类型"
                           size="small"
                           style="width: 120px; margin-left: 8px;"
+                          :disabled="isFieldDisabled('item', 'required_type')"
+                          :title="getFieldTooltip('item', 'required_type')"
                         >
                           <el-option label="仅拍照" value="photo" />
                           <el-option label="仅数据" value="data" />
@@ -176,6 +195,8 @@
                           type="danger" 
                           @click="removeItem(categoryIndex, itemIndex)"
                           style="margin-left: 8px;"
+                          :disabled="isOperationDisabled('delete_item')"
+                          :title="getDisabledReason('delete_item')"
                         >
                           <el-icon><Delete /></el-icon>
                         </el-button>
@@ -186,6 +207,8 @@
                           v-model="item.description" 
                           placeholder="检查项描述（可选）"
                           size="small"
+                          :disabled="isFieldDisabled('item', 'description')"
+                          :title="getFieldTooltip('item', 'description')"
                         />
                       </div>
 
@@ -194,15 +217,43 @@
                         <template #header>
                           <div class="card-header">
                             <span>字段配置（可选）</span>
-                            <el-button size="small" @click="addField(categoryIndex, itemIndex)"><el-icon><Plus /></el-icon> 添加字段</el-button>
+                            <el-button 
+                              size="small" 
+                              @click="addField(categoryIndex, itemIndex)"
+                              :disabled="isOperationDisabled('add_field')"
+                              :title="getDisabledReason('add_field')"
+                            >
+                              <el-icon><Plus /></el-icon> 添加字段
+                            </el-button>
                           </div>
                         </template>
                         <div v-if="!item.fields || item.fields.length === 0" class="empty-fields">暂无字段，点击“添加字段”新增</div>
                         <div v-for="(field, fieldIndex) in (item.fields || (item.fields = []))" :key="field.field_id || fieldIndex" class="field-row">
                           <div class="field-line">
-                            <el-input v-model="field.field_id" size="small" placeholder="字段ID（英文）" style="width: 180px" />
-                            <el-input v-model="field.label" size="small" placeholder="显示名称" style="width: 180px; margin-left:8px;" />
-                            <el-select v-model="field.type" size="small" placeholder="类型" style="width: 160px; margin-left:8px;">
+                            <el-input 
+                              v-model="field.field_id" 
+                              size="small" 
+                              placeholder="字段ID（英文）" 
+                              style="width: 180px"
+                              :disabled="isFieldDisabled('field', 'field_id')"
+                              :title="getFieldTooltip('field', 'field_id')"
+                            />
+                            <el-input 
+                              v-model="field.label" 
+                              size="small" 
+                              placeholder="显示名称" 
+                              style="width: 180px; margin-left:8px;"
+                              :disabled="isFieldDisabled('field', 'label')"
+                              :title="getFieldTooltip('field', 'label')"
+                            />
+                            <el-select 
+                              v-model="field.type" 
+                              size="small" 
+                              placeholder="类型" 
+                              style="width: 160px; margin-left:8px;"
+                              :disabled="isFieldDisabled('field', 'type')"
+                              :title="getFieldTooltip('field', 'type')"
+                            >
                               <el-option label="文本" value="text" />
                               <el-option label="数字" value="number" />
                               <el-option label="布尔" value="boolean" />
@@ -213,8 +264,24 @@
                               <el-option label="日期时间" value="datetime" />
                               <el-option label="富文本" value="rich_text" />
                             </el-select>
-                            <el-checkbox v-model="field.required" style="margin-left:12px;">必填</el-checkbox>
-                            <el-button size="small" type="danger" @click="removeField(categoryIndex, itemIndex, fieldIndex)" style="margin-left:8px;"><el-icon><Delete /></el-icon></el-button>
+                            <el-checkbox 
+                              v-model="field.required" 
+                              style="margin-left:12px;"
+                              :disabled="isRequiredFieldDisabled(field)"
+                              :title="getRequiredFieldTooltip(field)"
+                            >
+                              必填
+                            </el-checkbox>
+                            <el-button 
+                              size="small" 
+                              type="danger" 
+                              @click="removeField(categoryIndex, itemIndex, fieldIndex)" 
+                              style="margin-left:8px;"
+                              :disabled="isOperationDisabled('delete_field')"
+                              :title="getDisabledReason('delete_field')"
+                            >
+                              <el-icon><Delete /></el-icon>
+                            </el-button>
                           </div>
                           <div class="field-advanced">
                             <!-- 选项配置 -->
@@ -786,6 +853,35 @@ const isOperationDisabled = (operation) => {
 
 const getDisabledReason = (operation) => {
   return getOperationDisabledReason(operation, templateUsageInfo.value.is_used)
+}
+
+// 特殊处理：required 字段
+const isRequiredFieldDisabled = (field) => {
+  if (!templateUsageInfo.value.is_used) {
+    return false
+  }
+  
+  // 如果当前是 true，允许改为 false（放宽限制）
+  if (field.required) {
+    return false
+  }
+  
+  // 如果当前是 false，不能在模板已使用时改为 true
+  // 这里不能直接禁用，因为会影响交互，而是在点击时阻止
+  // 但为了用户体验，我们还是禁用
+  return true
+}
+
+const getRequiredFieldTooltip = (field) => {
+  if (!templateUsageInfo.value.is_used) {
+    return ''
+  }
+  
+  if (!field.required) {
+    return '该检查模板已有工单使用，不允许将字段从非必填改为必填'
+  }
+  
+  return ''
 }
 
 // 生命周期
