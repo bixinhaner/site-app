@@ -192,7 +192,7 @@ const showBindingHistory = async (equipment) => {
   bindingHistory.value = []
   
   try {
-    const token = localStorage.getItem('token')
+    const token = localStorage.getItem('access_token')
     const response = await axios.get(
       `/api/inspections/equipment-history/${equipment.serial_number}`,
       {
