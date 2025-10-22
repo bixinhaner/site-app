@@ -42,6 +42,11 @@ export const templateAPI = {
   // 删除模板
   async deleteTemplate(templateId) {
     return request.delete(`${API_BASE}/templates/${templateId}`)
+  },
+
+  // 获取模板使用情况
+  async getTemplateUsage(templateId) {
+    return request.get(`${API_BASE}/templates/${templateId}/usage`)
   }
 }
 

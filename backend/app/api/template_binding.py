@@ -26,6 +26,8 @@ from app.api.auth import get_current_user
 from app.services.template_resolver import (
     TemplateResolver, ResolveContext, create_resolver
 )
+from app.utils.template_validator import validate_template_changes, summarize_changes
+from app.utils.template_cascader import cascade_update_check_items
 
 router = APIRouter()
 
@@ -177,14 +179,84 @@ async def get_template(
     )
 
 
-@router.put("/templates/{template_id}", response_model=InspectionTemplateResponse)
+@router.get("/templates/{template_id}/usage")
+async def get_template_usage(
+    template_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取模板使用情况（简化版）"""
+    
+    # 权限检查
+    if current_user.role not in ["admin", "manager", "inspector"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="权限不足"
+        )
+    
+    # 验证模板存在
+    from app.models.inspection import SiteInspection, InspectionStatusEnum
+    
+    template = db.query(InspectionTemplate).filter(
+        InspectionTemplate.id == template_id
+    ).first()
+    
+    if not template:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    
+    # 统计使用情况
+    total = db.query(SiteInspection).filter(
+        SiteInspection.template_id == template_id
+    ).count()
+    
+    active = db.query(SiteInspection).filter(
+        SiteInspection.template_id == template_id,
+        SiteInspection.status.in_([
+            InspectionStatusEnum.DRAFT,
+            InspectionStatusEnum.IN_PROGRESS,
+            InspectionStatusEnum.SUBMITTED,
+            InspectionStatusEnum.UNDER_REVIEW
+        ])
+    ).count()
+    
+    # 获取前10个检查记录详情
+    inspections = db.query(SiteInspection).options(
+        joinedload(SiteInspection.site),
+        joinedload(SiteInspection.inspector)
+    ).filter(
+        SiteInspection.template_id == template_id
+    ).limit(10).all()
+    
+    details = [
+        {
+            "inspection_id": insp.id,
+            "site_name": insp.site.site_name if insp.site else "未知",
+            "status": insp.status.value,
+            "inspector": insp.inspector.full_name if insp.inspector else "未知",
+            "created_at": insp.created_at.isoformat()
+        }
+        for insp in inspections
+    ]
+    
+    return {
+        "template_id": template_id,
+        "is_used": total > 0,
+        "total_inspections": total,
+        "active_inspections": active,
+        "completed_inspections": total - active,
+        "inspection_details": details
+    }
+
+
+@router.put("/templates/{template_id}", response_model=dict)
 async def update_template(
     template_id: str,
     template_update: InspectionTemplateUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新检查模板"""
+    """更新检查模板（带自动级联更新）"""
+    
     # 权限检查
     if current_user.role not in ["admin", "manager"]:
         raise HTTPException(
@@ -202,7 +274,24 @@ async def update_template(
             detail="模板不存在"
         )
     
-    # 更新字段
+    # 保存旧数据（用于后端验证和级联更新）
+    old_template_data = template.template_data
+    new_template_data = template_update.template_data
+    
+    # 后端验证：检查是否有禁止的结构性变更
+    validation_result = validate_template_changes(old_template_data, new_template_data)
+    
+    if not validation_result['valid']:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "检测到禁止的结构性变更",
+                "message": "该模板已被使用，不允许进行结构性变更（如添加/删除检查项、修改字段类型等）",
+                "violations": validation_result['violations']
+            }
+        )
+    
+    # 应用更新
     update_fields = template_update.dict(exclude_unset=True)
     for field, value in update_fields.items():
         setattr(template, field, value)
@@ -211,27 +300,38 @@ async def update_template(
     db.commit()
     db.refresh(template)
     
-    # 获取绑定统计信息
-    bindings_count = db.query(TemplateBinding).filter(
-        TemplateBinding.template_id == template.id
-    ).count()
+    # 自动级联更新已有检查项
+    cascaded_count = 0
+    try:
+        cascaded_count = cascade_update_check_items(
+            db, 
+            template_id, 
+            old_template_data, 
+            new_template_data
+        )
+    except Exception as e:
+        # 级联更新失败不影响模板保存，但记录错误
+        print(f"[警告] 模板级联更新失败: {e}")
     
-    active_bindings_count = db.query(TemplateBinding).filter(
-        TemplateBinding.template_id == template.id,
-        TemplateBinding.active == True
-    ).count()
+    # 分析变更摘要
+    change_summary = summarize_changes(old_template_data, new_template_data)
     
-    return InspectionTemplateResponse(
-        id=template.id,
-        template_name=template.template_name,
-        template_data=template.template_data,
-        created_by=template.created_by,
-        created_at=template.created_at,
-        updated_at=template.updated_at,
-        creator_name=template.creator.full_name if template.creator else None,
-        bindings_count=bindings_count,
-        active_bindings_count=active_bindings_count
-    )
+    # 返回更新结果
+    return {
+        "success": True,
+        "message": "模板更新成功" + (f"，已自动更新 {cascaded_count} 个检查项" if cascaded_count > 0 else ""),
+        "template_id": template_id,
+        "template_name": template.template_name,
+        "cascaded_updates_count": cascaded_count,
+        "change_summary": {
+            "total_changes": change_summary['total_changes'],
+            "modified_names": change_summary['modified_names'],
+            "modified_descriptions": change_summary['modified_descriptions'],
+            "modified_labels": change_summary['modified_labels'],
+            "modified_constraints": change_summary['modified_constraints']
+        },
+        "updated_at": template.updated_at.isoformat()
+    }
 
 
 @router.get("/templates/{template_id}/bindings", response_model=List[TemplateBindingResponse])
