@@ -1174,15 +1174,6 @@
 		return date.toLocaleString('zh-CN')
 	}
 	
-	const formatTime = (dateTime) => {
-		if (!dateTime) return ''
-		const date = new Date(dateTime)
-		return date.toLocaleTimeString('zh-CN', {
-			hour: '2-digit',
-			minute: '2-digit'
-		})
-	}
-	
 	const formatCoordinates = (lat, lon) => {
 		return `${lat.toFixed(6)}, ${lon.toFixed(6)}`
 	}

@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>站点分布地图</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #f5f5f5;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 简单的站点标记样式 */
+        .site-marker {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: #f97316;
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+
+        .site-marker.operational {
+            background: #10b981;
+        }
+
+        .site-marker.construction {
+            background: #f59e0b;
+        }
+
+        .site-marker.maintenance {
+            background: #ef4444;
+        }
+
+        .site-label {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #333;
+            border: 1px solid #ddd;
+            white-space: nowrap;
+            transform: translate(-50%, -150%);
+            z-index: 1001;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 2000;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        .zoom-controls {
+            display: flex;
+            gap: 5px;
+        }
+
+        .zoom-btn {
+            width: 36px;
+            height: 36px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .zoom-btn:hover {
+            background: #f0f0f0;
+        }
+
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            z-index: 1500;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 3000;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #f97316;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="map">
+        <div class="loading" id="loadingIndicator">
+            <div class="spinner"></div>
+            <p style="margin-top: 16px; color: #666;">正在加载地图数据...</p>
+        </div>
+
+        <div class="info-panel">
+            <div>站点总数: <strong id="siteCount">0</strong></div>
+            <div>当前缩放: <strong id="zoomLevel">10</strong></div>
+        </div>
+
+        <div class="controls">
+            <div class="zoom-controls">
+                <div class="zoom-btn" onclick="zoomIn()">+</div>
+                <div class="zoom-btn" onclick="zoomOut()">-</div>
+                <div class="zoom-btn" onclick="resetView()">⟲</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentZoom = 10;
+        let centerX = 116.4074; // 北京经度
+        let centerY = 39.9042;  // 北京纬度
+        let markers = [];
+        let isDragging = false;
+        let dragStartX, dragStartY;
+
+        // 简单的墨卡托投影转换
+        function project(lat, lon) {
+            const x = (lon + 180) * (window.innerWidth / 360) + centerX * 0;
+            const y = (90 - lat) * (window.innerHeight / 180) + centerY * 0;
+            return { x, y };
+        }
+
+        // 创建站点标记
+        function createMarker(site) {
+            const marker = document.createElement('div');
+            marker.className = `site-marker ${site.status || 'operational'}`;
+            marker.title = site.site_name;
+
+            const label = document.createElement('div');
+            label.className = 'site-label';
+            label.textContent = site.site_name;
+            marker.appendChild(label);
+
+            marker.addEventListener('click', () => {
+                showSiteInfo(site);
+            });
+
+            return marker;
+        }
+
+        // 显示站点信息
+        function showSiteInfo(site) {
+            alert(`站点：${site.site_name}\n地址：${site.address || '暂无地址'}\n状态：${getStatusText(site.status)}`);
+        }
+
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                operational: '运营中',
+                construction: '建设中',
+                maintenance: '维护中'
+            };
+            return statusMap[status] || status;
+        }
+
+        // 更新标记位置
+        function updateMarkers() {
+            const mapContainer = document.getElementById('map');
+
+            markers.forEach(marker => {
+                const site = marker.site;
+                if (site.latitude && site.longitude) {
+                    const pos = project(site.latitude, site.longitude);
+                    marker.element.style.left = pos.x + 'px';
+                    marker.element.style.top = pos.y + 'px';
+                }
+            });
+        }
+
+        // 缩放控制
+        function zoomIn() {
+            if (currentZoom < 18) {
+                currentZoom += 1;
+                updateZoom();
+            }
+        }
+
+        function zoomOut() {
+            if (currentZoom > 3) {
+                currentZoom -= 1;
+                updateZoom();
+            }
+        }
+
+        function resetView() {
+            currentZoom = 10;
+            centerX = 116.4074;
+            centerY = 39.9042;
+            updateZoom();
+        }
+
+        function updateZoom() {
+            updateMarkers();
+            document.getElementById('zoomLevel').textContent = currentZoom;
+        }
+
+        // 拖拽功能
+        function startDrag(e) {
+            isDragging = true;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+        }
+
+        function drag(e) {
+            if (!isDragging) return;
+
+            const deltaX = e.clientX - dragStartX;
+            const deltaY = e.clientY - dragStartY;
+
+            centerX -= deltaX * (360 / window.innerWidth) / Math.pow(2, currentZoom);
+            centerY += deltaY * (180 / window.innerHeight) / Math.pow(2, currentZoom);
+
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+
+            updateMarkers();
+        }
+
+        function endDrag() {
+            isDragging = false;
+        }
+
+        // 加载站点数据
+        function loadSites(sites) {
+            console.log('SimpleMap加载站点数据:', sites.length);
+
+            // 清除现有标记
+            markers.forEach(marker => {
+                if (marker.element.parentNode) {
+                    marker.element.parentNode.removeChild(marker.element);
+                }
+            });
+            markers = [];
+
+            // 创建新标记
+            const mapContainer = document.getElementById('map');
+            sites.forEach(site => {
+                if (site.latitude && site.longitude) {
+                    const marker = createMarker(site);
+                    mapContainer.appendChild(marker);
+                    markers.push({ element: marker, site: site });
+                }
+            });
+
+            // 更新站点计数
+            document.getElementById('siteCount').textContent = sites.length;
+
+            // 隐藏加载提示
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+
+            // 更新标记位置
+            updateMarkers();
+
+            // 如果有站点，计算中心点
+            if (sites.length > 0) {
+                let totalLat = 0, totalLon = 0, count = 0;
+                sites.forEach(site => {
+                    if (site.latitude && site.longitude) {
+                        totalLat += parseFloat(site.latitude);
+                        totalLon += parseFloat(site.longitude);
+                        count++;
+                    }
+                });
+
+                if (count > 0) {
+                    centerX = totalLon / count;
+                    centerY = totalLat / count;
+                    updateMarkers();
+                }
+            }
+        }
+
+        // 监听来自父页面的消息
+        window.addEventListener('message', function(event) {
+            const { action, data } = event.data;
+            console.log('SimpleMap收到消息:', action, data);
+
+            switch(action) {
+                case 'loadMarkers':
+                    loadSites(data.sites || []);
+                    break;
+                case 'clearMarkers':
+                    loadSites([]);
+                    break;
+            }
+        });
+
+        // 初始化拖拽
+        document.getElementById('map').addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', endDrag);
+
+        // 窗口大小改变时更新
+        window.addEventListener('resize', updateMarkers);
+
+        // 初始化
+        window.addEventListener('load', function() {
+            console.log('SimpleMap初始化完成');
+            updateZoom();
+        });
+    </script>
+</body>
+</html>

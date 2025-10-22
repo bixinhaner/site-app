@@ -141,28 +141,10 @@
         });
         
         // 使用OpenStreetMap瓦片
-        // 使用多个瓦片服务器以提高加载成功率
-        const tileServers = [
-            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
-            'https://mt1.google.com/vt/lyrs=m@167000000&hl=zh-CN&x={x}&y={y}&z={z}',
-            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-        ];
-
-        // 创建多层瓦片组，自动切换失败的服务器
-        const tileLayerGroup = L.layerGroup([
-            L.tileLayer(tileServers[0], {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-                maxZoom: 18,
-                errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHGGJ28/NAUJr6AOgMgAAdYADIACgkP/gKwAAAABJRU5ErkJggg=='
-            }),
-            L.tileLayer(tileServers[1], {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap France</a>',
-                maxZoom: 18
-            })
-        ]);
-
-        tileLayerGroup.addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+            maxZoom: 19
+        }).addTo(map);
         
         // 存储标记对象
         const markers = {};

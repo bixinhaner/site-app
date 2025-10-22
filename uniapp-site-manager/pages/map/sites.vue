@@ -16,7 +16,7 @@
 			<iframe 
 				id="leafletMap"
 				class="map-iframe"
-				src="/static/map/leaflet-map.html"
+				:src="mapSrc"
 				@load="onMapLoad"
 			></iframe>
 		</view>
@@ -115,12 +115,27 @@
 	
 	// 计算属性
 	const totalSites = computed(() => sites.value.length)
-	
+
 	const filteredSites = computed(() => {
 		if (currentFilter.value === 'all') {
 			return sites.value
 		}
 		return sites.value.filter(site => site.status === currentFilter.value)
+	})
+
+	// 地图文件路径 - 兼容不同环境
+	const mapSrc = computed(() => {
+		// #ifdef H5
+		return './static/map/leaflet-map.html'
+		// #endif
+
+		// #ifdef APP-PLUS
+		// App中使用绝对路径
+		return plus.io.convertLocalFileSystemURL('_www/static/map/leaflet-map.html')
+		// #endif
+
+		// 默认路径
+		return './static/map/leaflet-map.html'
 	})
 	
 	// 生成地图中心点（所有站点的平均位置）
@@ -143,13 +158,36 @@
 	// 地图加载完成
 	const onMapLoad = () => {
 		console.log('地图iframe加载完成')
-		// H5环境中获取iframe引用
-		// #ifdef H5
-		mapIframe = document.getElementById('leafletMap')
-		// #endif
-		
+		// 获取iframe引用（兼容不同环境）
+		try {
+			// #ifdef H5
+			mapIframe = document.getElementById('leafletMap')
+			// #endif
+
+			// #ifdef APP-PLUS
+			mapIframe = plus.webview.getWebviewById('leafletMap')
+			// #endif
+		} catch (error) {
+			console.error('获取iframe引用失败:', error)
+			return
+		}
+
 		// 监听地图消息
-		window.addEventListener('message', handleMapMessage)
+		try {
+			// #ifdef H5
+			if (window && window.addEventListener) {
+				window.addEventListener('message', handleMapMessage)
+			}
+			// #endif
+
+			// #ifdef APP-PLUS
+			if (plus && plus.webview && plus.webview.currentWebview) {
+				plus.webview.currentWebview.addEventListener('message', handleMapMessage)
+			}
+			// #endif
+		} catch (error) {
+			console.error('添加消息监听器失败:', error)
+		}
 	}
 	
 	// 处理来自地图的消息
@@ -178,15 +216,28 @@
 			console.warn('地图未准备好')
 			return
 		}
-		
-		// #ifdef H5
-		if (mapIframe.contentWindow) {
-			mapIframe.contentWindow.postMessage({
-				action: action,
-				data: data
-			}, '*')
+
+		try {
+			// #ifdef H5
+			if (mapIframe.contentWindow) {
+				mapIframe.contentWindow.postMessage({
+					action: action,
+					data: data
+				}, '*')
+			}
+			// #endif
+
+			// #ifdef APP-PLUS
+			if (mapIframe && mapIframe.contentWindow) {
+				mapIframe.contentWindow.postMessage({
+					action: action,
+					data: data
+				}, '*')
+			}
+			// #endif
+		} catch (error) {
+			console.error('发送消息到地图失败:', error)
 		}
-		// #endif
 	}
 	
 	// 加载站点标记到地图
