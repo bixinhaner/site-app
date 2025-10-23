@@ -111,7 +111,7 @@
 import { ref, computed } from 'vue'
 import { Search, TrendCharts, Location, Box, Aim, CircleCheck, Tools, Checked } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import axios from 'axios'
+import request from '@/utils/request'
 
 const loading = ref(false)
 const searchSN = ref('')
@@ -130,23 +130,18 @@ const searchEquipment = async () => {
   bindingHistory.value = []
 
   try {
-    const token = localStorage.getItem('access_token')
-    
-    // 并行获取设备信息和绑定历史
+    // 并行获取设备信息和绑定历史（使用统一的 request 实例）
     const [equipmentRes, historyRes] = await Promise.all([
-      // 获取设备实例信息（这里需要调用设备API，简化处理）
-      axios.get(`/api/equipment/instances/search?serial_number=${searchSN.value}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(() => ({ data: null })),
-      
-      // 获取绑定历史
-      axios.get(`/api/inspections/equipment-history/${searchSN.value}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(() => ({ data: { history: [] } }))
+      request
+        .get('/api/equipment/instances/search', { params: { serial_number: searchSN.value } })
+        .catch(() => null),
+      request
+        .get(`/api/inspections/equipment-history/${searchSN.value}`)
+        .catch(() => ({ history: [] }))
     ])
 
-    equipmentInfo.value = equipmentRes.data
-    bindingHistory.value = historyRes.data.history || []
+    equipmentInfo.value = equipmentRes
+    bindingHistory.value = (historyRes && historyRes.history) ? historyRes.history : []
 
     if (!equipmentInfo.value && bindingHistory.value.length === 0) {
       ElMessage.warning('未找到该设备的信息')

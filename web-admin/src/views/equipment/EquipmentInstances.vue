@@ -124,7 +124,7 @@ import { stockApi } from '../../api/stock'
 import { ElMessage } from 'element-plus'
 import { equipmentApi } from '../../api/equipment'
 import { Document } from '@element-plus/icons-vue'
-import axios from 'axios'
+import request from '@/utils/request'
 
 const loading = ref(false)
 const selectedEquipmentId = ref('')
@@ -192,17 +192,8 @@ const showBindingHistory = async (equipment) => {
   bindingHistory.value = []
   
   try {
-    const token = localStorage.getItem('access_token')
-    const response = await axios.get(
-      `/api/inspections/equipment-history/${equipment.serial_number}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      }
-    )
-    
-    bindingHistory.value = response.data.history || []
+    const response = await request.get(`/api/inspections/equipment-history/${equipment.serial_number}`)
+    bindingHistory.value = response.history || []
   } catch (error) {
     console.error('获取绑定历史失败:', error)
     ElMessage.error('获取绑定历史失败')
