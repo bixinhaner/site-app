@@ -23,9 +23,10 @@ export const siteSurveysApi = {
   listPhotos: (surveyId) => request.get(`/api/site-surveys/${surveyId}/photos`),
   deletePhoto: (photoId) => request.delete(`/api/site-surveys/photos/${photoId}`),
   deletePhotosBatch: (surveyId, data) => request.delete(`/api/site-surveys/${surveyId}/photos`, { data }),
-  updatePhoto: (photoId, formData) => request.put(`/api/site-surveys/photos/${photoId}`, formData),
-  reorderPhotos: (surveyId, formData) => request.put(`/api/site-surveys/${surveyId}/photos/reorder`, formData),
-  getExif: (photoId) => request.get(`/api/site-surveys/photos/${photoId}/exif`),
+  updatePhoto: (photoId, formData) => request.put(`/api/site-surveys/photos/${photoId}`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  // 排序与EXIF功能已移除
 
   // import/export helpers
   downloadImportTemplate: () => request.get('/api/site-surveys/import-template', { responseType: 'blob' }),

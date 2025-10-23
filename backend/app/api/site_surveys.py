@@ -543,20 +543,22 @@ async def upload_photo(
     stored_path = await save_uploaded_file(file, category="site_surveys", sub_folder=survey_id)
     file_hash = calculate_file_hash(stored_path)
 
-    # Process images: compress + simple watermark; extract exif
+    # 先从原始文件提取 EXIF，再执行压缩/水印，避免处理过程中丢失元数据
     is_image = (file.content_type or '').startswith('image/')
     raw_exif = None
     if is_image:
         try:
-            # Compress
-            stored_path = await compress_image(stored_path)
-            # Add watermark (user, time)
-            wm_text = f"Survey {survey_id} | {current_user.username} | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
-            add_text_watermark_inline(stored_path, wm_text)
-            # Extract EXIF
             raw_exif = extract_exif(stored_path)
         except Exception:
             raw_exif = None
+        try:
+            # 压缩
+            stored_path = await compress_image(stored_path)
+            # 添加水印（覆盖保存）
+            wm_text = f"Survey {survey_id} | {current_user.username} | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+            add_text_watermark_inline(stored_path, wm_text)
+        except Exception:
+            pass
 
     taken_dt: Optional[datetime] = None
     if taken_at:
@@ -683,22 +685,40 @@ async def export_survey_zip(
     mem_zip = io.BytesIO()
     with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         # JSON summary
+        # 覆盖全部勘察信息字段，保证压缩包信息完备
         summary = {
             "id": survey.id,
             "site_id": survey.site_id,
+            "site_code": survey.site.site_code if survey.site else None,
             "site_name": survey.site.site_name if survey.site else None,
             "survey_date": survey.survey_date.isoformat() if survey.survey_date else None,
             "surveyor_name": survey.surveyor_name,
+            "surveyor_phone": survey.surveyor_phone,
             "feasibility": survey.feasibility,
-            "latitude": survey.latitude,
-            "longitude": survey.longitude,
             "address": survey.address,
-            "risks": survey.risks,
-            "recommendations": survey.recommendations,
+            # Geo
+            "latitude": survey.latitude, "longitude": survey.longitude, "gps_accuracy": survey.gps_accuracy,
+            # Site/Structure
+            "site_type": survey.site_type, "tower_type": survey.tower_type,
+            "available_height_m": survey.available_height_m, "load_capacity_kg": survey.load_capacity_kg,
+            # Power/Earthing
+            "power_available": survey.power_available, "power_distance_m": survey.power_distance_m,
+            "power_capacity_kw": survey.power_capacity_kw, "earthing_feasible": survey.earthing_feasible,
+            # Transmission
+            "fiber_available": survey.fiber_available, "fiber_distance_m": survey.fiber_distance_m,
+            "microwave_los": survey.microwave_los, "los_azimuth_deg": survey.los_azimuth_deg,
+            "los_distance_km": survey.los_distance_km,
+            # Environment/Access/Owner
+            "sensitive_points": survey.sensitive_points, "safety_notes": survey.safety_notes,
+            "permits_constraints": survey.permits_constraints, "entry_constraints": survey.entry_constraints,
+            "owner_name": survey.owner_name, "owner_phone": survey.owner_phone,
+            "access_time_window": survey.access_time_window,
+            # Conclusion & notes
+            "risks": survey.risks, "recommendations": survey.recommendations,
         }
         zf.writestr("summary.json", __import__("json").dumps(summary, ensure_ascii=False, indent=2))
 
-        # CSV
+        # CSV（包含全部键值）
         csv_buf = io.StringIO()
         writer = csv.writer(csv_buf)
         writer.writerow(["key", "value"])
@@ -706,8 +726,12 @@ async def export_survey_zip(
             writer.writerow([k, v])
         zf.writestr("summary.csv", csv_buf.getvalue())
 
-        # Photos
+        # Files (photos + attachments)
         photos = db.query(SiteSurveyPhoto).filter(SiteSurveyPhoto.survey_id == survey_id).all()
+        # files.csv 列出所有文件元数据
+        files_csv = io.StringIO()
+        fw = csv.writer(files_csv)
+        fw.writerow(["id","category","mime_type","file_name","file_path","file_size","taken_at","latitude","longitude"]) 
         for p in photos:
             if p.file_path and os.path.exists(p.file_path):
                 # put under photos/{category}/filename
@@ -715,6 +739,12 @@ async def export_survey_zip(
                 subdir = f"photos/{p.category or 'uncategorized'}"
                 arcname = f"{subdir}/{base_name}"
                 zf.write(p.file_path, arcname=arcname)
+                fw.writerow([
+                    p.id, p.category, p.mime_type, base_name, arcname,
+                    (os.path.getsize(p.file_path) if os.path.exists(p.file_path) else None),
+                    (p.taken_at.isoformat() if p.taken_at else None), p.latitude, p.longitude
+                ])
+        zf.writestr("files.csv", files_csv.getvalue())
 
     mem_zip.seek(0)
     filename = f"site_survey_{survey_id}.zip"
@@ -769,39 +799,65 @@ async def export_batch_zip(
                 site_name = s.site.site_name if s.site else ''
                 survey_folder = f"{site_code or 'site'}/{s.id}"
 
-            summary = {
-                "id": s.id,
-                "site_id": s.site_id,
-                "site_code": site_code,
-                "site_name": site_name,
-                "survey_date": s.survey_date.isoformat() if s.survey_date else None,
-                "surveyor_name": s.surveyor_name,
-                "feasibility": s.feasibility,
-                "latitude": s.latitude,
-                "longitude": s.longitude,
-                "address": s.address,
-                "risks": s.risks,
-                "recommendations": s.recommendations,
-            }
-            zf.writestr(f"{survey_folder}/summary.json", __import__("json").dumps(summary, ensure_ascii=False, indent=2))
+                summary = {
+                    "id": s.id,
+                    "site_id": s.site_id,
+                    "site_code": site_code,
+                    "site_name": site_name,
+                    "survey_date": s.survey_date.isoformat() if s.survey_date else None,
+                    "surveyor_name": s.surveyor_name,
+                    "surveyor_phone": s.surveyor_phone,
+                    "feasibility": s.feasibility,
+                    "address": s.address,
+                    # Geo
+                    "latitude": s.latitude, "longitude": s.longitude, "gps_accuracy": s.gps_accuracy,
+                    # Site/Structure
+                    "site_type": s.site_type, "tower_type": s.tower_type,
+                    "available_height_m": s.available_height_m, "load_capacity_kg": s.load_capacity_kg,
+                    # Power/Earthing
+                    "power_available": s.power_available, "power_distance_m": s.power_distance_m,
+                    "power_capacity_kw": s.power_capacity_kw, "earthing_feasible": s.earthing_feasible,
+                    # Transmission
+                    "fiber_available": s.fiber_available, "fiber_distance_m": s.fiber_distance_m,
+                    "microwave_los": s.microwave_los, "los_azimuth_deg": s.los_azimuth_deg,
+                    "los_distance_km": s.los_distance_km,
+                    # Environment/Access/Owner
+                    "sensitive_points": s.sensitive_points, "safety_notes": s.safety_notes,
+                    "permits_constraints": s.permits_constraints, "entry_constraints": s.entry_constraints,
+                    "owner_name": s.owner_name, "owner_phone": s.owner_phone,
+                    "access_time_window": s.access_time_window,
+                    # Conclusion & notes
+                    "risks": s.risks, "recommendations": s.recommendations,
+                }
+                zf.writestr(f"{survey_folder}/summary.json", __import__("json").dumps(summary, ensure_ascii=False, indent=2))
 
-            csv_buf = io.StringIO()
-            w = csv.writer(csv_buf)
-            for k, v in summary.items():
-                w.writerow([k, v])
-            zf.writestr(f"{survey_folder}/summary.csv", csv_buf.getvalue())
+                csv_buf = io.StringIO()
+                w = csv.writer(csv_buf)
+                for k, v in summary.items():
+                    w.writerow([k, v])
+                zf.writestr(f"{survey_folder}/summary.csv", csv_buf.getvalue())
 
-            writer.writerow([
-                s.id, site_code, site_name, summary["survey_date"], s.surveyor_name, s.feasibility
-            ])
+                writer.writerow([
+                    s.id, site_code, site_name, summary["survey_date"], s.surveyor_name, s.feasibility
+                ])
 
-            if include_photos:
                 photos = db.query(SiteSurveyPhoto).filter(SiteSurveyPhoto.survey_id == s.id).all()
+                # 写入文件索引 CSV
+                files_csv = io.StringIO()
+                fw = csv.writer(files_csv)
+                fw.writerow(["id","category","mime_type","file_name","file_path","file_size","taken_at","latitude","longitude"]) 
                 for p in photos:
-                    if p.file_path and os.path.exists(p.file_path):
-                        base = os.path.basename(p.file_path)
+                    base = os.path.basename(p.file_path) if p.file_path else ''
+                    rel = f"{survey_folder}/photos/{p.category or 'uncategorized'}/{base}" if base else ''
+                    if include_photos and p.file_path and os.path.exists(p.file_path):
                         pdir = f"{survey_folder}/photos/{p.category or 'uncategorized'}"
                         zf.write(p.file_path, arcname=f"{pdir}/{base}")
+                    fw.writerow([
+                        p.id, p.category, p.mime_type, base, rel,
+                        (os.path.getsize(p.file_path) if p.file_path and os.path.exists(p.file_path) else None),
+                        (p.taken_at.isoformat() if p.taken_at else None), p.latitude, p.longitude
+                    ])
+                zf.writestr(f"{survey_folder}/files.csv", files_csv.getvalue())
 
             zf.writestr("index.csv", index_csv.getvalue())
 
@@ -841,9 +897,13 @@ async def get_survey_audit_logs(
 @router.put("/photos/{photo_id}", response_model=SiteSurveyPhotoResponse)
 async def update_photo_metadata(
     photo_id: str,
-    category: Optional[str] = Form(None),
-    taken_at: Optional[str] = Form(None),
-    sort_order: Optional[int] = Form(None),
+    category: Optional[str] = Form(None, alias="category"),
+    taken_at: Optional[str] = Form(None, alias="taken_at"),
+    sort_order: Optional[int] = Form(None, alias="sort_order"),
+    # 兼容 JSON 载荷
+    category_json: Optional[str] = Body(None, embed=True, alias="category"),
+    taken_at_json: Optional[str] = Body(None, embed=True, alias="taken_at"),
+    sort_order_json: Optional[int] = Body(None, embed=True, alias="sort_order"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -852,13 +912,17 @@ async def update_photo_metadata(
     if not p:
         raise HTTPException(status_code=404, detail="照片不存在")
     before = {"category": p.category, "taken_at": p.taken_at.isoformat() if p.taken_at else None, "sort_order": p.sort_order}
-    if category is not None:
-        p.category = category
-    if sort_order is not None:
-        p.sort_order = sort_order
-    if taken_at:
+    # 以 form 值优先；若缺失则使用 JSON 值
+    eff_category = category if category is not None else category_json
+    eff_sort = sort_order if sort_order is not None else sort_order_json
+    eff_taken = taken_at if taken_at is not None else taken_at_json
+    if eff_category is not None:
+        p.category = eff_category
+    if eff_sort is not None:
+        p.sort_order = eff_sort
+    if eff_taken:
         try:
-            p.taken_at = datetime.fromisoformat(taken_at.replace("Z", "+00:00"))
+            p.taken_at = datetime.fromisoformat(eff_taken.replace("Z", "+00:00"))
         except Exception:
             pass
     db.commit()
@@ -878,26 +942,7 @@ async def update_photo_metadata(
     return p
 
 
-@router.put("/{survey_id}/photos/reorder")
-async def reorder_photos(
-    survey_id: str,
-    orders: List[str] = Form(...),  # list of photo_ids in desired order
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    _require_admin(current_user)
-    photos = db.query(SiteSurveyPhoto).filter(SiteSurveyPhoto.survey_id == survey_id).all()
-    id_to_photo = {p.id: p for p in photos}
-    for idx, pid in enumerate(orders, start=1):
-        if pid in id_to_photo:
-            id_to_photo[pid].sort_order = idx
-    db.commit()
-    try:
-        _audit(db, survey_id, "photo_reorder", current_user.id, details={"orders": orders})
-        db.commit()
-    except Exception:
-        db.rollback()
-    return {"success": True}
+# 照片排序功能已废弃：如需恢复，请参考历史实现（photo_reorder）。
 
 
 @router.post("/{survey_id}/photos/batch")
@@ -915,15 +960,19 @@ async def upload_photos_batch(
         stored_path = await save_uploaded_file(f, category="site_surveys", sub_folder=survey_id)
         file_hash = calculate_file_hash(stored_path)
         is_image = (f.content_type or '').startswith('image/')
+        # 先提取原始 EXIF，再压缩/水印
         raw_exif = None
         if is_image:
+            try:
+                raw_exif = extract_exif(stored_path)
+            except Exception:
+                raw_exif = None
             try:
                 stored_path = await compress_image(stored_path)
                 wm_text = f"Survey {survey_id} | {current_user.username} | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
                 add_text_watermark_inline(stored_path, wm_text)
-                raw_exif = extract_exif(stored_path)
             except Exception:
-                raw_exif = None
+                pass
         max_order = db.query(func.max(SiteSurveyPhoto.sort_order)).filter(SiteSurveyPhoto.survey_id == survey_id).scalar()
         next_order = (max_order or 0) + 1
         p = SiteSurveyPhoto(
@@ -979,17 +1028,7 @@ async def delete_photos_batch(
     return {"success": True, "deleted": len(photos)}
 
 
-@router.get("/photos/{photo_id}/exif")
-async def get_photo_exif(
-    photo_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    p = db.query(SiteSurveyPhoto).filter(SiteSurveyPhoto.id == photo_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="照片不存在")
-    data = p.exif or {}
-    return data
+# EXIF查看接口已废弃：如需恢复，请参考历史实现。
 
 
 @router.get("/{survey_id}/export-pdf")
@@ -1100,77 +1139,227 @@ async def export_survey_pdf(
         elements.append(Paragraph(m, styles["MetaCN"]))
     elements.append(PageBreak())
 
-    # Summary section as a key-value table
+    # Highlighted conclusion banner
+    feas = (survey.feasibility or "").strip()
+    feas_map = {
+        'feasible': ("可行", colors.HexColor('#67C23A')),
+        'conditionally_feasible': ("有条件可行", colors.HexColor('#E6A23C')),
+        'infeasible': ("不可行", colors.HexColor('#F56C6C')),
+    }
+    feas_label, feas_color = feas_map.get(feas, (feas or "未填写", primary))
+    badge = Table([[Paragraph(f"<b>结论：</b> {feas_label}", styles["BodyCN"])]], colWidths=[15*cm])
+    badge.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), feas_color),
+        ("TEXTCOLOR", (0,0), (-1,-1), colors.white),
+        ("LEFTPADDING", (0,0), (-1,-1), 8),
+        ("RIGHTPADDING", (0,0), (-1,-1), 8),
+        ("TOPPADDING", (0,0), (-1,-1), 6),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+    ]))
+    elements.append(badge)
+    elements.append(Spacer(1, 0.3*cm))
+
+    # 概览
     elements.append(Paragraph("概览", styles["H2CN"]))
     kv = [
         ("站点名称", site_name),
         ("站点编码", site_code),
         ("勘察日期", survey.survey_date.strftime('%Y-%m-%d %H:%M') if survey.survey_date else "-"),
         ("勘察人", survey.surveyor_name or "-"),
-        ("结论", survey.feasibility or "-"),
+        ("勘察人电话", survey.surveyor_phone or "-"),
         ("地址", survey.address or "-"),
         ("坐标", f"{survey.latitude or ''}, {survey.longitude or ''}"),
+        ("GPS精度(m)", f"{survey.gps_accuracy}" if survey.gps_accuracy is not None else "-"),
         ("风险", survey.risks or "-"),
         ("建议", survey.recommendations or "-"),
     ]
-    data = [[Paragraph(f"<b>{k}</b>", styles["BodyCN"]), Paragraph(v, styles["BodyCN"])] for k, v in kv]
-    table = Table(data, colWidths=[3*cm, 12*cm])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,-1), colors.white),
-        ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.white, accent_bg]),
-        ("TEXTCOLOR", (0,0), (0,-1), primary),
-        ("LINEBELOW", (0,0), (-1,-1), 0.25, colors.HexColor('#eeeeee')),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("LEFTPADDING", (0,0), (-1,-1), 6),
-        ("RIGHTPADDING", (0,0), (-1,-1), 6),
-        ("TOPPADDING", (0,0), (-1,-1), 6),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-    ]))
-    elements.append(table)
+    def _fmt_val(v):
+        try:
+            # booleans and None
+            if v is None:
+                return '-'
+            # numbers
+            if isinstance(v, (int, float)):
+                return ("%.6f" % v).rstrip('0').rstrip('.') if isinstance(v, float) else str(v)
+            # datetime
+            if isinstance(v, datetime):
+                return v.strftime('%Y-%m-%d %H:%M')
+            # other
+            s = str(v)
+            return s if s.strip() != '' else '-'
+        except Exception:
+            return str(v)
 
-    # Photos grid
+    def build_kv_table(pairs):
+        data = [[Paragraph(f"<b>{k}</b>", styles["BodyCN"]), Paragraph(_fmt_val(v), styles["BodyCN"])] for k, v in pairs]
+        t = Table(data, colWidths=[3*cm, 12*cm])
+        t.setStyle(TableStyle([
+            ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.white, accent_bg]),
+            ("LINEBELOW", (0,0), (-1,-1), 0.25, colors.HexColor('#eeeeee')),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("LEFTPADDING", (0,0), (-1,-1), 6),
+            ("RIGHTPADDING", (0,0), (-1,-1), 6),
+            ("TOPPADDING", (0,0), (-1,-1), 6),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+        ]))
+        return t
+    elements.append(build_kv_table(kv))
+
+    # 详细信息分组
+    elements.append(Spacer(1, 0.4*cm))
+    elements.append(Paragraph("场地与结构", styles["H2CN"]))
+    elements.append(build_kv_table([
+        ("站点类型", survey.site_type),
+        ("塔型", survey.tower_type),
+        ("可用挂高(m)", survey.available_height_m),
+        ("荷载(kg)", survey.load_capacity_kg),
+    ]))
+
+    elements.append(Spacer(1, 0.4*cm))
+    elements.append(Paragraph("供电与回传", styles["H2CN"]))
+    elements.append(build_kv_table([
+        ("市电可用", '是' if survey.power_available else ('否' if survey.power_available is not None else '-')),
+        ("电源距离(m)", survey.power_distance_m),
+        ("容量(kW)", survey.power_capacity_kw),
+        ("接地可行", '是' if survey.earthing_feasible else ('否' if survey.earthing_feasible is not None else '-')),
+        ("光纤可用", '是' if survey.fiber_available else ('否' if survey.fiber_available is not None else '-')),
+        ("光纤距离(m)", survey.fiber_distance_m),
+        ("微波LoS", '是' if survey.microwave_los else ('否' if survey.microwave_los is not None else '-')),
+        ("方位角(°)", survey.los_azimuth_deg),
+        ("距离(km)", survey.los_distance_km),
+    ]))
+
+    elements.append(Spacer(1, 0.4*cm))
+    elements.append(Paragraph("环境与进场", styles["H2CN"]))
+    elements.append(build_kv_table([
+        ("敏感点", survey.sensitive_points),
+        ("安全/隐患", survey.safety_notes),
+        ("审批/物业限制", survey.permits_constraints),
+        ("进场限制", survey.entry_constraints),
+    ]))
+
+    elements.append(Spacer(1, 0.2*cm))
+    elements.append(Paragraph("业主信息", styles["H2CN"]))
+    elements.append(build_kv_table([
+        ("业主姓名", survey.owner_name),
+        ("业主电话", survey.owner_phone),
+        ("时间窗口", survey.access_time_window),
+    ]))
+
+    # 附件清单（非图片）
+    attachments = (
+        db.query(SiteSurveyPhoto)
+        .filter(SiteSurveyPhoto.survey_id == survey_id)
+        .filter(or_(SiteSurveyPhoto.mime_type == None, ~SiteSurveyPhoto.mime_type.like('image/%')))  # noqa: E711
+        .order_by(SiteSurveyPhoto.created_at.asc())
+        .all()
+    )
+    if attachments:
+        elements.append(Spacer(1, 0.4*cm))
+        elements.append(Paragraph("附件清单", styles["H2CN"]))
+        rows = [["文件名", "分类", "类型", "大小(KB)"]]
+        for a in attachments:
+            size_kb = None
+            try:
+                if a.file_path and os.path.exists(a.file_path):
+                    size_kb = int(os.path.getsize(a.file_path)/1024)
+            except Exception:
+                size_kb = None
+            rows.append([
+                os.path.basename(a.file_path) if a.file_path else (a.original_name or a.id),
+                a.category or '-', a.mime_type or '-', str(size_kb or '-')
+            ])
+        t = Table(rows, colWidths=[8*cm, 3*cm, 3*cm, 2*cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), primary), ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, accent_bg]),
+            ("LINEBELOW", (0,0), (-1,-1), 0.25, colors.HexColor('#eeeeee')),
+            ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6),
+            ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+        ]))
+        elements.append(t)
+
+    # Photos grid（按分类分组排版，仅包含图片类型）
     photos = (
         db.query(SiteSurveyPhoto)
         .filter(SiteSurveyPhoto.survey_id == survey_id)
         .order_by(SiteSurveyPhoto.sort_order.asc().nulls_last(), SiteSurveyPhoto.created_at.asc())
         .all()
     )
+    # 仅保留图片类型，避免将附件（PDF/CAD等）混入照片区
+    photos = [p for p in photos if (p.mime_type or '').startswith('image/')]
+
     if photos:
+        # 小标题样式用于分类标题
+        styles.add(ParagraphStyle(name="H3CN", fontName=FONT_BOLD, fontSize=13, leading=18, textColor=text_color, spaceBefore=8, spaceAfter=4))
+
         elements.append(Spacer(1, 0.6*cm))
         elements.append(Paragraph("照片索引", styles["H2CN"]))
-        row: list = []
-        grid: list = []
-        for idx, p in enumerate(photos, start=1):
-            if not p.file_path or not os.path.exists(p.file_path):
+
+        # 映射分类显示名称（与前端一致）
+        def cat_label(k: str) -> str:
+            mapping = {
+                'overview': '全景',
+                'power': '电力/配电',
+                'room': '机房/机柜',
+                'duct': '管道/弱电',
+                'roof': '屋面/塔体',
+                'hazard': '隐患',
+                'custom': '其他',
+                'uncategorized': '未分类',
+            }
+            return mapping.get(k, k or '未分类')
+
+        # 分组
+        grouped: dict[str, list] = {}
+        for p in photos:
+            k = p.category or 'uncategorized'
+            grouped.setdefault(k, []).append(p)
+
+        # 分类顺序：已知类别优先，然后其余按名称排序
+        known_order = ['overview', 'power', 'room', 'duct', 'roof', 'hazard', 'custom', 'uncategorized']
+        present = list(grouped.keys())
+        ordered_cats = [k for k in known_order if k in present] + sorted([k for k in present if k not in known_order])
+
+        # 逐分类排版（两列网格）
+        for cat in ordered_cats:
+            group = [p for p in grouped[cat] if p.file_path and os.path.exists(p.file_path)]
+            if not group:
                 continue
-            try:
-                img = Image(p.file_path, width=7.4*cm, height=5.0*cm)
-                caption = Paragraph(f"{p.category or '未分类'} - {os.path.basename(p.file_path)}", styles["CaptionCN"])
-                cell = Table([[img],[caption]], colWidths=[7.4*cm])
-                cell.setStyle(TableStyle([
-                    ("ALIGN", (0,0), (-1,-1), "CENTER"),
-                    ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            elements.append(Paragraph(f"{cat_label(cat)}（{len(group)}）", styles["H3CN"]))
+
+            row: list = []
+            grid: list = []
+            for p in group:
+                try:
+                    img = Image(p.file_path, width=7.4*cm, height=5.0*cm)
+                    # 标注文件名作为说明
+                    caption = Paragraph(os.path.basename(p.file_path), styles["CaptionCN"])
+                    cell = Table([[img], [caption]], colWidths=[7.4*cm])
+                    cell.setStyle(TableStyle([
+                        ("ALIGN", (0,0), (-1,-1), "CENTER"),
+                        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+                    ]))
+                    row.append(cell)
+                    if len(row) == 2:
+                        grid.append(row)
+                        row = []
+                except Exception:
+                    continue
+            if row:
+                # 填充最后一列占位，保持两列对齐
+                row.append(Spacer(7.4*cm, 0))
+                grid.append(row)
+            if grid:
+                grid_table = Table(grid, colWidths=[7.6*cm, 7.6*cm], hAlign='LEFT', spaceBefore=6)
+                grid_table.setStyle(TableStyle([
+                    ("VALIGN", (0,0), (-1,-1), "TOP"),
+                    ("LEFTPADDING", (0,0), (-1,-1), 4),
+                    ("RIGHTPADDING", (0,0), (-1,-1), 4),
+                    ("TOPPADDING", (0,0), (-1,-1), 6),
+                    ("BOTTOMPADDING", (0,0), (-1,-1), 6),
                 ]))
-                row.append(cell)
-                if len(row) == 2:
-                    grid.append(row)
-                    row = []
-            except Exception:
-                continue
-        if row:
-            # fill last row
-            row.append(Spacer(7.4*cm, 0))
-            grid.append(row)
-        if grid:
-            grid_table = Table(grid, colWidths=[7.6*cm, 7.6*cm], hAlign='LEFT', spaceBefore=6)
-            grid_table.setStyle(TableStyle([
-                ("VALIGN", (0,0), (-1,-1), "TOP"),
-                ("LEFTPADDING", (0,0), (-1,-1), 4),
-                ("RIGHTPADDING", (0,0), (-1,-1), 4),
-                ("TOPPADDING", (0,0), (-1,-1), 6),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-            ]))
-            elements.append(grid_table)
+                elements.append(grid_table)
 
     # Build
     doc.build(elements, onFirstPage=draw_page_frame, onLaterPages=draw_page_frame)

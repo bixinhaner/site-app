@@ -33,6 +33,9 @@
             <el-form-item label="勘察人">
               <el-input v-model="form.surveyor_name" />
             </el-form-item>
+            <el-form-item label="勘察人电话">
+              <el-input v-model="form.surveyor_phone" />
+            </el-form-item>
             <el-form-item label="结论">
               <el-select v-model="form.feasibility" style="width:100%">
                 <el-option label="可行" value="feasible" />
@@ -51,16 +54,50 @@
                 <el-button size="small" @click="copyCoords">复制</el-button>
               </div>
             </el-form-item>
+            <el-form-item label="GPS精度(m)">
+              <el-input-number v-model="form.gps_accuracy" :step="1" :controls="false" />
+            </el-form-item>
             <el-form-item label="风险">
               <el-input v-model="form.risks" type="textarea" :rows="3" />
             </el-form-item>
             <el-form-item label="建议">
               <el-input v-model="form.recommendations" type="textarea" :rows="3" />
             </el-form-item>
+
+            <el-divider>场地与结构</el-divider>
+            <el-form-item label="站点类型"><el-input v-model="form.site_type" /></el-form-item>
+            <el-form-item label="塔型"><el-input v-model="form.tower_type" /></el-form-item>
+            <el-form-item label="可用挂高(m)"><el-input-number v-model="form.available_height_m" :step="0.5" :controls="false" /></el-form-item>
+            <el-form-item label="荷载(kg)"><el-input-number v-model="form.load_capacity_kg" :step="10" :controls="false" /></el-form-item>
+
+            <el-divider>供电与回传</el-divider>
+            <el-form-item label="市电可用"><el-switch v-model="form.power_available" /></el-form-item>
+            <el-form-item label="电源距离(m)"><el-input-number v-model="form.power_distance_m" :step="1" :controls="false" /></el-form-item>
+            <el-form-item label="容量(kW)"><el-input-number v-model="form.power_capacity_kw" :step="0.1" :precision="1" :controls="false" /></el-form-item>
+            <el-form-item label="接地可行"><el-switch v-model="form.earthing_feasible" /></el-form-item>
+            <el-form-item label="光纤可用"><el-switch v-model="form.fiber_available" /></el-form-item>
+            <el-form-item label="光纤距离(m)"><el-input-number v-model="form.fiber_distance_m" :step="1" :controls="false" /></el-form-item>
+            <el-form-item label="微波LoS"><el-switch v-model="form.microwave_los" /></el-form-item>
+            <el-form-item label="方位角(°)"><el-input-number v-model="form.los_azimuth_deg" :step="1" :controls="false" /></el-form-item>
+            <el-form-item label="距离(km)"><el-input-number v-model="form.los_distance_km" :step="0.1" :precision="1" :controls="false" /></el-form-item>
+
+            <el-divider>环境与进场</el-divider>
+            <el-form-item label="敏感点"><el-input v-model="form.sensitive_points" type="textarea" :rows="2" /></el-form-item>
+            <el-form-item label="安全/隐患"><el-input v-model="form.safety_notes" type="textarea" :rows="2" /></el-form-item>
+            <el-form-item label="审批/物业限制"><el-input v-model="form.permits_constraints" type="textarea" :rows="2" /></el-form-item>
+            <el-form-item label="进场限制"><el-input v-model="form.entry_constraints" type="textarea" :rows="2" /></el-form-item>
+
+            <el-divider>业主信息</el-divider>
+            <el-form-item label="业主姓名"><el-input v-model="form.owner_name" /></el-form-item>
+            <el-form-item label="业主电话"><el-input v-model="form.owner_phone" /></el-form-item>
+            <el-form-item label="时间窗口"><el-input v-model="form.access_time_window" /></el-form-item>
           </el-form>
         </el-card>
 
-        <el-card style="margin-top: 16px;">
+      </el-col>
+      <el-col :span="14">
+        <!-- 上传照片卡片：移动至照片墙上方，操作更就近 -->
+        <el-card>
           <template #header>上传照片</template>
           <div class="upload-bar">
             <el-select v-model="uploadCategory" placeholder="选择分类" style="width:200px">
@@ -84,15 +121,13 @@
           </div>
           <div class="tips">请先选择分类再上传；支持jpg/png，单张≤10MB</div>
         </el-card>
-      </el-col>
-      <el-col :span="14">
-        <el-card>
+
+        <el-card style="margin-top: 16px;">
           <template #header>
             <div style="display:flex; justify-content: space-between; align-items:center;">
               <span>照片墙</span>
               <div class="header-actions" v-if="isAdmin">
                 <el-button size="small" type="danger" :disabled="selectedIds.length===0" @click="batchDelete">删除所选</el-button>
-                <el-button size="small" type="primary" :disabled="photos.length===0" @click="saveOrder">保存排序</el-button>
               </div>
             </div>
           </template>
@@ -103,9 +138,9 @@
               <div class="grid">
                 <div v-for="(p, idx) in photosByCat[cat]" :key="p.id" class="item">
                   <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
-                  <div class="meta">
-                    <el-checkbox v-model="selectedMap[p.id]">选择</el-checkbox>
-                    <el-select size="small" v-model="p.category" style="width:120px" @change="updateCategory(p)" v-if="isAdmin">
+                  <div class="meta compact">
+                    <el-checkbox v-model="selectedMap[p.id]" size="small" />
+                    <el-select size="small" v-model="p.category" class="cat-select" @change="updateCategory(p)" v-if="isAdmin">
                       <el-option label="全景" value="overview" />
                       <el-option label="电力/配电" value="power" />
                       <el-option label="机房/机柜" value="room" />
@@ -115,10 +150,9 @@
                       <el-option label="其他" value="custom" />
                     </el-select>
                     <div class="meta-actions">
-                      <el-button link size="small" @click="viewExif(p)">EXIF</el-button>
-                      <el-button link type="danger" size="small" @click="delPhoto(p)" v-if="isAdmin">删除</el-button>
-                      <el-button link size="small" @click="moveUp(cat, idx)" :disabled="idx===0 || !isAdmin">上移</el-button>
-                      <el-button link size="small" @click="moveDown(cat, idx)" :disabled="idx===photosByCat[cat].length-1 || !isAdmin">下移</el-button>
+                      <el-button link type="danger" size="small" @click="delPhoto(p)" v-if="isAdmin" title="删除" aria-label="删除">
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
                     </div>
                   </div>
                 </div>
@@ -180,6 +214,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { siteSurveysApi } from '@/api/siteSurveys'
 import { useUserStore } from '@/stores/user'
+import config from '@/config/env.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -201,12 +236,35 @@ const load = async () => {
   form.value = {
     survey_date: res.survey_date ? new Date(res.survey_date) : new Date(),
     surveyor_name: res.surveyor_name,
+    surveyor_phone: res.surveyor_phone,
     feasibility: res.feasibility,
     address: res.address,
     latitude: res.latitude,
     longitude: res.longitude,
+    gps_accuracy: res.gps_accuracy,
     risks: res.risks,
-    recommendations: res.recommendations
+    recommendations: res.recommendations,
+    // extra sections
+    site_type: res.site_type,
+    tower_type: res.tower_type,
+    available_height_m: res.available_height_m,
+    load_capacity_kg: res.load_capacity_kg,
+    power_available: res.power_available,
+    power_distance_m: res.power_distance_m,
+    power_capacity_kw: res.power_capacity_kw,
+    earthing_feasible: res.earthing_feasible,
+    fiber_available: res.fiber_available,
+    fiber_distance_m: res.fiber_distance_m,
+    microwave_los: res.microwave_los,
+    los_azimuth_deg: res.los_azimuth_deg,
+    los_distance_km: res.los_distance_km,
+    sensitive_points: res.sensitive_points,
+    safety_notes: res.safety_notes,
+    permits_constraints: res.permits_constraints,
+    entry_constraints: res.entry_constraints,
+    owner_name: res.owner_name,
+    owner_phone: res.owner_phone,
+    access_time_window: res.access_time_window
   }
   photos.value = res.photos || []
 }
@@ -215,7 +273,16 @@ const load = async () => {
   try {
     saving.value = true
     // 仅提交变更字段，提升历史摘要可读性
-    const keys = ['survey_date','surveyor_name','feasibility','address','latitude','longitude','risks','recommendations']
+    const keys = [
+      'survey_date','surveyor_name','surveyor_phone','feasibility','address','latitude','longitude','gps_accuracy',
+      'risks','recommendations',
+      // extra sections
+      'site_type','tower_type','available_height_m','load_capacity_kg',
+      'power_available','power_distance_m','power_capacity_kw','earthing_feasible',
+      'fiber_available','fiber_distance_m','microwave_los','los_azimuth_deg','los_distance_km',
+      'sensitive_points','safety_notes','permits_constraints','entry_constraints',
+      'owner_name','owner_phone','access_time_window'
+    ]
     const payload = {}
     for (const k of keys) {
       const cur = form.value[k]
@@ -311,44 +378,7 @@ const load = async () => {
   }
 }
 
-const viewExif = async (p) => {
-  try {
-    const data = await siteSurveysApi.getExif(p.id)
-    const pretty = JSON.stringify(data || {}, null, 2)
-    ElMessage({ type: 'info', message: pretty, duration: 5000, showClose: true })
-  } catch (e) {
-    console.error(e)
-    ElMessage.error('读取EXIF失败')
-  }
-}
-
-const moveUp = (cat, idx) => {
-  const arr = photosByCat.value[cat]
-  if (idx <= 0) return
-  const tmp = arr[idx-1]; arr[idx-1] = arr[idx]; arr[idx] = tmp
-}
-const moveDown = (cat, idx) => {
-  const arr = photosByCat.value[cat]
-  if (idx >= arr.length-1) return
-  const tmp = arr[idx+1]; arr[idx+1] = arr[idx]; arr[idx] = tmp
-}
-  const saveOrder = async () => {
-    try {
-      // Flatten by current UI order
-      const ordered = []
-      for (const k of photosByCatKeys.value) {
-        for (const p of photosByCat.value[k]) ordered.push(p.id)
-      }
-      const fd = new FormData()
-      ordered.forEach(id => fd.append('orders', id))
-      await siteSurveysApi.reorderPhotos(id, fd)
-      ElMessage.success('已保存排序')
-      await loadAuditLogs()
-    } catch (e) {
-    console.error(e)
-    ElMessage.error('保存排序失败')
-  }
-}
+// 排序与EXIF功能已移除
 
 const photosByCat = computed(() => {
   const map = {}
@@ -366,7 +396,17 @@ const catLabel = (k) => ({
   overview: '全景', power: '电力/配电', room: '机房/机柜', duct: '管道/弱电', roof: '屋面/塔体', hazard: '隐患', custom: '其他', uncategorized: '未分类'
 }[k] || k)
 
-const fileUrl = (p) => !p ? '' : (p.startsWith('/') ? p : `/${p}`)
+const fileUrl = (filePath) => {
+  if (!filePath) return ''
+  // absolute or data URL
+  if (/^https?:\/\//i.test(filePath) || filePath.startsWith('data:')) return filePath
+  // common case: backend returns paths like 'uploads/xxx' (no leading slash)
+  if (filePath.startsWith('uploads/')) return `${config.API_BASE_URL}/${filePath}`
+  // leading slash paths like '/uploads/xxx' should also point to backend host
+  if (filePath.startsWith('/uploads/')) return `${config.API_BASE_URL}${filePath}`
+  // fallback: resolve relative to backend base
+  return `${config.API_BASE_URL}/${filePath.replace(/^\//, '')}`
+}
 const formatDate = (iso) => iso ? new Date(iso).toLocaleString() : '-'
 
 const toggleEdit = () => { editing.value = true }
@@ -432,8 +472,13 @@ const actionLabel = (a) => ({
 }[a] || a)
 
 const labelMap = {
-  feasibility: '结论', surveyor_name: '勘察人', survey_date: '勘察日期', address: '地址',
-  latitude: '纬度', longitude: '经度', risks: '风险', recommendations: '建议',
+  feasibility: '结论', surveyor_name: '勘察人', survey_date: '勘察日期', surveyor_phone: '勘察人电话', address: '地址',
+  latitude: '纬度', longitude: '经度', gps_accuracy: 'GPS精度', risks: '风险', recommendations: '建议',
+  site_type: '站点类型', tower_type: '塔型', available_height_m: '可用挂高', load_capacity_kg: '荷载',
+  power_available: '市电可用', power_distance_m: '电源距离', power_capacity_kw: '容量(kW)', earthing_feasible: '接地可行',
+  fiber_available: '光纤可用', fiber_distance_m: '光纤距离', microwave_los: '微波LoS', los_azimuth_deg: '方位角', los_distance_km: '距离(km)',
+  sensitive_points: '敏感点', safety_notes: '安全/隐患', permits_constraints: '审批/物业限制', entry_constraints: '进场限制',
+  owner_name: '业主姓名', owner_phone: '业主电话', access_time_window: '时间窗口',
   category: '分类', taken_at: '拍摄时间', sort_order: '显示顺序'
 }
 const feasibilityLabel = (v) => ({ feasible: '可行', conditionally_feasible: '有条件可行', infeasible: '不可行' }[v] || v)
@@ -441,6 +486,7 @@ const formatVal = (k, v) => {
   if (k === 'feasibility') return feasibilityLabel(v)
   if (k === 'survey_date' || k === 'taken_at' || k === 'created_at') return formatDate(v)
   if (typeof v === 'number' && (k === 'latitude' || k === 'longitude')) return v.toFixed(6)
+  if (typeof v === 'boolean' && ['power_available','fiber_available','earthing_feasible','microwave_los'].includes(k)) return v ? '是' : '否'
   if (v === null || v === undefined || v === '') return '-'
   return v
 }
@@ -480,14 +526,21 @@ const isAdmin = userStore.isAdmin
 .upload-bar { display:flex; gap:12px; align-items:center; margin-bottom: 8px; }
 .tips { color:#999; font-size: 12px; }
 .empty { color:#999; }
-.photo-groups { display:flex; flex-direction: column; gap: 12px; }
-.group-title { margin:0 0 8px 0; }
-.grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.item { border:1px solid #eee; border-radius: 6px; overflow:hidden; }
-.item .el-image { width:100%; height:160px; }
+.photo-groups { display:flex; flex-direction: column; gap: 20px; }
+.group-title { margin:0 0 8px 0; font-weight: 600; }
+/* 更灵活的自适应网格，最小宽 240px */
+.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.item { border:1px solid #eee; border-radius: 10px; overflow:hidden; background:#fff; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.item .el-image { width:100%; height:auto; aspect-ratio: 4 / 3; }
 .meta { display:flex; justify-content: space-between; align-items:center; padding:6px 8px; font-size:12px; background:#fafafa; }
+.meta.compact { gap: 8px; }
+.cat-select { width: 110px; }
+/* 让复选框更紧凑，隐藏文字标签 */
+.meta :deep(.el-checkbox__label) { display:none; }
+/* 压缩链接按钮内边距 */
+.meta :deep(.el-button.is-link) { padding: 0 6px; }
 @media (max-width: 1280px) {
-  .grid { grid-template-columns: repeat(3, 1fr); }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 }
 @media (max-width: 960px) {
   .grid { grid-template-columns: repeat(2, 1fr); }

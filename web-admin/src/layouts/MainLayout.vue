@@ -81,9 +81,9 @@
         </div>
         
         <!-- 页面内容 -->
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
+        <router-view v-slot="{ Component, route }">
+          <transition name="fade">
+            <component v-if="Component" :is="Component" :key="route.fullPath" />
           </transition>
         </router-view>
       </el-main>
