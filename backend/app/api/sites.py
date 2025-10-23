@@ -7,6 +7,8 @@ from app.models.user import User
 from app.models.site import Site
 from app.schemas.site import SiteCreate, SiteUpdate, SiteResponse
 from app.api.auth import get_current_user
+from sqlalchemy import func
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -142,3 +144,38 @@ async def delete_site(
     db.commit()
     
     return {"message": "Site deleted successfully"}
+
+
+class SiteStatsSummary(BaseModel):
+    total_sites: int
+    status_stats: dict
+    type_stats: dict
+
+
+@router.get("/stats/summary", response_model=SiteStatsSummary)
+async def get_site_stats_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """站点统计信息（管理员/经理）"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+
+    total_sites = db.query(func.count(Site.id)).scalar() or 0
+
+    # 按状态统计
+    status_rows = db.query(Site.status, func.count(Site.id)).group_by(Site.status).all()
+    status_stats = {str(s or "unknown"): int(c) for s, c in status_rows}
+
+    # 按类型统计
+    type_rows = db.query(Site.site_type, func.count(Site.id)).group_by(Site.site_type).all()
+    type_stats = {str(t or "unknown"): int(c) for t, c in type_rows}
+
+    return SiteStatsSummary(
+        total_sites=total_sites,
+        status_stats=status_stats,
+        type_stats=type_stats,
+    )

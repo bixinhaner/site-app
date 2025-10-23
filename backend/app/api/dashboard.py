@@ -1,0 +1,94 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy import func, desc
+from typing import Optional
+
+from app.core.database import get_db
+from app.api.auth import get_current_user
+from app.models.user import User
+from app.models.user import User as UserModel
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum
+from app.models.inspection import SiteInspection, InspectionStatusEnum
+from app.models.site import Site
+from app.models.equipment import Inventory, Equipment, StockTransaction
+
+router = APIRouter()
+
+
+@router.get("/summary")
+async def get_dashboard_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """仪表盘聚合汇总。
+
+    返回字段设计与前端 Phase 1 保持兼容：
+    - work_orders: { total, status }
+    - users: { total, active } （非管理员时置为 null）
+    - inventory: { low_stock_count, main_device_total_stock, recent_transactions }
+    - sites: { approx: false, status }
+    - inspections: { pending_review_count }
+    - surveys: { last7d_new }
+    - time_range: { from, to }
+    """
+
+    now = func.now()
+
+    # 工单统计
+    total_work_orders = db.query(func.count(WorkOrder.id)).scalar() or 0
+    status_rows = db.query(WorkOrder.status, func.count(WorkOrder.id)).group_by(WorkOrder.status).all()
+    work_order_status = {s.value if hasattr(s, 'value') else str(s): int(c) for s, c in status_rows}
+
+    # 用户统计（仅管理员/经理）
+    users_total = None
+    users_active = None
+    if current_user.role in ["admin", "manager"]:
+        users_total = db.query(func.count(UserModel.id)).scalar() or 0
+        users_active = db.query(func.count(UserModel.id)).filter(UserModel.is_active == True).scalar() or 0
+
+    # 库存汇总
+    low_stock_count = db.query(func.count(Inventory.id)).filter(Inventory.current_stock <= Inventory.min_stock).scalar() or 0
+    main_device_total_stock = db.query(func.sum(Inventory.current_stock)).join(Equipment).filter(Equipment.category == "main_device").scalar() or 0
+    recent_transactions = db.query(StockTransaction).order_by(desc(StockTransaction.operation_time)).limit(5).all()
+    transactions_data = [{
+        "id": t.id,
+        "type": t.transaction_type,
+        "document_number": t.document_number,
+        "operator_name": t.operator.full_name if t.operator else None,
+        "operation_time": t.operation_time.isoformat() if t.operation_time else None,
+        "total_quantity": t.total_quantity,
+    } for t in recent_transactions]
+
+    # 站点状态统计（精准）
+    site_rows = db.query(Site.status, func.count(Site.id)).group_by(Site.status).all()
+    site_status = {str(s or "unknown"): int(c) for s, c in site_rows}
+
+    # 检查待审统计
+    pending_review_count = db.query(func.count(SiteInspection.id)).filter(
+        SiteInspection.status.in_([InspectionStatusEnum.SUBMITTED, InspectionStatusEnum.UNDER_REVIEW])
+    ).scalar() or 0
+
+    # 勘察近7日
+    from datetime import datetime, timedelta
+    end = datetime.utcnow()
+    start = end - timedelta(days=7)
+    from app.models.survey import SiteSurvey
+    surveys_last7d = db.query(func.count(SiteSurvey.id)).filter(
+        SiteSurvey.created_at >= start,
+        SiteSurvey.created_at <= end
+    ).scalar() or 0
+
+    return {
+        "work_orders": {"total": int(total_work_orders), "status": work_order_status},
+        "users": {"total": users_total, "active": users_active},
+        "inventory": {
+            "low_stock_count": int(low_stock_count),
+            "main_device_total_stock": int(main_device_total_stock or 0),
+            "recent_transactions": transactions_data,
+        },
+        "sites": {"approx": False, "status": site_status},
+        "inspections": {"pending_review_count": int(pending_review_count)},
+        "surveys": {"last7d_new": int(surveys_last7d)},
+        "time_range": {"from": start.isoformat(), "to": end.isoformat()},
+    }
+

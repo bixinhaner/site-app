@@ -2323,3 +2323,59 @@ async def get_equipment_binding_history(
         "total_records": len(result),
         "history": result
     }
+
+
+# === 统计汇总 ===
+from sqlalchemy import func
+from app.models.inspection import SiteInspection, InspectionStatusEnum
+
+
+@router.get("/stats/summary", response_model=InspectionStatistics)
+async def get_inspection_stats_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """检查记录统计（管理员/经理）"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+
+    total = db.query(func.count(SiteInspection.id)).scalar() or 0
+
+    completed = db.query(func.count(SiteInspection.id)).filter(
+        SiteInspection.status == InspectionStatusEnum.COMPLETED
+    ).scalar() or 0
+
+    approved = db.query(func.count(SiteInspection.id)).filter(
+        SiteInspection.status == InspectionStatusEnum.APPROVED
+    ).scalar() or 0
+
+    rejected = db.query(func.count(SiteInspection.id)).filter(
+        SiteInspection.status == InspectionStatusEnum.REJECTED
+    ).scalar() or 0
+
+    pending = db.query(func.count(SiteInspection.id)).filter(
+        SiteInspection.status.in_([
+            InspectionStatusEnum.DRAFT,
+            InspectionStatusEnum.IN_PROGRESS,
+            InspectionStatusEnum.SUBMITTED,
+            InspectionStatusEnum.UNDER_REVIEW
+        ])
+    ).scalar() or 0
+
+    avg_score = db.query(func.avg(SiteInspection.score)).scalar()
+    avg_score = float(avg_score) if avg_score is not None else None
+
+    avg_completion_rate = db.query(func.avg(SiteInspection.completion_rate)).scalar() or 0.0
+
+    return InspectionStatistics(
+        total_inspections=int(total),
+        completed_inspections=int(completed),
+        pending_inspections=int(pending),
+        approved_inspections=int(approved),
+        rejected_inspections=int(rejected),
+        average_score=avg_score,
+        completion_rate=float(avg_completion_rate or 0.0)
+    )

@@ -10,7 +10,7 @@ from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
 from app.models import survey as _survey_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders
-from app.api import site_planning, logs, site_surveys
+from app.api import site_planning, logs, site_surveys, dashboard
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -62,6 +62,7 @@ app.include_router(site_planning.router, prefix="/api/sites", tags=["站点规�
 app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单管理"])
 app.include_router(logs.router, prefix="/api", tags=["用户日志"])
 app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表盘"])
 
 @app.get("/")
 async def root():
