@@ -162,6 +162,74 @@ def run_migration(db_path='site_manager.db'):
                     FOREIGN KEY (actor_id) REFERENCES users(id)
                 )
             '''
+            ,
+            'site_surveys': '''
+                CREATE TABLE site_surveys (
+                    id VARCHAR(32) PRIMARY KEY,
+                    site_id INTEGER NOT NULL,
+                    survey_date DATETIME NOT NULL,
+                    surveyor_name VARCHAR(100) NOT NULL,
+                    surveyor_phone VARCHAR(30),
+                    latitude FLOAT,
+                    longitude FLOAT,
+                    address TEXT,
+                    gps_accuracy FLOAT,
+                    site_type VARCHAR(50),
+                    tower_type VARCHAR(50),
+                    available_height_m FLOAT,
+                    load_capacity_kg FLOAT,
+                    power_available BOOLEAN,
+                    power_distance_m FLOAT,
+                    power_capacity_kw FLOAT,
+                    earthing_feasible BOOLEAN,
+                    fiber_available BOOLEAN,
+                    fiber_distance_m FLOAT,
+                    duct_notes TEXT,
+                    microwave_los BOOLEAN,
+                    los_azimuth_deg FLOAT,
+                    los_distance_km FLOAT,
+                    sensitive_points TEXT,
+                    safety_notes TEXT,
+                    permits_constraints TEXT,
+                    owner_name VARCHAR(100),
+                    owner_phone VARCHAR(30),
+                    access_time_window VARCHAR(100),
+                    entry_constraints TEXT,
+                    feasibility VARCHAR(30),
+                    risks TEXT,
+                    recommendations TEXT,
+                    extra_data JSON,
+                    created_by INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (site_id) REFERENCES sites(id),
+                    FOREIGN KEY (created_by) REFERENCES users(id)
+                )
+            ''',
+            'site_survey_photos': '''
+                CREATE TABLE site_survey_photos (
+                    id VARCHAR(32) PRIMARY KEY,
+                    survey_id VARCHAR(32) NOT NULL,
+                    original_name VARCHAR(255),
+                    file_path VARCHAR(500) NOT NULL,
+                    file_size INTEGER,
+                    mime_type VARCHAR(100),
+                    category VARCHAR(50),
+                    latitude FLOAT,
+                    longitude FLOAT,
+                    gps_accuracy FLOAT,
+                    address TEXT,
+                    taken_at DATETIME,
+                    has_watermark BOOLEAN DEFAULT FALSE,
+                    watermark_data JSON,
+                    hash_value VARCHAR(64),
+                    uploaded_by INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (survey_id) REFERENCES site_surveys(id) ON DELETE CASCADE,
+                    FOREIGN KEY (uploaded_by) REFERENCES users(id)
+                )
+            '''
         }
         
         for table_name, create_sql in new_tables.items():
@@ -188,6 +256,10 @@ def run_migration(db_path='site_manager.db'):
             ("idx_site_antenna_ports_planning_id", "site_antenna_ports", "planning_id"),
             ("idx_site_switch_ports_planning_id", "site_switch_ports", "planning_id"),
             ("idx_planning_change_logs_site_id", "planning_change_logs", "site_id"),
+            ("idx_site_surveys_site_id", "site_surveys", "site_id"),
+            ("idx_site_surveys_survey_date", "site_surveys", "survey_date"),
+            ("idx_site_surveys_feasibility", "site_surveys", "feasibility"),
+            ("idx_site_survey_photos_survey_id", "site_survey_photos", "survey_id"),
         ]
         
         for index_name, table_name, columns in indexes:

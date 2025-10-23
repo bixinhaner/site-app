@@ -8,8 +8,9 @@ from app.core.database import engine, Base
 # Ensure new models are imported before creating tables
 from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
+from app.models import survey as _survey_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders
-from app.api import site_planning, logs
+from app.api import site_planning, logs, site_surveys
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -60,6 +61,7 @@ app.include_router(stock.router, prefix="/api/stock", tags=["库存管理"])
 app.include_router(site_planning.router, prefix="/api/sites", tags=["站点规划"])
 app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单管理"])
 app.include_router(logs.router, prefix="/api", tags=["用户日志"])
+app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])
 
 @app.get("/")
 async def root():

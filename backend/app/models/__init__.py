@@ -7,6 +7,7 @@ from .inspection import (
 from .work_order import WorkOrder, WorkOrderItem, WorkOrderPhoto, AuditEvent
 from .equipment import Equipment, EquipmentPackage, EquipmentPackageItem, EquipmentInstance, Warehouse, Inventory, StockTransaction, StockTransactionItem, PickupRecord
 from .planning import SitePlanning, SitePlanningSector, SiteAntennaPort, SiteSwitchPort, PlanningChangeLog
+from .survey import SiteSurvey, SiteSurveyPhoto
 
 __all__ = [
     "User",
@@ -34,4 +35,6 @@ __all__ = [
     "SiteAntennaPort",
     "SiteSwitchPort",
     "PlanningChangeLog",
+    "SiteSurvey",
+    "SiteSurveyPhoto",
 ]

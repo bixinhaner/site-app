@@ -1,7 +1,7 @@
 import os
 import uuid
 import hashlib
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import UploadFile
 from PIL import Image, ImageDraw, ImageFont
 import aiofiles
@@ -203,3 +203,58 @@ def get_image_info(image_path: str) -> Dict[str, Any]:
             }
     except Exception as e:
         return {"error": str(e)}
+
+def extract_exif(image_path: str) -> Dict[str, Any]:
+    """提取图片的EXIF元数据，包含GPS与时间信息（若有）。"""
+    info: Dict[str, Any] = {}
+    try:
+        with Image.open(image_path) as img:
+            exif = getattr(img, '_getexif', None)
+            if not exif:
+                return info
+            raw = img.getexif()
+            if not raw:
+                return info
+            # 将PIL的EXIF字典转换为可序列化的简单字典
+            for tag_id, value in raw.items():
+                try:
+                    tag = Image.ExifTags.TAGS.get(tag_id, str(tag_id))
+                except Exception:
+                    tag = str(tag_id)
+                try:
+                    if isinstance(value, bytes):
+                        continue
+                    info[tag] = value
+                except Exception:
+                    continue
+    except Exception:
+        return {}
+    return info
+
+def add_text_watermark_inline(image_path: str, text: str, quality: int = 85) -> Optional[str]:
+    """为图片右下角添加简单文字水印并覆盖保存，返回新路径。失败返回None。"""
+    try:
+        with Image.open(image_path) as img:
+            img = img.convert('RGBA')
+            draw = ImageDraw.Draw(img)
+            try:
+                font = ImageFont.truetype("arial.ttf", 24)
+            except Exception:
+                font = ImageFont.load_default()
+            bbox = draw.textbbox((0,0), text, font=font)
+            tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
+            margin = 10
+            x = img.width - tw - margin
+            y = img.height - th - margin
+            # 半透明黑底
+            overlay = Image.new('RGBA', img.size, (255,255,255,0))
+            od = ImageDraw.Draw(overlay)
+            od.rectangle([x-6, y-4, x+tw+6, y+th+4], fill=(0,0,0,140))
+            combined = Image.alpha_composite(img, overlay)
+            draw = ImageDraw.Draw(combined)
+            draw.text((x,y), text, font=font, fill=(255,255,255,255))
+            out_path = image_path
+            combined.convert('RGB').save(out_path, 'JPEG', quality=quality, optimize=True)
+            return out_path
+    except Exception:
+        return None

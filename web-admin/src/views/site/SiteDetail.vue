@@ -2,7 +2,11 @@
   <div class="page">
     <div class="page-header">
       <h1>站点详情</h1>
-      <el-button @click="$router.back()"><el-icon><Back /></el-icon>返回</el-button>
+      <div class="header-actions">
+        <el-button @click="$router.back()"><el-icon><Back /></el-icon>返回</el-button>
+        <el-button @click="openSurveys"><el-icon><PictureFilled /></el-icon>勘察档案</el-button>
+        <el-button type="success" @click="createSurvey"><el-icon><Plus /></el-icon>新建勘察</el-button>
+      </div>
     </div>
     <el-card v-loading="loading">
       <div class="info-grid" v-if="site">
@@ -270,11 +274,19 @@ onMounted(() => {
   load()
   loadUsers()
 })
+
+const openSurveys = () => {
+  router.push({ name: 'SiteSurveys', params: {}, query: { site_id: route.params.id } })
+}
+const createSurvey = () => {
+  router.push({ name: 'SiteSurveyNew', query: { site_id: route.params.id } })
+}
 </script>
 
 <style scoped>
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
+.header-actions { display:flex; gap: 12px; }
 .info-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .item .label { color: var(--text-secondary); margin-right:8px; }
 .item .value { color: var(--text-primary); font-weight: 500; }
