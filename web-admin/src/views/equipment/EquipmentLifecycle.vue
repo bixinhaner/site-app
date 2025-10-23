@@ -130,7 +130,7 @@ const searchEquipment = async () => {
   bindingHistory.value = []
 
   try {
-    const token = localStorage.getItem('token')
+    const token = localStorage.getItem('access_token')
     
     // 并行获取设备信息和绑定历史
     const [equipmentRes, historyRes] = await Promise.all([
