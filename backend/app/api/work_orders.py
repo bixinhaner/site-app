@@ -15,6 +15,7 @@ from app.models.work_order import (
     ItemStatusEnum, AuditEvent
 )
 from app.models.inspection import SiteInspection, InspectionStatusEnum, InspectionTypeEnum, InspectionTemplate, InspectionCheckItem, CheckItemStatusEnum
+from app.models.survey import SiteSurveyPhoto
 from app.schemas.work_order import (
     WorkOrderCreate, WorkOrderUpdate, WorkOrderResponse,
     WorkOrderItemUpdate, WorkOrderItemResponse,
@@ -26,6 +27,8 @@ from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.work_order_sync import get_work_order_sync_service
 from app.utils.file_handler import save_uploaded_file, generate_watermark
 from app.utils.gps_utils import reverse_geocode
+from app.utils.field_validator import FieldValidator
+from app.schemas.inspection_enhanced import FieldDefinition
 
 router = APIRouter()
 
@@ -52,6 +55,21 @@ def _audit_site_status_change(db: Session, site_id: int, old_status: str, new_st
         db.add(audit_log)
     except Exception as e:
         print(f"[警告] 记录站点状态变更审计日志失败: {e}")
+
+
+# Role helpers
+def _is_field_worker(u: User) -> bool:
+    r = getattr(u, 'role', None)
+    return r in ("inspector", "surveyor")
+
+
+def _is_surveyor(u: User) -> bool:
+    return getattr(u, 'role', None) == "surveyor"
+
+
+def _ensure_surveyor_wo_type(wo: WorkOrder, u: User):
+    if _is_surveyor(u) and wo.type != WorkOrderTypeEnum.SITE_SURVEY:
+        raise HTTPException(status_code=403, detail="仅可操作勘察工单")
 
 
 def _update_site_status_on_work_order_create(db: Session, site_id: int, work_order_type: WorkOrderTypeEnum):
@@ -366,8 +384,10 @@ async def list_work_orders(
     if type_filter:
         q = q.filter(WorkOrder.type == type_filter)
 
-    if current_user.role == "inspector":
+    if _is_field_worker(current_user):
         q = q.filter(WorkOrder.assigned_to == current_user.id)
+        if _is_surveyor(current_user):
+            q = q.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
 
     # 按创建时间降序排序，这样最新的工单在最前面
     # 注意：使用created_at而不是assigned_at，因为assigned_at可能晚于created_at导致排序混乱
@@ -384,8 +404,9 @@ async def get_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
     return _enrich_work_order_response(db, wo)
 
 
@@ -464,6 +485,9 @@ async def accept_work_order(
     
     if wo.status != WorkOrderStatusEnum.PENDING:
         raise HTTPException(status_code=400, detail=f"只能接受待处理状态的工单，当前状态：{wo.status}")
+
+    # 勘察人员仅能接受勘察工单
+    _ensure_surveyor_wo_type(wo, current_user)
 
     # 更新工单状态
     old_status = wo.status
@@ -603,6 +627,14 @@ async def accept_work_order(
     _audit(db, "work_order", wo.id, "accept", current_user.id, 
            from_status=old_status.value, to_status=wo.status.value)
     
+    # 确保存在档案草稿
+    try:
+        from app.services.survey_sync import ensure_survey_for_work_order
+        ensure_survey_for_work_order(db, wo, current_user)
+        db.commit()
+    except Exception:
+        db.rollback()
+
     return {
         "message": "工单接受成功",
         "work_order": _enrich_work_order_response(db, wo),
@@ -622,8 +654,9 @@ async def get_work_order_inspection(
         raise HTTPException(status_code=404, detail="工单不存在")
     
     # 权限检查
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     if not wo.inspection_id:
         raise HTTPException(status_code=404, detail="工单尚未创建关联检查")
@@ -640,6 +673,72 @@ async def get_work_order_inspection(
     return {"inspection_id": inspection.id, "status": inspection.status.value}
 
 
+@router.get("/{work_order_id}/survey")
+async def get_work_order_survey(
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """确保并返回与工单关联的站点勘察档案（SiteSurvey）。"""
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
+
+    from app.services.survey_sync import ensure_survey_for_work_order
+    survey = ensure_survey_for_work_order(db, wo, current_user)
+    db.commit()
+
+    # 返回完整响应体（含站点与照片摘要）
+    from app.schemas.site_survey import SiteSurveyResponse, SiteSurveyPhotoResponse
+    photos = db.query(SiteSurveyPhoto).filter(SiteSurveyPhoto.survey_id == survey.id).all()
+    photo_items = [SiteSurveyPhotoResponse.model_validate(p) for p in photos]
+    return SiteSurveyResponse(
+        id=survey.id,
+        site_id=survey.site_id,
+        site_name=survey.site.site_name if survey.site else None,
+        site_code=survey.site.site_code if survey.site else None,
+        survey_date=survey.survey_date,
+        surveyor_name=survey.surveyor_name,
+        surveyor_phone=survey.surveyor_phone,
+        latitude=survey.latitude,
+        longitude=survey.longitude,
+        address=survey.address,
+        gps_accuracy=survey.gps_accuracy,
+        site_type=survey.site_type,
+        tower_type=survey.tower_type,
+        available_height_m=survey.available_height_m,
+        load_capacity_kg=survey.load_capacity_kg,
+        power_available=survey.power_available,
+        power_distance_m=survey.power_distance_m,
+        power_capacity_kw=survey.power_capacity_kw,
+        earthing_feasible=survey.earthing_feasible,
+        fiber_available=survey.fiber_available,
+        fiber_distance_m=survey.fiber_distance_m,
+        duct_notes=survey.duct_notes,
+        microwave_los=survey.microwave_los,
+        los_azimuth_deg=survey.los_azimuth_deg,
+        los_distance_km=survey.los_distance_km,
+        sensitive_points=survey.sensitive_points,
+        safety_notes=survey.safety_notes,
+        permits_constraints=survey.permits_constraints,
+        owner_name=survey.owner_name,
+        owner_phone=survey.owner_phone,
+        access_time_window=survey.access_time_window,
+        entry_constraints=survey.entry_constraints,
+        feasibility=survey.feasibility,
+        risks=survey.risks,
+        recommendations=survey.recommendations,
+        extra_data=survey.extra_data,
+        created_by=survey.created_by,
+        created_at=survey.created_at,
+        updated_at=survey.updated_at,
+        photos=photo_items,
+    )
+
+
 @router.post("/{work_order_id}/complete")
 async def complete_work_order(
     work_order_id: str,
@@ -653,6 +752,7 @@ async def complete_work_order(
     
     if wo.assigned_to != current_user.id and current_user.role not in ["admin", "manager"]:
         raise HTTPException(status_code=403, detail="无权限完成此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     if wo.status != WorkOrderStatusEnum.ACTIVE:
         raise HTTPException(status_code=400, detail="只能完成执行中的工单")
@@ -686,8 +786,9 @@ async def list_items(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     # 完全使用关联检查的检查项，不再使用工单自己的检查项
     if not wo.inspection_id:
@@ -740,8 +841,9 @@ async def update_item(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限修改此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     # 完全使用关联检查的检查项，不再使用工单自己的检查项
     if not wo.inspection_id:
@@ -761,8 +863,48 @@ async def update_item(
     
     # 更新检查项
     upd = data.dict(exclude_unset=True)
-    if 'data_value' in upd:
-        inspection_item.data_value = upd['data_value']
+    if 'data_value' in upd and upd['data_value'] is not None:
+        # 严格要求 field_name 与模板 field_id 一致；
+        field_ids = set()
+        label_to_id = {}
+        if isinstance(inspection_item.fields, list):
+            for f in inspection_item.fields:
+                fid = f.get('field_id') if isinstance(f, dict) else getattr(f, 'field_id', None)
+                lbl = f.get('label') if isinstance(f, dict) else getattr(f, 'label', None)
+                if fid:
+                    field_ids.add(str(fid))
+                if fid and lbl:
+                    label_to_id[str(lbl)] = str(fid)
+
+        normalized = []
+        invalid = []
+        for dv in upd['data_value']:
+            d = dv
+            if hasattr(dv, 'dict'):
+                d = dv.dict()
+            raw_name = d.get('field_name') or d.get('field_id') or d.get('key') or d.get('field') or d.get('name')
+            if not raw_name:
+                invalid.append('(missing field_name)')
+                continue
+            name = str(raw_name)
+            if field_ids and name not in field_ids:
+                mapped = label_to_id.get(name)
+                if mapped:
+                    name = mapped
+                else:
+                    invalid.append(name)
+                    continue
+            normalized.append({
+                'field_name': name,
+                'value': d.get('value'),
+                'unit': d.get('unit'),
+            })
+
+        if invalid:
+            allowed = ','.join(sorted(field_ids)) if field_ids else '无字段定义'
+            raise HTTPException(status_code=400, detail=f"存在未定义字段: {invalid}；允许的 field_id: {allowed}")
+
+        inspection_item.data_value = normalized
     if 'status' in upd:
         # 将字符串状态转换为枚举
         status_str = upd['status']
@@ -774,6 +916,27 @@ async def update_item(
             inspection_item.checked_at = None
     
     inspection_item.updated_at = datetime.utcnow()
+
+    # 可选：按字段定义进行类型校验（非严格，允许部分填写）
+    try:
+        field_definitions = []
+        if isinstance(inspection_item.fields, list):
+            for field_dict in inspection_item.fields:
+                try:
+                    fd = FieldDefinition(**field_dict)
+                    field_definitions.append(fd)
+                except Exception:
+                    pass
+        if field_definitions and inspection_item.data_value:
+            dv_list = []
+            for dv in inspection_item.data_value:
+                if hasattr(dv, 'dict'):
+                    dv_list.append(dv.dict())
+                elif isinstance(dv, dict):
+                    dv_list.append(dv)
+            _ = FieldValidator.validate_check_item_data(field_definitions, dv_list, strict=False)
+    except Exception:
+        pass
     
     # 检查是否应该更新工单的检查状态
     inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
@@ -824,8 +987,9 @@ async def upload_photo(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限上传该工单照片")
+    _ensure_surveyor_wo_type(wo, current_user)
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="只支持图片文件")
 
@@ -919,8 +1083,9 @@ async def list_photos(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问该工单照片")
+    _ensure_surveyor_wo_type(wo, current_user)
     photos = db.query(WorkOrderPhoto).filter(WorkOrderPhoto.work_order_id == work_order_id).order_by(WorkOrderPhoto.created_at.desc()).all()
     return [WorkOrderPhotoResponse.from_orm(p) for p in photos]
 
@@ -943,8 +1108,9 @@ async def delete_photo(
     if not wo:
         raise HTTPException(status_code=404, detail="关联工单不存在")
         
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限删除该照片")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     # 检查工单状态是否允许删除照片
     if wo.status not in [WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED]:
@@ -990,8 +1156,9 @@ async def replace_photo(
     if not wo:
         raise HTTPException(status_code=404, detail="关联工单不存在")
         
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限替换该照片")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     # 检查工单状态是否允许替换照片
     if wo.status not in [WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED]:
@@ -1076,8 +1243,9 @@ async def batch_photo_operations(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限操作该工单照片")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     # 检查工单状态是否允许操作照片
     if wo.status not in [WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED]:
@@ -1458,7 +1626,45 @@ async def final_review(
             )
 
     old = wo.status
-    wo.status = WorkOrderStatusEnum.APPROVED if req.action == "approve" else WorkOrderStatusEnum.REJECTED
+    if req.action == "approve":
+        # 业务确认：勘察类工单审核通过即100%完成
+        wo.status = WorkOrderStatusEnum.COMPLETED
+        wo.completed_at = datetime.utcnow()
+        # 同步检查状态与结果
+        if wo.inspection_id:
+            inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+            if inspection:
+                inspection.status = InspectionStatusEnum.APPROVED
+                inspection.reviewed_by = current_user.id
+                inspection.reviewed_at = datetime.utcnow()
+                inspection.review_comments = req.comments
+                if req.score is not None:
+                    inspection.score = req.score
+                    inspection.result = "pass" if req.score >= 60 else "fail"
+        # 站点状态更新
+        _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
+        # 审核通过时建立/追加“勘察档案快照”
+        try:
+            from app.services.survey_archive_service import create_or_append_archive
+            if wo.inspection_id:
+                create_or_append_archive(
+                    db,
+                    inspection_id=wo.inspection_id,
+                    operator_id=current_user.id,
+                    change_summary=req.comments or "审核通过"
+                )
+        except Exception as e:
+            print(f"[WARN] 创建/追加勘察档案失败(final_review): {e}")
+    else:
+        wo.status = WorkOrderStatusEnum.REJECTED
+        if wo.inspection_id:
+            inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+            if inspection:
+                inspection.status = InspectionStatusEnum.REJECTED
+                inspection.reviewed_by = current_user.id
+                inspection.reviewed_at = datetime.utcnow()
+                inspection.review_comments = req.comments
+
     wo.reviewed_by = current_user.id
     wo.reviewed_at = datetime.utcnow()
     wo.review_comments = req.comments
@@ -1466,7 +1672,7 @@ async def final_review(
         wo.score = req.score
     db.commit()
     _audit(db, "work_order", work_order_id, "final_review", current_user.id, from_status=old.value, to_status=wo.status.value, comments=req.comments)
-    return {"message": "审核完成"}
+    return {"message": "审核完成", "work_order": _enrich_work_order_response(db, wo)}
 
 
 def _update_work_order_result(db: Session, work_order_id: str):
@@ -1512,8 +1718,9 @@ async def get_item_field_schema(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问该工单")
+    _ensure_surveyor_wo_type(wo, current_user)
 
     if not wo.inspection_id:
         raise HTTPException(status_code=400, detail="工单尚未关联检查实例")
@@ -1574,6 +1781,7 @@ async def submit_work_order(
     # 权限检查：只有被分配人才能提交
     if wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="只有被分配人才能提交工单")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     # 允许从ACTIVE或REJECTED状态提交
     is_resubmit = wo.status == WorkOrderStatusEnum.REJECTED
@@ -1667,6 +1875,18 @@ async def submit_work_order(
     sync_service.sync_work_order_review_info(wo)
     
     db.commit()
+
+    # 同步检查内容至勘察档案（提交时不覆盖已存在字段）
+    try:
+        from app.services.survey_sync import sync_inspection_to_survey, SyncOptions, PhotoPolicy
+        sync_inspection_to_survey(
+            db,
+            inspection.id,
+            SyncOptions(mode='on_submit', overwrite_fields=False, photo_policy=PhotoPolicy.first_per_item)
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
     
     _audit(db, "work_order", wo.id, "submit" if not is_resubmit else "resubmit", current_user.id,
            from_status=old_status.value, to_status=wo.status.value)
@@ -1742,6 +1962,49 @@ async def review_work_order(
     sync_service.sync_work_order_review_info(wo)
     
     db.commit()
+
+    # 审核通过后：
+    # 1) 旧链路：最终同步到旧site_surveys（允许覆盖）
+    # 2) 新链路：创建/追加“勘察档案快照”版本（严格跟随模板结构）
+    if review_data.action == "approve" and wo.inspection_id:
+        try:
+            from app.services.survey_sync import sync_inspection_to_survey, SyncOptions, PhotoPolicy
+            survey = sync_inspection_to_survey(
+                db,
+                wo.inspection_id,
+                SyncOptions(mode='on_approve', overwrite_fields=True, photo_policy=PhotoPolicy.categorized_best, per_category_limit=8)
+            )
+            if survey:
+                review_info = {
+                    'status': 'approved',
+                    'score': getattr(wo, 'score', None),
+                    'reviewed_by': current_user.id,
+                    'reviewed_at': datetime.utcnow().isoformat(),
+                    'comments': review_data.comments,
+                }
+                try:
+                    extra = survey.extra_data or {}
+                    extra['review'] = review_info
+                    survey.extra_data = extra
+                    db.commit()
+                except Exception:
+                    db.rollback()
+        except Exception:
+            db.rollback()
+
+        # 新档案：仅在审核通过时建立/追加快照版本
+        try:
+            from app.services.survey_archive_service import create_or_append_archive
+            create_or_append_archive(
+                db,
+                inspection_id=wo.inspection_id,
+                operator_id=current_user.id,
+                change_summary=review_data.comments or "审核通过"
+            )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[WARN] 创建/追加勘察档案失败: {e}")
     
     _audit(db, "work_order", wo.id, f"review_{review_data.action}", current_user.id,
            from_status=old_status.value, to_status=wo.status.value,
@@ -2001,6 +2264,54 @@ async def mark_work_order_completed(
         "message": "工单已标记为完成",
         "work_order": _enrich_work_order_response(db, wo)
     }
+
+
+@router.post("/{work_order_id}/finalize-survey")
+async def finalize_survey_work_order(
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """将勘察类工单从 APPROVED 升级为 COMPLETED，并补建勘察档案快照。
+
+    用于老逻辑已将审核通过置为 APPROVED(85%) 的存量工单修正为 100%。
+    """
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=403, detail="无权限执行该操作")
+
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    if wo.type != WorkOrderTypeEnum.SITE_SURVEY:
+        raise HTTPException(status_code=400, detail="仅支持勘察类工单")
+    if wo.status not in [WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.UNDER_REVIEW, WorkOrderStatusEnum.SUBMITTED]:
+        raise HTTPException(status_code=400, detail=f"当前状态不需要或不允许完成：{wo.status}")
+
+    old_status = wo.status
+    wo.status = WorkOrderStatusEnum.COMPLETED
+    wo.completed_at = datetime.utcnow()
+
+    # 更新检查记录状态（若存在）
+    if wo.inspection_id:
+        inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+        if inspection:
+            inspection.status = InspectionStatusEnum.APPROVED
+            inspection.reviewed_by = current_user.id
+            inspection.reviewed_at = datetime.utcnow()
+
+    # 建立/追加档案
+    try:
+        from app.services.survey_archive_service import create_or_append_archive
+        if wo.inspection_id:
+            create_or_append_archive(db, inspection_id=wo.inspection_id, operator_id=current_user.id, change_summary="Finalize补建")
+    except Exception as e:
+        print(f"[WARN] finalize-survey 建档失败: {e}")
+
+    db.commit()
+    _audit(db, "work_order", work_order_id, "finalize_survey", current_user.id,
+           from_status=old_status.value, to_status=wo.status.value)
+
+    return {"message": "已完成并补建档案", "work_order": _enrich_work_order_response(db, wo)}
 
 
 @router.get("/{work_order_id}/progress")

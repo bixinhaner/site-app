@@ -8,6 +8,7 @@ from .work_order import WorkOrder, WorkOrderItem, WorkOrderPhoto, AuditEvent
 from .equipment import Equipment, EquipmentPackage, EquipmentPackageItem, EquipmentInstance, Warehouse, Inventory, StockTransaction, StockTransactionItem, PickupRecord
 from .planning import SitePlanning, SitePlanningSector, SiteAntennaPort, SiteSwitchPort, PlanningChangeLog
 from .survey import SiteSurvey, SiteSurveyPhoto
+from .survey_archive import SiteSurveyArchive, SiteSurveyArchiveVersion, SiteSurveyArchiveKVIndex
 
 __all__ = [
     "User",
@@ -37,4 +38,7 @@ __all__ = [
     "PlanningChangeLog",
     "SiteSurvey",
     "SiteSurveyPhoto",
+    "SiteSurveyArchive",
+    "SiteSurveyArchiveVersion",
+    "SiteSurveyArchiveKVIndex",
 ]

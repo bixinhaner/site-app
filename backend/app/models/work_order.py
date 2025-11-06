@@ -30,6 +30,7 @@ class WorkOrderTypeEnum(str, enum.Enum):
     TRANSMISSION_ISSUE = "transmission_issue"
     GPS_ISSUE = "gps_issue"
     SIGNAL_ISSUE = "signal_issue"
+    SITE_SURVEY = "site_survey"
 
 
 class ItemStatusEnum(str, enum.Enum):
@@ -182,4 +183,3 @@ class AuditEvent(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     operator = relationship("User")
-

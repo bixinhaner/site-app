@@ -14,7 +14,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.site import Site
 from app.models.inspection import (
-    InspectionTemplate, TemplateBinding
+    InspectionTemplate, TemplateBinding, SiteInspection
 )
 from app.schemas.template_binding import (
     TemplateBindingCreate, TemplateBindingUpdate, TemplateBindingResponse,
@@ -45,7 +45,7 @@ async def get_templates(
 ):
     """获取检查模板列表"""
     # 权限检查：管理员/经理可管理，检查员可读
-    if current_user.role not in ["admin", "manager", "inspector"]:
+    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"
@@ -140,7 +140,7 @@ async def get_template(
 ):
     """获取模板详情"""
     # 权限检查
-    if current_user.role not in ["admin", "manager", "inspector"]:
+    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"
@@ -188,7 +188,7 @@ async def get_template_usage(
     """获取模板使用情况（简化版）"""
     
     # 权限检查
-    if current_user.role not in ["admin", "manager", "inspector"]:
+    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"
@@ -278,18 +278,23 @@ async def update_template(
     old_template_data = template.template_data
     new_template_data = template_update.template_data
     
-    # 后端验证：检查是否有禁止的结构性变更
-    validation_result = validate_template_changes(old_template_data, new_template_data)
-    
-    if not validation_result['valid']:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "检测到禁止的结构性变更",
-                "message": "该模板已被使用，不允许进行结构性变更（如添加/删除检查项、修改字段类型等）",
-                "violations": validation_result['violations']
-            }
-        )
+    # 只有当模板已被检查记录引用时，才限制结构性变更
+    is_used = (db.query(func.count(SiteInspection.id))
+                 .filter(SiteInspection.template_id == template_id)
+                 .scalar() or 0) > 0
+
+    if is_used:
+        # 后端验证：检查是否有禁止的结构性变更
+        validation_result = validate_template_changes(old_template_data, new_template_data)
+        if not validation_result['valid']:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "检测到禁止的结构性变更",
+                    "message": "该模板已被使用，不允许进行结构性变更（如添加/删除检查项、修改字段类型等）",
+                    "violations": validation_result['violations']
+                }
+            )
     
     # 应用更新
     update_fields = template_update.dict(exclude_unset=True)
@@ -345,7 +350,7 @@ async def get_template_bindings(
 ):
     """获取模板绑定列表"""
     # 权限检查
-    if current_user.role not in ["admin", "manager", "inspector"]:
+    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"
@@ -667,7 +672,7 @@ async def resolve_template(
 ):
     """解析最匹配的模板"""
     # 权限检查
-    if current_user.role not in ["admin", "manager", "inspector"]:
+    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"

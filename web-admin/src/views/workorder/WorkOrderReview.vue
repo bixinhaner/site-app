@@ -385,7 +385,8 @@ const types = [
   { label: '断电问题', value: 'power_issue' },
   { label: '传输问题', value: 'transmission_issue' },
   { label: 'GPS问题', value: 'gps_issue' },
-  { label: '信号问题', value: 'signal_issue' }
+  { label: '信号问题', value: 'signal_issue' },
+  { label: '站点勘察', value: 'site_survey' }
 ]
 
 const canStartReview = computed(() => order.value && order.value.status === 'SUBMITTED')

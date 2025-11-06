@@ -24,6 +24,9 @@ export const useWorkOrderStore = defineStore('workorder', () => {
       if (status) {
         queryParams.push(`status_filter=${status}`)
       }
+      if (userStore.userInfo?.role === 'surveyor') {
+        queryParams.push('type_filter=site_survey')
+      }
 
       // 构建完整URL
       let url = buildApiUrl(API_ENDPOINTS.WORK_ORDERS.LIST)

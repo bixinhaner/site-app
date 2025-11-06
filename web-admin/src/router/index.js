@@ -98,6 +98,9 @@ const routes = [
           { path: 'surveys', name: 'SiteSurveys', component: () => import('../views/surveys/SurveyList.vue'), meta: { title: '勘察档案', icon: 'PictureFilled' } },
           { path: 'surveys/new', name: 'SiteSurveyNew', component: () => import('../views/surveys/SurveyForm.vue'), meta: { title: '新建勘察', hidden: true } },
           { path: 'surveys/:id', name: 'SiteSurveyDetail', component: () => import('../views/surveys/SurveyDetail.vue'), meta: { title: '勘察详情', hidden: true } }
+          ,
+          { path: 'archives', name: 'SurveyArchives', component: () => import('../views/archives/ArchiveList.vue'), meta: { title: '勘察档案(新)', icon: 'DocumentCopy' } },
+          { path: 'archives/:id', name: 'SurveyArchiveDetail', component: () => import('../views/archives/ArchiveDetail.vue'), meta: { title: '档案详情', hidden: true } }
         ]
       },
       // 检查管理（二级菜单）

@@ -19,7 +19,7 @@
           <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
         <el-select v-model="typeFilter" clearable placeholder="类型" style="width: 180px">
-          <el-option v-for="t in types" :key="t.value" :label="t.label" :value="t.value" />
+          <el-option v-for="t in filterTypes" :key="t.value" :label="t.label" :value="t.value" />
         </el-select>
         <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新建工单</el-button>
@@ -97,7 +97,7 @@
       </el-form-item>
       <el-form-item label="类型" prop="type">
         <el-select v-model="createForm.type" placeholder="选择类型" style="width: 100%" @change="onTypeOrSiteChange">
-          <el-option v-for="t in types" :key="t.value" :label="t.label" :value="t.value" />
+          <el-option v-for="t in createTypes" :key="t.value" :label="t.label" :value="t.value" />
         </el-select>
       </el-form-item>
       <el-form-item label="分配给" prop="assigned_to">
@@ -170,7 +170,7 @@
       </el-form-item>
       <el-form-item label="类型" prop="type">
         <el-select v-model="editForm.type" placeholder="选择类型" style="width: 100%">
-          <el-option v-for="t in types" :key="t.value" :label="t.label" :value="t.value" />
+          <el-option v-for="t in editTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
         </el-select>
       </el-form-item>
       <el-form-item label="分配给" prop="assigned_to">
@@ -318,14 +318,29 @@ const statuses = [
   { label: '已驳回', value: 'REJECTED' },
   { label: '已完成', value: 'COMPLETED' }
 ]
-const types = [
+// 类型显示映射（用于表格/详情友好显示历史类型）
+const typeLabelMap = {
+  'opening_inspection': '新站点设备安装',
+  'maintenance': '维护检查',
+  'power_issue': '断电问题',
+  'transmission_issue': '传输问题',
+  'gps_issue': 'GPS问题',
+  'signal_issue': '信号问题',
+  'site_survey': '站点勘察'
+}
+
+// 创建工单可选类型：仅两项
+const createTypes = [
   { label: '新站点设备安装', value: 'opening_inspection' },
-  { label: '维护检查', value: 'maintenance' },
-  { label: '断电问题', value: 'power_issue' },
-  { label: '传输问题', value: 'transmission_issue' },
-  { label: 'GPS问题', value: 'gps_issue' },
-  { label: '信号问题', value: 'signal_issue' }
+  { label: '站点勘察', value: 'site_survey' }
 ]
+
+// 顶部筛选可选类型：仅两项
+const filterTypes = [
+  { label: '新站点设备安装', value: 'opening_inspection' },
+  { label: '站点勘察', value: 'site_survey' }
+]
+
 
 const load = async () => {
   try {
@@ -379,6 +394,15 @@ const editVisible = ref(false)
 const updating = ref(false)
 const editForm = ref({ id: '', site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '' })
 const editFormRef = ref()
+// 编辑对话框类型选项：在仅两项基础上，额外包含当前工单类型以避免值缺失
+const editTypeOptions = computed(() => {
+  const base = [...createTypes]
+  const current = editForm.value?.type
+  if (current && !base.some(t => t.value === current)) {
+    base.push({ label: typeLabelMap[current] || current, value: current })
+  }
+  return base
+})
 const rules = {
   site_id: [{ required: true, message: '请选择站点', trigger: 'change' }],
   type: [{ required: true, message: '请选择类型', trigger: 'change' }],
@@ -573,7 +597,7 @@ const deleteWorkOrder = async (id) => {
 }
 
 const statusText = (v) => (statuses.find(s => s.value === v)?.label || v)
-const typeText = (v) => (types.find(t => t.value === v)?.label || v)
+const typeText = (v) => (typeLabelMap[v] || v)
 const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
 

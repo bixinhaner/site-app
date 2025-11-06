@@ -41,6 +41,7 @@
             <el-option label="管理员" value="admin" />
             <el-option label="项目经理" value="manager" />
             <el-option label="现场工程师" value="inspector" />
+            <el-option label="勘察人员" value="surveyor" />
             <el-option label="普通用户" value="user" />
           </el-select>
           

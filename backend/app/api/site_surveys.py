@@ -32,6 +32,25 @@ def _require_admin(current_user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员/经理权限")
 
 
+def _can_edit(db: Session, current_user: User, survey: SiteSurvey) -> bool:
+    role = getattr(current_user, 'role', None)
+    if role in ("admin", "manager"):
+        return True
+    if role == "surveyor" and getattr(survey, 'work_order_id', None):
+        from app.models.work_order import WorkOrder, WorkOrderTypeEnum, WorkOrderStatusEnum
+        wo = db.query(WorkOrder).filter(WorkOrder.id == survey.work_order_id).first()
+        if not wo:
+            return False
+        if wo.assigned_to != current_user.id:
+            return False
+        if wo.type != WorkOrderTypeEnum.SITE_SURVEY:
+            return False
+        if wo.status not in (WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED):
+            return False
+        return True
+    return False
+
+
 def _audit(
     db: Session,
     resource_id: str,
@@ -108,7 +127,8 @@ async def create_survey(
     current_user: User = Depends(get_current_user)
 ):
     # admin/manager（在鉴权代理下等同admin）
-    _require_admin(current_user)
+    if not _can_edit(db, current_user, survey):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限删除该勘察记录")
 
     site = db.query(Site).filter(Site.id == payload.site_id).first()
     if not site:
@@ -252,7 +272,8 @@ async def import_excel(
 
     注意：置于 `/{survey_id}` 动态路径之前，避免被误匹配。
     """
-    _require_admin(current_user)
+    if not _can_edit(db, current_user, survey):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限上传该勘察照片")
     from openpyxl import load_workbook
 
     content = await file.read()
@@ -449,10 +470,11 @@ async def update_survey(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    _require_admin(current_user)
     survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
     if not survey:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="勘察记录不存在")
+    if not _can_edit(db, current_user, survey):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限编辑该勘察记录")
     incoming = payload.dict(exclude_unset=True)
     # build diff（仅记录值真正发生变化的字段）
     before = {}
@@ -499,10 +521,11 @@ async def delete_survey(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    _require_admin(current_user)
     survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
     if not survey:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="勘察记录不存在")
+    if not _can_edit(db, current_user, survey):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限删除该勘察记录")
 
     # 删除文件
     for p in list(survey.photos or []):
@@ -535,10 +558,11 @@ async def upload_photo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    _require_admin(current_user)
     survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
     if not survey:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="勘察记录不存在")
+    if not _can_edit(db, current_user, survey):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限上传该勘察照片")
 
     stored_path = await save_uploaded_file(file, category="site_surveys", sub_folder=survey_id)
     file_hash = calculate_file_hash(stored_path)
@@ -649,10 +673,13 @@ async def delete_photo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    _require_admin(current_user)
+    # 校验删除权限
     p = db.query(SiteSurveyPhoto).filter(SiteSurveyPhoto.id == photo_id).first()
     if not p:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="照片不存在")
+    survey = db.query(SiteSurvey).filter(SiteSurvey.id == p.survey_id).first()
+    if not _can_edit(db, current_user, survey):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限删除该照片")
     try:
         if p.file_path and os.path.exists(p.file_path):
             os.remove(p.file_path)
@@ -907,10 +934,13 @@ async def update_photo_metadata(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    _require_admin(current_user)
+    # 权限：仅管理员/经理或关联工单的勘察人员可调整元数据
     p = db.query(SiteSurveyPhoto).filter(SiteSurveyPhoto.id == photo_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="照片不存在")
+    survey = db.query(SiteSurvey).filter(SiteSurvey.id == p.survey_id).first()
+    if not _can_edit(db, current_user, survey):
+        raise HTTPException(status_code=403, detail="无权限调整该照片")
     before = {"category": p.category, "taken_at": p.taken_at.isoformat() if p.taken_at else None, "sort_order": p.sort_order}
     # 以 form 值优先；若缺失则使用 JSON 值
     eff_category = category if category is not None else category_json
@@ -953,7 +983,11 @@ async def upload_photos_batch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    _require_admin(current_user)
+    survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(status_code=404, detail="勘察记录不存在")
+    if not _can_edit(db, current_user, survey):
+        raise HTTPException(status_code=403, detail="无权限上传该勘察照片")
     results = []
     for f in files:
         # Reuse single upload flow by calling within same request logic

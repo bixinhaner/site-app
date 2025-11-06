@@ -16,7 +16,13 @@ class UserCreate(UserBase):
     
     @validator('role')
     def validate_role(cls, v):
-        allowed_roles = ['admin', 'manager', 'inspector', 'user']
+        # Align with roles referenced across the codebase
+        allowed_roles = [
+            'admin', 'manager',
+            'inspector', 'surveyor',
+            'planner', 'warehouse_manager', 'reviewer',
+            'user'
+        ]
         if v not in allowed_roles:
             raise ValueError(f'Role must be one of: {allowed_roles}')
         return v
@@ -33,7 +39,12 @@ class UserUpdate(BaseModel):
     @validator('role')
     def validate_role(cls, v):
         if v is not None:
-            allowed_roles = ['admin', 'manager', 'inspector', 'user']
+            allowed_roles = [
+                'admin', 'manager',
+                'inspector', 'surveyor',
+                'planner', 'warehouse_manager', 'reviewer',
+                'user'
+            ]
             if v not in allowed_roles:
                 raise ValueError(f'Role must be one of: {allowed_roles}')
         return v

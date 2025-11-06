@@ -1,0 +1,200 @@
+{
+  "template_name": "站点勘察（默认）",
+  "template_version": "1.0",
+  "description": "默认站点勘察模板，包含与 site_surveys 字段绑定的检查项，支持自动同步。",
+  "check_categories": [
+    {
+      "category_id": "basic_info",
+      "category_name": "基本信息",
+      "items": [
+        {
+          "item_id": "survey_meta",
+          "item_name": "勘察信息",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "survey_date", "label": "勘察日期", "type": "datetime", "bind_to": "site_surveys.survey_date"},
+            {"field_id": "surveyor_name", "label": "勘察人员", "type": "text", "bind_to": "site_surveys.surveyor_name"},
+            {"field_id": "surveyor_phone", "label": "联系方式", "type": "text", "bind_to": "site_surveys.surveyor_phone"}
+          ]
+        }
+      ]
+    },
+    {
+      "category_id": "gps",
+      "category_name": "定位信息",
+      "items": [
+        {
+          "item_id": "location",
+          "item_name": "地理位置",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "latitude", "label": "纬度", "type": "number", "bind_to": "site_surveys.latitude"},
+            {"field_id": "longitude", "label": "经度", "type": "number", "bind_to": "site_surveys.longitude"},
+            {"field_id": "accuracy", "label": "GPS精度(米)", "type": "number", "bind_to": "site_surveys.gps_accuracy"},
+            {"field_id": "address", "label": "地址", "type": "text", "bind_to": "site_surveys.address"}
+          ]
+        }
+      ]
+    },
+    {
+      "category_id": "structure",
+      "category_name": "结构条件",
+      "items": [
+        {
+          "item_id": "site",
+          "item_name": "站点",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "site_type", "label": "站点类型", "type": "select_single", "options": [
+              {"label": "宏站", "value": "macro"},
+              {"label": "微站", "value": "micro"},
+              {"label": "室内站", "value": "indoor"},
+              {"label": "室外站", "value": "outdoor"}
+            ], "bind_to": "site_surveys.site_type"}
+          ]
+        },
+        {
+          "item_id": "tower",
+          "item_name": "塔桅/屋面",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "tower_type", "label": "塔桅类型", "type": "text", "bind_to": "site_surveys.tower_type"},
+            {"field_id": "available_height_m", "label": "可用高度(m)", "type": "number", "bind_to": "site_surveys.available_height_m"},
+            {"field_id": "load_capacity_kg", "label": "载重能力(kg)", "type": "number", "bind_to": "site_surveys.load_capacity_kg"}
+          ]
+        }
+      ]
+    },
+    {
+      "category_id": "power",
+      "category_name": "供电与接地",
+      "items": [
+        {
+          "item_id": "supply",
+          "item_name": "供电条件",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "power_available", "label": "是否有电", "type": "boolean", "bind_to": "site_surveys.power_available"},
+            {"field_id": "power_distance_m", "label": "引电距离(m)", "type": "number", "bind_to": "site_surveys.power_distance_m"},
+            {"field_id": "power_capacity_kw", "label": "可用容量(kW)", "type": "number", "bind_to": "site_surveys.power_capacity_kw"}
+          ]
+        },
+        {
+          "item_id": "earthing",
+          "item_name": "接地条件",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "earthing_feasible", "label": "接地可行", "type": "boolean", "bind_to": "site_surveys.earthing_feasible"}
+          ]
+        }
+      ]
+    },
+    {
+      "category_id": "transmission",
+      "category_name": "传输与微波",
+      "items": [
+        {
+          "item_id": "fiber",
+          "item_name": "光纤接入",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "fiber_available", "label": "是否有光纤", "type": "boolean", "bind_to": "site_surveys.fiber_available"},
+            {"field_id": "fiber_distance_m", "label": "光纤距离(m)", "type": "number", "bind_to": "site_surveys.fiber_distance_m"}
+          ]
+        },
+        {
+          "item_id": "duct",
+          "item_name": "管道/走线",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "duct_notes", "label": "管道说明", "type": "text", "bind_to": "site_surveys.duct_notes"}
+          ]
+        },
+        {
+          "item_id": "microwave",
+          "item_name": "微波视距",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "microwave_los", "label": "是否视距", "type": "boolean", "bind_to": "site_surveys.microwave_los"},
+            {"field_id": "los_azimuth_deg", "label": "方位角(°)", "type": "number", "bind_to": "site_surveys.los_azimuth_deg"},
+            {"field_id": "los_distance_km", "label": "距离(km)", "type": "number", "bind_to": "site_surveys.los_distance_km"}
+          ]
+        }
+      ]
+    },
+    {
+      "category_id": "environment",
+      "category_name": "环境与合规",
+      "items": [
+        {
+          "item_id": "impact",
+          "item_name": "敏感点",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "sensitive_points", "label": "敏感点", "type": "text", "bind_to": "site_surveys.sensitive_points"}
+          ]
+        },
+        {
+          "item_id": "safety",
+          "item_name": "安全备注",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "safety_notes", "label": "安全备注", "type": "text", "bind_to": "site_surveys.safety_notes"}
+          ]
+        },
+        {
+          "item_id": "compliance",
+          "item_name": "许可/限制",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "permits_constraints", "label": "许可/限制", "type": "text", "bind_to": "site_surveys.permits_constraints"}
+          ]
+        }
+      ]
+    },
+    {
+      "category_id": "access",
+      "category_name": "业主与出入",
+      "items": [
+        {
+          "item_id": "owner",
+          "item_name": "业主信息",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "owner_name", "label": "业主姓名", "type": "text", "bind_to": "site_surveys.owner_name"},
+            {"field_id": "owner_phone", "label": "业主电话", "type": "text", "bind_to": "site_surveys.owner_phone"}
+          ]
+        },
+        {
+          "item_id": "entry",
+          "item_name": "出入条件",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "access_time_window", "label": "可访问时间", "type": "text", "bind_to": "site_surveys.access_time_window"},
+            {"field_id": "entry_constraints", "label": "出入限制", "type": "text", "bind_to": "site_surveys.entry_constraints"}
+          ]
+        }
+      ]
+    },
+    {
+      "category_id": "conclusion",
+      "category_name": "结论与建议",
+      "items": [
+        {
+          "item_id": "summary",
+          "item_name": "综述",
+          "required_type": "data",
+          "fields": [
+            {"field_id": "feasibility", "label": "可行性", "type": "select_single", "options": [
+              {"label": "可行", "value": "feasible"},
+              {"label": "有条件可行", "value": "conditionally_feasible"},
+              {"label": "不可行", "value": "infeasible"}
+            ], "bind_to": "site_surveys.feasibility"},
+            {"field_id": "risks", "label": "风险", "type": "text", "bind_to": "site_surveys.risks"},
+            {"field_id": "recommendations", "label": "建议", "type": "text", "bind_to": "site_surveys.recommendations"}
+          ]
+        }
+      ]
+    }
+  ]
+}

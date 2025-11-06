@@ -62,6 +62,7 @@ class SiteSurvey(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    work_order_id = Column(String(32), ForeignKey("work_orders.id"))
 
     # Relationships
     site = relationship("Site")

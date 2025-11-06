@@ -9,7 +9,8 @@ Purpose
 
 What it covers (high level)
 - New tables: user_logs, site_planning(+sectors/antenna_ports/switch_ports, planning_change_logs),
-  site_surveys, site_survey_photos, equipment_binding_history.
+  site_surveys, site_survey_photos, equipment_binding_history,
+  site_survey_archives(+versions+kv_index).
 - New columns: inspection_check_items(description, equipment_sn, fields), work_orders(activated_at),
   pickup_records(serial_number, mac_address_1, mac_address_2, equipment_instance_id, work_order_id),
   template_bindings(task_type).
@@ -303,6 +304,64 @@ def run(db_path: str, do_backup: bool = True) -> int:
             )
         """)
 
+        # site survey archives (snapshot-based)
+        applied += ensure_table(cur, "site_survey_archives", """
+            CREATE TABLE site_survey_archives (
+                id VARCHAR(32) PRIMARY KEY,
+                site_id INTEGER NOT NULL,
+                work_order_id VARCHAR(32) NOT NULL,
+                inspection_id VARCHAR(32) NOT NULL,
+                template_id VARCHAR(32) NOT NULL,
+                template_version VARCHAR(20),
+                current_version INTEGER DEFAULT 1,
+                content JSON NOT NULL,
+                status VARCHAR(20) DEFAULT 'active',
+                created_by INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_by INTEGER,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (site_id) REFERENCES sites(id),
+                FOREIGN KEY (work_order_id) REFERENCES work_orders(id),
+                FOREIGN KEY (inspection_id) REFERENCES site_inspections(id),
+                FOREIGN KEY (template_id) REFERENCES inspection_templates(id),
+                FOREIGN KEY (created_by) REFERENCES users(id),
+                FOREIGN KEY (updated_by) REFERENCES users(id)
+            )
+        """)
+
+        applied += ensure_table(cur, "site_survey_archive_versions", """
+            CREATE TABLE site_survey_archive_versions (
+                id VARCHAR(32) PRIMARY KEY,
+                archive_id VARCHAR(32) NOT NULL,
+                version INTEGER NOT NULL,
+                content JSON NOT NULL,
+                diff JSON,
+                change_summary TEXT,
+                changed_by INTEGER,
+                changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (archive_id) REFERENCES site_survey_archives(id) ON DELETE CASCADE,
+                FOREIGN KEY (changed_by) REFERENCES users(id)
+            )
+        """)
+
+        applied += ensure_table(cur, "site_survey_archive_kv_index", """
+            CREATE TABLE site_survey_archive_kv_index (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                archive_id VARCHAR(32) NOT NULL,
+                version INTEGER NOT NULL,
+                path VARCHAR(200) NOT NULL,
+                field_label VARCHAR(200),
+                type VARCHAR(20),
+                value_number FLOAT,
+                value_bool BOOLEAN,
+                value_string TEXT,
+                value_datetime DATETIME,
+                raw_json JSON,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (archive_id) REFERENCES site_survey_archives(id) ON DELETE CASCADE
+            )
+        """)
+
         print("== Phase 2: add/alter columns ==")
         # inspection_check_items
         applied += ensure_column(cur, "inspection_check_items", "description", "TEXT")
@@ -359,6 +418,14 @@ def run(db_path: str, do_backup: bool = True) -> int:
                 applied += ensure_index(cur, "ix_inspection_check_items_cell", "inspection_check_items", "sector_id, band, equipment_sn")
             if {"inspection_id", "equipment_sn"}.issubset(ic_cols):
                 applied += ensure_index(cur, "ix_inspection_check_items_inspection_equipment", "inspection_check_items", "inspection_id, equipment_sn")
+
+        # survey archives indexes
+        applied += ensure_index(cur, "idx_survey_archives_site", "site_survey_archives", "site_id")
+        applied += ensure_index(cur, "idx_survey_archives_work_order", "site_survey_archives", "work_order_id")
+        applied += ensure_index(cur, "idx_survey_archives_updated_at", "site_survey_archives", "updated_at")
+        applied += ensure_index(cur, "idx_survey_archive_versions_key", "site_survey_archive_versions", "archive_id, version")
+        applied += ensure_index(cur, "idx_survey_kv_archive_version", "site_survey_archive_kv_index", "archive_id, version")
+        applied += ensure_index(cur, "idx_survey_kv_path", "site_survey_archive_kv_index", "path")
 
         conn.commit()
         print("\n== Done ==")

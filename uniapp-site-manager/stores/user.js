@@ -10,7 +10,8 @@ export const useUserStore = defineStore('user', () => {
 	// 权限相关的计算属性
 	// 将 manager 视作 admin 等同的权限
 	const isAdmin = computed(() => ['admin', 'manager'].includes(userInfo.value?.role))
-	const isInspector = computed(() => userInfo.value?.role === 'inspector')
+    const isInspector = computed(() => userInfo.value?.role === 'inspector')
+    const isSurveyor = computed(() => userInfo.value?.role === 'surveyor')
 	const isUser = computed(() => userInfo.value?.role === 'user')
 	
 	// 页面访问权限
@@ -195,7 +196,8 @@ export const useUserStore = defineStore('user', () => {
 		isUser,
 		canAccessSiteManagement,
 		canAccessUserManagement,
-		canViewAllInspections,
+    canViewAllInspections,
+    isSurveyor,
 		// 方法
 		login,
 		logout,

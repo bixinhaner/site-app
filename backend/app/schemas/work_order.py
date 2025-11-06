@@ -27,6 +27,7 @@ class WorkOrderTypeEnum(str, Enum):
     TRANSMISSION_ISSUE = "transmission_issue"
     GPS_ISSUE = "gps_issue"
     SIGNAL_ISSUE = "signal_issue"
+    SITE_SURVEY = "site_survey"
 
 
 class WorkOrderPriorityEnum(str, Enum):

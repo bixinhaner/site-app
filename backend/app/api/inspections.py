@@ -29,14 +29,27 @@ from app.schemas.inspection_enhanced import (
     InspectionSummary, SiteInspectionProgress
 )
 from app.api.auth import get_current_user
+from app.models.work_order import WorkOrder, WorkOrderTypeEnum
 from app.utils.file_handler import save_uploaded_file, generate_watermark
 from app.utils.gps_utils import reverse_geocode, validate_gps_accuracy
 from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.cell_generator import CellGenerator
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
+from app.models.work_order import WorkOrder, WorkOrderTypeEnum
 
 router = APIRouter()
+
+def _is_field_worker(u) -> bool:
+    r = getattr(u, 'role', None)
+    return r in ('inspector', 'surveyor')
+
+
+def _ensure_surveyor_inspection_type(db: Session, u, inspection: SiteInspection):
+    if getattr(u, 'role', None) == 'surveyor' and inspection and inspection.work_order_id:
+        wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
+        if not wo or wo.type != WorkOrderTypeEnum.SITE_SURVEY:
+            raise HTTPException(status_code=403, detail="仅可操作勘察检查")
 
 # 新增工具函数
 async def create_default_template(db: Session, site_id: int, inspection_type: str) -> InspectionTemplate:
@@ -415,7 +428,7 @@ async def get_inspections(
     query = db.query(SiteInspection)
     
     # 权限过滤：施工员只能看到自己的检查记录
-    if current_user.role == "inspector":
+    if _is_field_worker(current_user):
         query = query.filter(SiteInspection.inspector_id == current_user.id)
     
     if site_id:
@@ -470,12 +483,13 @@ async def get_inspection(
         )
     
     # 权限检查
-    if (current_user.role == "inspector" and 
+    if (_is_field_worker(current_user) and 
         inspection.inspector_id != current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="没有权限访问此检查记录"
         )
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 如果检查关联了工单，在照片列表中包含工单照片，并获取驳回意见
     if inspection.work_order_id:
@@ -538,12 +552,13 @@ async def update_inspection(
         )
     
     # 权限检查
-    if (current_user.role == "inspector" and 
+    if (_is_field_worker(current_user) and 
         inspection.inspector_id != current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="没有权限修改此检查记录"
         )
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 更新字段
     old_status = inspection.status
@@ -835,8 +850,9 @@ async def delete_inspection_photo(
     if not inspection:
         raise HTTPException(status_code=404, detail="关联检查不存在")
         
-    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限删除该照片")
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 检查检查状态是否允许删除照片
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
@@ -891,8 +907,9 @@ async def replace_inspection_photo(
     if not inspection:
         raise HTTPException(status_code=404, detail="关联检查不存在")
         
-    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限替换该照片")
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 检查检查状态是否允许替换照片
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
@@ -1002,8 +1019,9 @@ async def batch_inspection_photo_operations(
     if not inspection:
         raise HTTPException(status_code=404, detail="检查记录不存在")
         
-    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限操作该检查照片")
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 检查检查状态是否允许操作照片
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
@@ -1245,8 +1263,9 @@ async def cleanup_duplicate_inspection_photos(
     if not inspection:
         raise HTTPException(status_code=404, detail="检查记录不存在")
         
-    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限操作该检查照片")
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 构建查询条件
     query = db.query(InspectionPhoto).filter(InspectionPhoto.inspection_id == inspection_id)
@@ -1333,7 +1352,7 @@ async def get_inspection_statistics(
         query = query.filter(SiteInspection.created_at <= end_date)
     
     # 权限过滤
-    if current_user.role == "inspector":
+    if _is_field_worker(current_user):
         query = query.filter(SiteInspection.inspector_id == current_user.id)
     
     total_inspections = query.count()
@@ -1410,12 +1429,13 @@ async def get_inspection_items(
         )
     
     # 权限检查
-    if (current_user.role == "inspector" and 
+    if (_is_field_worker(current_user) and 
         inspection.inspector_id != current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="没有权限访问此检查记录"
         )
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 获取检查项，包括照片
     from sqlalchemy.orm import joinedload
@@ -1466,12 +1486,13 @@ async def update_inspection_item(
         )
     
     # 权限检查
-    if (current_user.role == "inspector" and 
+    if (_is_field_worker(current_user) and 
         inspection.inspector_id != current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="没有权限修改此检查记录"
         )
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 验证检查项存在
     check_item = db.query(InspectionCheckItem).filter(
@@ -1487,8 +1508,54 @@ async def update_inspection_item(
     
     # 更新检查项
     update_fields = item_update.dict(exclude_unset=True)
+
+    # 对于勘察类任务，严格要求 data_value 的 field_name 与模板 field_id 一致；
+    # 允许客户端使用 field_id/key/field/name 提交，但最终统一写入为 field_name=field_id。
+    if 'data_value' in update_fields and update_fields['data_value'] is not None:
+        # 构建 field_id 集合
+        field_ids = set()
+        label_to_id = {}
+        if isinstance(check_item.fields, list):
+            for f in check_item.fields:
+                fid = f.get('field_id') if isinstance(f, dict) else getattr(f, 'field_id', None)
+                lbl = f.get('label') if isinstance(f, dict) else getattr(f, 'label', None)
+                if fid:
+                    field_ids.add(str(fid))
+                if fid and lbl:
+                    label_to_id[str(lbl)] = str(fid)
+
+        normalized = []
+        invalid = []
+        for dv in update_fields['data_value']:
+            d = dv.dict() if hasattr(dv, 'dict') else (dv or {})
+            raw_name = d.get('field_name') or d.get('field_id') or d.get('key') or d.get('field') or d.get('name')
+            if not raw_name:
+                invalid.append('(missing field_name)')
+                continue
+            name = str(raw_name)
+            if field_ids and name not in field_ids:
+                # 精确以字段label匹配一次（非推断）
+                mapped = label_to_id.get(name)
+                if mapped:
+                    name = mapped
+                else:
+                    invalid.append(name)
+                    continue
+            normalized.append({
+                'field_name': name,
+                'value': d.get('value'),
+                'unit': d.get('unit'),
+            })
+
+        if invalid:
+            allowed = ','.join(sorted(field_ids)) if field_ids else '无字段定义'
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"存在未定义字段: {invalid}；允许的 field_id: {allowed}"
+            )
+        update_fields['data_value'] = normalized
     
-    # 如果更新包含data_value且检查项有字段定义，执行字段验证
+    # 如果更新包含data_value且检查项有字段定义，执行字段验证（非严格：允许部分填写）
     if 'data_value' in update_fields and check_item.fields:
         try:
             # 将check_item.fields转换为FieldDefinition对象列表
@@ -1514,7 +1581,7 @@ async def update_inspection_item(
                 validation_result = FieldValidator.validate_check_item_data(
                     field_definitions,
                     data_values_dict,
-                    strict=False  # 非严格模式，允许部分填写
+                    strict=False  # 勘察允许部分填写；未知字段在上一步已拒绝
                 )
                 
                 # 存储验证结果
@@ -1627,13 +1694,14 @@ async def reset_inspection_for_rejected_task(
             detail="检查记录不存在"
         )
     
-    # 权限检查：只有检查员本人可以重置自己的检查记录
-    if (current_user.role == "inspector" and 
+    # 权限检查：只有现场人员本人可以重置自己的检查记录
+    if (_is_field_worker(current_user) and 
         inspection.inspector_id != current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="没有权限重置此检查记录"
         )
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 检查关联的任务是否被驳回
     if inspection.work_order_id:
@@ -1872,9 +1940,10 @@ async def get_inspection_review_summary(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查记录不存在")
 
-    # 权限：检查员仅可看自己，其他角色可看
-    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+    # 权限：现场人员仅可看自己，其他角色可看
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限访问此检查记录")
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
 
     total = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id).count()
     pass_count = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id, InspectionCheckItem.review_status == "pass").count()
@@ -2206,11 +2275,12 @@ async def get_binding_history(
     
     # 权限检查
     inspection = check_item.inspection
-    if current_user.role == "inspector" and inspection.inspector_id != current_user.id:
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail="没有权限查看此检查项的历史记录"
         )
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
     
     # 查询历史记录
     history_records = db.query(EquipmentBindingHistory).options(
