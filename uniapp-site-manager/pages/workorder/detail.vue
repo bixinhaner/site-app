@@ -58,10 +58,10 @@
           v-if="order.status === 'REJECTED'"
         >{{ $t('workorder.modify') }}</button>
         <button 
-          class="action-btn warning" 
+          class="action-btn" 
           @click="handleRecall"
           v-if="(order.status === 'SUBMITTED' || order.status === 'UNDER_REVIEW') && canRecall"
-        >撤回</button>
+        >{{ $t('workorder.recall') }}</button>
       </view>
     </view>
 
@@ -235,23 +235,23 @@ const canRecall = computed(() => {
 const handleRecall = async () => {
   try {
     await new Promise((resolve, reject) => {
-      uni.showModal({ title: '确认撤回', content: '确认撤回本次提交？撤回后可继续编辑。', success: (res)=> res.confirm?resolve():reject('cancel') })
+      uni.showModal({ title: $t('messages.recallConfirmTitle'), content: $t('messages.recallConfirmContent'), success: (res)=> res.confirm?resolve():reject('cancel') })
     })
   } catch { return }
   try {
-    uni.showLoading({ title: '撤回中...' })
+    uni.showLoading({ title: $t('messages.recalling') })
     const res = await store.recallWorkOrder(orderId.value)
     if (res.success) {
-      uni.showToast({ title: '已撤回，可继续编辑', icon: 'success' })
+      uni.showToast({ title: $t('messages.recallSuccess'), icon: 'success' })
       const inspectionId = res.data?.work_order?.inspection_id || order.value?.inspection_id
       if (inspectionId) {
         uni.navigateTo({ url: `/pages/inspection/detail?id=${inspectionId}&fromWorkOrder=${orderId.value}` })
       }
     } else {
-      uni.showToast({ title: res.error || '撤回失败', icon: 'none' })
+      uni.showToast({ title: res.error || $t('messages.recallFailed'), icon: 'none' })
     }
   } catch (e) {
-    uni.showToast({ title: '撤回失败', icon: 'none' })
+    uni.showToast({ title: $t('messages.recallFailed'), icon: 'none' })
   } finally {
     uni.hideLoading()
   }

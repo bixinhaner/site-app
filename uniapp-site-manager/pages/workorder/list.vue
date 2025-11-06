@@ -39,10 +39,10 @@
             <button class="continue-btn" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.continue') }}</button>
           </view>
           <view class="order-actions" v-else-if="wo.status === 'SUBMITTED'">
-            <button class="recall-btn" size="mini" @click.stop="handleRecall(wo)">撤回</button>
+            <button class="recall-btn" size="mini" @click.stop="handleRecall(wo)">{{ $t('workorder.recall') }}</button>
           </view>
           <view class="order-actions" v-else-if="wo.status === 'UNDER_REVIEW'">
-            <button class="recall-btn" size="mini" @click.stop="handleRecall(wo)">撤回</button>
+            <button class="recall-btn" size="mini" @click.stop="handleRecall(wo)">{{ $t('workorder.recall') }}</button>
           </view>
           <view class="order-actions" v-else-if="wo.status === 'REJECTED'">
             <button class="rejected-btn" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.resubmit') }}</button>
@@ -178,28 +178,28 @@ const handleContinue = async (wo) => {
 const handleRecall = async (wo) => {
   // 权限兜底：仅指派人可撤回
   if (wo.assigned_to && userStore.userInfo?.id && wo.assigned_to !== userStore.userInfo.id) {
-    uni.showToast({ title: $t('messages.noPermission') || '无权限', icon: 'none' })
+    uni.showToast({ title: $t('messages.noPermission'), icon: 'none' })
     return
   }
   const confirmed = await new Promise((resolve) => {
-    uni.showModal({ title: '确认撤回', content: '确认撤回本次提交？撤回后可继续编辑。', success: (res)=> resolve(!!res.confirm), fail: ()=> resolve(false) })
+    uni.showModal({ title: $t('messages.recallConfirmTitle'), content: $t('messages.recallConfirmContent'), success: (res)=> resolve(!!res.confirm), fail: ()=> resolve(false) })
   })
   if (!confirmed) return
-  uni.showLoading({ title: '撤回中...' })
+  uni.showLoading({ title: $t('messages.recalling') })
   try {
     const res = await store.recallWorkOrder(wo.id)
     if (res.success) {
-      uni.showToast({ title: '已撤回，可继续编辑', icon: 'success' })
+      uni.showToast({ title: $t('messages.recallSuccess'), icon: 'success' })
       const inspectionId = res.data?.work_order?.inspection_id || wo.inspection_id
       if (inspectionId) {
         uni.navigateTo({ url: `/pages/inspection/detail?id=${inspectionId}&fromWorkOrder=${wo.id}` })
       }
       await reload()
     } else {
-      uni.showToast({ title: res.error || '撤回失败', icon: 'none' })
+      uni.showToast({ title: res.error || $t('messages.recallFailed'), icon: 'none' })
     }
   } catch (e) {
-    uni.showToast({ title: '撤回失败', icon: 'none' })
+    uni.showToast({ title: $t('messages.recallFailed'), icon: 'none' })
   } finally {
     uni.hideLoading()
   }
@@ -379,7 +379,7 @@ onShow(() => {
 		justify-content: flex-end;
 	}
 	
-.accept-btn, .continue-btn, .rejected-btn {
+.accept-btn, .continue-btn, .recalled-btn, .rejected-btn, .recall-btn {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -398,9 +398,7 @@ onShow(() => {
 	background: linear-gradient(135deg, #1d4ed8, #3b82f6);
 }
 
-.recall-btn {
-	background: linear-gradient(135deg, #f59e0b, #fbbf24);
-}
+.recall-btn { background: linear-gradient(135deg, #1d4ed8, #3b82f6); }
 
 .rejected-btn {
 	background: linear-gradient(135deg, #dc2626, #ef4444);
