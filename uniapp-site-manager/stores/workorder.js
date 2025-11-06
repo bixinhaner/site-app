@@ -157,6 +157,27 @@ export const useWorkOrderStore = defineStore('workorder', () => {
     }
   }
 
+  const recallWorkOrder = async (id) => {
+    if (!userStore.token) return { success: false, error: '未登录' }
+    try {
+      const response = await uni.request({
+        url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.RECALL(id)),
+        ...createRequestConfig({ method: 'POST', headers: getAuthHeaders(userStore.token) })
+      })
+      if ([200].includes(response.statusCode)) {
+        // 更新当前工单状态
+        if (current.value && current.value.id === id) {
+          current.value = response.data.work_order || current.value
+        }
+        return { success: true, data: response.data }
+      }
+      throw new Error(response.data?.detail || '撤回失败')
+    } catch (e) {
+      console.error('recallWorkOrder error:', e)
+      return { success: false, error: e.message || '网络错误' }
+    }
+  }
+
   const uploadPhoto = async (id, filePath, additional = {}) => {
     if (!userStore.token) return { success: false, error: '未登录' }
     try {
@@ -233,6 +254,7 @@ export const useWorkOrderStore = defineStore('workorder', () => {
     list, current, items, photos, loading, 
     getMyWorkOrders, getWorkOrder, getItems, getPhotos, 
     acceptWorkOrder, getInspection, completeWorkOrder,
-    uploadPhoto, deletePhoto, updateItem, getItemFieldSchema 
+    uploadPhoto, deletePhoto, updateItem, getItemFieldSchema,
+    recallWorkOrder
   }
 })

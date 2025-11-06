@@ -1897,6 +1897,73 @@ async def submit_work_order(
     }
 
 
+@router.post("/{work_order_id}/recall")
+def recall_work_order(
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """撤回已提交但未完成审核的工单，回到可编辑状态。
+    允许状态：SUBMITTED、UNDER_REVIEW。
+    权限：工单指派人（assigned_to）或管理员/经理。
+    动作：
+      - WorkOrder.status -> ACTIVE，submitted_at 置空
+      - 同步 SiteInspection.status -> IN_PROGRESS，submitted_at 置空
+      - 记录审计日志（action=recall）
+    """
+    wo: WorkOrder = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+
+    # 权限校验：指派人或 admin/manager
+    role = getattr(current_user, 'role', None)
+    if not (wo.assigned_to == current_user.id or role in ("admin", "manager")):
+        raise HTTPException(status_code=403, detail="仅指派人或管理员可撤回")
+
+    # 状态校验
+    if wo.status not in (WorkOrderStatusEnum.SUBMITTED, WorkOrderStatusEnum.UNDER_REVIEW):
+        raise HTTPException(status_code=409, detail="当前状态不可撤回")
+
+    old_status = wo.status
+    wo.status = WorkOrderStatusEnum.ACTIVE
+    wo.submitted_at = None
+    wo.updated_at = datetime.utcnow()
+
+    # 同步到检查
+    if wo.inspection_id:
+        inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+        if inspection:
+            inspection.status = InspectionStatusEnum.IN_PROGRESS
+            inspection.submitted_at = None
+            inspection.updated_at = datetime.utcnow()
+
+    # 审计日志
+    audit = AuditEvent(
+        id=str(uuid.uuid4()),
+        resource_type="work_order",
+        resource_id=work_order_id,
+        action="recall",
+        from_status=str(old_status.value if hasattr(old_status, 'value') else old_status),
+        to_status=str(wo.status.value if hasattr(wo.status, 'value') else wo.status),
+        operator_id=current_user.id,
+        comments="用户撤回提交",
+        details={}
+    )
+    db.add(audit)
+
+    # 使用同步服务进行状态一致性同步
+    sync_service = get_work_order_sync_service(db)
+    sync_service.sync_work_order_to_inspection_status(wo)
+
+    db.commit()
+    db.refresh(wo)
+
+    return {
+        "message": "撤回成功，已回到可编辑状态",
+        "work_order": _enrich_work_order_response(db, wo)
+    }
+
+
 @router.post("/{work_order_id}/review")
 async def review_work_order(
     work_order_id: str,

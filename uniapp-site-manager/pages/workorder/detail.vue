@@ -46,7 +46,7 @@
         </view>
       </view>
 
-      <view class="bottom-actions" v-if="order.status === 'ACTIVE' || order.status === 'REJECTED'">
+      <view class="bottom-actions" v-if="order.status === 'ACTIVE' || order.status === 'REJECTED' || order.status === 'SUBMITTED' || order.status === 'UNDER_REVIEW'">
         <button 
           class="action-btn" 
           @click="completeWorkOrder"
@@ -57,6 +57,11 @@
           @click="openEdit(null)"
           v-if="order.status === 'REJECTED'"
         >{{ $t('workorder.modify') }}</button>
+        <button 
+          class="action-btn warning" 
+          @click="handleRecall"
+          v-if="(order.status === 'SUBMITTED' || order.status === 'UNDER_REVIEW') && canRecall"
+        >撤回</button>
       </view>
     </view>
 
@@ -118,12 +123,14 @@
 </template>
 
 <script setup>
-import { ref, getCurrentInstance } from 'vue'
+import { ref, getCurrentInstance, computed } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
+import { useUserStore } from '@/stores/user'
 
 const { $t } = getCurrentInstance().appContext.config.globalProperties
 const store = useWorkOrderStore()
+const userStore = useUserStore()
 const order = ref(null)
 const items = ref([])
 const photos = ref([])
@@ -219,6 +226,35 @@ const previewPhoto = (p) => {
   const urls = itemPhotos({ id: p.item_id }).map(x => x.file_path)
   const current = urls.indexOf(p.file_path)
   uni.previewImage({ urls, current: current >= 0 ? current : 0 })
+}
+
+const canRecall = computed(() => {
+  try { return !!order.value && order.value.assigned_to === userStore.userInfo?.id } catch { return false }
+})
+
+const handleRecall = async () => {
+  try {
+    await new Promise((resolve, reject) => {
+      uni.showModal({ title: '确认撤回', content: '确认撤回本次提交？撤回后可继续编辑。', success: (res)=> res.confirm?resolve():reject('cancel') })
+    })
+  } catch { return }
+  try {
+    uni.showLoading({ title: '撤回中...' })
+    const res = await store.recallWorkOrder(orderId.value)
+    if (res.success) {
+      uni.showToast({ title: '已撤回，可继续编辑', icon: 'success' })
+      const inspectionId = res.data?.work_order?.inspection_id || order.value?.inspection_id
+      if (inspectionId) {
+        uni.navigateTo({ url: `/pages/inspection/detail?id=${inspectionId}&fromWorkOrder=${orderId.value}` })
+      }
+    } else {
+      uni.showToast({ title: res.error || '撤回失败', icon: 'none' })
+    }
+  } catch (e) {
+    uni.showToast({ title: '撤回失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+  }
 }
 
 const chooseAndUpload = async (it) => {

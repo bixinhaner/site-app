@@ -64,6 +64,7 @@ export const API_ENDPOINTS = {
     CREATE: '/api/work-orders',
     UPDATE: (id) => `/api/work-orders/${id}`,
     ACCEPT: (id) => `/api/work-orders/${id}/accept`,
+    RECALL: (id) => `/api/work-orders/${id}/recall`,
     COMPLETE: (id) => `/api/work-orders/${id}/complete`,
     INSPECTION: (id) => `/api/work-orders/${id}/inspection`,
     ITEMS: (id) => `/api/work-orders/${id}/items`,
