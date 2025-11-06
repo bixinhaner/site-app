@@ -1,7 +1,7 @@
 {
-    "name" : "站点信息管理APP",
+    "name" : "Baicells Sites Manager",
     "appid" : "__UNI__D81AC36",
-    "description" : "现代化的站点信息管理系统",
+    "description" : "Modern Site Information Management System",
     "versionName" : "1.0.0",
     "versionCode" : "100",
     "transformPx" : false,
