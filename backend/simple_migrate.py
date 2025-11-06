@@ -182,7 +182,7 @@ def create_tables():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_site_survey_archives_site_id ON site_survey_archives (site_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_site_survey_archives_work_order_id ON site_survey_archives (work_order_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_site_survey_archives_inspection_id ON site_survey_archives (inspection_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_site_survey_archives_template_id ON site_survey_archives (template_id)")
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_site_survey_archives_template_id ON site_survey_archives (template_id)"))
 
         # 4. 创建 site_survey_archive_versions 表
         print("  - 创建 site_survey_archive_versions 表...")
