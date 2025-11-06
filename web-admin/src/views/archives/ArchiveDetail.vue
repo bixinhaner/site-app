@@ -35,25 +35,27 @@
       />
     </el-card>
 
-    <el-drawer v-model="historyVisible" title="变更历史" size="50%">
-      <div class="hist-tools">
-        <el-select v-model="fromVer" placeholder="起始版本" style="width: 160px">
-          <el-option v-for="h in history" :key="h.version" :label="h.version" :value="h.version" />
-        </el-select>
-        <el-select v-model="toVer" placeholder="目标版本" style="width: 160px">
-          <el-option v-for="h in history" :key="'to'+h.version" :label="h.version" :value="h.version" />
-        </el-select>
-        <el-button :disabled="!fromVer || !toVer" @click="loadDiff">查看差异</el-button>
-        <el-button type="warning" :disabled="!toVer" @click="revertTo">回滚到目标版本</el-button>
-      </div>
-      <el-table :data="diff" height="60vh" v-if="diff && diff.length">
-        <el-table-column prop="op" label="操作" width="100" />
-        <el-table-column prop="path" label="路径" min-width="260" />
-        <el-table-column prop="value" label="值" min-width="260">
-          <template #default="{ row }">{{ preview(row.value) }}</template>
+    <el-drawer v-model="historyVisible" title="变更历史" size="60%">
+      <el-table :data="history" height="70vh" v-loading="historyLoading">
+        <el-table-column label="时间" width="180">
+          <template #default="{ row }">{{ formatDate(row.changed_at) }}</template>
+        </el-table-column>
+        <el-table-column prop="operator_name" label="操作人" width="140" />
+        <el-table-column prop="version" label="版本" width="100" />
+        <el-table-column label="摘要">
+          <template #default="{ row }">{{ row.summary || row.change_summary || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="明细" min-width="360">
+          <template #default="{ row }">
+            <div v-if="Array.isArray(row.details) && row.details.length">
+              <ul class="hist-lines">
+                <li v-for="(line, idx) in row.details" :key="idx">{{ line }}</li>
+              </ul>
+            </div>
+            <span v-else class="muted">-</span>
+          </template>
         </el-table-column>
       </el-table>
-      <el-empty description="选择版本查看差异" v-else />
     </el-drawer>
   </div>
 </template>
@@ -83,11 +85,9 @@ const edits = reactive(new Map()) // key: json pointer, value: new value
 const photoAdds = ref([]) // { categoryId, itemId, photo }
 const photoDeletes = ref([]) // { categoryId, itemId, photoId }
 
-const historyVisible = ref(false)
 const history = ref([])
-const fromVer = ref(null)
-const toVer = ref(null)
-const diff = ref(null)
+const historyLoading = ref(false)
+const historyVisible = ref(false)
 
 const safeClone = (obj) => {
   // 优先使用 JSON 深拷贝，避免 structuredClone 在含有不可克隆对象时报错
@@ -249,55 +249,26 @@ async function saveChanges() {
   }
 }
 
-function openHistory() {
-  historyVisible.value = true
-  loadHistory()
-}
-
 async function loadHistory() {
   try {
+    historyLoading.value = true
     const res = await surveyArchivesApi.history(id)
     history.value = Array.isArray(res) ? res : []
-    if (history.value.length >= 2) {
-      fromVer.value = history.value[history.value.length - 2].version
-      toVer.value = history.value[history.value.length - 1].version
-      await loadDiff()
-    }
   } catch (e) {
     console.error(e)
+  } finally {
+    historyLoading.value = false
   }
 }
 
-async function loadDiff() {
-  try {
-    if (!fromVer.value || !toVer.value) return
-    const res = await surveyArchivesApi.diff(id, fromVer.value, toVer.value)
-    diff.value = Array.isArray(res) ? res : []
-  } catch (e) {
-    console.error(e)
+function openHistory() {
+  historyVisible.value = true
+  if (!history.value || history.value.length === 0) {
+    loadHistory()
   }
 }
 
-async function revertTo() {
-  try {
-    await ElMessageBox.confirm(`回滚到版本 ${toVer.value} ？`, '确认', { type: 'warning' })
-    await surveyArchivesApi.revert(id, toVer.value)
-    ElMessage.success('已回滚')
-    await load()
-    await loadHistory()
-  } catch (e) {
-    if (e !== 'cancel') {
-      console.error(e)
-      ElMessage.error('回滚失败')
-    }
-  }
-}
-
-function preview(v) {
-  if (v == null) return '-'
-  if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
-}
+function formatDate(v) { return v ? new Date(v).toLocaleString() : '-' }
 
 async function onUploadPhoto({ categoryId, itemId, file }) {
   try {
@@ -369,6 +340,7 @@ async function onDeletePhoto({ photoId, photo }) {
 }
 
 onMounted(load)
+onMounted(loadHistory)
 
 function startEdit() {
   // 仅在按钮可见时可触发，此处不再重复权限判断
@@ -402,4 +374,7 @@ function goBack() {
 .page { padding: 16px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .meta { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.hist-lines { margin: 0; padding-left: 18px; }
+.hist-lines li { list-style: disc; line-height: 1.6; }
+.muted { color: #999; }
 </style>

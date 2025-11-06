@@ -104,15 +104,119 @@ def list_history(
     vers = db.query(SiteSurveyArchiveVersion).filter(
         SiteSurveyArchiveVersion.archive_id == archive_id
     ).order_by(SiteSurveyArchiveVersion.version.asc()).all()
-    return [
-        {
+
+    def _get(ci: int, ii: int, content: dict):
+        cats = (content or {}).get('check_categories') or []
+        if not isinstance(ci, int) or ci < 0 or ci >= len(cats):
+            return None, None, None
+        cat = cats[ci]
+        items = cat.get('items') or []
+        if not isinstance(ii, int) or ii < 0 or ii >= len(items):
+            return cat, None, None
+        item = items[ii]
+        fields = {f.get('field_id'): f for f in (item.get('fields') or [])}
+        return cat, item, fields
+
+    def _unescape(s: str) -> str:
+        return str(s).replace('~1', '/').replace('~0', '~')
+
+    results = []
+    prev_content = None
+    for v in vers:
+        # 统计与细粒度明细
+        field_changes = 0
+        photo_adds = 0
+        photo_removes = 0
+        lines = []
+
+        try:
+            for op in (v.diff or []):
+                path = str(op.get('path', ''))
+                typ = str(op.get('op', '')).lower()
+                # 值变更：/check_categories/{ci}/items/{ii}/values/{field}
+                if '/values/' in path and typ in ('replace', 'add'):
+                    try:
+                        parts = [p for p in path.split('/') if p]
+                        ci = int(parts[1]); ii = int(parts[3]); fid = _unescape(parts[5])
+                        cat, item, fields = _get(ci, ii, v.content)
+                        # label 信息
+                        cat_name = (cat or {}).get('category_name') or (cat or {}).get('category_id') or str(ci)
+                        item_name = (item or {}).get('item_name') or (item or {}).get('item_id') or str(ii)
+                        field_label = (fields or {}).get(fid, {}).get('label') or fid
+                        # 旧值从上一版本读取
+                        old_val = None
+                        if prev_content:
+                            try:
+                                pc = (prev_content or {}).get('check_categories') or []
+                                pit = (((pc[ci] or {}).get('items') or [])[ii] or {})
+                                old_val = ((pit.get('values') or {}).get(fid))
+                            except Exception:
+                                old_val = None
+                        new_val = (item or {}).get('values', {}).get(fid)
+                        field_changes += 1
+                        # 友好格式化
+                        def fmt(vv):
+                            if vv is None or vv == '':
+                                return '-'
+                            if isinstance(vv, bool):
+                                return '是' if vv else '否'
+                            return vv
+                        lines.append(f"{cat_name}/{item_name}/{field_label}：{fmt(old_val)} → {fmt(new_val)}")
+                    except Exception:
+                        field_changes += 1
+                        continue
+                # 照片变更：/check_categories/{ci}/items/{ii}/photos
+                elif '/photos' in path:
+                    try:
+                        parts = [p for p in path.split('/') if p]
+                        ci = int(parts[1]); ii = int(parts[3])
+                        cat, item, _ = _get(ci, ii, v.content)
+                        cat_name = (cat or {}).get('category_name') or (cat or {}).get('category_id') or str(ci)
+                        item_name = (item or {}).get('item_name') or (item or {}).get('item_id') or str(ii)
+                        if typ == 'add':
+                            val = op.get('value', None)
+                            cnt = len(val) if isinstance(val, list) else 1
+                            photo_adds += cnt
+                            lines.append(f"{cat_name}/{item_name}：新增照片 {cnt} 张")
+                        elif typ == 'remove':
+                            photo_removes += 1
+                            lines.append(f"{cat_name}/{item_name}：删除照片 1 张")
+                    except Exception:
+                        # ignore
+                        pass
+        except Exception:
+            pass
+
+        # 形成摘要
+        parts = []
+        if field_changes:
+            parts.append(f"更新了 {field_changes} 个字段")
+        if photo_adds:
+            parts.append(f"上传照片 {photo_adds} 张")
+        if photo_removes:
+            parts.append(f"删除照片 {photo_removes} 张")
+        summary = '；'.join(parts) if parts else (v.change_summary or ('创建档案' if v.version == 1 else '用户编辑'))
+
+        results.append({
             "version": v.version,
             "changed_by": v.changed_by,
+            "operator_name": getattr(getattr(v, 'changer', None), 'full_name', None),
             "changed_at": v.changed_at,
+            "summary": summary,
             "change_summary": v.change_summary,
-        }
-        for v in vers
-    ]
+            "details": lines,
+            "stats": {
+                "field_changes": field_changes,
+                "photo_adds": photo_adds,
+                "photo_removes": photo_removes,
+            }
+        })
+
+        prev_content = v.content
+
+    # 按时间倒序返回（最新在前）
+    results.sort(key=lambda r: (r.get('changed_at') or 0, r.get('version') or 0), reverse=True)
+    return results
 
 
 @router.get("/{archive_id}/diff")
