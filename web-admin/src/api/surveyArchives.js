@@ -50,4 +50,10 @@ export const surveyArchivesApi = {
   search(params) {
     return request.get('/api/survey-archives/search', { params })
   },
+  exportZip(id) {
+    return request.get(`/api/survey-archives/${id}/export`, { responseType: 'blob' })
+  },
+  exportPdf(id) {
+    return request.get(`/api/survey-archives/${id}/export-pdf`, { responseType: 'blob' })
+  },
 }

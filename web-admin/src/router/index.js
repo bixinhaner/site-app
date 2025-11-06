@@ -95,7 +95,7 @@ const routes = [
           { path: 'detail/:id', name: 'SiteDetail', component: () => import('../views/site/SiteDetail.vue'), meta: { title: '站点详情', hidden: true } },
           { path: 'planning/:id', name: 'SitePlanning', component: () => import('../views/site/SitePlanning.vue'), meta: { title: '站点规划', hidden: true } },
           { path: 'planning-batch', name: 'SitePlanningBatch', component: () => import('../views/site/SitePlanningBatch.vue'), meta: { title: '规划批量导入', icon: 'Operation' } },
-          { path: 'surveys', name: 'SiteSurveys', component: () => import('../views/surveys/SurveyList.vue'), meta: { title: '勘察档案', icon: 'PictureFilled' } },
+          { path: 'surveys', name: 'SiteSurveys', component: () => import('../views/surveys/SurveyList.vue'), meta: { title: '勘察档案（旧-废弃）', icon: 'PictureFilled' } },
           { path: 'surveys/new', name: 'SiteSurveyNew', component: () => import('../views/surveys/SurveyForm.vue'), meta: { title: '新建勘察', hidden: true } },
           { path: 'surveys/:id', name: 'SiteSurveyDetail', component: () => import('../views/surveys/SurveyDetail.vue'), meta: { title: '勘察详情', hidden: true } }
           ,

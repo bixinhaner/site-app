@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, Form
 from typing import Optional, List, Dict, Any
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.site import Site
 from app.models.survey_archive import SiteSurveyArchive, SiteSurveyArchiveVersion, SiteSurveyArchiveKVIndex
+from app.models.inspection import SiteInspection
 from app.services.survey_archive_service import (
     create_or_append_archive,
     patch_archive,
@@ -17,6 +18,10 @@ from app.services.survey_archive_service import (
 from app.utils.file_handler import save_uploaded_file, calculate_file_hash, extract_exif, compress_image, add_text_watermark_inline
 from datetime import datetime
 import os
+import io
+import csv
+import zipfile
+from fastapi.responses import StreamingResponse
 import uuid
 import jsonpatch
 
@@ -36,10 +41,20 @@ def page_archives(
     site_id: Optional[int] = None,
     template_id: Optional[str] = None,
     keyword: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    q = db.query(SiteSurveyArchive).join(Site, Site.id == SiteSurveyArchive.site_id)
+    q = (
+        db.query(SiteSurveyArchive)
+        .options(
+            joinedload(SiteSurveyArchive.site),
+            joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.inspector),
+            joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.reviewer),
+        )
+        .join(Site, Site.id == SiteSurveyArchive.site_id)
+    )
     if site_id:
         q = q.filter(SiteSurveyArchive.site_id == site_id)
     if template_id:
@@ -47,6 +62,10 @@ def page_archives(
     if keyword:
         kw = f"%{keyword}%"
         q = q.filter((Site.site_name.like(kw)) | (Site.site_code.like(kw)))
+    if date_from:
+        q = q.filter(SiteSurveyArchive.updated_at >= date_from)
+    if date_to:
+        q = q.filter(SiteSurveyArchive.updated_at <= date_to)
 
     total = q.count()
     rows = (
@@ -67,6 +86,9 @@ def page_archives(
             "inspection_id": a.inspection_id,
             "template_id": a.template_id,
             "template_version": a.template_version,
+            # 列表展示用人的信息
+            "inspector_name": getattr(getattr(a.inspection, 'inspector', None), 'full_name', None),
+            "reviewer_name": getattr(getattr(a.inspection, 'reviewer', None), 'full_name', None),
             "current_version": a.current_version,
             "updated_at": a.updated_at,
         })
@@ -217,6 +239,387 @@ def list_history(
     # 按时间倒序返回（最新在前）
     results.sort(key=lambda r: (r.get('changed_at') or 0, r.get('version') or 0), reverse=True)
     return results
+
+
+@router.get("/{archive_id}/export")
+async def export_archive_zip(
+    archive_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    a = db.query(SiteSurveyArchive).options(
+        joinedload(SiteSurveyArchive.site),
+        joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.inspector),
+        joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.reviewer),
+    ).filter(SiteSurveyArchive.id == archive_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    mem_zip = io.BytesIO()
+    with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # 概览与内容
+        overview = {
+            "id": a.id,
+            "site_id": a.site_id,
+            "site_code": a.site.site_code if a.site else None,
+            "site_name": a.site.site_name if a.site else None,
+            "work_order_id": a.work_order_id,
+            "inspection_id": a.inspection_id,
+            "inspector_name": getattr(getattr(a.inspection, 'inspector', None), 'full_name', None),
+            "reviewer_name": getattr(getattr(a.inspection, 'reviewer', None), 'full_name', None),
+            "template_id": a.template_id,
+            "template_version": a.template_version,
+            "current_version": a.current_version,
+            "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+        }
+        import json as _json
+        zf.writestr("overview.json", _json.dumps(overview, ensure_ascii=False, indent=2))
+        zf.writestr("content.json", _json.dumps(a.content or {}, ensure_ascii=False, indent=2))
+
+        # CSV总览
+        csv_buf = io.StringIO()
+        w = csv.writer(csv_buf)
+        w.writerow(["key", "value"])
+        for k, v in overview.items():
+            w.writerow([k, v])
+        zf.writestr("overview.csv", csv_buf.getvalue())
+
+        # 写入照片与清单
+        files_csv = io.StringIO()
+        fw = csv.writer(files_csv)
+        fw.writerow(["category","item","file_name","zip_path","mime_type","file_size"])
+        cats = (a.content or {}).get("check_categories") or []
+        for cat in cats:
+            cat_name = cat.get("category_name") or cat.get("category_id")
+            for it in (cat.get("items") or []):
+                item_name = it.get("item_name") or it.get("item_id")
+                for p in (it.get("photos") or []):
+                    fp = p.get("file_path")
+                    if not fp or not os.path.exists(fp):
+                        continue
+                    base = os.path.basename(fp)
+                    subdir = f"photos/{cat_name}/{item_name}"
+                    arcname = f"{subdir}/{base}"
+                    try:
+                        zf.write(fp, arcname=arcname)
+                    except Exception:
+                        continue
+                    fw.writerow([cat_name, item_name, base, arcname, p.get("mime_type"), (os.path.getsize(fp) if os.path.exists(fp) else None)])
+        zf.writestr("files.csv", files_csv.getvalue())
+
+    mem_zip.seek(0)
+    # 构造更有信息量的文件名
+    site_code = a.site.site_code if a.site else None
+    site_name = a.site.site_name if a.site else None
+    ver = a.current_version or 1
+    ts = (a.updated_at or datetime.utcnow()).strftime('%Y%m%d_%H%M')
+    def slugify(s: str) -> str:
+        import re
+        s = str(s or '').strip().replace(' ', '_')
+        return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
+    ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
+    human_base = f"勘察档案_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    from urllib.parse import quote
+    headers = {
+        "Content-Disposition": f"attachment; filename={ascii_base}.zip; filename*=UTF-8''{quote(human_base + '.zip')}"
+    }
+    return StreamingResponse(mem_zip, media_type="application/zip", headers=headers)
+
+
+@router.get("/{archive_id}/export-pdf")
+async def export_archive_pdf(
+    archive_id: str,
+    with_thumbs: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import cm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    except Exception:
+        raise HTTPException(status_code=500, detail="后端缺少 reportlab 依赖，请先安装")
+
+    a = db.query(SiteSurveyArchive).options(
+        joinedload(SiteSurveyArchive.site),
+        joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.inspector),
+        joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.reviewer),
+    ).filter(SiteSurveyArchive.id == archive_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    # 字体
+    def register_cn_fonts() -> tuple[str, str]:
+        fonts_dir = os.path.join("backend", "fonts")
+        candidates = [
+            ("NotoSansSC-Regular.ttf", "NotoSansSC-Bold.ttf"),
+            ("SourceHanSansSC-Regular.ttf", "SourceHanSansSC-Bold.ttf"),
+            ("NotoSansCJKsc-Regular.otf", "NotoSansCJKsc-Bold.otf"),
+        ]
+        for reg, bold in candidates:
+            reg_p = os.path.join(fonts_dir, reg)
+            bold_p = os.path.join(fonts_dir, bold)
+            if os.path.exists(reg_p):
+                try:
+                    pdfmetrics.registerFont(TTFont("CN", reg_p))
+                    if os.path.exists(bold_p):
+                        pdfmetrics.registerFont(TTFont("CN-Bold", bold_p))
+                    else:
+                        pdfmetrics.registerFont(TTFont("CN-Bold", reg_p))
+                    return "CN", "CN-Bold"
+                except Exception:
+                    pass
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+            return "STSong-Light", "STSong-Light"
+        except Exception:
+            return "Helvetica", "Helvetica-Bold"
+
+    FONT_MAIN, FONT_BOLD = register_cn_fonts()
+    primary = colors.HexColor("#F56C3A")
+    primary_light = colors.HexColor("#FFF6F0")
+    text_color = colors.HexColor("#333333")
+    border = colors.HexColor('#dddddd')
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=1.8*cm
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="TitleCN", fontName=FONT_BOLD, fontSize=24, leading=30, textColor=primary, spaceAfter=10))
+    styles.add(ParagraphStyle(name="H2CN", fontName=FONT_BOLD, fontSize=16, leading=22, textColor=primary, spaceBefore=10, spaceAfter=6))
+    styles.add(ParagraphStyle(name="BodyCN", fontName=FONT_MAIN, fontSize=11, leading=16, textColor=text_color))
+    styles.add(ParagraphStyle(name="MetaCN", fontName=FONT_MAIN, fontSize=10, leading=14, textColor=colors.HexColor('#555555')))
+    styles.add(ParagraphStyle(name="CaptionCN", fontName=FONT_MAIN, fontSize=9, leading=12, textColor=colors.HexColor('#666666'), alignment=1))
+
+    # 页眉/页脚
+    def draw_page_frame(canvas, doc_):
+        canvas.saveState()
+        # header bar
+        canvas.setFillColor(primary)
+        canvas.rect(0, A4[1]-1.2*cm, A4[0], 1.2*cm, stroke=0, fill=1)
+        canvas.setFillColor(colors.white)
+        canvas.setFont(FONT_BOLD, 12)
+        canvas.drawString(2*cm, A4[1]-0.85*cm, "勘察档案报告 Site Survey Archive")
+        # footer
+        canvas.setStrokeColor(primary)
+        canvas.setLineWidth(0.6)
+        canvas.line(2*cm, 1.5*cm, A4[0]-2*cm, 1.5*cm)
+        canvas.setFont(FONT_MAIN, 9)
+        canvas.setFillColor(colors.HexColor('#888888'))
+        canvas.drawRightString(A4[0]-2*cm, 1.1*cm, f"第 {doc_.page} 页")
+        canvas.restoreState()
+
+    story = []
+    # 封面标题
+    story.append(Paragraph("勘察档案报告", styles["TitleCN"]))
+
+    # Meta 卡片（两列表格）
+    meta_rows = [
+        ["站点", f"{a.site.site_name if a.site else '-'} ({a.site.site_code if a.site else '-'})"],
+        ["版本", str(a.current_version or '-')],
+        ["勘察人", str(getattr(getattr(a.inspection, 'inspector', None), 'full_name', '-') or '-')],
+        ["审核人", str(getattr(getattr(a.inspection, 'reviewer', None), 'full_name', '-') or '-')],
+        ["更新时间", (a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-')],
+    ]
+    meta_tbl = Table(meta_rows, colWidths=[3*cm, 12*cm])
+    meta_tbl.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
+        ('FONTSIZE', (0,0), (-1,-1), 10),
+        ('TEXTCOLOR', (0,0), (0,-1), colors.HexColor('#666666')),
+        ('BACKGROUND', (0,0), (-1,-1), primary_light),
+        ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
+        ('LINEAFTER', (0,0), (-1,-1), 0.25, border),
+        ('LINEABOVE', (0,0), (-1,-1), 0.25, border),
+        ('LINEBELOW', (0,0), (-1,-1), 0.25, border),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
+        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(meta_tbl)
+    story.append(Spacer(1, 10))
+
+    # 内容概览表（字段值）
+    def decimals_from_step(step_val) -> int:
+        try:
+            s = str(step_val)
+            if '.' in s:
+                return len(s.split('.', 1)[1].rstrip('0'))
+            return 0
+        except Exception:
+            return 0
+
+    def opt_label(options, v):
+        try:
+            for o in (options or []):
+                if str(o.get('value')) == str(v):
+                    return o.get('label') or v
+        except Exception:
+            pass
+        return v
+
+    def fmt_value_by_field(fd: dict, v):
+        if v is None or v == '':
+            return '-'
+        try:
+            t = str((fd or {}).get('type') or '').lower()
+            cons = (fd or {}).get('constraints') or {}
+            unit = cons.get('unit') or cons.get('suffix') or ''
+            # boolean
+            if t == 'boolean' or isinstance(v, bool):
+                return ('是' if (v is True or str(v).lower() in ('1','true','yes','y')) else '否') + (f" {unit}" if unit else '')
+            # number
+            if t == 'number' or isinstance(v, (int, float)):
+                prec = cons.get('precision')
+                if prec is None:
+                    prec = decimals_from_step(cons.get('step'))
+                try:
+                    fval = float(v)
+                    if isinstance(prec, int) and prec >= 0:
+                        sval = f"{fval:.{prec}f}" if prec > 0 else f"{int(round(fval))}"
+                    else:
+                        sval = str(fval)
+                except Exception:
+                    sval = str(v)
+                return sval + (f" {unit}" if unit else '')
+            # select single/multi
+            if t == 'select_single':
+                return str(opt_label((fd or {}).get('options'), v))
+            if t == 'select_multi':
+                arr = v if isinstance(v, list) else ([v] if v not in (None, '') else [])
+                labeled = [str(opt_label((fd or {}).get('options'), x)) for x in arr]
+                return '、'.join(labeled) if labeled else '-'
+            # dates
+            if t in ('date','time','datetime'):
+                from datetime import datetime as _dt
+                s = str(v)
+                dt = None
+                for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ","%Y-%m-%dT%H:%M:%S.%f","%Y-%m-%dT%H:%M:%S","%Y-%m-%d %H:%M:%S","%Y-%m-%d"):
+                    try:
+                        dt = _dt.strptime(s, fmt)
+                        break
+                    except Exception:
+                        continue
+                if not dt:
+                    return s
+                if t == 'date':
+                    return dt.strftime('%Y-%m-%d')
+                if t == 'time':
+                    return dt.strftime('%H:%M:%S')
+                return dt.strftime('%Y-%m-%d %H:%M')
+            # objects/arrays
+            if isinstance(v, (dict, list)):
+                import json as _json
+                return _json.dumps(v, ensure_ascii=False)
+            # default
+            return str(v)
+        except Exception:
+            return str(v)
+    cats = (a.content or {}).get("check_categories") or []
+    # 照片网格辅助
+    def make_photo_grid(photo_list, cols=2):
+        cells = []
+        row = []
+        for p in photo_list:
+            fp = p.get('file_path')
+            if not fp or not os.path.exists(fp):
+                continue
+            try:
+                im = Image(fp, width=7.2*cm if cols==2 else 5.0*cm, height=5.4*cm if cols==2 else 3.8*cm)
+                caption = Paragraph(os.path.basename(fp), styles['CaptionCN'])
+                row.append([im, caption])
+                if len(row) == cols:
+                    cells.append(row)
+                    row = []
+            except Exception:
+                continue
+        if row:
+            # 填充空白单元格以齐列
+            while len(row) < cols:
+                row.append("")
+            cells.append(row)
+        if not cells:
+            return None
+        cw = [7.6*cm if cols==2 else 5.4*cm] * cols
+        t = Table(cells, colWidths=cw)
+        t.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('LEFTPADDING', (0,0), (-1,-1), 4),
+            ('RIGHTPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ]))
+        return t
+
+    for cat in cats:
+        story.append(Paragraph(cat.get("category_name") or str(cat.get("category_id")), styles["H2CN"]))
+        for it in (cat.get("items") or []):
+            title = f"{it.get('item_name') or it.get('item_id')}"
+            story.append(Paragraph(title, styles["BodyCN"]))
+            tbl_data = [["字段", "值"]]
+            fields = it.get("fields") or []
+            values = it.get("values") or {}
+            for fd in fields:
+                label = fd.get("label") or fd.get("field_id")
+                raw = values.get(fd.get("field_id"))
+                val = fmt_value_by_field(fd, raw)
+                tbl_data.append([label, val])
+            if len(tbl_data) > 1:
+                t = Table(tbl_data, colWidths=[5*cm, 9*cm])
+                t.setStyle(TableStyle([
+                    ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
+                    ('FONTSIZE', (0,0), (-1,-1), 10),
+                    ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                    ('BACKGROUND', (0,0), (-1,0), primary),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                    ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
+                    ('LINEAFTER', (0,0), (-1,-1), 0.25, border),
+                    ('LINEABOVE', (0,0), (-1,-1), 0.25, border),
+                    ('LINEBELOW', (0,0), (-1,-1), 0.25, border),
+                    ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, primary_light]),
+                    ('LEFTPADDING', (0,0), (-1,-1), 6),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                    ('TOPPADDING', (0,0), (-1,-1), 4),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ]))
+                story.append(t)
+                story.append(Spacer(1, 6))
+            # 照片缩略表格
+            if with_thumbs:
+                grid = make_photo_grid((it.get("photos") or []), cols=2)
+                if grid:
+                    story.append(grid)
+                    story.append(Spacer(1, 6))
+        story.append(PageBreak())
+
+    doc.build(story, onFirstPage=draw_page_frame, onLaterPages=draw_page_frame)
+    buf.seek(0)
+    # 构造更有信息量的 PDF 文件名
+    site_code = a.site.site_code if a.site else None
+    site_name = a.site.site_name if a.site else None
+    ver = a.current_version or 1
+    ts = (a.updated_at or datetime.utcnow()).strftime('%Y%m%d_%H%M')
+    def slugify(s: str) -> str:
+        import re
+        s = str(s or '').strip().replace(' ', '_')
+        return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
+    ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
+    human_base = f"勘察档案_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    from urllib.parse import quote
+    headers = {
+        "Content-Disposition": f"attachment; filename={ascii_base}.pdf; filename*=UTF-8''{quote(human_base + '.pdf')}"
+    }
+    return StreamingResponse(buf, media_type="application/pdf", headers=headers)
 
 
 @router.get("/{archive_id}/diff")

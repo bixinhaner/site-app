@@ -14,6 +14,18 @@
           保存
         </el-button>
         <el-button v-if="editing" @click="cancelEdit">取消编辑</el-button>
+        <el-dropdown>
+          <el-button>
+            导出
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item @click="exportZip"><el-icon><Download /></el-icon>导出Zip</el-dropdown-item>
+              <el-dropdown-item @click="exportPdf"><el-icon><Document /></el-icon>导出PDF</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button @click="openHistory">历史</el-button>
       </div>
     </div>
@@ -128,6 +140,48 @@ const load = async (preserveEdits = false) => {
   } finally {
     loading.value = false
   }
+}
+
+async function exportZip() {
+  try {
+    const blob = await surveyArchivesApi.exportZip(id)
+    const url = window.URL.createObjectURL(new Blob([blob]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = buildExportName('zip')
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('导出失败')
+  }
+}
+
+async function exportPdf() {
+  try {
+    const blob = await surveyArchivesApi.exportPdf(id)
+    const url = window.URL.createObjectURL(new Blob([blob]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = buildExportName('pdf')
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('导出失败')
+  }
+}
+
+function buildExportName(ext) {
+  const code = content.value?.meta?.site_code || 'NA'
+  const name = content.value?.meta?.site_name || 'NA'
+  const ver = archive.value?.current_version || 1
+  const ts = archive.value?.updated_at ? new Date(archive.value.updated_at) : new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const tsStr = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}`
+  const raw = `勘察档案_${code}_${name}_v${ver}_${tsStr}.${ext}`
+  // 替换不安全字符
+  return raw.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '_')
 }
 
 const jsonPointerEscape = (s) => String(s).replaceAll('~', '~0').replaceAll('/', '~1')
@@ -303,6 +357,11 @@ async function onUploadPhoto({ categoryId, itemId, file }) {
 async function onDeletePhoto({ photoId, photo }) {
   try {
     if (!editing.value) return
+    try {
+      await ElMessageBox.confirm('确认删除该照片？', '提示', { type: 'warning' })
+    } catch (e) {
+      return
+    }
     // 如果是本次会话内新增的 pending 照片，直接从本地移除并移出待新增列表
     const isPending = photo && (photo.pending || String(photo.id || '').startsWith('temp-'))
     if (isPending) {
@@ -373,6 +432,7 @@ function goBack() {
 <style scoped>
 .page { padding: 16px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.header-actions { display:flex; gap: 12px; align-items:center; }
 .meta { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 8px; margin-bottom: 12px; }
 .hist-lines { margin: 0; padding-left: 18px; }
 .hist-lines li { list-style: disc; line-height: 1.6; }

@@ -72,16 +72,25 @@
         </div>
         <div class="photos">
           <div class="photos-header">照片</div>
-          <div class="photo-list">
-            <div v-for="p in (it.photos || [])" :key="p.id" class="photo">
-              <img v-if="isImage(p.mime_type)" :src="fileUrl(p.file_path)" alt="photo" />
-              <a :href="fileUrl(p.file_path)" target="_blank">{{ p.original_name || '查看' }}</a>
-              <el-button v-if="!disabled" link type="danger" size="small" @click="$emit('delete-photo', { photoId: p.id, photo: p })">删除</el-button>
+          <div class="grid">
+            <div v-for="p in (it.photos || [])" :key="p.id" class="item">
+              <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
+              <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+              <div class="meta compact">
+                <div class="meta-actions">
+                  <el-button v-if="!disabled" link type="danger" size="small"
+                    @click="$emit('delete-photo', { photoId: p.id, photo: p })" title="删除" aria-label="删除">
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+              </div>
             </div>
           </div>
-          <el-upload v-if="!disabled" :show-file-list="false" :http-request="(opt) => onUpload(cat, it, opt)" accept="image/*">
-            <el-button size="small">上传照片</el-button>
-          </el-upload>
+          <div class="upload-bar" v-if="!disabled">
+            <el-upload :show-file-list="false" :http-request="(opt) => onUpload(cat, it, opt)" accept="image/*">
+              <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
+            </el-upload>
+          </div>
         </div>
       </el-card>
     </div>
@@ -199,7 +208,13 @@ function dateDisplayFormat(type) {
 .fields { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 8px 16px; }
 .field label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
 .photos { margin-top: 8px; }
-.photo-list { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
-.photo img { width: 100%; height: 80px; object-fit: cover; border-radius: 4px; display: block; }
+.upload-bar { margin-top: 8px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.item { border: 1px solid #eee; border-radius: 10px; overflow: hidden; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.item .el-image { width: 100%; height: auto; aspect-ratio: 4 / 3; }
+.item { position: relative; }
+.badge-pending { position: absolute; top: 8px; right: 8px; pointer-events: none; }
+.meta { display:flex; justify-content: flex-end; align-items:center; padding:6px 8px; font-size:12px; background:#fafafa; }
+.meta.compact { gap: 8px; }
 .muted { color: #999; font-weight: normal; }
 </style>
