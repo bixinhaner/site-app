@@ -146,7 +146,8 @@ const messages = {
       modify: '修改工单',
       recall: '撤回',
       progress: '工单进度',
-      currentStatus: '当前状态'
+      currentStatus: '当前状态',
+      searchPlaceholder: '搜索工单标题或站点名称'
     },
     site: {
       title: '站点信息',
@@ -671,7 +672,8 @@ const messages = {
       modify: 'Modify Order',
       progress: 'Work Order Progress',
       currentStatus: 'Current Status',
-      recall: 'Recall'
+      recall: 'Recall',
+      searchPlaceholder: 'Search work order title or site name'
     },
     site: {
       title: 'Site Information',

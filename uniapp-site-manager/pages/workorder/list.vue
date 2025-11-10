@@ -3,6 +3,29 @@
     <view class="custom-navbar">
       <view class="navbar-content">
         <text class="navbar-title">{{ $t('workorder.title') }}</text>
+        <view class="navbar-actions">
+          <view class="action-btn" @click="toggleSearch">
+            <text class="action-icon">{{ showSearch ? '✕' : '🔍' }}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 可折叠搜索框 -->
+    <view class="search-container" :class="{ 'search-container-open': showSearch }">
+      <view class="search-box">
+        <text class="search-icon">🔍</text>
+        <input
+          class="search-input"
+          v-model="searchKeyword"
+          :placeholder="$t('workorder.searchPlaceholder')"
+          @input="onSearchInput"
+          @confirm="handleSearch"
+          @blur="handleSearchBlur"
+          confirm-type="search"
+          :focus="showSearch"
+        />
+        <text v-if="searchKeyword" class="clear-icon" @click="clearSearch">✕</text>
       </view>
     </view>
 
@@ -23,6 +46,11 @@
       refresher-background="#f7f8fb"
     >
       <view class="order-list">
+        <!-- 空状态提示 - 只在有搜索或筛选条件时显示 -->
+        <view v-if="orders.length === 0 && (searchKeyword || status)" class="empty-state">
+          <text class="empty-icon">📭</text>
+          <text class="empty-text">{{ $t('messages.noData') }}</text>
+        </view>
         <view class="order-item" v-for="wo in orders" :key="wo.id" @click="openDetail(wo)">
           <view class="order-header">
             <text class="order-title">{{ wo.title }}</text>
@@ -65,16 +93,19 @@ const languageStore = useLanguageStore()
 const userStore = useUserStore()
 const orders = ref([])
 const status = ref('')
+const searchKeyword = ref('')
+const showSearch = ref(false)
 const refreshing = ref(false)
 const isPageVisible = ref(false)
+let searchTimer = null
 
 const { $t } = getCurrentInstance().appContext.config.globalProperties
 
 const reload = async () => {
   try {
     refreshing.value = true
-    console.log('🔄 工单列表刷新中...', { status: status.value })
-    const res = await store.getMyWorkOrders(status.value || undefined)
+    console.log('🔄 工单列表刷新中...', { status: status.value, keyword: searchKeyword.value })
+    const res = await store.getMyWorkOrders(status.value || undefined, searchKeyword.value || undefined)
     if (res.success) {
       orders.value = res.data
       console.log('✅ 工单列表刷新成功', { count: res.data?.length })
@@ -98,6 +129,50 @@ const handleRefresh = async () => {
 const setStatus = async (s) => {
   status.value = s
   await reload()
+}
+
+// 实时搜索（防抖处理）
+const onSearchInput = () => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+  }
+  searchTimer = setTimeout(() => {
+    handleSearch()
+  }, 500) // 500ms防抖
+}
+
+// 执行搜索
+const handleSearch = async () => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  await reload()
+}
+
+// 清除搜索
+const clearSearch = () => {
+  searchKeyword.value = ''
+  reload()
+  // 如果搜索框已清空，延迟收起以显示动画
+  setTimeout(() => {
+    showSearch.value = false
+  }, 300)
+}
+
+// 切换搜索显示状态
+const toggleSearch = () => {
+  showSearch.value = !showSearch.value
+}
+
+// 搜索框失去焦点时的处理
+const handleSearchBlur = () => {
+  // 如果没有搜索内容，延迟收起搜索框
+  if (!searchKeyword.value.trim()) {
+    setTimeout(() => {
+      showSearch.value = false
+    }, 200)
+  }
 }
 
 const openDetail = (wo) => {
@@ -247,24 +322,96 @@ onShow(() => {
 		padding: 44rpx 30rpx 20rpx;
 		color: #fff;
 	}
-	
+
 	.navbar-content {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		height: 88rpx;
 	}
-	
+
 	.navbar-title {
 		font-size: 36rpx;
 		font-weight: bold;
 	}
-	
-	// 筛选标签 - 统一卡片风格
+
+	.navbar-actions {
+		display: flex;
+		gap: 20rpx;
+	}
+
+	.action-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 68rpx;
+		height: 68rpx;
+		border-radius: 50%;
+		background: rgba(255, 255, 255, 0.2);
+		transition: all 0.3s ease;
+	}
+
+	.action-btn:active {
+		background: rgba(255, 255, 255, 0.3);
+		transform: scale(0.95);
+	}
+
+	.action-icon {
+		font-size: 40rpx;
+	}
+
+	// 搜索框样式 - 可折叠
+	.search-container {
+		height: 0;
+		overflow: hidden;
+		opacity: 0;
+		transform: translateY(-20rpx);
+		transition: all 0.3s ease;
+	}
+
+	.search-container-open {
+		height: auto;
+		opacity: 1;
+		transform: translateY(0);
+		padding: 16rpx 32rpx;
+		background: var(--bg-elevated);
+		box-shadow: var(--shadow-card);
+		border-bottom: 1rpx solid #f0f0f0;
+	}
+
+	.search-box {
+		display: flex;
+		align-items: center;
+		background: #f8f9fa;
+		border-radius: 50rpx;
+		padding: 0 24rpx;
+		height: 80rpx;
+	}
+
+	.search-icon {
+		font-size: 32rpx;
+		margin-right: 16rpx;
+		color: #6b7280;
+	}
+
+	.search-input {
+		flex: 1;
+		height: 80rpx;
+		font-size: 28rpx;
+		color: var(--text-primary);
+	}
+
+	.clear-icon {
+		font-size: 32rpx;
+		color: #6b7280;
+		padding: 8rpx;
+	}
+
+	// 筛选标签 - 紧凑布局
 	.filter-tabs {
 		display: flex;
-		gap: 16rpx;
-		padding: 20rpx 32rpx;
+		gap: 12rpx;
+		padding: 16rpx 24rpx;
 		background: var(--bg-elevated);
 		box-shadow: var(--shadow-card);
 	}
@@ -273,12 +420,12 @@ onShow(() => {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-height: 88rpx; /* >=44px */
-		padding: 0 28rpx;
-		border-radius: 24rpx;
+		min-height: 68rpx;
+		padding: 0 20rpx;
+		border-radius: 20rpx;
 		background: #f8f9fa;
 		color: #6b7280;
-		font-size: 28rpx;
+		font-size: 26rpx;
 		transition: all 0.3s ease;
 		
 		&.active {
@@ -296,7 +443,28 @@ onShow(() => {
 	.order-list {
 		padding: 0 20rpx;
 	}
-	
+
+	// 空状态提示
+	.empty-state {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 120rpx 40rpx;
+		color: var(--text-secondary);
+	}
+
+	.empty-icon {
+		font-size: 120rpx;
+		margin-bottom: 32rpx;
+		opacity: 0.5;
+	}
+
+	.empty-text {
+		font-size: 28rpx;
+		color: var(--text-secondary);
+	}
+
 	// 工单卡片 - 统一卡片样式
 	.order-item {
 		background: var(--bg-elevated);

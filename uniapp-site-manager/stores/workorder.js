@@ -12,37 +12,65 @@ export const useWorkOrderStore = defineStore('workorder', () => {
 
   const userStore = useUserStore()
 
-  const getMyWorkOrders = async (status) => {
+  const getMyWorkOrders = async (status, keyword) => {
     if (!userStore.token) return { success: false, error: '未登录' }
     loading.value = true
     try {
-      // 构建查询参数
-      const queryParams = []
-      if (userStore.userInfo?.id) {
-        queryParams.push(`assigned_to=${userStore.userInfo.id}`)
-      }
-      if (status) {
-        queryParams.push(`status_filter=${status}`)
-      }
-      if (userStore.userInfo?.role === 'surveyor') {
-        queryParams.push('type_filter=site_survey')
-      }
+      // 如果有搜索关键词，使用搜索端点
+      if (keyword && keyword.trim()) {
+        const queryParams = []
+        queryParams.push(`keyword=${encodeURIComponent(keyword.trim())}`)
+        if (userStore.userInfo?.id) {
+          queryParams.push(`assigned_to=${userStore.userInfo.id}`)
+        }
+        if (status) {
+          queryParams.push(`status=${status}`)
+        }
 
-      // 构建完整URL
-      let url = buildApiUrl(API_ENDPOINTS.WORK_ORDERS.LIST)
-      if (queryParams.length > 0) {
-        url += '?' + queryParams.join('&')
-      }
+        // 使用搜索端点
+        let url = buildApiUrl(`${API_ENDPOINTS.WORK_ORDERS.LIST}/search`)
+        if (queryParams.length > 0) {
+          url += '?' + queryParams.join('&')
+        }
 
-      const response = await uni.request({
-        url,
-        ...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
-      })
-      if (response.statusCode === 200) {
-        list.value = response.data
-        return { success: true, data: response.data }
+        const response = await uni.request({
+          url,
+          ...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
+        })
+        if (response.statusCode === 200) {
+          list.value = response.data.work_orders || []
+          return { success: true, data: response.data.work_orders || [] }
+        }
+        throw new Error(response.data?.detail || '搜索工单失败')
+      } else {
+        // 没有搜索关键词，使用普通列表端点
+        const queryParams = []
+        if (userStore.userInfo?.id) {
+          queryParams.push(`assigned_to=${userStore.userInfo.id}`)
+        }
+        if (status) {
+          queryParams.push(`status_filter=${status}`)
+        }
+        if (userStore.userInfo?.role === 'surveyor') {
+          queryParams.push('type_filter=site_survey')
+        }
+
+        // 构建完整URL
+        let url = buildApiUrl(API_ENDPOINTS.WORK_ORDERS.LIST)
+        if (queryParams.length > 0) {
+          url += '?' + queryParams.join('&')
+        }
+
+        const response = await uni.request({
+          url,
+          ...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
+        })
+        if (response.statusCode === 200) {
+          list.value = response.data
+          return { success: true, data: response.data }
+        }
+        throw new Error(response.data?.detail || '获取工单失败')
       }
-      throw new Error(response.data?.detail || '获取工单失败')
     } catch (e) {
       console.error('getMyWorkOrders error:', e)
       return { success: false, error: e.message || '网络错误' }

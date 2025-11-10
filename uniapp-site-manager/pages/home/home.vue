@@ -26,7 +26,7 @@
 		<!-- 统计卡片 -->
 		<view class="stats-container">
 			<view class="stats-grid">
-				<!-- 管理员和经理能查看和管理站点，检查员只能查看 -->
+				<!-- 管理员和经理能查看和管理站点，现场工程师只能查看自己的站点 -->
 				<view class="stat-card" @click="goToSites">
 					<view class="stat-icon site-icon">📍</view>
 					<view class="stat-info">
@@ -61,8 +61,8 @@
 					</view>
 				</view>
 
-				<!-- 检查员显示活跃工单 -->
-				<view class="stat-card" v-if="isInspector" @click="goToWorkOrders">
+				<!-- 现场工程师显示活跃工单 -->
+				<view class="stat-card" v-if="isInspector || isSurveyor" @click="goToWorkOrders">
 					<view class="stat-icon inspection-icon">📋</view>
 					<view class="stat-info">
 						<text class="stat-number">{{ workOrderStats.assigned }}</text>
@@ -98,9 +98,9 @@
 					<text class="action-label">{{ $t('home.statistics') }}</text>
 				</view>
 				
-				
-				<!-- 扫码领料功能 -->
-				<view class="action-item" @click="goToScanPickup">
+
+				<!-- 扫码领料功能 - 管理员/经理/检查员可用，勘察员不可用 -->
+				<view class="action-item" v-if="!isSurveyor" @click="goToScanPickup">
 					<view class="action-icon">📦</view>
 					<text class="action-label">{{ $t('stock.pickup') }}</text>
 				</view>
@@ -191,6 +191,7 @@
 	const isAdmin = computed(() => userRole.value === 'admin')
 	const isManager = computed(() => userRole.value === 'manager')
 	const isInspector = computed(() => userRole.value === 'inspector')
+	const isSurveyor = computed(() => userRole.value === 'surveyor')
 	const canViewStats = computed(() => isAdmin.value || isManager.value)
 	const canViewReports = computed(() => isAdmin.value || isManager.value)
 	
@@ -243,8 +244,8 @@
 			if (sitesResult.success) {
 				let sites = sitesResult.data
 
-				// inspector角色：只统计工单关联的站点
-				if (isInspector.value) {
+				// inspector和surveyor角色：只统计工单关联的站点
+				if (isInspector.value || isSurveyor.value) {
 					const workOrderSiteIds = new Set(
 						wos.map(wo => wo.site_id).filter(id => id)
 					)

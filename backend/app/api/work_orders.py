@@ -161,15 +161,20 @@ async def search_work_orders(
     """搜索工单（带分页和筛选）"""
     from sqlalchemy import or_, and_
     import math
-    
-    if current_user.role not in ["admin", "manager"]:
+
+    # 权限检查：允许admin、manager和普通用户搜索
+    # 普通用户只能搜索自己的工单
+    is_admin_or_manager = current_user.role in ["admin", "manager"]
+    is_field_worker = current_user.role in ["inspector", "surveyor"]
+
+    if not (is_admin_or_manager or is_field_worker):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    
+
     query = db.query(WorkOrder)
-    
+
     # 关键词搜索
     if keyword:
         query = query.join(Site, WorkOrder.site_id == Site.id, isouter=True).filter(
@@ -180,37 +185,45 @@ async def search_work_orders(
                 Site.site_code.contains(keyword)
             )
         )
-    
+
     # 状态筛选
     if status:
         query = query.filter(WorkOrder.status == status)
-    
+
     # 类型筛选
     if type:
         query = query.filter(WorkOrder.type == type)
-    
+
     # 分配人筛选
-    if assigned_to:
-        query = query.filter(WorkOrder.assigned_to == assigned_to)
-    
+    if is_admin_or_manager:
+        # 管理员可以查看所有分配人
+        if assigned_to:
+            query = query.filter(WorkOrder.assigned_to == assigned_to)
+    else:
+        # 普通用户只能查看自己的工单
+        query = query.filter(WorkOrder.assigned_to == current_user.id)
+        # 勘察人员仅能搜索勘察工单
+        if is_field_worker and current_user.role == 'surveyor':
+            query = query.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
+
     # 优先级筛选
-    if priority:
+    if priority and is_admin_or_manager:
         query = query.filter(WorkOrder.priority == priority)
-    
+
     # 站点筛选
     if site_id:
         query = query.filter(WorkOrder.site_id == site_id)
-    
+
     # 计算总数
     total = query.count()
-    
+
     # 分页查询
     work_orders = query.order_by(WorkOrder.assigned_at.desc()).offset(skip).limit(limit).all()
-    
+
     # 计算分页信息
     page = (skip // limit) + 1
     pages = math.ceil(total / limit)
-    
+
     return WorkOrderListResponse(
         work_orders=[_enrich_work_order_response(db, wo) for wo in work_orders],
         total=total,
