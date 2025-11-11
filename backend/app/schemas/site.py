@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 class SiteBase(BaseModel):
@@ -46,3 +46,35 @@ class SiteResponse(SiteBase):
     
     class Config:
         from_attributes = True
+
+
+# ===== 批量导入（基础信息） =====
+class BasicImportRowResult(BaseModel):
+    row_index: int
+    site_code: Optional[str] = None
+    success: bool
+    action: Optional[str] = None  # created|skipped
+    site_id: Optional[int] = None
+    warnings: Optional[List[str]] = []
+    errors: Optional[List[str]] = []
+
+
+class BasicBatchImportReport(BaseModel):
+    batch_id: str
+    dry_run: bool
+    total_rows: int
+    success_count: int
+    failed_count: int
+    results: List[BasicImportRowResult]
+
+
+class BasicImportHistoryItem(BaseModel):
+    batch_id: str
+    action: str  # dry_run|import
+    operator_id: int
+    operator_name: Optional[str] = None
+    file_name: Optional[str] = None
+    created_at: datetime
+    total_rows: Optional[int] = None
+    success_count: Optional[int] = None
+    failed_count: Optional[int] = None

@@ -16,7 +16,8 @@ class Site(Base):
     province = Column(String(50))
     city = Column(String(50))
     district = Column(String(50))
-    status = Column(String(20), default="planning")  # planning, construction, operational, maintenance
+    # 默认状态调整为勘察待开展阶段
+    status = Column(String(20), default="survey_pending")  # survey_pending, planning, construction, operational, maintenance
     priority = Column(String(20), default="normal")  # high, normal, low
     description = Column(Text)
     contact_person = Column(String(50))

@@ -92,6 +92,17 @@ def _compute_diff(before: Optional[dict], after: Optional[dict]) -> dict:
     return diff
 
 
+def _ensure_site_plannable(site: Site):
+    """业务门禁：仅允许在勘察完成后的状态进行规划。
+
+    规则：当站点状态为 survey_pending（勘察前/进行中）时，禁止录入/导入规划。
+    允许状态示例：planning, construction, operational, maintenance 等。
+    """
+    status = getattr(site, 'status', None)
+    if status == 'survey_pending':
+        raise HTTPException(status_code=409, detail="站点尚处于勘察阶段（survey_pending），暂不允许录入规划信息。请完成勘察后再试。")
+
+
 def _create_new_version(
     db: Session,
     site_id: int,
@@ -242,6 +253,8 @@ async def update_planning(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
+    # 生命周期门禁
+    _ensure_site_plannable(site)
 
     # optimistic lock
     current = _get_current_planning(db, site_id)
@@ -365,6 +378,8 @@ async def upload_planning(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
+    # 生命周期门禁
+    _ensure_site_plannable(site)
 
     content = await file.read()
     errors: List[str] = []
@@ -617,41 +632,18 @@ async def batch_upload_planning(
         try:
             site = db.query(Site).filter(Site.site_code == code).first()
             if not site:
-                if dry_run:
-                    # report as would-create
-                    warnings.append("站点不存在，将自动创建")
-                else:
-                    # create new site from Sites sheet
-                    try:
-                        srow = sites_df[sites_df["SiteCode"].astype(str) == code].iloc[0].to_dict()
-                    except Exception:
-                        errors.append("Sites 工作表缺少该站点行: " + code)
-                        results.append(BatchPlanningResult(site_code=code, success=False, errors=errors))
-                        failed_count += 1
-                        continue
-                    site_name = srow.get("SiteName")
-                    if not site_name:
-                        errors.append("缺少 SiteName，无法创建站点: " + code)
-                        results.append(BatchPlanningResult(site_code=code, success=False, errors=errors))
-                        failed_count += 1
-                        continue
-                    site = Site(
-                        site_code=code,
-                        site_name=site_name,
-                        site_type=srow.get("SiteType"),
-                        address=srow.get("Address"),
-                        province=srow.get("Province"),
-                        city=srow.get("City"),
-                        district=srow.get("District"),
-                        priority=srow.get("Priority") or "normal",
-                        contact_person=srow.get("ContactPerson"),
-                        contact_phone=srow.get("ContactPhone"),
-                        created_by=current_user.id
-                    )
-                    db.add(site)
-                    db.commit()
-                    db.refresh(site)
-                    warnings.append("已新建站点")
+                errors.append("站点不存在：请先在‘站点信息导入’创建站点并完成勘察")
+                results.append(BatchPlanningResult(site_code=code, success=False, errors=errors))
+                failed_count += 1
+                continue
+            # 生命周期门禁
+            try:
+                _ensure_site_plannable(site)
+            except HTTPException as he:
+                errors.append(str(he.detail))
+                results.append(BatchPlanningResult(site_code=code, site_id=site.id, success=False, errors=errors))
+                failed_count += 1
+                continue
 
             srow = sites_df[sites_df["SiteCode"].astype(str) == code].iloc[0].to_dict()
             bands_val = srow.get("Bands") or ""

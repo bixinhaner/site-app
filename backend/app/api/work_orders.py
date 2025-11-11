@@ -97,6 +97,20 @@ def _update_site_status_on_work_order_complete(db: Session, site_id: int, work_o
     - 如果是安装工单(opening_inspection)完成，检查该站点的所有安装工单
     - 如果所有安装工单都已完成，将站点状态改为operational
     """
+    # 勘察工单审核通过 -> 站点进入规划阶段
+    if work_order_type == WorkOrderTypeEnum.SITE_SURVEY:
+        site = db.query(Site).filter(Site.id == site_id).first()
+        if site and site.status == "survey_pending":
+            old_status = site.status
+            site.status = "planning"
+            print(f"[站点状态自动更新] 站点 {site_id} ({site.site_name}) 勘察审核通过，状态从 {old_status} 更新为 {site.status}")
+
+            # 审计
+            _audit_site_status_change(
+                db, site_id, old_status, site.status,
+                "勘察工单审核通过，进入规划阶段"
+            )
+
     if work_order_type == WorkOrderTypeEnum.OPENING_INSPECTION:
         # 查询该站点下所有安装工单
         opening_work_orders = db.query(WorkOrder).filter(

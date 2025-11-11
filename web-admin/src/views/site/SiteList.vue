@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1>站点列表</h1>
       <div class="header-actions">
-        <el-input v-model="keyword" placeholder="搜索站点名称/编码/城市" clearable style="width: 260px" @keyup.enter="reload" />
+        <el-input v-model="keyword" placeholder="搜索站点名称/编码/城市（动态生效）" clearable style="width: 260px" />
         <el-select v-model="statusFilter" placeholder="状态" clearable style="width: 140px" @change="reload">
           <el-option label="规划中" value="planning" />
           <el-option label="施工中" value="construction" />
@@ -13,14 +13,15 @@
         <!-- <el-select v-model="assigneeFilter" placeholder="指派给" clearable style="width: 200px" filterable @visible-change="v=> v && loadUsers()" @change="reload">
           <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
         </el-select> -->
+        <el-button v-if="canCreateSite" type="primary" @click="createSite">
+          <el-icon><Plus /></el-icon>
+          新增站点
+        </el-button>
         <el-button v-if="canManagePlanning" type="success" @click="openBatchPlanning">
           <el-icon><Operation /></el-icon>
-          规划批量导入
+          规划信息导入
         </el-button>
-        <el-button type="primary" @click="reload">
-          <el-icon><Search /></el-icon>
-          筛选
-        </el-button>
+        <!-- 筛选按钮已移除：搜索栏与筛选项动态生效 -->
       </div>
     </div>
 
@@ -88,7 +89,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
@@ -97,6 +98,7 @@ import { useUserStore } from '../../stores/user'
 const router = useRouter()
 const userStore = useUserStore()
 const canManagePlanning = computed(() => ['admin', 'manager', 'planner'].includes(userStore.user?.role))
+const canCreateSite = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
 const loading = ref(false)
 const sites = ref([])
 const total = ref(0)
@@ -141,6 +143,10 @@ const viewDetail = (row) => {
 
 const viewPlanning = (row) => {
   router.push({ name: 'SitePlanning', params: { id: row.id } })
+}
+
+const createSite = () => {
+  router.push({ name: 'SiteBasicBatch' })
 }
 
 const openBatchPlanning = () => {
@@ -204,6 +210,11 @@ onMounted(() => {
   reload()
   // 预热用户列表（仅管理员有效）
   loadUsers()
+})
+
+// 关键字动态生效：重置到第1页（当前实现为前端本地过滤）
+watch(keyword, () => {
+  currentPage.value = 1
 })
 </script>
 
