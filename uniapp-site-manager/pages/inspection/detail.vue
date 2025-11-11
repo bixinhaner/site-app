@@ -8,9 +8,7 @@
 				</view>
 				<text class="navbar-title">{{ $t('inspection.detail') }}</text>
 				<view class="navbar-actions">
-					<view class="share-button" @click="shareInspection" v-if="inspectionData">
-						<text class="share-icon">📤</text>
-					</view>
+					<!-- 右上角分享按钮已移除 -->
 				</view>
 			</view>
 		</view>
@@ -423,13 +421,7 @@
 				审核
 			</button>
 			
-			<button 
-				class="action-btn export-btn" 
-				@click="exportReport"
-				:disabled="exporting"
-			>
-				{{ exporting ? '导出中...' : '导出报告' }}
-			</button>
+			<!-- 导出报告按钮为占位功能，已移除 -->
 		</view>
 		
 		<!-- 加载状态 -->
@@ -601,7 +593,7 @@
 	
 	// 响应式数据
 	const loading = ref(true)
-	const exporting = ref(false)
+// 导出占位功能已移除
 	const inspectionData = ref(null)
 	const workOrderProgress = ref(null)
 	const workOrderData = ref(null)
@@ -985,46 +977,9 @@
 		})
 	}
 	
-	const shareInspection = () => {
-		const shareData = {
-			title: `${inspectionData.value.site_name} - 检查报告`,
-			path: `/pages/inspection/detail?id=${inspectionId.value}`
-		}
-		
-		uni.showShareMenu({
-			withShareTicket: true,
-			menus: ['shareAppMessage', 'shareTimeline'],
-			success: () => {
-				console.log('分享菜单显示成功')
-			}
-		})
-	}
+// 分享功能已移除
 	
-	const exportReport = async () => {
-		try {
-			exporting.value = true
-			
-			// 这里可以调用导出API
-			// const result = await inspectionStore.exportInspectionReport(inspectionId.value)
-			
-			// 模拟导出过程
-			await new Promise(resolve => setTimeout(resolve, 2000))
-			
-			uni.showToast({
-				title: '导出成功',
-				icon: 'success'
-			})
-			
-		} catch (error) {
-			console.error('导出失败:', error)
-			uni.showToast({
-				title: '导出失败',
-				icon: 'error'
-			})
-		} finally {
-			exporting.value = false
-		}
-	}
+// exportReport 已删除
 	
 	const openMap = () => {
 		if (!inspectionData.value.latitude || !inspectionData.value.longitude) return
@@ -1223,7 +1178,7 @@
 		justify-content: space-between;
 	}
 	
-	.back-button, .share-button {
+.back-button {
 		width: 88rpx;
 		height: 88rpx;
 		display: flex;
@@ -1233,7 +1188,7 @@
 		background: rgba(255, 255, 255, 0.2);
 	}
 	
-	.back-icon, .share-icon {
+.back-icon {
 		font-size: 36rpx;
 		color: white;
 		font-weight: bold;
@@ -1856,9 +1811,7 @@
 		background: linear-gradient(135deg, #f97316, #fb923c);
 	}
 	
-	.export-btn {
-		background: linear-gradient(135deg, #f97316, #fb923c);
-	}
+/* .export-btn 已废弃 */
 	
 	.action-btn:disabled {
 		background: #adb5bd;

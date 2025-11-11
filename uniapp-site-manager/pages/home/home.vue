@@ -93,10 +93,7 @@
 				</view>
 				
 				
-				<view class="action-item" v-if="canViewReports" @click="goToReports">
-					<view class="action-icon">📊</view>
-					<text class="action-label">{{ $t('home.statistics') }}</text>
-				</view>
+				<!-- 报告功能入口为占位，已移除 -->
 				
 
 				<!-- 扫码领料功能 - 管理员/经理/检查员可用，勘察员不可用 -->
@@ -193,7 +190,7 @@
 	const isInspector = computed(() => userRole.value === 'inspector')
 	const isSurveyor = computed(() => userRole.value === 'surveyor')
 	const canViewStats = computed(() => isAdmin.value || isManager.value)
-	const canViewReports = computed(() => isAdmin.value || isManager.value)
+// 报告占位入口已移除
 	
 	// 获取用户头像文字
 	const getAvatarText = () => {
@@ -323,9 +320,7 @@
 		uni.navigateTo({ url: '/pages/map/sites' })
 	}
 	
-	const goToReports = () => {
-		uni.showToast({ title: '报告功能开发中', icon: 'none' })
-	}
+// 报告功能入口已移除
 	
 	
 	const goToScanPickup = () => {
