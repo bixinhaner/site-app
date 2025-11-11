@@ -1070,67 +1070,71 @@
 						sizeType: ['original'],
 						sourceType: sourceType,
 						success: async (chooseRes) => {
-							try {
-								let finalImagePath = chooseRes.tempFilePaths[0]
-								
-								// 如果是拍照，添加水印
-								if (isCamera) {
-									console.log('拍照模式，添加GPS水印')
+								try {
+									let finalImagePath = chooseRes.tempFilePaths[0]
+									let usedWatermark = false
+									let gpsUsed = { ...gpsData }
 									
-									// 显示水印添加加载提示
+									// 拍照/相册均添加GPS水印，确保上传后端校验通过
+									console.log(isCamera ? '拍照模式，添加GPS水印' : '相册模式，添加GPS水印')
 									uni.showLoading({
 										title: $t('inspection.addingGpsWatermark') || 'Adding GPS watermark...',
 										mask: true
 									})
-									
-						try {
-							const watermarkTool = getWatermarkTool()
-							finalImagePath = await watermarkTool.addWatermark(
-								finalImagePath,
-								gpsData.latitude,
-								gpsData.longitude,
-								gpsData.address,
-								userStore.userInfo?.username || ($t('inspection.unknownUser') || 'Unknown'),
-								currentItem.value.item_name || ($t('inspection.inspectionItem') || 'Inspection Item'),
-								gpsData // 传入完整GPS信息，供水印工具复用
-							)
-							console.log('水印添加成功，最终图片路径:', finalImagePath)
-										
-										// 隐藏加载提示
-										uni.hideLoading()
-										
+									try {
+										// 相册模式需要现取一次定位
+										if (!isCamera) {
+											try {
+												gpsUsed = await getHighAccuracyLocation()
+											} catch (gpsErr) {
+												await handleGpsFailure(gpsErr)
+												return
+											}
+										}
+										const watermarkTool = getWatermarkTool()
+										finalImagePath = await watermarkTool.addWatermark(
+											finalImagePath,
+											gpsUsed.latitude,
+											gpsUsed.longitude,
+											gpsUsed.address,
+											userStore.userInfo?.username || ($t('inspection.unknownUser') || 'Unknown'),
+											currentItem.value.item_name || ($t('inspection.inspectionItem') || 'Inspection Item'),
+											gpsUsed
+										)
+										usedWatermark = true
+										console.log('水印添加成功，最终图片路径:', finalImagePath)
 									} catch (watermarkError) {
 										console.warn('水印添加失败，使用原图:', watermarkError)
-										
-										// 隐藏加载提示
+										// 相册模式若无法添加水印，则不允许继续，避免后端400
+										if (!isCamera) {
+											uni.hideLoading()
+											uni.showToast({
+												title: $t('inspection.gpsFetchFailedShort') || 'GPS fetch failed',
+												icon: 'error'
+											})
+											return
+										}
+									} finally {
 										uni.hideLoading()
-										
-										// 显示错误提示
-										uni.showToast({
-											title: $t('inspection.watermarkFailedUseOriginal') || 'Watermark failed, using original',
-											icon: 'none',
-											duration: 2000
-										})
 									}
-								}
-								
-								// 创建照片对象
-								const photo = {
-									file_path: finalImagePath,
-									taken_at: new Date().toISOString(),
-									latitude: gpsData.latitude,
-									longitude: gpsData.longitude,
-									gps_accuracy: gpsData.accuracy,
-									address: gpsData.address,
-									has_watermark: isCamera,
-									watermark_data: isCamera ? {
-										timestamp: new Date().toISOString(),
-										coordinates: `${gpsData.latitude},${gpsData.longitude}`,
-										accuracy: gpsData.accuracy,
-									inspector: userStore.userInfo?.username || ($t('inspection.unknownUser') || 'Unknown'),
-									item_name: currentItem.value.item_name || ($t('inspection.inspectionItem') || 'Inspection Item')
-									} : null
-								}
+									
+									// 创建照片对象
+									const photo = {
+										file_path: finalImagePath,
+										taken_at: new Date().toISOString(),
+										latitude: gpsUsed.latitude,
+										longitude: gpsUsed.longitude,
+										gps_accuracy: gpsUsed.accuracy,
+										address: gpsUsed.address,
+										has_watermark: usedWatermark,
+										watermark_data: usedWatermark ? {
+											timestamp: new Date().toISOString(),
+											coordinates: `${gpsUsed.latitude},${gpsUsed.longitude}`,
+											accuracy: gpsUsed.accuracy,
+										inspector: userStore.userInfo?.username || ($t('inspection.unknownUser') || 'Unknown'),
+										item_name: currentItem.value.item_name || ($t('inspection.inspectionItem') || 'Inspection Item')
+										} : null
+									}
 								
 								if (!currentItem.value.photos) {
 									currentItem.value.photos = []
