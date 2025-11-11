@@ -428,10 +428,30 @@ export class WatermarkTool {
     console.log('开始使用原生插件添加GPS水印...')
     
     try {
-      console.log('开始通过原生插件获取GPS和地址信息...')
-      
-      // 使用原生定位插件获取位置信息
-      const locationResult = await this.getLocationFromNativePlugin()
+      // 若外部已提供GPS结果，则直接使用，避免再次调用原生定位
+      let locationResult = null
+      if (options && options.gpsOverride) {
+        console.log('使用传入的GPS覆盖数据:', options.gpsOverride)
+        const o = options.gpsOverride || {}
+        const data = o.data || {
+          latitude: o.latitude,
+          longitude: o.longitude,
+          accuracy: o.accuracy || 0,
+          provider: o.provider || 'native-plugin'
+        }
+        const addressObj = o.addressInfo || (typeof o.address === 'string' ? { formattedAddress: o.address } : o.address) || (o.formattedAddress ? { formattedAddress: o.formattedAddress } : null)
+        locationResult = {
+          code: 0,
+          success: true,
+          data,
+          address: addressObj,
+          message: '使用外部提供的定位结果'
+        }
+      } else {
+        console.log('开始通过原生插件获取GPS和地址信息...')
+        // 使用原生定位插件获取位置信息
+        locationResult = await this.getLocationFromNativePlugin()
+      }
       
       // 从原生插件结果中提取地址信息
       let address = '位置获取中...'

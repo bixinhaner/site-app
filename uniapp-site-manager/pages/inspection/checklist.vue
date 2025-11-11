@@ -1083,17 +1083,18 @@
 										mask: true
 									})
 									
-									try {
-										const watermarkTool = getWatermarkTool()
-										finalImagePath = await watermarkTool.addWatermark(
-											finalImagePath,
-											gpsData.latitude,
-											gpsData.longitude,
-											gpsData.address,
-											userStore.userInfo?.username || ($t('inspection.unknownUser') || 'Unknown'),
-											currentItem.value.item_name || ($t('inspection.inspectionItem') || 'Inspection Item')
-										)
-										console.log('水印添加成功，最终图片路径:', finalImagePath)
+						try {
+							const watermarkTool = getWatermarkTool()
+							finalImagePath = await watermarkTool.addWatermark(
+								finalImagePath,
+								gpsData.latitude,
+								gpsData.longitude,
+								gpsData.address,
+								userStore.userInfo?.username || ($t('inspection.unknownUser') || 'Unknown'),
+								currentItem.value.item_name || ($t('inspection.inspectionItem') || 'Inspection Item'),
+								gpsData // 传入完整GPS信息，供水印工具复用
+							)
+							console.log('水印添加成功，最终图片路径:', finalImagePath)
 										
 										// 隐藏加载提示
 										uni.hideLoading()
@@ -1353,6 +1354,7 @@
 							longitude: data.longitude,
 							accuracy: data.accuracy || 0,
 							address: addressString,
+							addressInfo: address, // 传回原生插件的地址对象，供水印使用
 							provider: 'native-plugin'
 						})
 					} else {
@@ -1378,11 +1380,11 @@
 	}
 	
 	// 获取水印工具
-	const getWatermarkTool = () => {
-		return {
-			addWatermark: async (imagePath, latitude, longitude, address, inspector, itemName) => {
-				try {
-					console.log('使用增强GPS地址水印功能')
+		const getWatermarkTool = () => {
+			return {
+				addWatermark: async (imagePath, latitude, longitude, address, inspector, itemName, gpsExtra = null) => {
+					try {
+						console.log('使用增强GPS地址水印功能')
 					
 					// 先获取图片信息并设置canvas尺寸
 					const imageInfo = await new Promise((resolve, reject) => {
@@ -1401,8 +1403,8 @@
 					// 等待DOM更新
 					await new Promise(resolve => setTimeout(resolve, 100))
 					
-					// 导入增强水印工具
-					const { watermarkTool } = await import('@/utils/watermark.js')
+						// 导入增强水印工具
+						const { watermarkTool } = await import('@/utils/watermark.js')
 					
 					// 准备水印数据，尝试多种站点名称获取方式
 					const siteName = inspectionData.value?.site_name || 
@@ -1432,12 +1434,13 @@
 						最终水印数据: watermarkData
 					})
 					
-					// 使用新的增强水印功能，使用页面中的canvas
-					const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, watermarkData, {
-						showAddressDetails: true,
-						showPOI: false,
-						canvasId: 'watermarkCanvas'  // 使用页面中已有的canvas
-					})
+						// 使用新的增强水印功能，使用页面中的canvas，并复用已获取的GPS
+						const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, watermarkData, {
+							showAddressDetails: true,
+							showPOI: false,
+							canvasId: 'watermarkCanvas',  // 使用页面中已有的canvas
+							gpsOverride: gpsExtra
+						})
 					
 					console.log('增强水印添加完成:', watermarkedPath)
 					return watermarkedPath
