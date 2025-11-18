@@ -759,7 +759,14 @@ async def import_sn_batch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """批量导入SN"""
+    """批量导入SN
+
+    功能：
+    - 为每个 SN 创建设备实例 EquipmentInstance
+    - 更新/创建 Inventory 库存记录（按 warehouse_id + equipment_type_id 聚合）
+    - 生成 SNImportRecord + SNImportDetail 记录导入结果
+    - 生成一条 StockTransaction(stock_in) + StockTransactionItem 作为正式入库记录
+    """
     import pandas as pd
     import io
     import base64
@@ -796,6 +803,9 @@ async def import_sn_batch(
         failed_count = 0
         duplicate_count = 0
         import_details = []
+
+        # 用于后续一次性生成出入库记录
+        total_import_quantity = 0
         
         # 逐行处理数据
         for index, row in excel_data.iterrows():
@@ -876,19 +886,28 @@ async def import_sn_batch(
                 db.add(import_detail)
                 
                 success_count += 1
-                
-                # 更新库存统计
-                inventory = db.query(Inventory).filter(
+                total_import_quantity += 1
+
+                # 更新库存统计（确保同一仓库+设备只有一条库存记录）
+                inventories = db.query(Inventory).filter(
                     and_(
                         Inventory.warehouse_id == warehouse_id,
                         Inventory.equipment_id == equipment_type_id
                     )
-                ).first()
-                
-                if inventory:
-                    inventory.current_stock += 1
-                    inventory.available_stock += 1
-                    inventory.last_updated_by = current_user.id
+                ).all()
+
+                if inventories:
+                    # 将多条记录合并到第一条，避免产生重复 Inventory
+                    main_inv = inventories[0]
+                    if len(inventories) > 1:
+                        for extra in inventories[1:]:
+                            main_inv.current_stock += extra.current_stock
+                            main_inv.available_stock += extra.available_stock
+                            db.delete(extra)
+                    # 然后再加上本次导入的 1 台
+                    main_inv.current_stock += 1
+                    main_inv.available_stock += 1
+                    main_inv.last_updated_by = current_user.id
                 else:
                     new_inventory = Inventory(
                         warehouse_id=warehouse_id,
@@ -915,7 +934,30 @@ async def import_sn_batch(
         import_record.failed_count = failed_count
         import_record.duplicate_count = duplicate_count
         import_record.status = "completed"
-        
+
+        # 如果有成功导入的 SN，生成正式入库记录（出入库记录）
+        if success_count > 0:
+            transaction_id = str(uuid.uuid4())
+            document_number = f"SNIN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}"
+
+            stock_in_trans = StockTransaction(
+                id=transaction_id,
+                transaction_type=TransactionTypeEnum.STOCK_IN,
+                warehouse_id=warehouse_id,
+                operator_id=current_user.id,
+                document_number=document_number,
+                total_quantity=total_import_quantity,
+                notes=f"SN批量导入 - {file_name}",
+            )
+            db.add(stock_in_trans)
+
+            trans_item = StockTransactionItem(
+                transaction_id=transaction_id,
+                equipment_id=equipment_type_id,
+                quantity=total_import_quantity,
+            )
+            db.add(trans_item)
+
         db.commit()
         
         return {

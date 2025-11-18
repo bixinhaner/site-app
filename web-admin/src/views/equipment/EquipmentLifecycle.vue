@@ -108,10 +108,13 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { Search, TrendCharts, Location, Box, Aim, CircleCheck, Tools, Checked } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
+
+const route = useRoute()
 
 const loading = ref(false)
 const searchSN = ref('')
@@ -153,6 +156,14 @@ const searchEquipment = async () => {
     loading.value = false
   }
 }
+
+onMounted(() => {
+  const snParam = route.query.sn || route.query.serial_number
+  if (snParam) {
+    searchSN.value = String(snParam)
+    searchEquipment()
+  }
+})
 
 // 计算生命周期阶段
 const lifecycleStages = computed(() => {

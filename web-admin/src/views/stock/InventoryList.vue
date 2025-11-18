@@ -351,9 +351,12 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { stockApi } from '../../api/stock'
 import * as XLSX from 'xlsx'
+
+const router = useRouter()
 
 const loading = ref(false)
 const inventoryList = ref([])
@@ -582,12 +585,17 @@ const viewDeviceInstances = async (equipment) => {
   }
 }
 
-// 设备追踪
+// 设备追踪：跳转到设备生命周期追踪页面，并自动带入 SN
 const trackDevice = (serialNumber) => {
-  // 这里可以跳转到设备追踪页面或打开追踪弹窗
-  ElMessage.info(`追踪设备: ${serialNumber}`)
-  // 将来可以实现:
-  // this.$router.push({ name: 'DeviceTrack', params: { sn: serialNumber } })
+  const sn = (serialNumber || '').trim()
+  if (!sn) {
+    ElMessage.warning('该实例缺少 SN，无法追踪')
+    return
+  }
+  router.push({
+    name: 'EquipmentLifecycle',
+    query: { sn }
+  })
 }
 
 // 查看出入库历史

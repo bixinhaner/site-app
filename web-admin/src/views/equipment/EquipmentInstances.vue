@@ -49,6 +49,18 @@
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column label="操作" width="200">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              type="primary"
+              text
+              @click="gotoLifecycle(row)"
+            >
+              设备跟踪
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
     
@@ -120,11 +132,14 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { stockApi } from '../../api/stock'
 import { ElMessage } from 'element-plus'
 import { equipmentApi } from '../../api/equipment'
 import { Document } from '@element-plus/icons-vue'
 import request from '@/utils/request'
+
+const router = useRouter()
 
 const loading = ref(false)
 const selectedEquipmentId = ref('')
@@ -182,6 +197,18 @@ const copy = async (text) => {
   } catch (e) {
     ElMessage.error('复制失败')
   }
+}
+
+// 跳转到设备生命周期追踪页面，并自动带入 SN
+const gotoLifecycle = (row) => {
+  if (!row?.serial_number) {
+    ElMessage.warning('该实例缺少 SN，无法追踪')
+    return
+  }
+  router.push({
+    name: 'EquipmentLifecycle',
+    query: { sn: row.serial_number }
+  })
 }
 
 // 显示设备绑定历史
