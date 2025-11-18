@@ -333,6 +333,56 @@ async def create_work_order(
     if not site:
         raise HTTPException(status_code=404, detail="站点不存在")
 
+    # 勘察工单创建规则校验
+    if data.type == WorkOrderTypeEnum.SITE_SURVEY:
+        # 1) 站点状态限制：construction/operational 阶段不允许新建勘察工单
+        if site.status in ("construction", "operational"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"站点当前状态为 {site.status}，不允许新建勘察工单"
+            )
+
+        # 2) 同一站点仅允许存在一条“进行中的”勘察工单
+        in_progress_statuses = [
+            WorkOrderStatusEnum.PENDING,
+            WorkOrderStatusEnum.ACTIVE,
+            WorkOrderStatusEnum.SUBMITTED,
+            WorkOrderStatusEnum.UNDER_REVIEW,
+            WorkOrderStatusEnum.APPROVED,
+            WorkOrderStatusEnum.ACTIVATED,
+        ]
+        existing_survey_wos = db.query(WorkOrder).filter(
+            WorkOrder.site_id == data.site_id,
+            WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY,
+            WorkOrder.status.in_(in_progress_statuses),
+        ).order_by(WorkOrder.assigned_at.desc()).all()
+
+        if existing_survey_wos:
+            existing_brief = []
+            for e in existing_survey_wos[:10]:
+                enriched = _enrich_work_order_response(db, e)
+                existing_brief.append({
+                    "id": enriched.get("id"),
+                    "title": enriched.get("title"),
+                    "status": enriched.get("status").value if hasattr(enriched.get("status"), "value") else str(enriched.get("status")),
+                    "assigned_to": enriched.get("assigned_to"),
+                    "assignee_name": enriched.get("assignee_name"),
+                    "assigner_name": enriched.get("assigner_name"),
+                    "assigned_at": enriched.get("assigned_at").isoformat() if enriched.get("assigned_at") else None,
+                })
+
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "DUPLICATE_SURVEY_ORDER",
+                    "message": "该站点已存在进行中的勘察工单，不允许重复创建",
+                    "site_id": data.site_id,
+                    "site_name": getattr(site, "site_name", None),
+                    "site_code": getattr(site, "site_code", None),
+                    "existing_work_orders": existing_brief,
+                },
+            )
+
     # 重复校验：仅针对安装工单，任意状态都视为存在历史记录，需用户确认后方可继续
     if data.type == WorkOrderTypeEnum.OPENING_INSPECTION and not (getattr(data, "confirm_duplicate", False)):
         existing_wos = db.query(WorkOrder).filter(

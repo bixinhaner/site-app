@@ -112,6 +112,7 @@ import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../../stores/user'
+import { surveyArchivesApi } from '@/api/surveyArchives'
 
 const route = useRoute()
 const router = useRouter()
@@ -275,9 +276,26 @@ onMounted(() => {
   loadUsers()
 })
 
-const openSurveys = () => {
-  router.push({ name: 'SiteSurveys', params: {}, query: { site_id: route.params.id } })
+const openSurveys = async () => {
+  try {
+    const res = await surveyArchivesApi.page({
+      page: 1,
+      page_size: 1,
+      site_id: route.params.id
+    })
+    const items = Array.isArray(res?.items) ? res.items : []
+    if (!items.length) {
+      ElMessage.info('当前站点暂无勘察档案')
+      return
+    }
+    const archive = items[0]
+    router.push({ name: 'SurveyArchiveDetail', params: { id: archive.id } })
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('获取勘察档案失败')
+  }
 }
+
 const createSurvey = () => {
   router.push({ name: 'SiteSurveyNew', query: { site_id: route.params.id } })
 }

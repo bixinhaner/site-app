@@ -33,6 +33,11 @@
     <el-card v-if="content">
       <div class="meta">
         <div>站点：{{ content.meta?.site_name }}（{{ content.meta?.site_code }}）</div>
+        <div>
+          勘察轮次：
+          <span v-if="(archive?.survey_round || 1) === 1">初勘（第1次勘察）</span>
+          <span v-else>复勘（第{{ archive?.survey_round }}次勘察）</span>
+        </div>
         <div>工单：{{ content.meta?.work_order_id }}</div>
         <div>检查：{{ content.meta?.inspection_id }}</div>
         <div>模板：{{ content.meta?.template?.name }} v{{ content.meta?.template?.version }}</div>

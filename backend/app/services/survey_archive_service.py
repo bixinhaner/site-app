@@ -15,6 +15,7 @@ from app.models import (
     InspectionCheckItem,
     InspectionPhoto,
 )
+from app.models.work_order import WorkOrderTypeEnum
 from app.models.survey_archive import (
     SiteSurveyArchive,
     SiteSurveyArchiveVersion,
@@ -310,6 +311,14 @@ def create_or_append_archive(
     insp = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
     if not insp or not insp.work_order_id:
         raise ValueError("无效的检查记录或未绑定工单")
+
+    # 仅允许勘察类工单生成勘察档案快照，其他类型工单跳过
+    wo = db.query(WorkOrder).filter(WorkOrder.id == insp.work_order_id).first()
+    if not wo:
+        raise ValueError("未找到关联工单")
+    if wo.type != WorkOrderTypeEnum.SITE_SURVEY:
+        raise ValueError(f"仅支持勘察工单生成勘察档案，当前工单类型为: {wo.type}")
+
     tpl = db.query(InspectionTemplate).filter(InspectionTemplate.id == insp.template_id).first()
     if not tpl:
         raise ValueError("未找到检查模板")

@@ -19,6 +19,14 @@
           <template #default="{ row }">{{ row.site_code || '-' }}</template>
         </el-table-column>
         <el-table-column prop="site_name" label="站点名称" min-width="180" />
+        <el-table-column label="勘察轮次" width="200">
+          <template #default="{ row }">
+            <el-tag :type="(row.survey_round || 1) === 1 ? 'success' : 'warning'">
+              <span v-if="(row.survey_round || 1) === 1">初勘（第1次勘察）</span>
+              <span v-else>复勘（第{{ row.survey_round }}次勘察）</span>
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="inspector_name" label="勘察人" width="140" />
         <el-table-column prop="reviewer_name" label="审核人" width="140" />
         <el-table-column prop="updated_at" label="更新时间" width="180">

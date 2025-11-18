@@ -75,8 +75,28 @@ def page_archives(
         .all()
     )
 
+    # 计算每个档案在其站点内的勘察轮次（按创建时间升序）
+    survey_round_map: Dict[str, int] = {}
+    site_ids = {a.site_id for a in rows if a.site_id is not None}
+    if site_ids:
+        all_archives = (
+            db.query(SiteSurveyArchive)
+            .filter(SiteSurveyArchive.site_id.in_(site_ids))
+            .order_by(SiteSurveyArchive.created_at.asc())
+            .all()
+        )
+        site_round: Dict[int, int] = {}
+        for arc in all_archives:
+            sid = arc.site_id
+            if sid is None:
+                continue
+            current_round = site_round.get(sid, 0) + 1
+            site_round[sid] = current_round
+            survey_round_map[arc.id] = current_round
+
     items = []
     for a in rows:
+        survey_round = survey_round_map.get(a.id, 1)
         items.append({
             "id": a.id,
             "site_id": a.site_id,
@@ -91,6 +111,9 @@ def page_archives(
             "reviewer_name": getattr(getattr(a.inspection, 'reviewer', None), 'full_name', None),
             "current_version": a.current_version,
             "updated_at": a.updated_at,
+            # 勘察轮次：1 为初勘，>1 为复勘
+            "survey_round": survey_round,
+            "is_resurvey": survey_round > 1,
         })
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -104,6 +127,21 @@ def get_archive(
     a = db.query(SiteSurveyArchive).filter(SiteSurveyArchive.id == archive_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="档案不存在")
+
+    # 计算该档案在其站点内的勘察轮次（按创建时间升序）
+    survey_round = 1
+    if a.site_id is not None:
+        archives = (
+            db.query(SiteSurveyArchive)
+            .filter(SiteSurveyArchive.site_id == a.site_id)
+            .order_by(SiteSurveyArchive.created_at.asc())
+            .all()
+        )
+        for idx, arc in enumerate(archives, start=1):
+            if arc.id == a.id:
+                survey_round = idx
+                break
+
     return {
         "id": a.id,
         "site_id": a.site_id,
@@ -114,6 +152,8 @@ def get_archive(
         "current_version": a.current_version,
         "content": a.content,
         "updated_at": a.updated_at,
+        "survey_round": survey_round,
+        "is_resurvey": survey_round > 1,
     }
 
 
