@@ -11,12 +11,25 @@ from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.site import Site
 from app.models.planning import (
-    SitePlanning, SitePlanningSector, SiteAntennaPort, SiteSwitchPort, PlanningChangeLog
+    SitePlanning,
+    SitePlanningSector,
+    SiteAntennaPort,
+    SiteSwitchPort,
+    PlanningChangeLog,
+    SitePlanningCell,
 )
 from app.schemas.planning import (
-    SitePlanningResponse, SitePlanningUpdate, SitePlanningVersion,
-    PlanningImportReport, SitePlanningBase, PlanningChangeLogItem,
-    BatchImportReport, BatchPlanningResult
+    SitePlanningResponse,
+    SitePlanningUpdate,
+    SitePlanningVersion,
+    PlanningImportReport,
+    SitePlanningBase,
+    PlanningChangeLogItem,
+    BatchImportReport,
+    BatchPlanningResult,
+    PlanningCell,
+    SitePlanningLldResponse,
+    SitePlanningLldSummary,
 )
 
 
@@ -103,6 +116,52 @@ def _ensure_site_plannable(site: Site):
         raise HTTPException(status_code=409, detail="站点尚处于勘察阶段（survey_pending），暂不允许录入规划信息。请完成勘察后再试。")
 
 
+def _normalize_tower_id(value) -> Optional[str]:
+    """将 Excel 中的 TOWER ID 规范化为用于匹配站点的 SITE ID（site_code）。"""
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
+
+
+def _first_not_null(row: dict, candidates) -> Optional[object]:
+    """从多列候选中取第一个非空值（排除 NaN 和空字符串）。"""
+    for name in candidates:
+        if name in row:
+            v = row.get(name)
+            if pd.isna(v):
+                continue
+            if isinstance(v, str) and not v.strip():
+                continue
+            return v
+    return None
+
+
+def _to_str(v) -> Optional[str]:
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    s = str(v).strip()
+    return s if s else None
+
+
+def _to_int(v) -> Optional[int]:
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    try:
+        return int(str(v).split('.')[0])
+    except Exception:
+        return None
+
+
+def _to_float(v) -> Optional[float]:
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
 def _create_new_version(
     db: Session,
     site_id: int,
@@ -186,6 +245,206 @@ def _create_new_version(
     db.commit()
 
     return planning
+
+
+def _collect_lld_rows_by_tower(excel: pd.ExcelFile) -> dict:
+    """
+    按 TOWER ID 聚合 LLD 行数据。
+
+    返回结构:
+        {
+          "TOWER_ID": [
+              {"rat": "LTE"|"NR", "band_code": "B28"/"N41", "sheet_name": "B28", "row": {...}},
+              ...
+          ],
+          ...
+        }
+    """
+    rows_by_tower = {}
+    for sheet_name in excel.sheet_names:
+        if not sheet_name:
+            continue
+        sname = str(sheet_name).strip()
+        upper = sname.upper()
+        if not (upper.startswith("B") or upper.startswith("N")):
+            # 仅处理 B*/N* 这些 4G/5G 规划 sheet
+            continue
+        rat = "LTE" if upper.startswith("B") else "NR"
+        band_code = sname
+
+        df = excel.parse(sheet_name)
+        if df.empty:
+            continue
+        # 去除列名空格，便于字段匹配
+        df.rename(columns=lambda c: str(c).strip(), inplace=True)
+
+        for _, r in df.iterrows():
+            row_dict = r.to_dict()
+            tower_raw = row_dict.get("TOWER ID")
+            tower_id = _normalize_tower_id(tower_raw)
+            local_cell_val = _first_not_null(row_dict, ["LOCAL CELL ID"])
+            if not tower_id or local_cell_val is None:
+                # 没有 SITE ID 或 LOCAL CELL ID 的行视为无效
+                continue
+            rows_by_tower.setdefault(tower_id, []).append(
+                {
+                    "rat": rat,
+                    "band_code": band_code,
+                    "sheet_name": sname,
+                    "row": row_dict,
+                }
+            )
+    return rows_by_tower
+
+
+def _build_cell_dict_from_row(
+    site_id: int,
+    tower_id: str,
+    meta: dict,
+) -> dict:
+    """将 LLD 行解析为 SitePlanningCell 可用的字段字典（不含 planning_id）。"""
+    rat = meta["rat"]
+    band_code = meta["band_code"]
+    sheet_name = meta["sheet_name"]
+    row = meta["row"]
+
+    cell = {
+        "site_id": site_id,
+        "rat": rat,
+        "band_code": band_code,
+        "sheet_name": sheet_name,
+        "tower_id": tower_id,
+        "site_information": _to_str(_first_not_null(row, ["SITE INFORMATION"])),
+        "site_name": _to_str(_first_not_null(row, ["SITE NAME"])),
+        "local_cell_id": _to_int(_first_not_null(row, ["LOCAL CELL ID"])),
+        "cell_name": _to_str(_first_not_null(row, ["CELL NAME"])),
+        "enb_id": _to_int(_first_not_null(row, ["ENB ID"])),
+        "eci": _to_int(_first_not_null(row, ["ECI"])),
+        "plmn": _to_str(_first_not_null(row, ["PLMN"])),
+        "tac": _to_str(_first_not_null(row, ["TAC"])),
+        "pci": _to_int(_first_not_null(row, ["PCI"])),
+        "zc_root_index": _to_int(_first_not_null(row, ["ZC Root Index"])),
+        "longitude": _to_float(_first_not_null(row, ["Longitude"])),
+        "latitude": _to_float(_first_not_null(row, ["Latitude"])),
+        "power_dbm": _to_float(_first_not_null(row, ["功率（dbm）", "功率"])),
+        "pa": _to_str(_first_not_null(row, ["PA"])),
+        "pb": _to_str(_first_not_null(row, ["PB"])),
+        "cover_type": _to_str(_first_not_null(row, ["Cover Type"])),
+        "band_in_file": _to_str(_first_not_null(row, ["BAND"])),
+        "frequency": _to_int(_first_not_null(row, ["Frequency"])),
+        "bandwidth": _to_str(_first_not_null(row, ["带宽", "Bandwidth"])),
+        "mechanical_downtilt_deg": _to_float(_first_not_null(row, ["机械下倾"])),
+        "electrical_downtilt_deg": _to_float(_first_not_null(row, ["电子下倾"])),
+        "azimuth_deg": _to_float(_first_not_null(row, ["Azimuth"])),
+        "tower_height": _to_float(_first_not_null(row, ["Tower Height"])),
+        "antenna_height": _to_float(_first_not_null(row, ["Antenna Height"])),
+        "tower_merchants": _to_str(_first_not_null(row, ["Tower Merchants"])),
+        "band_combination": _to_str(_first_not_null(row, ["Band Combination"])),
+        "antenna_ports": _to_int(_first_not_null(row, ["天线端口"])),
+        "cell_allocation": _to_str(_first_not_null(row, ["Cell Allocation"])),
+        "tower_name": _to_str(_first_not_null(row, ["TOWER NAME"])),
+        "town": _to_str(_first_not_null(row, ["Town"])),
+        "region": _to_str(_first_not_null(row, ["Region"])),
+        "coverage_area": _to_str(_first_not_null(row, ["覆盖区域"])),
+        "coverage_weight": _to_str(_first_not_null(row, ["区域权重"])),
+        "scenario": _to_str(_first_not_null(row, ["覆盖场景"])),
+        "scenario_weight": _to_str(_first_not_null(row, ["场景权重"])),
+        "weight": _to_str(_first_not_null(row, ["综合权重"])),
+        "remark": _to_str(_first_not_null(row, ["备注列：调整日期"])),
+        # 5G 字段（如果列不存在或为 NaN，会自动为 None）
+        "gnb_id": _to_int(_first_not_null(row, ["gNB ID"])),
+        "gnb_length": _to_int(_first_not_null(row, ["Gnb length"])),
+        "nci": _to_int(_first_not_null(row, ["NCI"])),
+        "gnb_wan_ip": _to_str(_first_not_null(row, ["gNB WAN IP"])),
+        "master_5gc_ip1": _to_str(_first_not_null(row, ["MASTER 5GC IP1"])),
+        "master_5gc_ip2": _to_str(_first_not_null(row, ["MASTER 5GC IP2"])),
+        "master_5gc_ip3": _to_str(_first_not_null(row, ["MASTER 5GC IP3"])),
+        "backup_5gc_ip1": _to_str(_first_not_null(row, ["BACKUP 5GC IP1"])),
+        "backup_5gc_ip2": _to_str(_first_not_null(row, ["BACKUP 5GC IP2"])),
+        "backup_5gc_ip3": _to_str(_first_not_null(row, ["BACKUP 5GC IP3"])),
+        "master_omc_ip": _to_str(_first_not_null(row, ["MASTER OMC IP"])),
+        "backup_omc_ip": _to_str(_first_not_null(row, ["BACKUP OMC IP"])),
+        "ntp_ip1": _to_str(_first_not_null(row, ["NTP IP1"])),
+        "ntp_ip2": _to_str(_first_not_null(row, ["NTP IP2"])),
+        "kssb": _to_float(_first_not_null(row, ["Kssb"])),
+        "offset_to_point_a": _to_str(_first_not_null(row, ["Offset to PointA"])),
+        "slot_config": _to_str(_first_not_null(row, ["Slot config"])),
+        "slot_config_dl_ul": _to_str(_first_not_null(row, ["Slot config DL/UL"])),
+        "symbol_config_dl_ul": _to_str(_first_not_null(row, ["Symbol config DL/UL"])),
+        "extra_params": None,
+    }
+    return cell
+
+
+def _build_planning_from_cells(site_id: int, cells: List[dict]) -> SitePlanningBase:
+    """根据 Cell 明细聚合生成 SitePlanningBase（bands + sectors）。"""
+    # bands: 使用 band_code 去重
+    bands = sorted(
+        {c["band_code"] for c in cells if c.get("band_code")}
+    )
+
+    # sectors: 以 LOCAL CELL ID 作为扇区号
+    sector_ids = sorted(
+        {c["local_cell_id"] for c in cells if c.get("local_cell_id") is not None}
+    )
+    sectors = []
+    for sid in sector_ids:
+        sec_cells = [c for c in cells if c.get("local_cell_id") == sid]
+        # 取第一个有方位角/下倾角的 Cell
+        az = None
+        mech = None
+        elec = None
+        for c in sec_cells:
+            if az is None and c.get("azimuth_deg") is not None:
+                az = c["azimuth_deg"]
+            if mech is None and c.get("mechanical_downtilt_deg") is not None:
+                mech = c["mechanical_downtilt_deg"]
+            if elec is None and c.get("electrical_downtilt_deg") is not None:
+                elec = c["electrical_downtilt_deg"]
+        downtilt = (mech or 0.0) + (elec or 0.0)
+        sector_bands = sorted(
+            {c["band_code"] for c in sec_cells if c.get("band_code")}
+        )
+        sectors.append(
+            {
+                "sector_index": int(sid),
+                "azimuth_deg": float(az or 0.0),
+                "downtilt_deg": float(downtilt),
+                "bands": sector_bands,
+            }
+        )
+
+    sector_count = len(sector_ids)
+
+    return SitePlanningBase(
+        bands=bands,
+        sector_count=sector_count,
+        notes=None,
+        sectors=sectors,
+        antenna_ports=[],
+        switch_ports=[],
+    )
+
+
+def _build_lld_summary_from_cells(planning: SitePlanning, cells: List[SitePlanningCell]) -> SitePlanningLldSummary:
+    """根据当前规划版本与 Cell 明细构建概要统计。"""
+    bands = sorted({c.band_code for c in cells if c.band_code})
+    lte_cell_count = sum(1 for c in cells if c.rat == "LTE")
+    nr_cell_count = sum(1 for c in cells if c.rat == "NR")
+
+    mech_vals = [c.mechanical_downtilt_deg for c in cells if c.mechanical_downtilt_deg is not None]
+    elec_vals = [c.electrical_downtilt_deg for c in cells if c.electrical_downtilt_deg is not None]
+
+    return SitePlanningLldSummary(
+        bands=bands,
+        sector_count=planning.sector_count or 0,
+        lte_cell_count=lte_cell_count,
+        nr_cell_count=nr_cell_count,
+        mechanical_downtilt_min=min(mech_vals) if mech_vals else None,
+        mechanical_downtilt_max=max(mech_vals) if mech_vals else None,
+        electrical_downtilt_min=min(elec_vals) if elec_vals else None,
+        electrical_downtilt_max=max(elec_vals) if elec_vals else None,
+    )
 
 
 @router.get("/{site_id}/planning", response_model=SitePlanningResponse)
@@ -360,7 +619,91 @@ async def restore_version(site_id: int, version: int, db: Session = Depends(get_
         antenna_ports=snap["antenna_ports"],
         switch_ports=snap["switch_ports"],
     )
-    _create_new_version(db, site_id, data, current_user.id, operation="restore", summary=f"Restore to v{version}")
+    # 创建新的规划版本
+    new_planning = _create_new_version(
+        db,
+        site_id,
+        data,
+        current_user.id,
+        operation="restore",
+        summary=f"Restore to v{version}",
+    )
+
+    # 如果被回滚的版本有 LLD Cell 明细，则将其复制到新版本
+    old_cells = (
+        db.query(SitePlanningCell)
+        .filter(SitePlanningCell.planning_id == planning.id)
+        .all()
+    )
+    if old_cells:
+        for oc in old_cells:
+            cell_kwargs = {
+                "site_id": oc.site_id,
+                "rat": oc.rat,
+                "band_code": oc.band_code,
+                "sheet_name": oc.sheet_name,
+                "tower_id": oc.tower_id,
+                "site_information": oc.site_information,
+                "site_name": oc.site_name,
+                "local_cell_id": oc.local_cell_id,
+                "cell_name": oc.cell_name,
+                "enb_id": oc.enb_id,
+                "eci": oc.eci,
+                "plmn": oc.plmn,
+                "tac": oc.tac,
+                "pci": oc.pci,
+                "zc_root_index": oc.zc_root_index,
+                "longitude": oc.longitude,
+                "latitude": oc.latitude,
+                "power_dbm": oc.power_dbm,
+                "pa": oc.pa,
+                "pb": oc.pb,
+                "cover_type": oc.cover_type,
+                "band_in_file": oc.band_in_file,
+                "frequency": oc.frequency,
+                "bandwidth": oc.bandwidth,
+                "mechanical_downtilt_deg": oc.mechanical_downtilt_deg,
+                "electrical_downtilt_deg": oc.electrical_downtilt_deg,
+                "azimuth_deg": oc.azimuth_deg,
+                "tower_height": oc.tower_height,
+                "antenna_height": oc.antenna_height,
+                "tower_merchants": oc.tower_merchants,
+                "band_combination": oc.band_combination,
+                "antenna_ports": oc.antenna_ports,
+                "cell_allocation": oc.cell_allocation,
+                "tower_name": oc.tower_name,
+                "town": oc.town,
+                "region": oc.region,
+                "coverage_area": oc.coverage_area,
+                "coverage_weight": oc.coverage_weight,
+                "scenario": oc.scenario,
+                "scenario_weight": oc.scenario_weight,
+                "weight": oc.weight,
+                "remark": oc.remark,
+                "gnb_id": oc.gnb_id,
+                "gnb_length": oc.gnb_length,
+                "nci": oc.nci,
+                "gnb_wan_ip": oc.gnb_wan_ip,
+                "master_5gc_ip1": oc.master_5gc_ip1,
+                "master_5gc_ip2": oc.master_5gc_ip2,
+                "master_5gc_ip3": oc.master_5gc_ip3,
+                "backup_5gc_ip1": oc.backup_5gc_ip1,
+                "backup_5gc_ip2": oc.backup_5gc_ip2,
+                "backup_5gc_ip3": oc.backup_5gc_ip3,
+                "master_omc_ip": oc.master_omc_ip,
+                "backup_omc_ip": oc.backup_omc_ip,
+                "ntp_ip1": oc.ntp_ip1,
+                "ntp_ip2": oc.ntp_ip2,
+                "kssb": oc.kssb,
+                "offset_to_point_a": oc.offset_to_point_a,
+                "slot_config": oc.slot_config,
+                "slot_config_dl_ul": oc.slot_config_dl_ul,
+                "symbol_config_dl_ul": oc.symbol_config_dl_ul,
+                "extra_params": oc.extra_params,
+            }
+            db.add(SitePlanningCell(planning_id=new_planning.id, **cell_kwargs))
+        db.commit()
+
     return await get_current_planning(site_id, db, current_user)
 
 
@@ -712,4 +1055,294 @@ async def batch_upload_planning(
         success_count=success_count,
         failed_count=failed_count,
         results=results,
+    )
+
+
+@router.get("/planning/lld-batch-template")
+async def download_lld_batch_template():
+    """
+    下载 LLD 规划导入模板。
+
+    当前实现直接返回仓库根目录下的
+    `Summary of pre planned site LLD_newplan251113V1.xlsx` 文件，
+    以保证与规划团队现有模板格式完全一致。
+    """
+    from fastapi.responses import StreamingResponse
+    from pathlib import Path
+
+    base_dir = Path(__file__).resolve().parents[3]
+    xlsx_path = base_dir / "Summary of pre planned site LLD_newplan251113V1.xlsx"
+    if not xlsx_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail="LLD 模板文件缺失：请在系统部署目录中放置 Summary of pre planned site LLD_newplan251113V1.xlsx",
+        )
+
+    data = xlsx_path.read_bytes()
+    output = io.BytesIO(data)
+    output.seek(0)
+    headers = {
+        "Content-Disposition": "attachment; filename=site_planning_lld_template.xlsx"
+    }
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
+
+
+@router.post("/planning/lld-batch-upload", response_model=BatchImportReport)
+async def lld_batch_upload_planning(
+    file: UploadFile = File(...),
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    基于 LLD Excel（B28/B40/B3/N41 等 Sheet）批量导入站点规划。
+    使用 TOWER ID 作为 SITE ID，匹配 sites.site_code。
+    """
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    content = await file.read()
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="仅支持 Excel(.xlsx/.xls)")
+
+    try:
+        excel = pd.ExcelFile(io.BytesIO(content))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Excel 解析失败: {e}")
+
+    rows_by_tower = _collect_lld_rows_by_tower(excel)
+    if not rows_by_tower:
+        raise HTTPException(status_code=400, detail="未在 LLD 文件中找到有效的 B*/N* 规划数据（检查 TOWER ID 与 LOCAL CELL ID 列是否存在且非空）")
+
+    results: List[BatchPlanningResult] = []
+    success_count = 0
+    failed_count = 0
+
+    for tower_id, metas in rows_by_tower.items():
+        errors: List[str] = []
+        warnings: List[str] = []
+        try:
+            site = db.query(Site).filter(Site.site_code == tower_id).first()
+            if not site:
+                errors.append("站点不存在：请先在‘站点信息导入’创建站点并完成勘察")
+                results.append(BatchPlanningResult(site_code=tower_id, success=False, errors=errors))
+                failed_count += 1
+                continue
+
+            # 生命周期门禁
+            try:
+                _ensure_site_plannable(site)
+            except HTTPException as he:
+                errors.append(str(he.detail))
+                results.append(BatchPlanningResult(site_code=tower_id, site_id=site.id, success=False, errors=errors))
+                failed_count += 1
+                continue
+
+            # 构造 Cell 明细
+            cell_dicts: List[dict] = []
+            for meta in metas:
+                cell = _build_cell_dict_from_row(site.id, tower_id, meta)
+                if cell.get("local_cell_id") is None:
+                    # 理论上上游已经过滤过，这里再次防御
+                    continue
+                cell_dicts.append(cell)
+
+            if not cell_dicts:
+                errors.append("该站点在 LLD 中没有有效的小区行（LOCAL CELL ID 为空）")
+                results.append(BatchPlanningResult(site_code=tower_id, site_id=site.id, success=False, errors=errors))
+                failed_count += 1
+                continue
+
+            lte_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "LTE")
+            nr_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "NR")
+            bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
+
+            if dry_run:
+                # 试运行仅返回统计信息，不落库
+                results.append(
+                    BatchPlanningResult(
+                        site_code=tower_id,
+                        site_id=site.id,
+                        success=True,
+                        warnings=warnings,
+                        lte_cell_count=lte_cell_count,
+                        nr_cell_count=nr_cell_count,
+                        bands=bands,
+                    )
+                )
+                success_count += 1
+                continue
+
+            # 构造并持久化新的规划版本
+            base = _build_planning_from_cells(site.id, cell_dicts)
+            planning = _create_new_version(
+                db,
+                site.id,
+                base,
+                current_user.id,
+                operation="lld_import",
+                summary=f"LLD batch import: {file.filename}",
+            )
+
+            # 将 cells 与规划版本关联后落库
+            for c in cell_dicts:
+                db.add(SitePlanningCell(planning_id=planning.id, **c))
+            db.commit()
+
+            results.append(
+                BatchPlanningResult(
+                    site_code=tower_id,
+                    site_id=site.id,
+                    success=True,
+                    version_created=planning.version,
+                    warnings=warnings,
+                    lte_cell_count=lte_cell_count,
+                    nr_cell_count=nr_cell_count,
+                    bands=bands,
+                )
+            )
+            success_count += 1
+        except Exception as e:
+            errors.append(str(e))
+            results.append(BatchPlanningResult(site_code=tower_id, success=False, errors=errors))
+            failed_count += 1
+
+    return BatchImportReport(
+        dry_run=dry_run,
+        total_sites=len(rows_by_tower),
+        success_count=success_count,
+        failed_count=failed_count,
+        results=results,
+    )
+
+
+@router.post("/{site_id}/planning/lld-upload", response_model=BatchPlanningResult)
+async def lld_upload_planning_for_site(
+    site_id: int,
+    file: UploadFile = File(...),
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    单站 LLD 导入：只处理 LLD 文件中 TOWER ID 与该站点 site_code 匹配的行。
+    返回 BatchPlanningResult 以复用前端展示逻辑。
+    """
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    _ensure_site_plannable(site)
+
+    content = await file.read()
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="仅支持 Excel(.xlsx/.xls)")
+
+    try:
+        excel = pd.ExcelFile(io.BytesIO(content))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Excel 解析失败: {e}")
+
+    rows_by_tower = _collect_lld_rows_by_tower(excel)
+    metas = rows_by_tower.get(site.site_code) or []
+    if not metas:
+        raise HTTPException(status_code=400, detail=f"LLD 文件中未找到与站点编码 {site.site_code} 匹配的 TOWER ID 行")
+
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    cell_dicts: List[dict] = []
+    for meta in metas:
+        cell = _build_cell_dict_from_row(site.id, site.site_code, meta)
+        if cell.get("local_cell_id") is None:
+            continue
+        cell_dicts.append(cell)
+
+    if not cell_dicts:
+        errors.append("该站点在 LLD 中没有有效的小区行（LOCAL CELL ID 为空）")
+        return BatchPlanningResult(site_code=site.site_code, site_id=site.id, success=False, errors=errors)
+
+    lte_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "LTE")
+    nr_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "NR")
+    bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
+
+    if dry_run:
+        return BatchPlanningResult(
+            site_code=site.site_code,
+            site_id=site.id,
+            success=True,
+            warnings=warnings,
+            lte_cell_count=lte_cell_count,
+            nr_cell_count=nr_cell_count,
+            bands=bands,
+        )
+
+    base = _build_planning_from_cells(site.id, cell_dicts)
+    planning = _create_new_version(
+        db,
+        site.id,
+        base,
+        current_user.id,
+        operation="lld_import",
+        summary=f"LLD single-site import: {file.filename}",
+    )
+    for c in cell_dicts:
+        db.add(SitePlanningCell(planning_id=planning.id, **c))
+    db.commit()
+
+    return BatchPlanningResult(
+        site_code=site.site_code,
+        site_id=site.id,
+        success=True,
+        version_created=planning.version,
+        warnings=warnings,
+        lte_cell_count=lte_cell_count,
+        nr_cell_count=nr_cell_count,
+        bands=bands,
+    )
+
+
+@router.get("/{site_id}/planning/lld", response_model=SitePlanningLldResponse)
+async def get_lld_planning(
+    site_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取当前版本的 LLD 规划数据：包括 SitePlanning 概要 + Cell 明细 + 汇总信息。
+    """
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    planning = _get_current_planning(db, site_id)
+    if not planning:
+        raise HTTPException(status_code=404, detail="Planning not found for this site")
+
+    cells = (
+        db.query(SitePlanningCell)
+        .filter(
+            SitePlanningCell.site_id == site_id,
+            SitePlanningCell.planning_id == planning.id,
+        )
+        .order_by(SitePlanningCell.rat.asc(), SitePlanningCell.band_code.asc(), SitePlanningCell.local_cell_id.asc())
+        .all()
+    )
+
+    summary = _build_lld_summary_from_cells(planning, cells)
+    # 直接复用已有的 get_current_planning 构建概要
+    planning_resp = await get_current_planning(site_id, db, current_user)
+
+    cell_models = [PlanningCell.model_validate(c, from_attributes=True) for c in cells]
+
+    return SitePlanningLldResponse(
+        planning=planning_resp,
+        cells=cell_models,
+        summary=summary,
     )

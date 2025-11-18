@@ -93,9 +93,15 @@ const routes = [
         children: [
           { path: 'list', name: 'SiteList', component: () => import('../views/site/SiteList.vue'), meta: { title: '站点列表', icon: 'Location' } },
           { path: 'detail/:id', name: 'SiteDetail', component: () => import('../views/site/SiteDetail.vue'), meta: { title: '站点详情', hidden: true } },
-          { path: 'planning/:id', name: 'SitePlanning', component: () => import('../views/site/SitePlanning.vue'), meta: { title: '站点规划', hidden: true } },
+          // 旧版站点规划页面（逐步下线）
+          { path: 'planning/:id', name: 'SitePlanning', component: () => import('../views/site/SitePlanning.vue'), meta: { title: '站点规划（旧）', hidden: true } },
+          // 新版 LLD 站点规划页面
+          { path: 'planning-lld/:id', name: 'SitePlanningLld', component: () => import('../views/site/SitePlanningLld.vue'), meta: { title: '站点规划（LLD新）', hidden: true } },
           { path: 'basic-import', name: 'SiteBasicBatch', component: () => import('../views/site/SiteBasicBatch.vue'), meta: { title: '站点信息导入', icon: 'Plus' } },
-          { path: 'planning-batch', name: 'SitePlanningBatch', component: () => import('../views/site/SitePlanningBatch.vue'), meta: { title: '规划信息导入', icon: 'Operation' } },
+          // 旧版规划导入页面
+          { path: 'planning-batch', name: 'SitePlanningBatch', component: () => import('../views/site/SitePlanningBatch.vue'), meta: { title: '规划信息导入（旧）', icon: 'Operation' } },
+          // 新版 LLD 规划导入页面
+          { path: 'planning-batch-lld', name: 'SitePlanningBatchLld', component: () => import('../views/site/SitePlanningBatchLld.vue'), meta: { title: '规划信息导入（LLD新）', icon: 'Operation' } },
           { path: 'basic-import-history', name: 'SiteBasicImportHistory', component: () => import('../views/site/SiteBasicImportHistory.vue'), meta: { title: '导入历史', hidden: true } },
           { path: 'surveys', name: 'SiteSurveys', component: () => import('../views/surveys/SurveyList.vue'), meta: { title: '勘察档案（旧-废弃）', icon: 'PictureFilled' } },
           { path: 'surveys/new', name: 'SiteSurveyNew', component: () => import('../views/surveys/SurveyForm.vue'), meta: { title: '新建勘察', hidden: true } },

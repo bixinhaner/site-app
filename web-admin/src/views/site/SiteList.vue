@@ -142,7 +142,8 @@ const viewDetail = (row) => {
 }
 
 const viewPlanning = (row) => {
-  router.push({ name: 'SitePlanning', params: { id: row.id } })
+  // 默认跳转到 LLD 新版站点规划页面
+  router.push({ name: 'SitePlanningLld', params: { id: row.id } })
 }
 
 const createSite = () => {
@@ -150,7 +151,8 @@ const createSite = () => {
 }
 
 const openBatchPlanning = () => {
-  router.push({ name: 'SitePlanningBatch' })
+  // 默认跳转到 LLD 新版规划导入页面
+  router.push({ name: 'SitePlanningBatchLld' })
 }
 
 const openAssign = (row) => {

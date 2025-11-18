@@ -22,6 +22,21 @@ export const sitePlanningApi = {
     const url = `/api/sites/planning/batch-upload?dry_run=${dryRun}`
     return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
+  // LLD 新版规划导入/查询接口
+  downloadLldBatchTemplate: () => request.get('/api/sites/planning/lld-batch-template', { responseType: 'blob' }),
+  lldBatchImportPlanning: (file, dryRun = true) => {
+    const form = new FormData()
+    form.append('file', file)
+    const url = `/api/sites/planning/lld-batch-upload?dry_run=${dryRun}`
+    return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  lldImportPlanning: (siteId, file, dryRun = true) => {
+    const form = new FormData()
+    form.append('file', file)
+    const url = `/api/sites/${siteId}/planning/lld-upload?dry_run=${dryRun}`
+    return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  getLldPlanning: (siteId) => request.get(`/api/sites/${siteId}/planning/lld`),
 }
 
 export default sitePlanningApi

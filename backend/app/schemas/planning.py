@@ -125,6 +125,10 @@ class BatchPlanningResult(BaseModel):
     errors: List[str] = []
     warnings: List[str] = []
     version_created: Optional[int] = None
+    # LLD 导入扩展字段（可选）
+    lte_cell_count: Optional[int] = None
+    nr_cell_count: Optional[int] = None
+    bands: Optional[List[str]] = None
 
 
 class BatchImportReport(BaseModel):
@@ -133,3 +137,108 @@ class BatchImportReport(BaseModel):
     success_count: int
     failed_count: int
     results: List[BatchPlanningResult] = []
+
+
+class PlanningCell(BaseModel):
+    """LLD Cell 明细返回模型（字段与 SitePlanningCell 模型对应的子集）"""
+
+    id: int
+    planning_id: int
+    site_id: int
+
+    rat: str
+    band_code: str
+    sheet_name: str
+
+    tower_id: str
+    site_information: Optional[str] = None
+    site_name: Optional[str] = None
+
+    local_cell_id: Optional[int] = None
+    cell_name: Optional[str] = None
+
+    enb_id: Optional[int] = None
+    eci: Optional[int] = None
+    plmn: Optional[str] = None
+    tac: Optional[str] = None
+    pci: Optional[int] = None
+    zc_root_index: Optional[int] = None
+
+    longitude: Optional[float] = None
+    latitude: Optional[float] = None
+
+    power_dbm: Optional[float] = None
+    pa: Optional[str] = None
+    pb: Optional[str] = None
+
+    cover_type: Optional[str] = None
+    band_in_file: Optional[str] = None
+    frequency: Optional[int] = None
+    bandwidth: Optional[str] = None
+
+    mechanical_downtilt_deg: Optional[float] = None
+    electrical_downtilt_deg: Optional[float] = None
+    azimuth_deg: Optional[float] = None
+
+    tower_height: Optional[float] = None
+    antenna_height: Optional[float] = None
+    tower_merchants: Optional[str] = None
+
+    band_combination: Optional[str] = None
+    antenna_ports: Optional[int] = None
+    cell_allocation: Optional[str] = None
+
+    tower_name: Optional[str] = None
+    town: Optional[str] = None
+    region: Optional[str] = None
+    coverage_area: Optional[str] = None
+    coverage_weight: Optional[str] = None
+    scenario: Optional[str] = None
+    scenario_weight: Optional[str] = None
+    weight: Optional[str] = None
+    remark: Optional[str] = None
+
+    # 5G 专有字段
+    gnb_id: Optional[int] = None
+    gnb_length: Optional[int] = None
+    nci: Optional[int] = None
+
+    gnb_wan_ip: Optional[str] = None
+    master_5gc_ip1: Optional[str] = None
+    master_5gc_ip2: Optional[str] = None
+    master_5gc_ip3: Optional[str] = None
+    backup_5gc_ip1: Optional[str] = None
+    backup_5gc_ip2: Optional[str] = None
+    backup_5gc_ip3: Optional[str] = None
+
+    master_omc_ip: Optional[str] = None
+    backup_omc_ip: Optional[str] = None
+
+    ntp_ip1: Optional[str] = None
+    ntp_ip2: Optional[str] = None
+
+    kssb: Optional[float] = None
+    offset_to_point_a: Optional[str] = None
+    slot_config: Optional[str] = None
+    slot_config_dl_ul: Optional[str] = None
+    symbol_config_dl_ul: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SitePlanningLldSummary(BaseModel):
+    bands: List[str] = []
+    sector_count: int = 0
+    lte_cell_count: int = 0
+    nr_cell_count: int = 0
+    mechanical_downtilt_min: Optional[float] = None
+    mechanical_downtilt_max: Optional[float] = None
+    electrical_downtilt_min: Optional[float] = None
+    electrical_downtilt_max: Optional[float] = None
+
+
+class SitePlanningLldResponse(BaseModel):
+    planning: Optional[SitePlanningResponse] = None
+    cells: List[PlanningCell] = []
+    summary: SitePlanningLldSummary
