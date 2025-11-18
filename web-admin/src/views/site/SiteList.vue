@@ -6,6 +6,7 @@
         <el-input v-model="keyword" placeholder="搜索站点名称/编码/城市（动态生效）" clearable style="width: 260px" />
         <el-select v-model="statusFilter" placeholder="状态" clearable style="width: 140px" @change="reload">
           <el-option label="规划中" value="planning" />
+          <el-option label="规划完成" value="planned" />
           <el-option label="施工中" value="construction" />
           <el-option label="已开通" value="operational" />
           <el-option label="维护中" value="maintenance" />

@@ -178,6 +178,11 @@ def _create_new_version(
         current.is_current = False
         db.flush()
 
+    # 确保站点状态从 planning 切换为 planned（仅在第一次形成规划基线时）
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if site and site.status == "planning":
+        site.status = "planned"
+
     new_version = _max_version(db, site_id) + 1
     planning = SitePlanning(
         site_id=site_id,

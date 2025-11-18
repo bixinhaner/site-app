@@ -105,6 +105,100 @@
             />
           </div>
           <el-table :data="filteredLteCells" border size="small" height="520">
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div class="expand-groups">
+                  <div class="expand-group">
+                    <div class="group-title">基本信息</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">RAT</span><span class="field-value">{{ row.rat || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">BandCode</span><span class="field-value">{{ row.band_code || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Sheet</span><span class="field-value">{{ row.sheet_name || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">TOWER ID</span><span class="field-value">{{ row.tower_id || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">SITE INFORMATION</span><span class="field-value">{{ row.site_information || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">SITE NAME</span><span class="field-value">{{ row.site_name || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">TOWER NAME</span><span class="field-value">{{ row.tower_name || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Town</span><span class="field-value">{{ row.town || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Region</span><span class="field-value">{{ row.region || '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="expand-group">
+                    <div class="group-title">小区标识</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">LOCAL CELL ID</span><span class="field-value">{{ row.local_cell_id ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">CELL NAME</span><span class="field-value">{{ row.cell_name || '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="expand-group">
+                    <div class="group-title">无线参数</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">PLMN</span><span class="field-value">{{ row.plmn || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">TAC</span><span class="field-value">{{ row.tac || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">PCI</span><span class="field-value">{{ row.pci ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">ZC Root Index</span><span class="field-value">{{ row.zc_root_index ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">功率(dBm)</span><span class="field-value">{{ row.power_dbm ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">PA</span><span class="field-value">{{ row.pa || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">PB</span><span class="field-value">{{ row.pb || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">BAND(原始)</span><span class="field-value">{{ row.band_in_file || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Frequency</span><span class="field-value">{{ row.frequency ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Bandwidth</span><span class="field-value">{{ row.bandwidth || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">机械下倾</span><span class="field-value">{{ row.mechanical_downtilt_deg ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">电子下倾</span><span class="field-value">{{ row.electrical_downtilt_deg ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Azimuth</span><span class="field-value">{{ row.azimuth_deg ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">经度</span><span class="field-value">{{ row.longitude ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">纬度</span><span class="field-value">{{ row.latitude ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">塔高</span><span class="field-value">{{ row.tower_height ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">天线高</span><span class="field-value">{{ row.antenna_height ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">塔商</span><span class="field-value">{{ row.tower_merchants || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Band Combination</span><span class="field-value">{{ row.band_combination || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">天线端口</span><span class="field-value">{{ row.antenna_ports ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Cell Allocation</span><span class="field-value">{{ row.cell_allocation || '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="expand-group">
+                    <div class="group-title">覆盖与评估</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">Cover Type</span><span class="field-value">{{ row.cover_type || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">覆盖区域</span><span class="field-value">{{ row.coverage_area || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">区域权重</span><span class="field-value">{{ row.coverage_weight || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">覆盖场景</span><span class="field-value">{{ row.scenario || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">场景权重</span><span class="field-value">{{ row.scenario_weight || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">综合权重</span><span class="field-value">{{ row.weight || '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="expand-group">
+                    <div class="group-title">5G 核心网（NR 时有意义）</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">gNB ID</span><span class="field-value">{{ row.gnb_id ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Gnb length</span><span class="field-value">{{ row.gnb_length ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">NCI</span><span class="field-value">{{ row.nci ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">gNB WAN IP</span><span class="field-value">{{ row.gnb_wan_ip || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MASTER 5GC IP1</span><span class="field-value">{{ row.master_5gc_ip1 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MASTER 5GC IP2</span><span class="field-value">{{ row.master_5gc_ip2 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MASTER 5GC IP3</span><span class="field-value">{{ row.master_5gc_ip3 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">BACKUP 5GC IP1</span><span class="field-value">{{ row.backup_5gc_ip1 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">BACKUP 5GC IP2</span><span class="field-value">{{ row.backup_5gc_ip2 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">BACKUP 5GC IP3</span><span class="field-value">{{ row.backup_5gc_ip3 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MASTER OMC IP</span><span class="field-value">{{ row.master_omc_ip || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">BACKUP OMC IP</span><span class="field-value">{{ row.backup_omc_ip || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">NTP IP1</span><span class="field-value">{{ row.ntp_ip1 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">NTP IP2</span><span class="field-value">{{ row.ntp_ip2 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Kssb</span><span class="field-value">{{ row.kssb ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Offset to PointA</span><span class="field-value">{{ row.offset_to_point_a || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Slot config</span><span class="field-value">{{ row.slot_config || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Slot DL/UL</span><span class="field-value">{{ row.slot_config_dl_ul || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Symbol DL/UL</span><span class="field-value">{{ row.symbol_config_dl_ul || '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="expand-group">
+                    <div class="group-title">其它</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">备注</span><span class="field-value">{{ row.remark || '-' }}</span></div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="tower_id" label="TOWER ID" width="160" />
             <el-table-column prop="local_cell_id" label="LOCAL CELL ID" width="120" />
             <el-table-column prop="cell_name" label="CELL NAME" min-width="220" />
@@ -145,27 +239,149 @@
               clearable
             />
           </div>
-          <el-table :data="filteredNrCells" border size="small" height="520">
-            <el-table-column prop="tower_id" label="TOWER ID" width="160" />
-            <el-table-column prop="local_cell_id" label="LOCAL CELL ID" width="120" />
-            <el-table-column prop="cell_name" label="CELL NAME" min-width="220" />
-            <el-table-column prop="band_code" label="Band" width="80" />
-            <el-table-column prop="gnb_id" label="gNB ID" width="100" />
-            <el-table-column prop="nci" label="NCI" width="160" />
-            <el-table-column prop="pci" label="PCI" width="80" />
-            <el-table-column prop="frequency" label="Freq" width="100" />
-            <el-table-column prop="bandwidth" label="Bandwidth" width="110" />
-            <el-table-column prop="slot_config" label="Slot config" width="120" />
-            <el-table-column prop="slot_config_dl_ul" label="Slot DL/UL" width="120" />
-            <el-table-column prop="symbol_config_dl_ul" label="Symbol DL/UL" width="130" />
-            <el-table-column prop="mechanical_downtilt_deg" label="机械下倾(°)" width="110" />
-            <el-table-column prop="electrical_downtilt_deg" label="电子下倾(°)" width="110" />
-            <el-table-column prop="azimuth_deg" label="Azimuth(°)" width="110" />
-            <el-table-column prop="gnb_wan_ip" label="gNB WAN IP" width="150" />
-            <el-table-column prop="master_5gc_ip1" label="MASTER 5GC IP1" width="150" />
-            <el-table-column prop="backup_5gc_ip1" label="BACKUP 5GC IP1" width="150" />
-            <el-table-column prop="ntp_ip1" label="NTP IP1" width="150" />
-          </el-table>
+          <el-tabs v-model="nrViewMode" class="inner-tabs">
+            <el-tab-pane label="简表" name="basic">
+              <el-table :data="filteredNrCells" border size="small" height="520">
+                <el-table-column type="expand">
+                  <template #default="{ row }">
+                    <div class="expand-groups">
+                      <div class="expand-group">
+                        <div class="group-title">基本信息</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">RAT</span><span class="field-value">{{ row.rat || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">BandCode</span><span class="field-value">{{ row.band_code || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Sheet</span><span class="field-value">{{ row.sheet_name || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">TOWER ID</span><span class="field-value">{{ row.tower_id || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">SITE INFORMATION</span><span class="field-value">{{ row.site_information || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">SITE NAME</span><span class="field-value">{{ row.site_name || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">TOWER NAME</span><span class="field-value">{{ row.tower_name || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Town</span><span class="field-value">{{ row.town || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Region</span><span class="field-value">{{ row.region || '-' }}</span></div>
+                        </div>
+                      </div>
+                      <div class="expand-group">
+                        <div class="group-title">小区标识</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">LOCAL CELL ID</span><span class="field-value">{{ row.local_cell_id ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">CELL NAME</span><span class="field-value">{{ row.cell_name || '-' }}</span></div>
+                        </div>
+                      </div>
+                      <div class="expand-group">
+                        <div class="group-title">无线参数</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">PLMN</span><span class="field-value">{{ row.plmn || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">TAC</span><span class="field-value">{{ row.tac || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">PCI</span><span class="field-value">{{ row.pci ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">ZC Root Index</span><span class="field-value">{{ row.zc_root_index ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">功率(dBm)</span><span class="field-value">{{ row.power_dbm ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">PA</span><span class="field-value">{{ row.pa || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">PB</span><span class="field-value">{{ row.pb || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">BAND(原始)</span><span class="field-value">{{ row.band_in_file || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Frequency</span><span class="field-value">{{ row.frequency ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Bandwidth</span><span class="field-value">{{ row.bandwidth || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">机械下倾</span><span class="field-value">{{ row.mechanical_downtilt_deg ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">电子下倾</span><span class="field-value">{{ row.electrical_downtilt_deg ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Azimuth</span><span class="field-value">{{ row.azimuth_deg ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">经度</span><span class="field-value">{{ row.longitude ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">纬度</span><span class="field-value">{{ row.latitude ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">塔高</span><span class="field-value">{{ row.tower_height ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">天线高</span><span class="field-value">{{ row.antenna_height ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">塔商</span><span class="field-value">{{ row.tower_merchants || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Band Combination</span><span class="field-value">{{ row.band_combination || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">天线端口</span><span class="field-value">{{ row.antenna_ports ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Cell Allocation</span><span class="field-value">{{ row.cell_allocation || '-' }}</span></div>
+                        </div>
+                      </div>
+                      <div class="expand-group">
+                        <div class="group-title">覆盖与评估</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">Cover Type</span><span class="field-value">{{ row.cover_type || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">覆盖区域</span><span class="field-value">{{ row.coverage_area || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">区域权重</span><span class="field-value">{{ row.coverage_weight || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">覆盖场景</span><span class="field-value">{{ row.scenario || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">场景权重</span><span class="field-value">{{ row.scenario_weight || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">综合权重</span><span class="field-value">{{ row.weight || '-' }}</span></div>
+                        </div>
+                      </div>
+                      <div class="expand-group">
+                        <div class="group-title">5G 核心网</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">gNB ID</span><span class="field-value">{{ row.gnb_id ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Gnb length</span><span class="field-value">{{ row.gnb_length ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">NCI</span><span class="field-value">{{ row.nci ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">gNB WAN IP</span><span class="field-value">{{ row.gnb_wan_ip || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">MASTER 5GC IP1</span><span class="field-value">{{ row.master_5gc_ip1 || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">MASTER 5GC IP2</span><span class="field-value">{{ row.master_5gc_ip2 || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">MASTER 5GC IP3</span><span class="field-value">{{ row.master_5gc_ip3 || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">BACKUP 5GC IP1</span><span class="field-value">{{ row.backup_5gc_ip1 || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">BACKUP 5GC IP2</span><span class="field-value">{{ row.backup_5gc_ip2 || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">BACKUP 5GC IP3</span><span class="field-value">{{ row.backup_5gc_ip3 || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">MASTER OMC IP</span><span class="field-value">{{ row.master_omc_ip || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">BACKUP OMC IP</span><span class="field-value">{{ row.backup_omc_ip || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">NTP IP1</span><span class="field-value">{{ row.ntp_ip1 || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">NTP IP2</span><span class="field-value">{{ row.ntp_ip2 || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Kssb</span><span class="field-value">{{ row.kssb ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Offset to PointA</span><span class="field-value">{{ row.offset_to_point_a || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Slot config</span><span class="field-value">{{ row.slot_config || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Slot DL/UL</span><span class="field-value">{{ row.slot_config_dl_ul || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Symbol DL/UL</span><span class="field-value">{{ row.symbol_config_dl_ul || '-' }}</span></div>
+                        </div>
+                      </div>
+                      <div class="expand-group">
+                        <div class="group-title">其它</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">备注</span><span class="field-value">{{ row.remark || '-' }}</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="tower_id" label="TOWER ID" width="160" />
+                <el-table-column prop="local_cell_id" label="LOCAL CELL ID" width="120" />
+                <el-table-column prop="cell_name" label="CELL NAME" min-width="220" />
+                <el-table-column prop="band_code" label="Band" width="80" />
+                <el-table-column prop="gnb_id" label="gNB ID" width="100" />
+                <el-table-column prop="nci" label="NCI" width="160" />
+                <el-table-column prop="pci" label="PCI" width="80" />
+                <el-table-column prop="frequency" label="Freq" width="100" />
+                <el-table-column prop="bandwidth" label="Bandwidth" width="110" />
+                <el-table-column prop="slot_config" label="Slot config" width="120" />
+                <el-table-column prop="slot_config_dl_ul" label="Slot DL/UL" width="120" />
+                <el-table-column prop="symbol_config_dl_ul" label="Symbol DL/UL" width="130" />
+                <el-table-column prop="mechanical_downtilt_deg" label="机械下倾(°)" width="110" />
+                <el-table-column prop="electrical_downtilt_deg" label="电子下倾(°)" width="110" />
+                <el-table-column prop="azimuth_deg" label="Azimuth(°)" width="110" />
+                <el-table-column prop="gnb_wan_ip" label="gNB WAN IP" width="150" />
+              </el-table>
+            </el-tab-pane>
+            <el-tab-pane label="核心网字段视图" name="core">
+              <el-table :data="filteredNrCells" border size="small" height="520">
+                <el-table-column prop="tower_id" label="TOWER ID" width="160" />
+                <el-table-column prop="local_cell_id" label="LOCAL CELL ID" width="120" />
+                <el-table-column prop="cell_name" label="CELL NAME" min-width="220" />
+                <el-table-column prop="band_code" label="Band" width="80" />
+                <el-table-column prop="gnb_id" label="gNB ID" width="100" />
+                <el-table-column prop="gnb_length" label="Gnb length" width="120" />
+                <el-table-column prop="nci" label="NCI" width="160" />
+                <el-table-column prop="gnb_wan_ip" label="gNB WAN IP" width="150" />
+                <el-table-column prop="master_5gc_ip1" label="MASTER 5GC IP1" width="150" />
+                <el-table-column prop="master_5gc_ip2" label="MASTER 5GC IP2" width="150" />
+                <el-table-column prop="master_5gc_ip3" label="MASTER 5GC IP3" width="150" />
+                <el-table-column prop="backup_5gc_ip1" label="BACKUP 5GC IP1" width="150" />
+                <el-table-column prop="backup_5gc_ip2" label="BACKUP 5GC IP2" width="150" />
+                <el-table-column prop="backup_5gc_ip3" label="BACKUP 5GC IP3" width="150" />
+                <el-table-column prop="master_omc_ip" label="MASTER OMC IP" width="150" />
+                <el-table-column prop="backup_omc_ip" label="BACKUP OMC IP" width="150" />
+                <el-table-column prop="ntp_ip1" label="NTP IP1" width="150" />
+                <el-table-column prop="ntp_ip2" label="NTP IP2" width="150" />
+                <el-table-column prop="kssb" label="Kssb" width="100" />
+                <el-table-column prop="offset_to_point_a" label="Offset to PointA" width="160" />
+                <el-table-column prop="slot_config" label="Slot config" width="120" />
+                <el-table-column prop="slot_config_dl_ul" label="Slot DL/UL" width="120" />
+                <el-table-column prop="symbol_config_dl_ul" label="Symbol DL/UL" width="130" />
+              </el-table>
+            </el-tab-pane>
+          </el-tabs>
         </el-tab-pane>
 
         <el-tab-pane label="日志" name="logs">
@@ -228,6 +444,7 @@ const lteKeyword = ref('')
 const nrBandFilter = ref('')
 const nrNciFilter = ref('')
 const nrKeyword = ref('')
+const nrViewMode = ref('basic')
 
 const goBack = () => router.back()
 
@@ -359,5 +576,13 @@ onMounted(async () => {
 .meta-row { display:flex; gap: 12px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; }
 .filter-row { display:flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 .mr8 { margin-right: 8px; }
+.expand-groups { display: flex; flex-direction: column; gap: 12px; padding: 8px 0; }
+.expand-group { border-top: 1px solid #eee; padding-top: 8px; }
+.expand-group:first-child { border-top: none; padding-top: 0; }
+.group-title { font-weight: 600; margin-bottom: 4px; color: #333; }
+.group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 12px; }
+.field-item { display:flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.field-label { color: #666; white-space: nowrap; }
+.field-value { color: #333; word-break: break-all; text-align: right; }
+.inner-tabs { margin-top: 4px; }
 </style>
-

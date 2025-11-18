@@ -79,15 +79,16 @@ def _update_site_status_on_work_order_create(db: Session, site_id: int, work_ord
     """
     if work_order_type == WorkOrderTypeEnum.OPENING_INSPECTION:
         site = db.query(Site).filter(Site.id == site_id).first()
-        if site and site.status == "planning":
+        # 允许从 planning 或 planned 进入 construction
+        if site and site.status in ("planning", "planned"):
             old_status = site.status
             site.status = "construction"
             print(f"[站点状态自动更新] 站点 {site_id} ({site.site_name}) 状态从 {old_status} 更新为 {site.status}")
-            
+
             # 记录审计日志
             _audit_site_status_change(
                 db, site_id, old_status, site.status,
-                f"创建安装工单，站点进入建设阶段"
+                "创建安装工单，站点进入建设阶段"
             )
 
 
