@@ -232,9 +232,6 @@
 												<text class="equipment-label">{{ $t('inspection.boundDevice') }}:</text>
 												<text class="equipment-sn">{{ item.equipment_sn }}</text>
 											</view>
-											<button class="history-btn" @click.stop="showBindingHistory(item)">
-												📜 {{ $t('inspection.viewHistory') }}
-											</button>
 										</view>
 										<view v-else class="equipment-unbound">
 											<text class="warning-icon">⚠️</text>

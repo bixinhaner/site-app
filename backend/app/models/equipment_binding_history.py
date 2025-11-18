@@ -35,7 +35,19 @@ class EquipmentBindingHistory(Base):
     equipment_model = Column(String(100))  # 设备型号
     
     # 操作信息
-    action = Column(Enum(BindingActionEnum), nullable=False, default=BindingActionEnum.BIND)
+    # 注意：Enum 使用枚举的 value（小写字符串）进行存储，
+    # 与 Alembic 迁移中定义的 'bind' / 'unbind' / 'rebind' 保持一致，
+    # 避免写入大写枚举名（如 'BIND'）触发 SQLite CHECK 约束错误。
+    action = Column(
+        Enum(
+            BindingActionEnum,
+            # 显式使用枚举值作为数据库存储值
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+            name="bindingactionenum",
+        ),
+        nullable=False,
+        default=BindingActionEnum.BIND,
+    )
     operator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     operated_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
     
