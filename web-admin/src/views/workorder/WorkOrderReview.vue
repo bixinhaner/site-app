@@ -14,12 +14,69 @@
           <el-descriptions-item label="站点">{{ order.site_name || order.site_id }}</el-descriptions-item>
           <el-descriptions-item label="分配给">{{ order.assignee_name }}</el-descriptions-item>
           <el-descriptions-item label="优先级">{{ priorityText(order.priority) }}</el-descriptions-item>
-          <el-descriptions-item label="状态"><el-tag>{{ statusText(order.status) }}</el-tag></el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag>{{ statusText(order.status, order.type) }}</el-tag>
+          </el-descriptions-item>
           <el-descriptions-item label="分配时间">{{ formatDateTime(order.assigned_at) }}</el-descriptions-item>
           <el-descriptions-item label="提交时间">{{ formatDateTime(order.submitted_at) }}</el-descriptions-item>
         </el-descriptions>
 
         <el-divider />
+
+        <!-- 开站工单设备状态，仅对 opening_inspection 展示 -->
+        <el-card
+          v-if="order.type === 'opening_inspection'"
+          class="mb16"
+          v-loading="deviceStatusLoading"
+        >
+          <template #header>
+            <div class="card-header">
+              <span>开站设备在线 / 激活状态</span>
+              <div>
+                <span v-if="deviceStatusCheckedAt" style="margin-right: 12px; color: #909399;">
+                  最近检查时间：{{ formatDateTime(deviceStatusCheckedAt) }}
+                </span>
+                <el-button size="small" @click="loadDeviceStatus(false)">加载</el-button>
+                <el-button size="small" type="primary" @click="loadDeviceStatus(true)">刷新状态</el-button>
+              </div>
+            </div>
+          </template>
+          <el-empty v-if="!devices.length && !deviceStatusLoading" description="暂无绑定设备记录" />
+          <el-table v-else :data="devices" size="small" stripe>
+            <el-table-column prop="sn" label="设备 SN" min-width="180" />
+            <el-table-column prop="equipment_type" label="设备类型" width="120" />
+            <el-table-column prop="equipment_model" label="设备型号" min-width="160" />
+            <el-table-column label="扇区信息" min-width="160">
+              <template #default="{ row }">
+                扇区 {{ row.sector_id || '-' }} / Band {{ row.band || '-' }} / Cell {{ row.cell_id || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="在线状态" width="120">
+              <template #default="{ row }">
+                <el-tag v-if="row.online === true" type="success">已在线</el-tag>
+                <el-tag v-else-if="row.online === false" type="danger">未在线</el-tag>
+                <el-tag v-else>未知</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="激活状态" width="140">
+              <template #default="{ row }">
+                <el-tag v-if="row.activated === true" type="success">已激活</el-tag>
+                <el-tag v-else-if="row.activated === false" type="warning">未激活</el-tag>
+                <el-tag v-else>未知</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="安装人" width="140">
+              <template #default="{ row }">
+                {{ row.installer_name || row.installer_id || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="bound_at" label="绑定时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.bound_at) }}
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
         <div class="section-header">
           <h3>检查项审核</h3>
           <div v-if="summary">
@@ -370,12 +427,18 @@ const workOrderLogs = ref([])
 const inspectionLogs = ref([])
 const activeHistoryTab = ref('workorder')
 
+// 设备状态
+const deviceStatusLoading = ref(false)
+const devices = ref([])
+const deviceStatusCheckedAt = ref(null)
+
 const statuses = [
   { label: '待分配', value: 'PENDING' },
   { label: '已分配', value: 'ACTIVE' },
   { label: '已提交', value: 'SUBMITTED' },
   { label: '审核中', value: 'UNDER_REVIEW' },
-  { label: '已通过', value: 'APPROVED' },
+  { label: '已通过/待上线', value: 'APPROVED' },
+  { label: '已开通(上线阶段)', value: 'ACTIVATED' },
   { label: '已驳回', value: 'REJECTED' },
   { label: '已完成', value: 'COMPLETED' }
 ]
@@ -425,7 +488,7 @@ const refresh = async () => {
     // 先加载工单信息
     order.value = await request.get(`/api/work-orders/${id}`)
     // 然后基于工单信息加载相关数据
-    await Promise.all([loadItems(), loadSummary()])
+    await Promise.all([loadItems(), loadSummary(), loadDeviceStatus(false)])
   } catch (e) {
     console.error(e)
     ElMessage.error('加载工单失败')
@@ -660,10 +723,39 @@ const formatFileSize = (size) => {
   return `${(size / (1024 * 1024)).toFixed(2)} MB`
 }
 
-const statusText = (v) => (statuses.find(s => s.value === v)?.label || v)
+const statusText = (status, type) => {
+  if (type === 'opening_inspection') {
+    if (status === 'APPROVED') return '待上线 (80%)'
+    if (status === 'ACTIVATED') return '已上线待激活 (90%)'
+    if (status === 'COMPLETED') return '已激活 (100%)'
+  }
+  return statuses.find(s => s.value === status)?.label || status
+}
 const typeText = (v) => (types.find(t => t.value === v)?.label || v)
 const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
+
+const loadDeviceStatus = async (refresh = false) => {
+  // 仅开站工单需要设备状态
+  if (!order.value || order.value.type !== 'opening_inspection') {
+    devices.value = []
+    deviceStatusCheckedAt.value = null
+    return
+  }
+  try {
+    deviceStatusLoading.value = true
+    const res = await request.get(`/api/sites/${order.value.site_id}/omc/devices`, {
+      params: { refresh: refresh ? 1 : 0 }
+    })
+    devices.value = Array.isArray(res.devices) ? res.devices : []
+    deviceStatusCheckedAt.value = res.checked_at || null
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '加载设备状态失败')
+  } finally {
+    deviceStatusLoading.value = false
+  }
+}
 
 // 审核历史相关方法
 const showAuditHistory = async () => {

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 import uuid
 import io
@@ -23,7 +23,9 @@ from app.schemas.site import (
 from app.api.auth import get_current_user
 from sqlalchemy import func, or_
 from pydantic import BaseModel
-from app.models.work_order import AuditEvent
+from app.models.work_order import AuditEvent, WorkOrder, WorkOrderTypeEnum
+from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+from app.services.omc_client import get_omc_client, parse_online_flag, parse_activated_flag
 
 router = APIRouter()
 
@@ -474,3 +476,141 @@ async def get_site_stats_summary(
         status_stats=status_stats,
         type_stats=type_stats,
     )
+
+
+@router.get("/{site_id}/omc/devices")
+async def get_site_omc_devices(
+    site_id: int,
+    refresh: bool = Query(False, description="是否立即刷新 OMC 状态"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取站点绑定设备的在线/激活状态（统一接口）
+
+    - 设备列表来源：equipment_binding_history 推导当前绑定的 SN
+    - 在线状态：OMC /enodeb/infos/status/{sn} 的 connectionStatus
+    - 激活状态：OMC /enodeb/infos/cert/status/{sn} 的 certUploadStatus/secretKeyUploadStatus
+    """
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+
+    # 权限：管理员/经理/巡检角色可以查看任意站点；普通 user 仅允许查看自己站点
+    if current_user.role == "user":
+        if site.assigned_to not in (None, current_user.id) and site.created_by != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
+    # 1. 基于绑定历史推导当前 SN 及扇区信息
+    # 取每个 SN 最新一条记录，且 action != UNBIND
+    subq = (
+        db.query(
+            EquipmentBindingHistory.equipment_sn.label("sn"),
+            func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
+        )
+        .filter(EquipmentBindingHistory.site_id == site_id)
+        .group_by(EquipmentBindingHistory.equipment_sn)
+        .subquery()
+    )
+
+    latest_rows: list[EquipmentBindingHistory] = (
+        db.query(EquipmentBindingHistory)
+        .options(joinedload(EquipmentBindingHistory.operator))
+        .join(
+            subq,
+            (EquipmentBindingHistory.equipment_sn == subq.c.sn)
+            & (EquipmentBindingHistory.operated_at == subq.c.latest_at),
+        )
+        .filter(EquipmentBindingHistory.site_id == site_id)
+        .all()
+    )
+
+    devices = []
+    for row in latest_rows:
+        if row.action == BindingActionEnum.UNBIND or not row.equipment_sn:
+            continue
+        installer = row.operator
+        installer_name = None
+        if installer:
+            installer_name = installer.full_name or installer.username
+        devices.append(
+            {
+                "sn": row.equipment_sn,
+                "equipment_type": row.equipment_type,
+                "equipment_model": row.equipment_model,
+                "sector_id": row.sector_id,
+                "band": row.band,
+                "cell_id": row.cell_id,
+                "installer_id": row.operator_id,
+                "installer_name": installer_name,
+                "bound_at": row.operated_at.isoformat() if row.operated_at else None,
+                "online": None,
+                "activated": None,
+            }
+        )
+
+    if not devices:
+        return {"site_id": site_id, "checked_at": None, "devices": []}
+
+    sns = [d["sn"] for d in devices]
+
+    checked_at = None
+    online_map = {}
+    activated_map = {}
+
+    # 2. 如果需要刷新，直接调 OMC
+    client = None
+    if refresh:
+        client = get_omc_client(db)
+        if not client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="OMC 未配置，请先在后台配置 OMC API",
+            )
+        for sn in sns:
+            try:
+                status_payload = client.get_enodeb_status(sn)
+                online_map[sn] = parse_online_flag(status_payload)
+            except Exception as exc:  # pragma: no cover
+                print(f"[OMC] 查询在线状态失败 SN={sn}: {exc}")
+                online_map[sn] = False
+        # 只有全部在线时才检查激活
+        if all(online_map.values()):
+            for sn in sns:
+                try:
+                    cert_payload = client.get_cert_status(sn)
+                    activated_map[sn] = parse_activated_flag(cert_payload)
+                except Exception as exc:  # pragma: no cover
+                    print(f"[OMC] 查询激活状态失败 SN={sn}: {exc}")
+                    activated_map[sn] = False
+        checked_at = datetime.utcnow().isoformat()
+    else:
+        # 不刷新：尝试从最近的开站工单缓存中读取状态
+        latest_opening_wo = (
+            db.query(WorkOrder)
+            .filter(
+                WorkOrder.site_id == site_id,
+                WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            )
+            .order_by(WorkOrder.assigned_at.desc())
+            .first()
+        )
+        if latest_opening_wo and latest_opening_wo.extra_data:
+            try:
+                omc_status = latest_opening_wo.extra_data.get("omc_status") or {}
+                online_map = omc_status.get("online") or {}
+                activated_map = omc_status.get("activated") or {}
+                checked_at = omc_status.get("checked_at")
+            except Exception:
+                online_map = {}
+                activated_map = {}
+
+    # 将状态填充到设备列表
+    for d in devices:
+        sn = d["sn"]
+        if sn in online_map:
+            d["online"] = bool(online_map[sn])
+        if sn in activated_map:
+            d["activated"] = bool(activated_map[sn])
+
+    return {"site_id": site_id, "checked_at": checked_at, "devices": devices}

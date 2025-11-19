@@ -145,6 +145,21 @@ const routes = [
           { path: 'list', name: 'UserList', component: () => import('../views/user/UserList.vue'), meta: { title: '用户列表', icon: 'UserFilled' } }
         ]
       },
+      // 系统配置
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: RouterView,
+        meta: { title: '系统配置', icon: 'Setting' },
+        children: [
+          {
+            path: 'omc',
+            name: 'OmcConfig',
+            component: () => import('../views/system/OmcConfig.vue'),
+            meta: { title: 'OMC API 配置', icon: 'Cpu' }
+          }
+        ]
+      },
       // 兼容旧路径的重定向
       { path: 'equipment', redirect: { name: 'Equipment' }, meta: { hidden: true } },
       { path: 'packages', redirect: { name: 'Packages' }, meta: { hidden: true } },

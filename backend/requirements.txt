@@ -19,3 +19,4 @@ pandas==2.2.0
 openpyxl==3.1.2
 reportlab==4.2.2
 jsonpatch==1.33
+requests==2.31.0

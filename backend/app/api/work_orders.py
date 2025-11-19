@@ -10,18 +10,32 @@ from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.site import Site
 from app.models.work_order import (
-    WorkOrder, WorkOrderItem, WorkOrderPhoto,
-    WorkOrderStatusEnum, WorkOrderTypeEnum, WorkOrderPriorityEnum,
-    ItemStatusEnum, AuditEvent
+    WorkOrder,
+    WorkOrderItem,
+    WorkOrderPhoto,
+    WorkOrderStatusEnum,
+    WorkOrderTypeEnum,
+    WorkOrderPriorityEnum,
+    ItemStatusEnum,
+    AuditEvent,
 )
 from app.models.inspection import SiteInspection, InspectionStatusEnum, InspectionTypeEnum, InspectionTemplate, InspectionCheckItem, CheckItemStatusEnum
 from app.models.survey import SiteSurveyPhoto
 from app.schemas.work_order import (
-    WorkOrderCreate, WorkOrderUpdate, WorkOrderResponse,
-    WorkOrderItemUpdate, WorkOrderItemResponse,
-    WorkOrderStatusChangeRequest, WorkOrderReviewRequest,
-    ItemReviewRequest, PhotoReviewRequest, WorkOrderPhotoResponse,
-    ReviewSummary, WorkOrderBatchOperation, WorkOrderSearchParams, WorkOrderListResponse
+    WorkOrderCreate,
+    WorkOrderUpdate,
+    WorkOrderResponse,
+    WorkOrderItemUpdate,
+    WorkOrderItemResponse,
+    WorkOrderStatusChangeRequest,
+    WorkOrderReviewRequest,
+    ItemReviewRequest,
+    PhotoReviewRequest,
+    WorkOrderPhotoResponse,
+    ReviewSummary,
+    WorkOrderBatchOperation,
+    WorkOrderSearchParams,
+    WorkOrderListResponse,
 )
 from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.work_order_sync import get_work_order_sync_service
@@ -29,6 +43,7 @@ from app.utils.file_handler import save_uploaded_file, generate_watermark
 from app.utils.gps_utils import reverse_geocode
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
+from app.services.omc_monitor import run_omc_check_for_work_order
 
 router = APIRouter()
 
@@ -317,6 +332,13 @@ def _audit(db: Session, resource_type: str, resource_id: str, action: str, opera
     )
     db.add(ev)
     db.commit()
+
+    # 对于开站工单，审核通过后立即触发一次后台 OMC 状态检查
+    if review_data.action == "approve" and wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        try:
+            run_omc_check_for_work_order(wo.id)
+        except Exception as exc:  # pragma: no cover - OMC 故障不影响审核主流程
+            print(f"[OMC] 审核后触发开站工单检查失败 work_order_id={wo.id}: {exc}")
 
 
 @router.post("", response_model=WorkOrderResponse)
@@ -2066,11 +2088,25 @@ async def review_work_order(
     old_status = wo.status
     
     if review_data.action == "approve":
-        wo.status = WorkOrderStatusEnum.COMPLETED
-        wo.completed_at = datetime.utcnow()
-        
-        # 自动更新站点状态
-        _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
+        # 审核通过：对于普通工单仍视为“已完成”，
+        # 对于开站工单则仅进入“待上线”阶段，后续由 OMC 状态推进。
+        if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+            wo.status = WorkOrderStatusEnum.APPROVED  # 80%：待上线
+            # 站点状态：从 construction 进入 pending_online（待上线）
+            site = db.query(Site).filter(Site.id == wo.site_id).first()
+            if site and site.status in ("construction", "planning", "planned"):
+                old_site_status = site.status
+                site.status = "pending_online"
+                print(
+                    f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
+                    f"状态从 {old_site_status} 更新为 {site.status} (开站工单审核通过，待上线)"
+                )
+        else:
+            wo.status = WorkOrderStatusEnum.COMPLETED
+            wo.completed_at = datetime.utcnow()
+            
+            # 自动更新站点状态（勘察/其他工单沿用原有逻辑）
+            _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
         
         # 同步检查状态
         if wo.inspection_id:
@@ -2151,9 +2187,16 @@ async def review_work_order(
             db.rollback()
             print(f"[WARN] 创建/追加勘察档案失败: {e}")
     
-    _audit(db, "work_order", wo.id, f"review_{review_data.action}", current_user.id,
-           from_status=old_status.value, to_status=wo.status.value,
-           comments=review_data.comments)
+    _audit(
+        db,
+        "work_order",
+        wo.id,
+        f"review_{review_data.action}",
+        current_user.id,
+        from_status=old_status.value,
+        to_status=wo.status.value,
+        comments=review_data.comments,
+    )
     
     return {
         "message": f"工单{review_data.action}成功",

@@ -65,8 +65,10 @@
         <el-table-column prop="priority" label="优先级" width="100">
           <template #default="{ row }"><el-tag>{{ priorityText(row.priority) }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="130">
-          <template #default="{ row }"><el-tag>{{ statusText(row.status) }}</el-tag></template>
+        <el-table-column prop="status" label="状态" width="160">
+          <template #default="{ row }">
+            <el-tag>{{ statusText(row.status, row.type) }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="assigned_at" label="分配时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
@@ -314,7 +316,8 @@ const statuses = [
   { label: '已分配', value: 'ACTIVE' },
   { label: '已提交', value: 'SUBMITTED' },
   { label: '审核中', value: 'UNDER_REVIEW' },
-  { label: '已通过', value: 'APPROVED' },
+  { label: '已通过/待上线', value: 'APPROVED' },
+  { label: '已开通(上线阶段)', value: 'ACTIVATED' },
   { label: '已驳回', value: 'REJECTED' },
   { label: '已完成', value: 'COMPLETED' }
 ]
@@ -596,7 +599,14 @@ const deleteWorkOrder = async (id) => {
   }
 }
 
-const statusText = (v) => (statuses.find(s => s.value === v)?.label || v)
+const statusText = (status, type) => {
+  if (type === 'opening_inspection') {
+    if (status === 'APPROVED') return '待上线 (80%)'
+    if (status === 'ACTIVATED') return '已上线待激活 (90%)'
+    if (status === 'COMPLETED') return '已激活 (100%)'
+  }
+  return statuses.find(s => s.value === status)?.label || status
+}
 const typeText = (v) => (typeLabelMap[v] || v)
 const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')

@@ -13,7 +13,7 @@
         <div class="item"><span class="label">站点名称</span><span class="value">{{ site.site_name }}</span></div>
         <div class="item"><span class="label">站点编码</span><span class="value">{{ site.site_code }}</span></div>
         <div class="item"><span class="label">类型</span><span class="value">{{ site.site_type || '-' }}</span></div>
-        <div class="item"><span class="label">状态</span><span class="value">{{ site.status }}</span></div>
+        <div class="item"><span class="label">状态</span><span class="value">{{ siteStatusText(site.status) }}</span></div>
         <div class="item"><span class="label">地址</span><span class="value">{{ site.address || '-' }}</span></div>
       </div>
     </el-card>
@@ -59,6 +59,57 @@
         <el-table-column label="操作" width="100">
           <template #default="{ row }">
             <el-button link type="primary" @click="viewWorkOrder(row)">查看</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <!-- 设备在线/激活状态 -->
+    <el-card class="mt16" v-loading="deviceStatusLoading">
+      <template #header>
+        <div class="card-header">
+          <span>设备在线 / 激活状态</span>
+          <div>
+            <span v-if="deviceStatusCheckedAt" style="margin-right: 12px; color: #909399;">
+              最近检查时间：{{ formatDate(deviceStatusCheckedAt) }}
+            </span>
+            <el-button size="small" @click="loadDeviceStatus(false)">加载</el-button>
+            <el-button size="small" type="primary" @click="loadDeviceStatus(true)">刷新状态</el-button>
+          </div>
+        </div>
+      </template>
+      <el-empty v-if="!devices.length && !deviceStatusLoading" description="暂无绑定设备记录" />
+      <el-table v-else :data="devices" size="small" stripe>
+        <el-table-column prop="sn" label="设备 SN" min-width="180" />
+        <el-table-column prop="equipment_type" label="设备类型" width="120" />
+        <el-table-column prop="equipment_model" label="设备型号" min-width="160" />
+        <el-table-column label="扇区信息" min-width="160">
+          <template #default="{ row }">
+            扇区 {{ row.sector_id || '-' }} / Band {{ row.band || '-' }} / Cell {{ row.cell_id || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="在线状态" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.online === true" type="success">已在线</el-tag>
+            <el-tag v-else-if="row.online === false" type="danger">未在线</el-tag>
+            <el-tag v-else>未知</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="激活状态" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.activated === true" type="success">已激活</el-tag>
+            <el-tag v-else-if="row.activated === false" type="warning">未激活</el-tag>
+            <el-tag v-else>未知</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="安装人" width="140">
+          <template #default="{ row }">
+            {{ row.installer_name || row.installer_id || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="bound_at" label="绑定时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.bound_at) }}
           </template>
         </el-table-column>
       </el-table>
@@ -128,12 +179,18 @@ const historyDialogVisible = ref(false)
 const historyLoading = ref(false)
 const historyWorkOrders = ref([])
 
+// 设备状态
+const deviceStatusLoading = ref(false)
+const devices = ref([])
+const deviceStatusCheckedAt = ref(null)
+
 const load = async () => {
   try {
     loading.value = true
     const res = await request.get(`/api/sites/${route.params.id}`)
     site.value = res
     await loadWorkOrders()
+    await loadDeviceStatus(false)
   } catch (e) {
     console.error(e)
     ElMessage.error('加载站点详情失败')
@@ -233,6 +290,20 @@ const formatWorkOrderStatus = (status) => {
   return map[status] || status
 }
 
+const siteStatusText = (status) => {
+  const map = {
+    survey_pending: '勘察中',
+    planning: '规划中',
+    planned: '规划完成',
+    construction: '施工中',
+    pending_online: '待上线',
+    online_pending_activation: '已上线待激活',
+    operational: '已开通',
+    maintenance: '维护中'
+  }
+  return map[status] || status
+}
+
 const formatPriority = (priority) => {
   const map = {
     'HIGH': '高',
@@ -265,6 +336,22 @@ const getPriorityTagType = (priority) => {
     'LOW': 'info'
   }
   return map[priority] || 'info'
+}
+
+const loadDeviceStatus = async (refresh = false) => {
+  try {
+    deviceStatusLoading.value = true
+    const res = await request.get(`/api/sites/${route.params.id}/omc/devices`, {
+      params: { refresh: refresh ? 1 : 0 }
+    })
+    devices.value = Array.isArray(res.devices) ? res.devices : []
+    deviceStatusCheckedAt.value = res.checked_at || null
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '加载设备状态失败')
+  } finally {
+    deviceStatusLoading.value = false
+  }
 }
 
 const viewWorkOrder = (workOrder) => {

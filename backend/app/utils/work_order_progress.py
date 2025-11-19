@@ -5,7 +5,7 @@
 """
 
 from sqlalchemy.orm import Session
-from app.models.work_order import WorkOrder, WorkOrderStatusEnum
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.models.inspection import InspectionCheckItem, CheckItemStatusEnum
 
 class WorkOrderProgressCalculator:
@@ -42,6 +42,15 @@ class WorkOrderProgressCalculator:
         """
         base_progress = cls.STATUS_PROGRESS_MAP.get(work_order.status, 0)
         
+        # 针对开站工单，使用自定义阶段进度：APPROVED=80, ACTIVATED=90, COMPLETED=100
+        if work_order.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+            if work_order.status == WorkOrderStatusEnum.APPROVED:
+                base_progress = 80
+            elif work_order.status == WorkOrderStatusEnum.ACTIVATED:
+                base_progress = 90
+            elif work_order.status == WorkOrderStatusEnum.COMPLETED:
+                base_progress = 100
+
         result = {
             "progress": base_progress,
             "stage": work_order.status.value,

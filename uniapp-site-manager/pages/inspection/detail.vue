@@ -594,6 +594,8 @@
 	const inspectionData = ref(null)
 	const workOrderProgress = ref(null)
 	const workOrderData = ref(null)
+	const deviceStatus = ref({ checked_at: null, devices: [] })
+	const deviceStatusLoading = ref(false)
 	const inspectorInfo = ref(null)
 	const checkItems = ref([])
 	const currentFilter = ref('all')
@@ -809,15 +811,18 @@
 				const status = response.data.status
 				let progressPercentage = 0
 				
+				const isOpening = response.data.type === 'opening_inspection'
+				
 				switch (status) {
 					case 'PENDING':
 						progressPercentage = 0
 						break
-					case 'ACTIVE':
+					case 'ACTIVE': {
 						// 如果是ACTIVE状态，根据检查项完成度动态计算
 						const completionRate = inspectionData.value?.completion_rate || 0
 						progressPercentage = Math.max(20, Math.min(65, 20 + (completionRate / 100) * 45))
 						break
+					}
 					case 'SUBMITTED':
 						progressPercentage = 65
 						break
@@ -825,10 +830,10 @@
 						progressPercentage = 75
 						break
 					case 'APPROVED':
-						progressPercentage = 85
+						progressPercentage = isOpening ? 80 : 85
 						break
 					case 'ACTIVATED':
-						progressPercentage = 95
+						progressPercentage = isOpening ? 90 : 95
 						break
 					case 'COMPLETED':
 						progressPercentage = 100
@@ -850,6 +855,35 @@
 			console.warn('获取工单进度失败:', error)
 			// 如果获取工单进度失败，仍然显示检查进度
 			workOrderProgress.value = null
+		}
+	}
+	
+	// 加载站点设备在线/激活状态（调用统一接口）
+	const loadSiteDevices = async (refresh = false) => {
+		if (!workOrderData.value || !workOrderData.value.site_id) {
+			deviceStatus.value = { checked_at: null, devices: [] }
+			return
+		}
+		try {
+			deviceStatusLoading.value = true
+			const response = await uni.request({
+				url: buildApiUrl(`/api/sites/${workOrderData.value.site_id}/omc/devices${refresh ? '?refresh=1' : ''}`),
+				...createRequestConfig({
+					method: 'GET',
+					headers: getAuthHeaders(userStore.token)
+				})
+			})
+			
+			if (response.statusCode === 200) {
+				deviceStatus.value = {
+					checked_at: response.data.checked_at || null,
+					devices: Array.isArray(response.data.devices) ? response.data.devices : []
+				}
+			}
+		} catch (error) {
+			console.warn('获取站点设备状态失败:', error)
+		} finally {
+			deviceStatusLoading.value = false
 		}
 	}
 	
@@ -1140,6 +1174,20 @@
 	}
 	
 	const getWorkOrderStatusText = (status) => {
+		const type = workOrderData.value?.type
+		if (type === 'opening_inspection') {
+			const openingMap = {
+				PENDING: '待处理',
+				ACTIVE: '执行中',
+				SUBMITTED: '已提交',
+				UNDER_REVIEW: '审核中',
+				APPROVED: '待上线',
+				ACTIVATED: '已上线待激活',
+				COMPLETED: '已激活',
+				REJECTED: '已驳回'
+			}
+			return openingMap[status] || status
+		}
 		const statusMap = {
 			PENDING: '待处理',
 			ACTIVE: '执行中',
