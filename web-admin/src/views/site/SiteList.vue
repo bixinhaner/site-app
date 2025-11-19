@@ -122,14 +122,15 @@ const reload = async () => {
     loading.value = true
     const params = {
       skip: (currentPage.value - 1) * pageSize.value,
-      limit: pageSize.value
+      limit: pageSize.value,
     }
+    if (keyword.value) params.keyword = keyword.value
     if (statusFilter.value) params.status = statusFilter.value
     if (assigneeFilter.value) params.assigned_to = assigneeFilter.value
-    const res = await request.get('/api/sites/', { params })
-    // 后端未返回总数，这里用近似：以当前页数据长度替代
-    sites.value = Array.isArray(res) ? res : []
-    total.value = (currentPage.value - 1) * pageSize.value + sites.value.length + (sites.value.length === pageSize.value ? pageSize.value : 0)
+    const res = await request.get('/api/sites/search', { params })
+    const list = Array.isArray(res?.sites) ? res.sites : []
+    sites.value = list
+    total.value = typeof res?.total === 'number' ? res.total : list.length
   } catch (e) {
     console.error(e)
     ElMessage.error('加载站点失败')
@@ -194,15 +195,7 @@ const loadUsers = async () => {
   }
 }
 
-const displayedSites = computed(() => {
-  if (!keyword.value) return sites.value
-  const kw = keyword.value.toLowerCase()
-  return sites.value.filter(s =>
-    (s.site_name || '').toLowerCase().includes(kw) ||
-    (s.site_code || '').toLowerCase().includes(kw) ||
-    (s.city || '').toLowerCase().includes(kw)
-  )
-})
+const displayedSites = computed(() => sites.value)
 
 const userName = (id) => {
   const u = userOptions.value.find(u => u.id === id)
@@ -215,9 +208,10 @@ onMounted(() => {
   loadUsers()
 })
 
-// 关键字动态生效：重置到第1页（当前实现为前端本地过滤）
+// 关键字动态生效：重置到第1页并走后端搜索
 watch(keyword, () => {
   currentPage.value = 1
+  reload()
 })
 </script>
 

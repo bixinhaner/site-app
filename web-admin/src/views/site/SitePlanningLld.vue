@@ -388,7 +388,11 @@
           <el-table :data="logs" v-loading="logsLoading" border>
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="operation" label="操作" width="120" />
-            <el-table-column prop="actor_id" label="操作者" width="120" />
+            <el-table-column label="操作者" width="160">
+              <template #default="{ row }">
+                {{ row.actor_name || row.actor_id || '-' }}
+              </template>
+            </el-table-column>
             <el-table-column prop="created_at" label="时间" width="200" />
             <el-table-column label="变更字段" min-width="260">
               <template #default="{ row }">

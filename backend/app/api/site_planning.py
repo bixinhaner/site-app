@@ -856,7 +856,13 @@ async def download_import_template():
 
 
 @router.get("/{site_id}/planning/logs", response_model=List[PlanningChangeLogItem])
-async def get_change_logs(site_id: int, skip: int = 0, limit: int = 50, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_change_logs(
+    site_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     logs = (
         db.query(PlanningChangeLog)
         .filter(PlanningChangeLog.site_id == site_id)
@@ -870,6 +876,7 @@ async def get_change_logs(site_id: int, skip: int = 0, limit: int = 50, db: Sess
             id=l.id,
             operation=l.operation,
             actor_id=l.actor_id,
+            actor_name=getattr(l.actor, "username", None),
             summary=l.summary,
             created_at=l.created_at.isoformat() if l.created_at else "",
             diff=l.diff,

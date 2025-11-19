@@ -78,3 +78,11 @@ class BasicImportHistoryItem(BaseModel):
     total_rows: Optional[int] = None
     success_count: Optional[int] = None
     failed_count: Optional[int] = None
+
+
+class SiteListResponse(BaseModel):
+    sites: List[SiteResponse]
+    total: int
+    page: int
+    size: int
+    pages: int

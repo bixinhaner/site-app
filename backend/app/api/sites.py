@@ -6,16 +6,22 @@ import uuid
 import io
 import pandas as pd
 from datetime import datetime
+import math
 
 from app.core.database import get_db
 from app.models.user import User
 from app.models.site import Site
 from app.schemas.site import (
-    SiteCreate, SiteUpdate, SiteResponse,
-    BasicBatchImportReport, BasicImportRowResult, BasicImportHistoryItem,
+    SiteCreate,
+    SiteUpdate,
+    SiteResponse,
+    BasicBatchImportReport,
+    BasicImportRowResult,
+    BasicImportHistoryItem,
+    SiteListResponse,
 )
 from app.api.auth import get_current_user
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from pydantic import BaseModel
 from app.models.work_order import AuditEvent
 
@@ -73,6 +79,57 @@ async def get_sites(
 
     sites = query.offset(skip).limit(limit).all()
     return [SiteResponse.from_orm(site) for site in sites]
+
+
+@router.get("/search", response_model=SiteListResponse)
+async def search_sites(
+    keyword: Optional[str] = Query(None, description="搜索站点名称/编码/城市"),
+    status: Optional[str] = Query(None),
+    site_type: Optional[str] = Query(None),
+    assigned_to: Optional[int] = Query(None),
+    skip: int = Query(0, ge=0, description="跳过记录数"),
+    limit: int = Query(50, ge=1, le=100, description="每页记录数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """站点搜索与分页列表（返回总数）"""
+    query = db.query(Site)
+
+    # 权限控制：普通 user 只能看到分配给自己的站点
+    if current_user.role == "user":
+        query = query.filter(Site.assigned_to == current_user.id)
+
+    # 关键词搜索
+    if keyword:
+        query = query.filter(
+            or_(
+                Site.site_name.contains(keyword),
+                Site.site_code.contains(keyword),
+                Site.city.contains(keyword),
+            )
+        )
+
+    # 过滤条件
+    if status:
+        query = query.filter(Site.status == status)
+    if site_type:
+        query = query.filter(Site.site_type == site_type)
+    if assigned_to:
+        query = query.filter(Site.assigned_to == assigned_to)
+
+    total = query.count()
+    sites = query.offset(skip).limit(limit).all()
+
+    page = (skip // limit) + 1
+    pages = math.ceil(total / limit) if limit else 1
+
+    return SiteListResponse(
+        sites=[SiteResponse.from_orm(site) for site in sites],
+        total=total,
+        page=page,
+        size=limit,
+        pages=pages,
+    )
 
 
 # ===== 基础信息批量导入（模板/上传/历史） =====

@@ -113,6 +113,7 @@ class PlanningChangeLogItem(BaseModel):
     id: int
     operation: str
     actor_id: int
+    actor_name: Optional[str] = None
     summary: Optional[str]
     created_at: str
     diff: Optional[Dict[str, Any]]
