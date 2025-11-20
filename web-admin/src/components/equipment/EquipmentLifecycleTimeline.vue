@@ -28,6 +28,43 @@
       </el-descriptions>
     </div>
 
+    <!-- OMC 设备状态 -->
+    <div v-if="equipmentInfo" class="omc-status">
+      <div class="omc-status-header">
+        <h3>OMC 设备状态</h3>
+        <el-button
+          type="primary"
+          size="small"
+          :loading="omcLoading"
+          @click="loadOmcStatus"
+        >
+          刷新 OMC 状态
+        </el-button>
+      </div>
+      <div class="omc-status-body">
+        <div v-if="omcStatus">
+          <el-tag :type="omcStatus.online ? 'success' : 'danger'">
+            {{ omcStatus.online ? '在线' : '离线或未知' }}
+          </el-tag>
+          <el-tag
+            :type="omcStatus.activated ? 'success' : 'info'"
+            style="margin-left: 8px"
+          >
+            {{ omcStatus.activated ? '已激活' : '未激活或未知' }}
+          </el-tag>
+          <span
+            v-if="omcStatus.checked_at"
+            class="omc-checked-at"
+          >
+            最近检测时间：{{ formatTime(omcStatus.checked_at) }}
+          </span>
+        </div>
+        <div v-else>
+          <span>尚未查询 OMC 状态</span>
+        </div>
+      </div>
+    </div>
+
     <el-divider v-if="equipmentInfo" />
 
     <!-- 生命周期时间轴 -->
@@ -112,6 +149,28 @@ const props = defineProps({
 const loading = ref(false)
 const equipmentInfo = ref(null)
 const bindingHistory = ref([])
+const omcLoading = ref(false)
+const omcStatus = ref(null)
+
+const loadOmcStatus = async () => {
+  if (!props.sn) {
+    ElMessage.warning('暂无设备SN，无法查询OMC状态')
+    return
+  }
+
+  omcLoading.value = true
+  omcStatus.value = null
+
+  try {
+    const res = await request.get(`/api/omc/devices/${props.sn}/status`)
+    omcStatus.value = res
+  } catch (error) {
+    console.error('查询OMC状态失败:', error)
+    ElMessage.error('查询OMC状态失败')
+  } finally {
+    omcLoading.value = false
+  }
+}
 
 const loadLifecycle = async () => {
   if (!props.sn) return
@@ -327,6 +386,30 @@ const formatTime = (isoString) => {
   margin-bottom: 24px;
 }
 
+.omc-status {
+  margin-bottom: 24px;
+}
+
+.omc-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.omc-status-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #606266;
+}
+
+.omc-checked-at {
+  margin-left: 8px;
+  color: #909399;
+}
+
 .lifecycle-container {
   padding: 16px 0;
 }
@@ -358,4 +441,3 @@ const formatTime = (isoString) => {
   font-family: 'Courier New', monospace;
 }
 </style>
-

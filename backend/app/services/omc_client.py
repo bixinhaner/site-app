@@ -94,14 +94,6 @@ class OmcClient:
     path = f"northboundApi/v1/enodeb/infos/status/{sn}"
     return self._request("GET", path)
 
-  def get_cert_status(self, sn: str) -> Dict:
-    """
-    获取设备证书/激活状态:
-    GET /northboundApi/v1/enodeb/infos/cert/status/{sn}
-    """
-    path = f"northboundApi/v1/enodeb/infos/cert/status/{sn}"
-    return self._request("GET", path)
-
 
 def load_omc_config(db: Session) -> Optional[dict]:
   row = db.query(SystemConfig).filter(SystemConfig.key == "omc_api").first()
@@ -154,17 +146,37 @@ def parse_online_flag(payload: Dict) -> bool:
 
 def parse_activated_flag(payload: Dict) -> bool:
   """
-  从 /enodeb/infos/cert/status 返回结果中解析“已激活”状态。
+  从 /enodeb/infos/status 返回结果中解析“设备已激活”状态。
 
-  文档示例字段:
-  - certUploadStatus: "3"
-  - secretKeyUploadStatus: "3"
-  - certFileName: "ENBCert.der"
-
-  这里约定:
-  - certUploadStatus == "3" 且 secretKeyUploadStatus == "3" 视为已激活。
+  业务约定:
+  - 使用 cellStatus 字段判断设备是否激活
+  - 当 cellStatus 第一个数字为 "1" 时视为已激活
+    例如: "1,0" -> 激活;  "0,1" -> 未激活
   """
   data = payload.get("data") or {}
-  cert_status = str(data.get("certUploadStatus") or "").strip()
-  key_status = str(data.get("secretKeyUploadStatus") or "").strip()
-  return cert_status == "3" and key_status == "3"
+  raw = str(data.get("cellStatus") or "").strip()
+  if not raw:
+    return False
+  first = raw.split(",")[0].strip()
+  return first == "1"
+
+
+def is_success_status_payload(payload: Dict) -> bool:
+  """
+  判定 OMC /enodeb/infos/status 等接口的业务响应是否“成功”。
+
+  约定:
+  - 未提供 code 字段视为成功
+  - code 在 {0, 200} 视为成功
+  - 其他 code 视为业务失败（例如 402: no device operation permission）
+  """
+  if not isinstance(payload, dict):
+    return False
+  code = payload.get("code")
+  if code is None:
+    return True
+  try:
+    code_int = int(code)
+  except (TypeError, ValueError):
+    return False
+  return code_int in (0, 200)

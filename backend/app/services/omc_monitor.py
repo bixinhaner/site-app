@@ -20,6 +20,10 @@ from app.services.omc_client import (
   parse_online_flag,
   parse_activated_flag,
 )
+from app.services.omc_state import (
+  upsert_omc_device_state,
+  summarize_site_omc_state,
+)
 
 _monitor_thread: threading.Thread | None = None
 
@@ -59,6 +63,7 @@ def _get_bound_sns_for_site(db: Session, site_id: int) -> List[str]:
 
 
 def _check_site_devices_status(
+  db: Session,
   client: OmcClient,
   sns: List[str],
 ) -> Tuple[Dict[str, bool], Dict[str, bool]]:
@@ -71,12 +76,30 @@ def _check_site_devices_status(
   """
   online_map: Dict[str, bool] = {}
   activated_map: Dict[str, bool] = {}
+  status_payloads: Dict[str, Dict] = {}
 
   # 先检查在线状态
   for sn in sns:
     try:
       resp = client.get_enodeb_status(sn)
-      online_map[sn] = parse_online_flag(resp)
+      status_payloads[sn] = resp
+      online_flag = parse_online_flag(resp)
+      activated_flag = parse_activated_flag(resp)
+      online_map[sn] = online_flag
+
+      # 写入 SN 聚合表（只升不降），source 标记为 monitor，仅在业务响应成功时写入
+      if is_success_status_payload(resp):
+        try:
+          upsert_omc_device_state(
+            db=db,
+            sn=sn,
+            online_raw=bool(online_flag),
+            activated_raw=bool(activated_flag),
+            source="monitor",
+            status_payload=resp,
+          )
+        except Exception as exc:  # pragma: no cover - 聚合表异常不影响主流程
+          print(f"[OMC] 写入 OmcDeviceState 失败 SN={sn}: {exc}")
     except Exception as exc:  # pragma: no cover - 网络异常不终止整体流程
       print(f"[OMC] 查询在线状态失败 SN={sn}: {exc}")
       online_map[sn] = False
@@ -88,8 +111,8 @@ def _check_site_devices_status(
   # 全部在线后再检查激活状态
   for sn in sns:
     try:
-      resp = client.get_cert_status(sn)
-      activated_map[sn] = parse_activated_flag(resp)
+      payload = status_payloads.get(sn) or {}
+      activated_map[sn] = parse_activated_flag(payload)
     except Exception as exc:  # pragma: no cover
       print(f"[OMC] 查询激活状态失败 SN={sn}: {exc}")
       activated_map[sn] = False
@@ -119,7 +142,7 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
       "checked_at": datetime.utcnow().isoformat(),
     }
   else:
-    online_map, activated_map = _check_site_devices_status(client, sns)
+    online_map, activated_map = _check_site_devices_status(db, client, sns)
     all_online = all(online_map.values()) if sns else False
     all_activated = sns and activated_map and all(activated_map.values())
 
@@ -132,27 +155,36 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
       "checked_at": datetime.utcnow().isoformat(),
     }
 
-    # 状态推进：仅向前推进，不回退
-    if all_online and wo.status == WorkOrderStatusEnum.APPROVED:
-      old_status = wo.status
-      wo.status = WorkOrderStatusEnum.ACTIVATED  # 90%: 已上线待激活
-      wo.activated_at = datetime.utcnow()
+  # 基于 SN 聚合表的 ever 状态进行站点/工单状态推进
+  ever_summary = summarize_site_omc_state(db, wo.site_id)
+  ever_all_online = bool(ever_summary.get("all_ever_online"))
+  ever_all_activated = bool(ever_summary.get("all_ever_activated"))
 
-      site = db.query(Site).filter(Site.id == wo.site_id).first()
-      if site:
-        old_site_status = site.status
-        if old_site_status in ("construction", "pending_online"):
-          site.status = "online_pending_activation"
-          print(
-            f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
-            f"状态从 {old_site_status} 更新为 {site.status} (设备全部在线)"
-          )
+  # 将 ever 聚合结果写入 summary，方便前端或排查
+  summary["all_ever_online"] = ever_all_online
+  summary["all_ever_activated"] = ever_all_activated
 
-  if summary["all_activated"] and wo.status in (
+  # 状态推进：仅向前推进，不回退
+  if ever_all_online and wo.status == WorkOrderStatusEnum.APPROVED:
+    old_status = wo.status
+    wo.status = WorkOrderStatusEnum.ACTIVATED  # 90%: 已上线待激活
+    wo.activated_at = datetime.utcnow()
+
+    site = db.query(Site).filter(Site.id == wo.site_id).first()
+    if site:
+      old_site_status = site.status
+      if old_site_status in ("construction", "pending_online"):
+        site.status = "online_pending_activation"
+        print(
+          f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
+          f"状态从 {old_site_status} 更新为 {site.status} (站点所有设备曾经全部在线)"
+        )
+
+  if ever_all_activated and wo.status in (
     WorkOrderStatusEnum.APPROVED,
     WorkOrderStatusEnum.ACTIVATED,
   ):
-    # 全部激活 -> 工单视为完成，站点进入 operational（通过原有逻辑）
+    # 全部激活（ever）-> 工单视为完成，站点进入 operational
     old_status = wo.status
     wo.status = WorkOrderStatusEnum.COMPLETED
     wo.completed_at = datetime.utcnow()

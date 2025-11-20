@@ -1,7 +1,9 @@
-from typing import Optional
+from typing import Optional, Dict, Any, List
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
+from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -9,7 +11,18 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import User
 from app.models.system_config import SystemConfig
-from app.services.omc_client import load_omc_config, OmcClient
+from app.models.omc_state import OmcDeviceState
+from app.models.site import Site
+from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+from app.services.omc_client import (
+  load_omc_config,
+  OmcClient,
+  get_omc_client,
+  parse_online_flag,
+  parse_activated_flag,
+  is_success_status_payload,
+)
+from app.services.omc_state import upsert_omc_device_state
 
 router = APIRouter()
 
@@ -30,6 +43,34 @@ class OmcConfigResponse(BaseModel):
 class OmcTestResponse(BaseModel):
   success: bool
   message: str
+
+
+class OmcDeviceStatusBySnResponse(BaseModel):
+  sn: str
+  online: bool
+  activated: bool
+  checked_at: str
+  status_payload: Optional[Dict[str, Any]] = None
+
+
+class OmcDeviceStateItem(BaseModel):
+  sn: str
+  omc_online_raw: Optional[bool] = None
+  omc_active_raw: Optional[bool] = None
+  ever_online: bool
+  ever_activated: bool
+  first_online_at: Optional[datetime] = None
+  first_activated_at: Optional[datetime] = None
+  last_seen_at: Optional[datetime] = None
+  last_source: Optional[str] = None
+  current_site_id: Optional[int] = None
+  current_site_code: Optional[str] = None
+  current_site_name: Optional[str] = None
+
+
+class OmcDeviceStateListResponse(BaseModel):
+  total: int
+  items: List[OmcDeviceStateItem]
 
 
 def _ensure_admin(user: User) -> None:
@@ -115,6 +156,98 @@ async def update_omc_config(
   )
 
 
+@router.get("/states", response_model=OmcDeviceStateListResponse)
+async def list_omc_device_states(
+  page: int = Query(1, ge=1, description="页码（从1开始）"),
+  page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+  sn: Optional[str] = Query(None, description="按设备SN模糊搜索"),
+  db: Session = Depends(get_db),
+  current_user: User = Depends(get_current_user),
+):
+  """
+  OMC 设备状态聚合列表（仅 admin/manager 可见）。
+  """
+  _ensure_admin(current_user)
+
+  query = db.query(OmcDeviceState)
+  if sn:
+    like_expr = f"%{sn.strip()}%"
+    query = query.filter(OmcDeviceState.sn.ilike(like_expr))
+
+  total = query.count()
+
+  states: List[OmcDeviceState] = (
+    query.order_by(OmcDeviceState.sn)
+    .offset((page - 1) * page_size)
+    .limit(page_size)
+    .all()
+  )
+
+  if not states:
+    return OmcDeviceStateListResponse(total=0, items=[])
+
+  # 查询当前绑定站点（按 SN 维度）
+  sns = [s.sn for s in states]
+
+  binding_subq = (
+    db.query(
+      EquipmentBindingHistory.equipment_sn.label("sn"),
+      func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
+    )
+    .filter(EquipmentBindingHistory.equipment_sn.in_(sns))
+    .group_by(EquipmentBindingHistory.equipment_sn)
+    .subquery()
+  )
+
+  latest_bindings = (
+    db.query(EquipmentBindingHistory, Site)
+    .join(
+      binding_subq,
+      and_(
+        EquipmentBindingHistory.equipment_sn == binding_subq.c.sn,
+        EquipmentBindingHistory.operated_at == binding_subq.c.latest_at,
+      ),
+    )
+    .join(Site, EquipmentBindingHistory.site_id == Site.id)
+    .filter(EquipmentBindingHistory.action != BindingActionEnum.UNBIND)
+    .all()
+  )
+
+  # 构建 SN -> 站点 的映射
+  sn_site_map: Dict[str, Dict[str, Any]] = {}
+  for bh, site in latest_bindings:
+    key = (bh.equipment_sn or "").strip()
+    if not key:
+      continue
+    sn_site_map[key] = {
+      "site_id": site.id,
+      "site_code": site.site_code,
+      "site_name": site.site_name,
+    }
+
+  items: List[OmcDeviceStateItem] = []
+  for state in states:
+    site_info = sn_site_map.get(state.sn or "", {})
+    items.append(
+      OmcDeviceStateItem(
+        sn=state.sn,
+        omc_online_raw=state.omc_online_raw,
+        omc_active_raw=state.omc_active_raw,
+        ever_online=bool(state.ever_online),
+        ever_activated=bool(state.ever_activated),
+        first_online_at=state.first_online_at,
+        first_activated_at=state.first_activated_at,
+        last_seen_at=state.last_seen_at,
+        last_source=state.last_source,
+        current_site_id=site_info.get("site_id"),
+        current_site_code=site_info.get("site_code"),
+        current_site_name=site_info.get("site_name"),
+      )
+    )
+
+  return OmcDeviceStateListResponse(total=total, items=items)
+
+
 @router.post("/test", response_model=OmcTestResponse)
 async def test_omc_connection(
   db: Session = Depends(get_db),
@@ -154,3 +287,61 @@ async def test_omc_connection(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail=f"连接 OMC 或校验账号失败: {exc}",
     ) from exc
+
+
+@router.get("/devices/{sn}/status", response_model=OmcDeviceStatusBySnResponse)
+async def get_device_status_by_sn(
+  sn: str,
+  db: Session = Depends(get_db),
+  current_user: User = Depends(get_current_user),
+) -> OmcDeviceStatusBySnResponse:
+  """
+  按设备 SN 直接查询 OMC 在线 / 激活状态。
+
+  - 在线状态：OMC /northboundApi/v1/enodeb/infos/status/{sn}
+  - 激活状态：OMC /northboundApi/v1/enodeb/infos/cert/status/{sn}
+  - 所有登录用户均可查询
+  """
+  # 仅要求登录即可；不做角色限制
+  _ = current_user
+
+  client = get_omc_client(db)
+  if not client:
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="OMC 未配置，请先在后台配置 OMC API",
+    )
+
+  try:
+    status_payload = client.get_enodeb_status(sn)
+    online = parse_online_flag(status_payload)
+  except Exception as exc:
+    raise HTTPException(
+      status_code=status.HTTP_502_BAD_GATEWAY,
+      detail=f"查询 OMC 在线状态失败: {exc}",
+    ) from exc
+
+  # 设备激活: 基于 /enodeb/infos/status 返回中的 cellStatus 判断
+  activated = parse_activated_flag(status_payload)
+
+  checked_at = datetime.utcnow().isoformat() + "Z"
+
+  # 写入 SN 聚合状态（只升不降），仅在业务响应成功时入库
+  if is_success_status_payload(status_payload):
+    upsert_omc_device_state(
+      db=db,
+      sn=sn,
+      online_raw=bool(online),
+      activated_raw=bool(activated),
+      source="api_poll",
+      status_payload=status_payload,
+    )
+    db.commit()
+
+  return OmcDeviceStatusBySnResponse(
+    sn=sn,
+    online=bool(online),
+    activated=bool(activated),
+    checked_at=checked_at,
+    status_payload=status_payload,
+  )

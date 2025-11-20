@@ -157,6 +157,12 @@ const routes = [
             name: 'OmcConfig',
             component: () => import('../views/system/OmcConfig.vue'),
             meta: { title: 'OMC API 配置', icon: 'Cpu' }
+          },
+          {
+            path: 'omc-states',
+            name: 'OmcDeviceStates',
+            component: () => import('../views/system/OmcDeviceStateList.vue'),
+            meta: { title: 'OMC 设备状态', icon: 'TrendCharts' }
           }
         ]
       },

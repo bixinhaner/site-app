@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from app.models.work_order import AuditEvent, WorkOrder, WorkOrderTypeEnum
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
 from app.services.omc_client import get_omc_client, parse_online_flag, parse_activated_flag
+from app.services.omc_state import summarize_site_omc_state
 
 router = APIRouter()
 
@@ -449,6 +450,23 @@ class SiteStatsSummary(BaseModel):
     type_stats: dict
 
 
+class SiteOmcEverDevice(BaseModel):
+    sn: str
+    ever_online: bool
+    ever_activated: bool
+    omc_online_raw: Optional[bool] = None
+    omc_active_raw: Optional[bool] = None
+    last_seen_at: Optional[str] = None
+
+
+class SiteOmcEverSummary(BaseModel):
+    site_id: int
+    sns: List[str]
+    all_ever_online: bool
+    all_ever_activated: bool
+    devices: List[SiteOmcEverDevice]
+
+
 @router.get("/stats/summary", response_model=SiteStatsSummary)
 async def get_site_stats_summary(
     db: Session = Depends(get_db),
@@ -490,7 +508,7 @@ async def get_site_omc_devices(
 
     - 设备列表来源：equipment_binding_history 推导当前绑定的 SN
     - 在线状态：OMC /enodeb/infos/status/{sn} 的 connectionStatus
-    - 激活状态：OMC /enodeb/infos/cert/status/{sn} 的 certUploadStatus/secretKeyUploadStatus
+    - 激活状态：OMC /enodeb/infos/status/{sn} 的 cellStatus，第一个数字为 1 视为已激活
     """
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
@@ -567,19 +585,21 @@ async def get_site_omc_devices(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="OMC 未配置，请先在后台配置 OMC API",
             )
+        status_payloads: dict[str, dict] = {}
         for sn in sns:
             try:
                 status_payload = client.get_enodeb_status(sn)
+                status_payloads[sn] = status_payload
                 online_map[sn] = parse_online_flag(status_payload)
             except Exception as exc:  # pragma: no cover
                 print(f"[OMC] 查询在线状态失败 SN={sn}: {exc}")
                 online_map[sn] = False
-        # 只有全部在线时才检查激活
+        # 只有全部在线时才检查激活（基于 cellStatus）
         if all(online_map.values()):
             for sn in sns:
                 try:
-                    cert_payload = client.get_cert_status(sn)
-                    activated_map[sn] = parse_activated_flag(cert_payload)
+                    payload = status_payloads.get(sn) or {}
+                    activated_map[sn] = parse_activated_flag(payload)
                 except Exception as exc:  # pragma: no cover
                     print(f"[OMC] 查询激活状态失败 SN={sn}: {exc}")
                     activated_map[sn] = False
@@ -614,3 +634,41 @@ async def get_site_omc_devices(
             d["activated"] = bool(activated_map[sn])
 
     return {"site_id": site_id, "checked_at": checked_at, "devices": devices}
+
+
+@router.get("/{site_id}/omc/devices/ever", response_model=SiteOmcEverSummary)
+async def get_site_omc_devices_ever(
+    site_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    基于 SN 聚合表 (omc_device_states) 获取站点设备的“ever”在线/激活状态。
+
+    - ever_online: 该 SN 曾经被 OMC 观测为在线
+    - ever_activated: 该 SN 曾经被 OMC 观测为激活
+    - 仅依赖历史观测记录，不主动调用 OMC 实时接口
+    """
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+
+    # 权限规则与 /omc/devices 保持一致
+    if current_user.role == "user":
+        if site.assigned_to not in (None, current_user.id) and site.created_by != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
+    summary = summarize_site_omc_state(db, site_id)
+
+    devices = [
+        SiteOmcEverDevice(**d)
+        for d in summary.get("devices", [])
+    ]
+
+    return SiteOmcEverSummary(
+        site_id=summary["site_id"],
+        sns=summary["sns"],
+        all_ever_online=summary["all_ever_online"],
+        all_ever_activated=summary["all_ever_activated"],
+        devices=devices,
+    )
