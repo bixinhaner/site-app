@@ -97,16 +97,22 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button
               type="primary"
               size="small"
               text
               :loading="isRefreshing(row.sn)"
+              :disabled="getCooldown(row.sn) > 0"
               @click="refreshSn(row)"
             >
-              实时检测
+              <span v-if="getCooldown(row.sn) > 0">
+                实时检测 ({{ getCooldown(row.sn) }}s)
+              </span>
+              <span v-else>
+                实时检测
+              </span>
             </el-button>
           </template>
         </el-table-column>
@@ -140,6 +146,8 @@ const page = ref(1)
 const pageSize = ref(20)
 const searchSn = ref('')
 const refreshingSn = ref('')
+const refreshCooldowns = ref({}) // { sn: remainingSeconds }
+let cooldownTimer = null
 
 const loadData = async () => {
   loading.value = true
@@ -180,10 +188,17 @@ const handleSizeChange = () => {
 const refreshSn = async (row) => {
   const sn = (row && row.sn) || ''
   if (!sn) return
+  const remaining = refreshCooldowns.value[sn] || 0
+  if (remaining > 0) {
+    ElMessage.warning(`请等待 ${remaining}s 后再检测该设备`)
+    return
+  }
   refreshingSn.value = sn
   try {
     await request.get(`/api/omc/devices/${sn}/status`)
     ElMessage.success('已触发实时检测，状态已更新')
+    // 启动该 SN 的10秒冷却
+    startCooldown(sn)
     await loadData()
   } catch (error) {
     console.error('实时检测 OMC 状态失败:', error)
@@ -194,6 +209,32 @@ const refreshSn = async (row) => {
 }
 
 const isRefreshing = (sn) => refreshingSn.value === sn
+
+const startCooldown = (sn) => {
+  refreshCooldowns.value = {
+    ...refreshCooldowns.value,
+    [sn]: 10
+  }
+  if (cooldownTimer) return
+  cooldownTimer = setInterval(() => {
+    const next = {}
+    let hasAny = false
+    Object.entries(refreshCooldowns.value).forEach(([key, val]) => {
+      const n = (val || 0) - 1
+      if (n > 0) {
+        next[key] = n
+        hasAny = true
+      }
+    })
+    refreshCooldowns.value = next
+    if (!hasAny) {
+      clearInterval(cooldownTimer)
+      cooldownTimer = null
+    }
+  }, 1000)
+}
+
+const getCooldown = (sn) => refreshCooldowns.value[sn] || 0
 
 const statusTagType = (val) => {
   if (val === true) return 'success'

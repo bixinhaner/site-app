@@ -322,27 +322,27 @@ const statuses = [
   { label: '已完成', value: 'COMPLETED' }
 ]
 // 类型显示映射（用于表格/详情友好显示历史类型）
-const typeLabelMap = {
-  'opening_inspection': '新站点设备安装',
+	const typeLabelMap = {
+	  'opening_inspection': '新站安装',
   'maintenance': '维护检查',
   'power_issue': '断电问题',
   'transmission_issue': '传输问题',
-  'gps_issue': 'GPS问题',
-  'signal_issue': '信号问题',
-  'site_survey': '站点勘察'
-}
-
-// 创建工单可选类型：仅两项
-const createTypes = [
-  { label: '新站点设备安装', value: 'opening_inspection' },
-  { label: '站点勘察', value: 'site_survey' }
-]
-
-// 顶部筛选可选类型：仅两项
-const filterTypes = [
-  { label: '新站点设备安装', value: 'opening_inspection' },
-  { label: '站点勘察', value: 'site_survey' }
-]
+	  'gps_issue': 'GPS问题',
+	  'signal_issue': '信号问题',
+	  'site_survey': '站点勘查'
+	}
+	
+	// 创建工单可选类型：仅两项
+	const createTypes = [
+	  { label: '站点勘查', value: 'site_survey' },
+	  { label: '新站安装', value: 'opening_inspection' }
+	]
+	
+	// 顶部筛选可选类型：仅两项
+	const filterTypes = [
+	  { label: '站点勘查', value: 'site_survey' },
+	  { label: '新站安装', value: 'opening_inspection' }
+	]
 
 
 const load = async () => {
@@ -471,10 +471,16 @@ const onTypeOrSiteChange = async () => {
 }
 
 const submitCreate = () => {
+  // 防止重复提交
+  if (creating.value) return
+  creating.value = true
+
   formRef.value.validate(async (valid) => {
-    if (!valid) return
+    if (!valid) {
+      creating.value = false
+      return
+    }
     try {
-      creating.value = true
       const payload = { ...createForm.value }
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
       await request.post('/api/work-orders', payload)
@@ -505,6 +511,9 @@ const confirmDuplicateCreate = async () => {
     dupVisible.value = false
     return
   }
+  // 防止重复提交
+  if (creating.value) return
+
   try {
     creating.value = true
     const payload = { ...dupPayload.value }

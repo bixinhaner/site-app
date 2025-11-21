@@ -333,13 +333,6 @@ def _audit(db: Session, resource_type: str, resource_id: str, action: str, opera
     db.add(ev)
     db.commit()
 
-    # 对于开站工单，审核通过后立即触发一次后台 OMC 状态检查
-    if review_data.action == "approve" and wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
-        try:
-            run_omc_check_for_work_order(wo.id)
-        except Exception as exc:  # pragma: no cover - OMC 故障不影响审核主流程
-            print(f"[OMC] 审核后触发开站工单检查失败 work_order_id={wo.id}: {exc}")
-
 
 @router.post("", response_model=WorkOrderResponse)
 @router.post("/", response_model=WorkOrderResponse)
@@ -403,6 +396,18 @@ async def create_work_order(
                     "site_code": getattr(site, "site_code", None),
                     "existing_work_orders": existing_brief,
                 },
+            )
+
+    # 安装工单创建规则校验：
+    # - 当站点仍处于勘察或规划阶段（survey_pending, planning）时，禁止创建安装工单
+    if data.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        if site.status in ("survey_pending", "planning"):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"站点当前状态为 {site.status}，尚处于勘察/规划阶段，"
+                    "不允许创建安装工单，请完成勘察并完成规划确认后再试。"
+                ),
             )
 
     # 重复校验：仅针对安装工单，任意状态都视为存在历史记录，需用户确认后方可继续
@@ -2197,6 +2202,13 @@ async def review_work_order(
         to_status=wo.status.value,
         comments=review_data.comments,
     )
+    
+    # 对于开站工单：审核通过后触发一次后台 OMC 状态检查
+    if review_data.action == "approve" and wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        try:
+            run_omc_check_for_work_order(wo.id)
+        except Exception as exc:  # pragma: no cover - OMC 故障不影响审核主流程
+            print(f"[OMC] 审核后触发开站工单检查失败 work_order_id={wo.id}: {exc}")
     
     return {
         "message": f"工单{review_data.action}成功",

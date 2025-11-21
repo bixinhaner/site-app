@@ -37,7 +37,19 @@
                   最近检查时间：{{ formatDateTime(deviceStatusCheckedAt) }}
                 </span>
                 <el-button size="small" @click="loadDeviceStatus(false)">加载</el-button>
-                <el-button size="small" type="primary" @click="loadDeviceStatus(true)">刷新状态</el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  :disabled="deviceRefreshCooldown > 0"
+                  @click="loadDeviceStatus(true)"
+                >
+                  <span v-if="deviceRefreshCooldown > 0">
+                    刷新状态 ({{ deviceRefreshCooldown }}s)
+                  </span>
+                  <span v-else>
+                    刷新状态
+                  </span>
+                </el-button>
               </div>
             </div>
           </template>
@@ -51,18 +63,28 @@
                 扇区 {{ row.sector_id || '-' }} / Band {{ row.band || '-' }} / Cell {{ row.cell_id || '-' }}
               </template>
             </el-table-column>
-            <el-table-column label="在线状态" width="120">
+            <el-table-column label="在线状态" width="200">
               <template #default="{ row }">
-                <el-tag v-if="row.online === true" type="success">已在线</el-tag>
-                <el-tag v-else-if="row.online === false" type="danger">未在线</el-tag>
-                <el-tag v-else>未知</el-tag>
+                <div class="status-cell">
+                  <el-tag :type="onlineRealtimeTagType(row.online)" size="small" class="mr4">
+                    {{ onlineRealtimeText(row.online) }}
+                  </el-tag>
+                  <el-tag :type="everOnlineTagType(row.ever_online)" size="small">
+                    {{ everOnlineText(row.ever_online) }}
+                  </el-tag>
+                </div>
               </template>
             </el-table-column>
-            <el-table-column label="激活状态" width="140">
+            <el-table-column label="激活状态" width="220">
               <template #default="{ row }">
-                <el-tag v-if="row.activated === true" type="success">已激活</el-tag>
-                <el-tag v-else-if="row.activated === false" type="warning">未激活</el-tag>
-                <el-tag v-else>未知</el-tag>
+                <div class="status-cell">
+                  <el-tag :type="activeRealtimeTagType(row.activated)" size="small" class="mr4">
+                    {{ activeRealtimeText(row.activated) }}
+                  </el-tag>
+                  <el-tag :type="everActiveTagType(row.ever_activated)" size="small">
+                    {{ everActiveText(row.ever_activated) }}
+                  </el-tag>
+                </div>
               </template>
             </el-table-column>
             <el-table-column label="安装人" width="140">
@@ -735,7 +757,40 @@ const typeText = (v) => (types.find(t => t.value === v)?.label || v)
 const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
 
+const onlineRealtimeText = (val) => {
+  if (val === true) return '当前在线'
+  if (val === false) return '当前离线'
+  return '待检测'
+}
+const onlineRealtimeTagType = (val) => {
+  if (val === true) return 'success'
+  if (val === false) return 'danger'
+  return 'info'
+}
+const everOnlineTagType = (val) => (val ? 'success' : 'info')
+const everOnlineText = (val) => (val ? '曾上线' : '未曾上线')
+
+const activeRealtimeText = (val) => {
+  if (val === true) return '当前已激活'
+  if (val === false) return '当前未激活'
+  return '待检测'
+}
+const activeRealtimeTagType = (val) => {
+  if (val === true) return 'success'
+  if (val === false) return 'warning'
+  return 'info'
+}
+const everActiveTagType = (val) => (val ? 'success' : 'info')
+const everActiveText = (val) => (val ? '曾激活' : '未曾激活')
+
+const deviceRefreshCooldown = ref(0)
+let deviceCooldownTimer = null
+
 const loadDeviceStatus = async (refresh = false) => {
+  if (refresh && deviceRefreshCooldown.value > 0) {
+    ElMessage.warning(`请等待 ${deviceRefreshCooldown.value}s 后再刷新设备状态`)
+    return
+  }
   // 仅开站工单需要设备状态
   if (!order.value || order.value.type !== 'opening_inspection') {
     devices.value = []
@@ -749,6 +804,10 @@ const loadDeviceStatus = async (refresh = false) => {
     })
     devices.value = Array.isArray(res.devices) ? res.devices : []
     deviceStatusCheckedAt.value = res.checked_at || null
+
+    if (refresh) {
+      startDeviceCooldown()
+    }
   } catch (e) {
     console.error(e)
     ElMessage.error(e?.response?.data?.detail || '加载设备状态失败')
@@ -817,6 +876,20 @@ const getStatusTagType = (status) => {
   return 'info'
 }
 
+const startDeviceCooldown = () => {
+  deviceRefreshCooldown.value = 10
+  if (deviceCooldownTimer) return
+  deviceCooldownTimer = setInterval(() => {
+    if (deviceRefreshCooldown.value > 0) {
+      deviceRefreshCooldown.value -= 1
+    }
+    if (deviceRefreshCooldown.value <= 0) {
+      clearInterval(deviceCooldownTimer)
+      deviceCooldownTimer = null
+    }
+  }, 1000)
+}
+
 onMounted(refresh)
 </script>
 
@@ -824,6 +897,15 @@ onMounted(refresh)
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .section-header { display:flex; justify-content: space-between; align-items:center; margin: 8px 0; }
+
+.status-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mr4 {
+  margin-right: 4px;
+}
 
 /* 审核历史样式 */
 .card-header {

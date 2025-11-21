@@ -19,6 +19,7 @@ from app.services.omc_client import (
   get_omc_client,
   parse_online_flag,
   parse_activated_flag,
+  is_success_status_payload,
 )
 from app.services.omc_state import (
   upsert_omc_device_state,

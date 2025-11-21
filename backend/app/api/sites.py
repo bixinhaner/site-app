@@ -25,8 +25,13 @@ from sqlalchemy import func, or_
 from pydantic import BaseModel
 from app.models.work_order import AuditEvent, WorkOrder, WorkOrderTypeEnum
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
-from app.services.omc_client import get_omc_client, parse_online_flag, parse_activated_flag
-from app.services.omc_state import summarize_site_omc_state
+from app.services.omc_client import (
+    get_omc_client,
+    parse_online_flag,
+    parse_activated_flag,
+    is_success_status_payload,
+)
+from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_state
 
 router = APIRouter()
 
@@ -572,12 +577,19 @@ async def get_site_omc_devices(
 
     sns = [d["sn"] for d in devices]
 
-    checked_at = None
-    online_map = {}
-    activated_map = {}
+    # 2. 聚合 ever 状态（曾上线 / 曾激活）
+    summary = summarize_site_omc_state(db, site_id)
+    ever_map: dict[str, dict] = {}
+    for dev in summary.get("devices", []):
+        sn_key = dev.get("sn")
+        if sn_key:
+            ever_map[sn_key] = dev
 
-    # 2. 如果需要刷新，直接调 OMC
-    client = None
+    checked_at = None
+    online_map: dict[str, bool] = {}
+    activated_map: dict[str, bool] = {}
+
+    # 3. 如果需要刷新，直接调 OMC 获取“实时状态”
     if refresh:
         client = get_omc_client(db)
         if not client:
@@ -590,11 +602,27 @@ async def get_site_omc_devices(
             try:
                 status_payload = client.get_enodeb_status(sn)
                 status_payloads[sn] = status_payload
-                online_map[sn] = parse_online_flag(status_payload)
+                online_flag = parse_online_flag(status_payload)
+                activated_flag = parse_activated_flag(status_payload)
+                online_map[sn] = online_flag
+
+                # 将此次观测写入 SN 聚合表，方便在“OMC 设备状态”页面统一查看
+                try:
+                    upsert_omc_device_state(
+                        db=db,
+                        sn=sn,
+                        online_raw=bool(online_flag),
+                        activated_raw=bool(activated_flag),
+                        source="api_poll",
+                        status_payload=status_payload,
+                    )
+                except Exception as exc:  # pragma: no cover - 聚合表异常不影响主流程
+                    print(f"[OMC] 写入 OmcDeviceState 失败 SN={sn}: {exc}")
             except Exception as exc:  # pragma: no cover
                 print(f"[OMC] 查询在线状态失败 SN={sn}: {exc}")
                 online_map[sn] = False
-        # 只有全部在线时才检查激活（基于 cellStatus）
+
+        # 只有全部在线时才检查激活（用于当前接口返回的 activated 字段）
         if all(online_map.values()):
             for sn in sns:
                 try:
@@ -604,34 +632,24 @@ async def get_site_omc_devices(
                     print(f"[OMC] 查询激活状态失败 SN={sn}: {exc}")
                     activated_map[sn] = False
         checked_at = datetime.utcnow().isoformat()
-    else:
-        # 不刷新：尝试从最近的开站工单缓存中读取状态
-        latest_opening_wo = (
-            db.query(WorkOrder)
-            .filter(
-                WorkOrder.site_id == site_id,
-                WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-            )
-            .order_by(WorkOrder.assigned_at.desc())
-            .first()
-        )
-        if latest_opening_wo and latest_opening_wo.extra_data:
-            try:
-                omc_status = latest_opening_wo.extra_data.get("omc_status") or {}
-                online_map = omc_status.get("online") or {}
-                activated_map = omc_status.get("activated") or {}
-                checked_at = omc_status.get("checked_at")
-            except Exception:
-                online_map = {}
-                activated_map = {}
+        # 提交本次刷新中写入的 OmcDeviceState 变更
+        try:
+            db.commit()
+        except Exception as exc:  # pragma: no cover
+            db.rollback()
+            print(f"[OMC] 提交 OmcDeviceState 变更失败 site_id={site_id}: {exc}")
 
-    # 将状态填充到设备列表
+    # 将状态填充到设备列表：实时在线/激活 + ever 在线/激活
     for d in devices:
         sn = d["sn"]
         if sn in online_map:
             d["online"] = bool(online_map[sn])
         if sn in activated_map:
             d["activated"] = bool(activated_map[sn])
+        ever_info = ever_map.get(sn) or {}
+        d["ever_online"] = bool(ever_info.get("ever_online")) if ever_info else False
+        d["ever_activated"] = bool(ever_info.get("ever_activated")) if ever_info else False
+        d["ever_last_seen_at"] = ever_info.get("last_seen_at") if ever_info else None
 
     return {"site_id": site_id, "checked_at": checked_at, "devices": devices}
 

@@ -36,9 +36,15 @@
           type="primary"
           size="small"
           :loading="omcLoading"
+          :disabled="refreshCooldown > 0"
           @click="loadOmcStatus"
         >
-          刷新 OMC 状态
+          <span v-if="refreshCooldown > 0">
+            刷新 OMC 状态 ({{ refreshCooldown }}s)
+          </span>
+          <span v-else>
+            刷新 OMC 状态
+          </span>
         </el-button>
       </div>
       <div class="omc-status-body">
@@ -134,7 +140,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { TrendCharts, Location, Box, Aim, CircleCheck, Tools, Checked } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
@@ -151,10 +157,16 @@ const equipmentInfo = ref(null)
 const bindingHistory = ref([])
 const omcLoading = ref(false)
 const omcStatus = ref(null)
+const refreshCooldown = ref(0)
+let cooldownTimer = null
 
 const loadOmcStatus = async () => {
   if (!props.sn) {
     ElMessage.warning('暂无设备SN，无法查询OMC状态')
+    return
+  }
+  if (refreshCooldown.value > 0) {
+    ElMessage.warning(`请等待 ${refreshCooldown.value}s 后再刷新 OMC 状态`)
     return
   }
 
@@ -164,12 +176,27 @@ const loadOmcStatus = async () => {
   try {
     const res = await request.get(`/api/omc/devices/${props.sn}/status`)
     omcStatus.value = res
+    startCooldown()
   } catch (error) {
     console.error('查询OMC状态失败:', error)
     ElMessage.error('查询OMC状态失败')
   } finally {
     omcLoading.value = false
   }
+}
+
+const startCooldown = () => {
+  refreshCooldown.value = 10
+  if (cooldownTimer) return
+  cooldownTimer = setInterval(() => {
+    if (refreshCooldown.value > 0) {
+      refreshCooldown.value -= 1
+    }
+    if (refreshCooldown.value <= 0) {
+      clearInterval(cooldownTimer)
+      cooldownTimer = null
+    }
+  }, 1000)
 }
 
 const loadLifecycle = async () => {
@@ -217,6 +244,13 @@ watch(
     }
   }
 )
+
+onUnmounted(() => {
+  if (cooldownTimer) {
+    clearInterval(cooldownTimer)
+    cooldownTimer = null
+  }
+})
 
 const lifecycleStages = computed(() => {
   const stages = []
