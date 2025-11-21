@@ -579,17 +579,9 @@ async def create_stock_in(
         serial_number = item_data.get("serial_number", "").strip()
         
         equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
-        
-        # 创建入库明细
-        transaction_item = StockTransactionItem(
-            transaction_id=transaction_id,
-            equipment_id=equipment_id,
-            quantity=quantity,
-            batch_number=batch_number
-        )
-        db.add(transaction_item)
-        
-        # 主设备：创建设备实例
+
+        # 主设备：创建设备实例，并与出入库明细关联
+        equipment_instance_id = None
         if equipment.category == "main_device":
             equipment_instance_id = str(uuid.uuid4())
             equipment_instance = EquipmentInstance(
@@ -604,6 +596,16 @@ async def create_stock_in(
                 received_by=current_user.id
             )
             db.add(equipment_instance)
+
+        # 创建入库明细
+        transaction_item = StockTransactionItem(
+            transaction_id=transaction_id,
+            equipment_id=equipment_id,
+            quantity=quantity,
+            batch_number=batch_number,
+            equipment_instance_id=equipment_instance_id,
+        )
+        db.add(transaction_item)
         
         # 更新库存统计
         inventory = db.query(Inventory).filter(
@@ -672,11 +674,13 @@ async def get_stock_transactions(
         # 获取明细
         items = []
         for item in trans.transaction_items:
+            serial_number = item.equipment_instance.serial_number if item.equipment_instance else None
             items.append({
                 "equipment_name": item.equipment.equipment_name,
                 "equipment_code": item.equipment.equipment_code,
                 "quantity": item.quantity,
-                "unit": item.equipment.unit
+                "unit": item.equipment.unit,
+                "serial_number": serial_number,
             })
         
         result.append({

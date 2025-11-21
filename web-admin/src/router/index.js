@@ -59,12 +59,6 @@ const routes = [
             meta: { title: '出入库记录', icon: 'Document' }
           },
           {
-            path: 'import-history',
-            name: 'ImportHistory',
-            component: () => import('../views/stock/ImportHistory.vue'),
-            meta: { title: 'SN导入记录', icon: 'Tickets' }
-          },
-          {
             path: 'warehouses',
             name: 'Warehouses',
             component: () => import('../views/stock/WarehouseList.vue'),
@@ -171,7 +165,7 @@ const routes = [
       { path: 'packages', redirect: { name: 'Packages' }, meta: { hidden: true } },
       { path: 'stock-in', redirect: { name: 'StockIn' }, meta: { hidden: true } },
       { path: 'stock-history', redirect: { name: 'StockHistory' }, meta: { hidden: true } },
-      { path: 'import-history', redirect: { name: 'ImportHistory' }, meta: { hidden: true } },
+      { path: 'import-history', redirect: { name: 'StockHistory', query: { type: 'import' } }, meta: { hidden: true } },
       {
         path: 'reports',
         name: 'Reports',
