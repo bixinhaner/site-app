@@ -3,6 +3,7 @@
 
 # Python
 venv/
+*.venv/
 *.pyc
 *.pyo
 *.pyd
