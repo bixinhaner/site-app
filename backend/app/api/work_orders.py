@@ -1732,9 +1732,24 @@ async def final_review(
 
     old = wo.status
     if req.action == "approve":
-        # 业务确认：勘察类工单审核通过即100%完成
-        wo.status = WorkOrderStatusEnum.COMPLETED
-        wo.completed_at = datetime.utcnow()
+        # 勘察类：审核即视为完成；开站类：仅标记为 APPROVED，待 OMC 达标后自动推进
+        if wo.type == WorkOrderTypeEnum.SITE_SURVEY:
+            wo.status = WorkOrderStatusEnum.COMPLETED
+            wo.completed_at = datetime.utcnow()
+        elif wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+            wo.status = WorkOrderStatusEnum.APPROVED
+            # 站点从 construction/planning/planned 进入 pending_online
+            site = db.query(Site).filter(Site.id == wo.site_id).first()
+            if site and site.status in ("construction", "planning", "planned"):
+                old_site_status = site.status
+                site.status = "pending_online"
+                print(
+                    f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
+                    f"状态从 {old_site_status} 更新为 {site.status} (开站工单审核通过，待上线)"
+                )
+        else:
+            wo.status = WorkOrderStatusEnum.COMPLETED
+            wo.completed_at = datetime.utcnow()
         # 同步检查状态与结果
         if wo.inspection_id:
             inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
@@ -1747,19 +1762,37 @@ async def final_review(
                     inspection.score = req.score
                     inspection.result = "pass" if req.score >= 60 else "fail"
         # 站点状态更新
-        _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
-        # 审核通过时建立/追加“勘察档案快照”
+        if wo.status == WorkOrderStatusEnum.COMPLETED:
+            _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
+
+        # 开站工单审核通过后立即触发一次 OMC 检查（单工单）
+        if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION and wo.status == WorkOrderStatusEnum.APPROVED:
+            try:
+                from app.services.omc_monitor import run_omc_check_for_work_order
+                run_omc_check_for_work_order(wo.id)
+            except Exception as exc:  # pragma: no cover
+                print(f"[OMC] 审核后立即检查失败 work_order_id={wo.id}: {exc}")
+        # 审核通过时建立/追加档案快照
         try:
-            from app.services.survey_archive_service import create_or_append_archive
             if wo.inspection_id:
-                create_or_append_archive(
-                    db,
-                    inspection_id=wo.inspection_id,
-                    operator_id=current_user.id,
-                    change_summary=req.comments or "审核通过"
-                )
+                if wo.type == WorkOrderTypeEnum.SITE_SURVEY:
+                    from app.services.survey_archive_service import create_or_append_archive
+                    create_or_append_archive(
+                        db,
+                        inspection_id=wo.inspection_id,
+                        operator_id=current_user.id,
+                        change_summary=req.comments or "审核通过"
+                    )
+                elif wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+                    from app.services.opening_archive_service import create_or_append_archive as create_opening_archive
+                    create_opening_archive(
+                        db,
+                        inspection_id=wo.inspection_id,
+                        operator_id=current_user.id,
+                        change_summary=req.comments or "审核通过"
+                    )
         except Exception as e:
-            print(f"[WARN] 创建/追加勘察档案失败(final_review): {e}")
+            print(f"[WARN] 创建/追加档案失败(final_review): {e}")
     else:
         wo.status = WorkOrderStatusEnum.REJECTED
         if wo.inspection_id:

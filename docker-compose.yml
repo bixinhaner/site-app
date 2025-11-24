@@ -1,0 +1,24 @@
+version: '3.9'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - backend/.env
+    volumes:
+      - ./backend/site_manager.db:/app/site_manager.db
+      - ./backend/uploads:/app/uploads
+    ports:
+      - '8000:8000'
+    restart: unless-stopped
+
+  web-admin:
+    build:
+      context: .
+      dockerfile: web-admin/Dockerfile
+    ports:
+      - '3030:80'
+    restart: unless-stopped
+

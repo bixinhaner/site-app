@@ -5,6 +5,7 @@
       <div class="header-actions">
         <el-button @click="$router.back()"><el-icon><Back /></el-icon>返回</el-button>
         <el-button @click="openSurveys"><el-icon><PictureFilled /></el-icon>勘察档案</el-button>
+        <el-button @click="openOpeningArchives"><el-icon><DocumentAdd /></el-icon>开站档案</el-button>
         <el-button type="success" @click="createSurvey"><el-icon><Plus /></el-icon>新建勘察</el-button>
       </div>
     </div>
@@ -186,6 +187,7 @@ import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../../stores/user'
 import { surveyArchivesApi } from '@/api/surveyArchives'
+import { openingArchivesApi } from '@/api/openingArchives'
 
 const route = useRoute()
 const router = useRouter()
@@ -455,6 +457,26 @@ const openSurveys = async () => {
   } catch (e) {
     console.error(e)
     ElMessage.error('获取勘察档案失败')
+  }
+}
+
+const openOpeningArchives = async () => {
+  try {
+    const res = await openingArchivesApi.page({
+      page: 1,
+      page_size: 1,
+      site_id: route.params.id
+    })
+    const items = Array.isArray(res?.items) ? res.items : []
+    if (!items.length) {
+      ElMessage.info('当前站点暂无开站档案')
+      return
+    }
+    const archive = items[0]
+    router.push({ name: 'OpeningArchiveDetail', params: { id: archive.id } })
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('获取开站档案失败')
   }
 }
 

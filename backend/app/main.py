@@ -10,10 +10,11 @@ from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
 from app.models import survey as _survey_models  # noqa: F401
 from app.models import survey_archive as _survey_archive_models  # noqa: F401
+from app.models import opening_archive as _opening_archive_models  # noqa: F401
 from app.models import system_config as _system_config_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders
-from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, omc, omc_push
+from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, omc, omc_push
 from app.services.omc_monitor import start_background_omc_monitor
 
 # 创建数据库表
@@ -67,6 +68,7 @@ app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单�
 app.include_router(logs.router, prefix="/api", tags=["用户日志"])
 app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])
 app.include_router(survey_archives.router, prefix="/api/survey-archives", tags=["勘察档案"])
+app.include_router(opening_archives.router, prefix="/api/opening-archives", tags=["开站档案"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表盘"])
 app.include_router(omc.router, prefix="/api/omc", tags=["OMC配置"])
 app.include_router(omc_push.router, prefix="/api/omc", tags=["OMC状态上报告"])

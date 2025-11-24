@@ -623,14 +623,14 @@ async def get_site_omc_devices(
                 online_map[sn] = False
 
         # 只有全部在线时才检查激活（用于当前接口返回的 activated 字段）
-        if all(online_map.values()):
-            for sn in sns:
-                try:
-                    payload = status_payloads.get(sn) or {}
-                    activated_map[sn] = parse_activated_flag(payload)
-                except Exception as exc:  # pragma: no cover
-                    print(f"[OMC] 查询激活状态失败 SN={sn}: {exc}")
-                    activated_map[sn] = False
+        # 直接解析激活状态；若离线或 404，则视为未激活，避免前端显示残留的“已激活”
+        for sn in sns:
+            try:
+                payload = status_payloads.get(sn) or {}
+                activated_map[sn] = parse_activated_flag(payload)
+            except Exception as exc:  # pragma: no cover
+                print(f"[OMC] 查询激活状态失败 SN={sn}: {exc}")
+                activated_map[sn] = False
         checked_at = datetime.utcnow().isoformat()
         # 提交本次刷新中写入的 OmcDeviceState 变更
         try:
@@ -644,8 +644,8 @@ async def get_site_omc_devices(
         sn = d["sn"]
         if sn in online_map:
             d["online"] = bool(online_map[sn])
-        if sn in activated_map:
-            d["activated"] = bool(activated_map[sn])
+        # 若未取到激活结果，默认 False，避免保留旧值
+        d["activated"] = bool(activated_map.get(sn, False))
         ever_info = ever_map.get(sn) or {}
         d["ever_online"] = bool(ever_info.get("ever_online")) if ever_info else False
         d["ever_activated"] = bool(ever_info.get("ever_activated")) if ever_info else False

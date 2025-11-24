@@ -74,6 +74,9 @@ class OmcClient:
     headers = {"Authorization": token}
     try:
       resp = self.session.request(method, url, headers=headers, timeout=self.timeout)
+      # 对 404 做降级处理：视为设备不存在/离线，返回空数据而不是抛异常
+      if resp.status_code == 404:
+        return {"code": 404, "data": {}}
       resp.raise_for_status()
     except Exception as exc:
       raise RuntimeError(f"请求 OMC 接口失败: {url} ({exc})") from exc

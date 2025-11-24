@@ -32,7 +32,7 @@
         <el-table-column prop="site_name" label="站点名称" min-width="180" />
         <el-table-column prop="site_type" label="类型" width="120" />
         <el-table-column prop="city" label="城市" width="120" />
-        <el-table-column prop="status" label="状态" width="110">
+        <el-table-column prop="status" label="状态" width="140">
           <template #default="{ row }">
             <el-tag>{{ row.status }}</el-tag>
           </template>

@@ -2387,6 +2387,46 @@ async def get_equipment_binding_history(
             "notes": record.notes,
             "inspection_id": record.inspection_id
         })
+
+    # 追加 OMC 首次上线/激活事件（若存在）
+    try:
+        from app.models.omc_state import OmcDeviceState
+        state = db.query(OmcDeviceState).filter(OmcDeviceState.sn == equipment_sn).first()
+        if state:
+            if state.first_online_at:
+                result.append({
+                    "id": f"omc-first-online-{equipment_sn}",
+                    "action": "omc_first_online",
+                    "site": None,
+                    "cell_info": {},
+                    "operator": {"id": None, "name": "系统(OMC)"},
+                    "operated_at": state.first_online_at.isoformat(),
+                    "previous_equipment_sn": None,
+                    "latitude": None,
+                    "longitude": None,
+                    "gps_accuracy": None,
+                    "notes": "OMC 记录的首次上线时间",
+                    "inspection_id": None
+                })
+            if state.first_activated_at:
+                result.append({
+                    "id": f"omc-first-activated-{equipment_sn}",
+                    "action": "omc_first_activated",
+                    "site": None,
+                    "cell_info": {},
+                    "operator": {"id": None, "name": "系统(OMC)"},
+                    "operated_at": state.first_activated_at.isoformat(),
+                    "previous_equipment_sn": None,
+                    "latitude": None,
+                    "longitude": None,
+                    "gps_accuracy": None,
+                    "notes": "OMC 记录的首次激活时间",
+                    "inspection_id": None
+                })
+        # 按时间倒序排序，确保时间线顺序正确
+        result.sort(key=lambda x: x.get("operated_at") or "", reverse=True)
+    except Exception as exc:  # pragma: no cover
+        print(f"[WARN] 附加 OMC 生命周期事件失败: {exc}")
     
     return {
         "equipment_sn": equipment_sn,

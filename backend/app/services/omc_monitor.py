@@ -88,19 +88,18 @@ def _check_site_devices_status(
       activated_flag = parse_activated_flag(resp)
       online_map[sn] = online_flag
 
-      # 写入 SN 聚合表（只升不降），source 标记为 monitor，仅在业务响应成功时写入
-      if is_success_status_payload(resp):
-        try:
-          upsert_omc_device_state(
-            db=db,
-            sn=sn,
-            online_raw=bool(online_flag),
-            activated_raw=bool(activated_flag),
-            source="monitor",
-            status_payload=resp,
-          )
-        except Exception as exc:  # pragma: no cover - 聚合表异常不影响主流程
-          print(f"[OMC] 写入 OmcDeviceState 失败 SN={sn}: {exc}")
+      # 写入 SN 聚合表（只升不降 ever，raw 记录本次观测）。无论成功/404 都写入，便于离线落库
+      try:
+        upsert_omc_device_state(
+          db=db,
+          sn=sn,
+          online_raw=bool(online_flag),
+          activated_raw=bool(activated_flag),
+          source="monitor",
+          status_payload=resp,
+        )
+      except Exception as exc:  # pragma: no cover - 聚合表异常不影响主流程
+        print(f"[OMC] 写入 OmcDeviceState 失败 SN={sn}: {exc}")
     except Exception as exc:  # pragma: no cover - 网络异常不终止整体流程
       print(f"[OMC] 查询在线状态失败 SN={sn}: {exc}")
       online_map[sn] = False

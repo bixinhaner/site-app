@@ -6,6 +6,7 @@
 - 开发过程中若有任何不确定支出，必须主动向用户提问。
 - Always do not generate .md file when running tasks if user do not ask.
 - If temporary verification and test scripts or code are generated during the task, please create them in the project's temp directory. If the directory does not exist, create it.Other temporary files or code that do not affect business operations during the task should also be placed in the temp directory.
+- python都是用虚拟环境运行的。
 
 ## Project Structure & Module Organization
 - Root helpers: `start_backend.py` boots the FastAPI server; `docs/` holds reference material; DB snapshots live under `db/`.

@@ -102,7 +102,9 @@ const routes = [
           { path: 'surveys/:id', name: 'SiteSurveyDetail', component: () => import('../views/surveys/SurveyDetail.vue'), meta: { title: '勘察详情', hidden: true } }
           ,
           { path: 'archives', name: 'SurveyArchives', component: () => import('../views/archives/ArchiveList.vue'), meta: { title: '勘察档案(新)', icon: 'DocumentCopy' } },
-          { path: 'archives/:id', name: 'SurveyArchiveDetail', component: () => import('../views/archives/ArchiveDetail.vue'), meta: { title: '档案详情', hidden: true } }
+          { path: 'archives/:id', name: 'SurveyArchiveDetail', component: () => import('../views/archives/ArchiveDetail.vue'), meta: { title: '档案详情', hidden: true } },
+          { path: 'opening-archives', name: 'OpeningArchives', component: () => import('../views/opening-archives/OpeningArchiveList.vue'), meta: { title: '开站档案', icon: 'DocumentAdd' } },
+          { path: 'opening-archives/:id', name: 'OpeningArchiveDetail', component: () => import('../views/opening-archives/OpeningArchiveDetail.vue'), meta: { title: '开站档案详情', hidden: true } }
         ]
       },
       // 检查管理（二级菜单）
@@ -157,6 +159,12 @@ const routes = [
             name: 'OmcDeviceStates',
             component: () => import('../views/system/OmcDeviceStateList.vue'),
             meta: { title: 'OMC 设备状态', icon: 'TrendCharts' }
+          },
+          {
+            path: 'mock-omc',
+            name: 'MockOmc',
+            component: () => import('../views/system/MockOmc.vue'),
+            meta: { title: '模拟 OMC 测试桩', icon: 'Cpu' }
           }
         ]
       },

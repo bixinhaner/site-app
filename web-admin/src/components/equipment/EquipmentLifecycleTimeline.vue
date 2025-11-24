@@ -351,6 +351,38 @@ const lifecycleStages = computed(() => {
           新小区: `扇区${record.cell_info.sector_id} ${record.cell_info.band || ''}`
         }
       })
+    } else if (record.action === 'omc_first_online') {
+      stages.push({
+        title: '🌐 首次上线',
+        timestamp: formatTime(record.operated_at),
+        type: 'info',
+        color: '#0ea5e9',
+        tagType: 'info',
+        size: 'large',
+        icon: TrendCharts,
+        description: record.notes || 'OMC 首次检测到设备上线',
+        operator: record.operator?.name || '系统(OMC)',
+        details: {
+          设备SN: equipmentInfo.value?.serial_number || props.sn || '-',
+          记录来源: 'OMC'
+        }
+      })
+    } else if (record.action === 'omc_first_activated') {
+      stages.push({
+        title: '⚡ 首次激活',
+        timestamp: formatTime(record.operated_at),
+        type: 'success',
+        color: '#22c55e',
+        tagType: 'success',
+        size: 'large',
+        icon: Checked,
+        description: record.notes || 'OMC 首次检测到设备激活',
+        operator: record.operator?.name || '系统(OMC)',
+        details: {
+          设备SN: equipmentInfo.value?.serial_number || props.sn || '-',
+          记录来源: 'OMC'
+        }
+      })
     }
   })
 

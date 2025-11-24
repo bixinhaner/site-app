@@ -1,0 +1,12 @@
+.git
+venv
+__pycache__
+backend/__pycache__
+backend/uploads
+web-admin/node_modules
+web-admin/dist
+uniapp-site-manager/node_modules
+temp
+*.log
+*.db
+

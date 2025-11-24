@@ -9,6 +9,7 @@ from .equipment import Equipment, EquipmentPackage, EquipmentPackageItem, Equipm
 from .planning import SitePlanning, SitePlanningSector, SiteAntennaPort, SiteSwitchPort, PlanningChangeLog
 from .survey import SiteSurvey, SiteSurveyPhoto
 from .survey_archive import SiteSurveyArchive, SiteSurveyArchiveVersion, SiteSurveyArchiveKVIndex
+from .opening_archive import SiteOpeningArchive, SiteOpeningArchiveVersion, SiteOpeningArchiveKVIndex
 
 __all__ = [
     "User",
@@ -41,4 +42,7 @@ __all__ = [
     "SiteSurveyArchive",
     "SiteSurveyArchiveVersion",
     "SiteSurveyArchiveKVIndex",
+    "SiteOpeningArchive",
+    "SiteOpeningArchiveVersion",
+    "SiteOpeningArchiveKVIndex",
 ]

@@ -314,29 +314,45 @@ async def get_device_status_by_sn(
 
   try:
     status_payload = client.get_enodeb_status(sn)
-    online = parse_online_flag(status_payload)
   except Exception as exc:
-    raise HTTPException(
-      status_code=status.HTTP_502_BAD_GATEWAY,
-      detail=f"查询 OMC 在线状态失败: {exc}",
-    ) from exc
+    # 兜底：遇到 404 等异常返回离线状态，仍向前端返回 200，便于查看最新状态
+    # 同时写入聚合表，避免保留旧值
+    online = False
+    activated = False
+    status_payload = {"error": str(exc)}
+    upsert_omc_device_state(
+      db=db,
+      sn=sn,
+      online_raw=online,
+      activated_raw=activated,
+      source="api_poll",
+      status_payload=status_payload,
+    )
+    db.commit()
+    return OmcDeviceStatusBySnResponse(
+      sn=sn,
+      online=online,
+      activated=activated,
+      checked_at=datetime.utcnow().isoformat() + "Z",
+      status_payload=status_payload,
+    )
 
+  online = parse_online_flag(status_payload)
   # 设备激活: 基于 /enodeb/infos/status 返回中的 cellStatus 判断
   activated = parse_activated_flag(status_payload)
 
   checked_at = datetime.utcnow().isoformat() + "Z"
 
-  # 写入 SN 聚合状态（只升不降），仅在业务响应成功时入库
-  if is_success_status_payload(status_payload):
-    upsert_omc_device_state(
-      db=db,
-      sn=sn,
-      online_raw=bool(online),
-      activated_raw=bool(activated),
-      source="api_poll",
-      status_payload=status_payload,
-    )
-    db.commit()
+  # 写入 SN 聚合状态（只升不降 ever，但原始状态可回退），无论 OMC 返回是否成功都更新 omc_online_raw
+  upsert_omc_device_state(
+    db=db,
+    sn=sn,
+    online_raw=bool(online),
+    activated_raw=bool(activated),
+    source="api_poll",
+    status_payload=status_payload,
+  )
+  db.commit()
 
   return OmcDeviceStatusBySnResponse(
     sn=sn,
