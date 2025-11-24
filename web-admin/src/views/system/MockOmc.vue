@@ -26,6 +26,11 @@
             <el-switch v-model="row.activated" @change="v => updateState(row, { activated: v })" />
           </template>
         </el-table-column>
+        <el-table-column prop="cell_name" label="Cell Name" min-width="160">
+          <template #default="{ row }">
+            <el-input v-model="row.cell_name" size="small" placeholder="未设置" @change="v => updateState(row, { cell_name: v })" />
+          </template>
+        </el-table-column>
         <el-table-column prop="description" label="备注" min-width="200" />
         <el-table-column prop="updated_at" label="更新时间" width="180">
           <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
@@ -101,7 +106,7 @@ const reload = async () => {
 
 const openCreate = () => {
   editing.value = false
-  form.value = { sn: '', online: false, activated: false, description: '' }
+  form.value = { sn: '', online: false, activated: false, description: '', cell_name: '' }
   dialogVisible.value = true
 }
 
@@ -122,6 +127,7 @@ const save = async () => {
       await mockOmcApi.update(form.value.sn, {
         online: form.value.online,
         activated: form.value.activated,
+        cell_name: form.value.cell_name,
         description: form.value.description
       })
     } else {

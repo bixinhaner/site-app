@@ -90,7 +90,7 @@ def _check_site_devices_status(
 
       # 写入 SN 聚合表（只升不降 ever，raw 记录本次观测）。无论成功/404 都写入，便于离线落库
       try:
-        upsert_omc_device_state(
+        state, newly_online, newly_activated = upsert_omc_device_state(
           db=db,
           sn=sn,
           online_raw=bool(online_flag),
@@ -98,6 +98,13 @@ def _check_site_devices_status(
           source="monitor",
           status_payload=resp,
         )
+        # 尝试同步 cellName：首次上线会触发；如果之前未绑定则未写入，这里每次检查都会尝试，
+        # 仅在找到绑定且未同步过时真正调用，避免遗漏后续绑定场景。
+        try:
+          from app.services.omc_sync import sync_cellname_if_needed
+          sync_cellname_if_needed(db, client, sn)
+        except Exception as sync_exc:  # pragma: no cover
+          print(f"[OMC] 同步 cellName 失败 SN={sn}: {sync_exc}")
       except Exception as exc:  # pragma: no cover - 聚合表异常不影响主流程
         print(f"[OMC] 写入 OmcDeviceState 失败 SN={sn}: {exc}")
     except Exception as exc:  # pragma: no cover - 网络异常不终止整体流程

@@ -11,6 +11,7 @@ from app.models import user_log as _user_log_models  # noqa: F401
 from app.models import survey as _survey_models  # noqa: F401
 from app.models import survey_archive as _survey_archive_models  # noqa: F401
 from app.models import opening_archive as _opening_archive_models  # noqa: F401
+from app.models import omc_cellname_sync as _omc_cellname_sync_models  # noqa: F401
 from app.models import system_config as _system_config_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders

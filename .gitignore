@@ -58,3 +58,19 @@ test.keystore
 
 # Temp workspace (do not commit archives or scratch files)
 temp/
+
+# UniApp 构建产物
+uniapp-site-manager/unpackage/
+uniapp-site-manager/android-wrapper/app/src/main/assets/
+uniapp-site-manager/.hbuilderx/temp_install/
+
+# Web 构建产物
+web-admin/dist/
+
+# 插件构建产物
+my-location-plugin-final/
+LocationPluginBuilder/*/build/
+
+# 测试文件
+*-test.html
+test.html

@@ -15,7 +15,7 @@ def upsert_omc_device_state(
     activated_raw: Optional[bool],
     source: str,
     status_payload: Optional[Dict] = None,
-) -> OmcDeviceState:
+) -> tuple[OmcDeviceState, bool, bool]:
     """
     将一次 OMC 观测写入 OmcDeviceState（SN 级聚合）:
 
@@ -48,6 +48,7 @@ def upsert_omc_device_state(
             state.ever_online = True
             if not state.first_online_at:
                 state.first_online_at = now
+                newly_online = True
 
     if activated_raw is not None:
         state.omc_active_raw = bool(activated_raw)
@@ -56,8 +57,9 @@ def upsert_omc_device_state(
             state.ever_activated = True
             if not state.first_activated_at:
                 state.first_activated_at = now
+                newly_activated = True
 
-    return state
+    return state, newly_online, newly_activated
 
 
 def get_device_state_by_sn(db: Session, sn: str) -> Optional[OmcDeviceState]:
@@ -179,4 +181,3 @@ def summarize_site_omc_state(db: Session, site_id: int) -> Dict:
         "all_ever_activated": all_ever_activated,
         "devices": devices,
     }
-

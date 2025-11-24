@@ -97,6 +97,24 @@ class OmcClient:
     path = f"northboundApi/v1/enodeb/infos/status/{sn}"
     return self._request("GET", path)
 
+  def set_cell_name(self, sn: str, cell_name: str, sync_flag: int = 0) -> Dict:
+    """
+    修改设备小区名:
+    PUT /northboundApi/v1/device/parameters/cellname/{sn}
+    body: {\"cellName\": \"xxx\", \"syncFlag\": 0}
+    """
+    path = f"northboundApi/v1/device/parameters/cellname/{sn}"
+    payload = {"cellName": cell_name, "syncFlag": sync_flag}
+    url = self._build_url(path)
+    token = self._get_access_token()
+    headers = {"Authorization": token}
+    try:
+      resp = self.session.put(url, json=payload, headers=headers, timeout=self.timeout)
+      resp.raise_for_status()
+      return resp.json()
+    except Exception as exc:
+      raise RuntimeError(f"修改小区名失败: {url} ({exc})") from exc
+
 
 def load_omc_config(db: Session) -> Optional[dict]:
   row = db.query(SystemConfig).filter(SystemConfig.key == "omc_api").first()

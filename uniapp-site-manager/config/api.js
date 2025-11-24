@@ -42,7 +42,8 @@ export const API_ENDPOINTS = {
     CREATE: '/api/sites/',
     UPDATE: (id) => `/api/sites/${id}`,
     DELETE: (id) => `/api/sites/${id}`,
-    PLANNING: (id) => `/api/sites/${id}/planning`
+    PLANNING: (id) => `/api/sites/${id}/planning`,
+    OMC_STATUS: (id) => `/api/sites/${id}/omc/devices`
   },
   
   

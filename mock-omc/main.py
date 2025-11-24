@@ -28,6 +28,7 @@ class Device(Base):
     online = Column(Boolean, default=False)
     activated = Column(Boolean, default=False)
     description = Column(Text)
+    cell_name = Column(Text)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -56,12 +57,14 @@ class DeviceCreate(BaseModel):
     sn: str
     online: bool = False
     activated: bool = False
+    cell_name: Optional[str] = None
     description: Optional[str] = None
 
 
 class DeviceUpdate(BaseModel):
     online: Optional[bool] = None
     activated: Optional[bool] = None
+    cell_name: Optional[str] = None
     description: Optional[str] = None
 
 
@@ -69,6 +72,7 @@ class DeviceOut(BaseModel):
     sn: str
     online: bool
     activated: bool
+    cell_name: Optional[str] = None
     description: Optional[str] = None
     updated_at: Optional[datetime] = None
 
@@ -90,6 +94,7 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
         sn=payload.sn,
         online=payload.online,
         activated=payload.activated,
+        cell_name=payload.cell_name,
         description=payload.description,
         updated_at=datetime.utcnow(),
     )
@@ -108,6 +113,8 @@ def update_device(sn: str, payload: DeviceUpdate, db: Session = Depends(get_db))
         dev.online = payload.online
     if payload.activated is not None:
         dev.activated = payload.activated
+    if payload.cell_name is not None:
+        dev.cell_name = payload.cell_name
     if payload.description is not None:
         dev.description = payload.description
     dev.updated_at = datetime.utcnow()
@@ -135,6 +142,8 @@ def set_state(sn: str, payload: DeviceUpdate = Body(...), db: Session = Depends(
         dev.online = payload.online
     if payload.activated is not None:
         dev.activated = payload.activated
+    if payload.cell_name is not None:
+        dev.cell_name = payload.cell_name
     if payload.description is not None:
         dev.description = payload.description
     dev.updated_at = datetime.utcnow()
@@ -166,9 +175,24 @@ def get_status(sn: str, db: Session = Depends(get_db)):
         # cellStatus 约定首位 1 表示已激活
         "cellStatus": "1,0" if dev.activated else "0,0",
         "sn": dev.sn,
+        "cellName": dev.cell_name,
         "updated_at": (dev.updated_at or datetime.utcnow()).isoformat(),
     }
-    return {"code": 0, "data": data}
+    return {"code": 0, "message": "success", "data": data}
+
+
+@app.put("/northboundApi/v1/device/parameters/cellname/{sn}")
+def set_cellname(sn: str, payload: dict = Body(...), db: Session = Depends(get_db)):
+    dev = db.query(Device).filter(Device.sn == sn).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="SN 未找到")
+    cell_name = payload.get("cellName") or payload.get("cell_name")
+    if not cell_name:
+        raise HTTPException(status_code=400, detail="cellName 不能为空")
+    dev.cell_name = str(cell_name)
+    dev.updated_at = datetime.utcnow()
+    db.commit()
+    return {"code": 200, "message": "success", "data": None}
 
 
 @app.get("/")

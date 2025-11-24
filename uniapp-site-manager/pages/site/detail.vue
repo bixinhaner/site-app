@@ -53,6 +53,34 @@
 					</view>
 				</view>
 			</view>
+
+			<!-- 设备状态（OMC） -->
+			<view class="info-section">
+				<view class="section-header">
+					<view class="section-title">设备状态（OMC）</view>
+					<button class="refresh-btn" @click="loadOmcStatus(true)" :disabled="omcLoading">
+						{{ omcLoading ? '刷新中…' : '刷新' }}
+					</button>
+				</view>
+				<view v-if="omcError" class="omc-error">{{ omcError }}</view>
+				<view v-else-if="omcStatus?.devices && omcStatus.devices.length" class="device-cards">
+					<view class="device-card" v-for="dev in omcStatus.devices" :key="dev.sn">
+						<view class="device-header">
+							<text class="device-sn">{{ dev.sn }}</text>
+							<view class="device-tags">
+								<text class="tag" :class="dev.online ? 'tag-online' : 'tag-offline'">{{ dev.online ? '在线' : '离线' }}</text>
+								<text class="tag" :class="dev.activated ? 'tag-activated' : 'tag-inactive'">{{ dev.activated ? '已激活' : '未激活' }}</text>
+							</view>
+						</view>
+						<view class="device-meta">
+							<text v-if="dev.ever_online" class="meta">曾上线</text>
+							<text v-if="dev.ever_activated" class="meta">曾激活</text>
+						</view>
+					</view>
+					<view class="checked-at" v-if="omcStatus.checked_at">最近检测：{{ formatTime(omcStatus.checked_at) }}</view>
+				</view>
+				<view v-else class="omc-empty">暂无设备状态数据</view>
+			</view>
 			
 			<!-- 位置信息 -->
 			<view class="info-section">
@@ -262,6 +290,9 @@
 	const planning = ref(null)
 	const planningExpanded = ref(false)
 	const showMapSelector = ref(false)
+	const omcStatus = ref(null)
+	const omcLoading = ref(false)
+	const omcError = ref('')
 
 	const site = computed(() => siteStore.currentSite)
 
@@ -379,6 +410,34 @@
 		})
 	}
 
+	// 加载 OMC 设备状态
+	const loadOmcStatus = async (refresh = false) => {
+		if (!siteId.value) return
+		omcLoading.value = true
+		omcError.value = ''
+		try {
+			const baseUrl = buildApiUrl(API_ENDPOINTS.SITES.OMC_STATUS(siteId.value))
+			const url = refresh ? `${baseUrl}?refresh=1` : baseUrl
+			const res = await uni.request({
+				url,
+				...createRequestConfig({
+					method: 'GET',
+					headers: getAuthHeaders(userStore.token)
+				})
+			})
+			if (res.statusCode === 200) {
+				omcStatus.value = res.data
+			} else {
+				omcError.value = res.data?.detail || '获取设备状态失败'
+			}
+		} catch (error) {
+			console.warn('获取站点设备状态失败:', error)
+			omcError.value = '获取设备状态失败'
+		} finally {
+			omcLoading.value = false
+		}
+	}
+
 	// 加载站点详情
 	const loadSiteDetail = async () => {
 		if (!siteId.value) return
@@ -391,6 +450,9 @@
 
 			// 加载站点规划信息
 			await loadPlanning()
+
+			// 加载 OMC 设备状态（默认不强制刷新）
+			await loadOmcStatus(false)
 
 			// 加载相关的检查记录
 			const result = await inspectionStore.getInspections({
@@ -675,6 +737,39 @@
 	
 	// 描述信息
 	.description-text { font-size: 14px; color: #374151; line-height: 1.6; }
+
+	/* OMC 设备状态 */
+	.section-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+	.refresh-btn {
+		padding: 6px 12px;
+		background: var(--color-primary);
+		color: #fff;
+		border: none;
+		border-radius: 8px;
+		font-size: 13px;
+	}
+	.refresh-btn:disabled {
+		opacity: 0.6;
+	}
+	.omc-error { color: #f56c6c; font-size: 14px; }
+	.omc-empty { color: #909399; font-size: 14px; }
+	.device-cards { display: flex; flex-direction: column; gap: 10px; }
+	.device-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; background: #fff; }
+	.device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+	.device-sn { font-size: 15px; font-weight: 600; }
+	.device-tags { display: flex; gap: 6px; }
+	.tag { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+	.tag-online { background: #e6f9f0; color: #2f9e5f; }
+	.tag-offline { background: #fdecec; color: #d93030; }
+	.tag-activated { background: #e8f5ff; color: #1e80ff; }
+	.tag-inactive { background: #f4f4f5; color: #606266; }
+	.device-meta { display: flex; gap: 10px; color: #606266; font-size: 13px; }
+	.checked-at { margin-top: 6px; font-size: 12px; color: #909399; }
 
 	// 站点规划样式
 	.expandable {
