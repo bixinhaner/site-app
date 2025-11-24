@@ -104,7 +104,9 @@ const routes = [
           { path: 'archives', name: 'SurveyArchives', component: () => import('../views/archives/ArchiveList.vue'), meta: { title: '勘察档案(新)', icon: 'DocumentCopy' } },
           { path: 'archives/:id', name: 'SurveyArchiveDetail', component: () => import('../views/archives/ArchiveDetail.vue'), meta: { title: '档案详情', hidden: true } },
           { path: 'opening-archives', name: 'OpeningArchives', component: () => import('../views/opening-archives/OpeningArchiveList.vue'), meta: { title: '开站档案', icon: 'DocumentAdd' } },
-          { path: 'opening-archives/:id', name: 'OpeningArchiveDetail', component: () => import('../views/opening-archives/OpeningArchiveDetail.vue'), meta: { title: '开站档案详情', hidden: true } }
+          { path: 'opening-archives/:id', name: 'OpeningArchiveDetail', component: () => import('../views/opening-archives/OpeningArchiveDetail.vue'), meta: { title: '开站档案详情', hidden: true } },
+          { path: 'ssv-archives', name: 'SSVArchives', component: () => import('../views/ssv-archives/SSVArchiveList.vue'), meta: { title: 'SSV 档案', icon: 'Document' } },
+          { path: 'ssv-archives/:id', name: 'SSVArchiveDetail', component: () => import('../views/ssv-archives/SSVArchiveDetail.vue'), meta: { title: 'SSV 档案详情', hidden: true } }
         ]
       },
       // 检查管理（二级菜单）

@@ -75,4 +75,15 @@ export const workOrderAPI = {
   }
 }
 
+export const WorkOrderType = {
+  OPENING_INSPECTION: 'opening_inspection',
+  SSV: 'ssv',
+  MAINTENANCE: 'maintenance',
+  POWER_ISSUE: 'power_issue',
+  TRANSMISSION_ISSUE: 'transmission_issue',
+  GPS_ISSUE: 'gps_issue',
+  SIGNAL_ISSUE: 'signal_issue',
+  SITE_SURVEY: 'site_survey'
+}
+
 export default workOrderAPI

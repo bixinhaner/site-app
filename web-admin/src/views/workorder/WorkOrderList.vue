@@ -332,17 +332,19 @@ const statuses = [
 	  'site_survey': '站点勘查'
 	}
 	
-	// 创建工单可选类型：仅两项
-	const createTypes = [
-	  { label: '站点勘查', value: 'site_survey' },
-	  { label: '新站安装', value: 'opening_inspection' }
-	]
-	
-	// 顶部筛选可选类型：仅两项
-	const filterTypes = [
-	  { label: '站点勘查', value: 'site_survey' },
-	  { label: '新站安装', value: 'opening_inspection' }
-	]
+// 创建工单可选类型
+const createTypes = [
+  { label: '站点勘查', value: 'site_survey' },
+  { label: '新站安装', value: 'opening_inspection' },
+  { label: 'SSV 验收', value: 'ssv' },
+]
+
+// 顶部筛选可选类型
+const filterTypes = [
+  { label: '站点勘查', value: 'site_survey' },
+  { label: '新站安装', value: 'opening_inspection' },
+  { label: 'SSV 验收', value: 'ssv' },
+]
 
 
 const load = async () => {
@@ -481,6 +483,15 @@ const submitCreate = () => {
       return
     }
     try {
+      // SSV 仅支持运营中的站点
+      if (createForm.value.type === 'ssv') {
+        const s = siteOptions.value.find(x => x.id === createForm.value.site_id)
+        if (s && s.status !== 'operational') {
+          ElMessage.error('SSV 工单仅支持运营中的站点')
+          creating.value = false
+          return
+        }
+      }
       const payload = { ...createForm.value }
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
       await request.post('/api/work-orders', payload)

@@ -442,6 +442,26 @@ async def create_work_order(
                 }
             )
 
+    # SSV 工单创建规则校验：站点需为 operational，且同一站点同时间只允许一条进行中的 SSV 工单
+    if data.type == WorkOrderTypeEnum.SSV:
+        if site.status != "operational":
+            raise HTTPException(status_code=409, detail="站点尚未运营，不能创建 SSV 工单")
+        in_progress_statuses = [
+            WorkOrderStatusEnum.PENDING,
+            WorkOrderStatusEnum.ACTIVE,
+            WorkOrderStatusEnum.SUBMITTED,
+            WorkOrderStatusEnum.UNDER_REVIEW,
+            WorkOrderStatusEnum.APPROVED,
+            WorkOrderStatusEnum.ACTIVATED,
+        ]
+        existing_ssv = db.query(WorkOrder).filter(
+            WorkOrder.site_id == data.site_id,
+            WorkOrder.type == WorkOrderTypeEnum.SSV,
+            WorkOrder.status.in_(in_progress_statuses)
+        ).first()
+        if existing_ssv:
+            raise HTTPException(status_code=409, detail="该站点已有进行中的 SSV 工单")
+
     wo = WorkOrder(
         id=str(uuid.uuid4()),
         site_id=data.site_id,
@@ -1747,6 +1767,13 @@ async def final_review(
                     f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
                     f"状态从 {old_site_status} 更新为 {site.status} (开站工单审核通过，待上线)"
                 )
+        elif wo.type == WorkOrderTypeEnum.SSV:
+            wo.status = WorkOrderStatusEnum.COMPLETED
+            wo.completed_at = datetime.utcnow()
+            # SSV 审核完成即视为通过
+            site = db.query(Site).filter(Site.id == wo.site_id).first()
+            if site:
+                site.ssv_passed = True
         else:
             wo.status = WorkOrderStatusEnum.COMPLETED
             wo.completed_at = datetime.utcnow()
@@ -1786,6 +1813,14 @@ async def final_review(
                 elif wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
                     from app.services.opening_archive_service import create_or_append_archive as create_opening_archive
                     create_opening_archive(
+                        db,
+                        inspection_id=wo.inspection_id,
+                        operator_id=current_user.id,
+                        change_summary=req.comments or "审核通过"
+                    )
+                elif wo.type == WorkOrderTypeEnum.SSV:
+                    from app.services.ssv_archive_service import create_or_append_archive as create_ssv_archive
+                    create_ssv_archive(
                         db,
                         inspection_id=wo.inspection_id,
                         operator_id=current_user.id,

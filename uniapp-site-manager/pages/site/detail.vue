@@ -22,6 +22,9 @@
 				<view class="site-status" :class="getStatusClass(site?.status)">
 					{{ getStatusText(site?.status) }}
 				</view>
+				<view class="site-status ssv-tag" :class="site?.ssv_passed ? 'status-success' : 'status-default'">
+					{{ site?.ssv_passed ? 'SSV 已通过' : 'SSV 未通过' }}
+				</view>
 			</view>
 		</view>
 		
@@ -634,6 +637,21 @@
 		opacity: 0.9;
 		display: block;
 		margin-bottom: 12px;
+	}
+
+	.ssv-tag {
+		display: inline-flex;
+		align-items: center;
+		padding: 6rpx 12rpx;
+		border-radius: 12rpx;
+		font-size: 24rpx;
+		background: #f5f7fa;
+		color: #606266;
+		margin-top: 4px;
+	}
+	.status-success {
+		background: #e6f9f0;
+		color: #2f9e5f;
 	}
 	
 	.site-status {

@@ -25,6 +25,7 @@ class WorkOrderPriorityEnum(str, enum.Enum):
 
 class WorkOrderTypeEnum(str, enum.Enum):
     OPENING_INSPECTION = "opening_inspection"
+    SSV = "ssv"
     MAINTENANCE = "maintenance"
     POWER_ISSUE = "power_issue"
     TRANSMISSION_ISSUE = "transmission_issue"

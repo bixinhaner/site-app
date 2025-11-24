@@ -15,6 +15,7 @@
         <div class="item"><span class="label">站点编码</span><span class="value">{{ site.site_code }}</span></div>
         <div class="item"><span class="label">类型</span><span class="value">{{ site.site_type || '-' }}</span></div>
         <div class="item"><span class="label">状态</span><span class="value">{{ siteStatusText(site.status) }}</span></div>
+        <div class="item"><span class="label">SSV</span><span class="value"><el-tag :type="site.ssv_passed ? 'success' : 'info'">{{ site.ssv_passed ? '已通过' : '未通过' }}</el-tag></span></div>
         <div class="item"><span class="label">地址</span><span class="value">{{ site.address || '-' }}</span></div>
       </div>
     </el-card>

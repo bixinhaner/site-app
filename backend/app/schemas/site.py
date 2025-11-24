@@ -39,6 +39,7 @@ class SiteUpdate(BaseModel):
 class SiteResponse(SiteBase):
     id: int
     status: str
+    ssv_passed: Optional[bool] = False
     assigned_to: Optional[int] = None
     created_by: Optional[int] = None
     created_at: datetime

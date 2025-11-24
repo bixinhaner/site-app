@@ -37,6 +37,11 @@
             <el-tag>{{ row.status }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="ssv_passed" label="SSV" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.ssv_passed ? 'success' : 'info'">{{ row.ssv_passed ? '已通过' : '未通过' }}</el-tag>
+          </template>
+        </el-table-column>
         <!-- <el-table-column prop="assigned_to" label="指派给" width="140">
           <template #default="{ row }">
             <span>{{ userName(row.assigned_to) }}</span>

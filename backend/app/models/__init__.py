@@ -10,6 +10,7 @@ from .planning import SitePlanning, SitePlanningSector, SiteAntennaPort, SiteSwi
 from .survey import SiteSurvey, SiteSurveyPhoto
 from .survey_archive import SiteSurveyArchive, SiteSurveyArchiveVersion, SiteSurveyArchiveKVIndex
 from .opening_archive import SiteOpeningArchive, SiteOpeningArchiveVersion, SiteOpeningArchiveKVIndex
+from .ssv_archive import SiteSSVArchive, SiteSSVArchiveVersion, SiteSSVArchiveKVIndex
 from .omc_cellname_sync import OmcCellNameSync
 
 __all__ = [
@@ -46,5 +47,8 @@ __all__ = [
     "SiteOpeningArchive",
     "SiteOpeningArchiveVersion",
     "SiteOpeningArchiveKVIndex",
+    "SiteSSVArchive",
+    "SiteSSVArchiveVersion",
+    "SiteSSVArchiveKVIndex",
     "OmcCellNameSync",
 ]

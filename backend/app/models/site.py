@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Float, Text, ForeignKey, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -25,6 +25,8 @@ class Site(Base):
     # - operational: 已开通运行
     # - maintenance: 维护阶段
     status = Column(String(20), default="survey_pending")
+    # SSV 是否通过
+    ssv_passed = Column(Boolean, default=False)
     priority = Column(String(20), default="normal")  # high, normal, low
     description = Column(Text)
     contact_person = Column(String(50))
