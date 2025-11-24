@@ -37,6 +37,11 @@ export const sitePlanningApi = {
     return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
   getLldPlanning: (siteId) => request.get(`/api/sites/${siteId}/planning/lld`),
+  // LLD 手动编辑API
+  updateLldPlanning: (siteId, baseVersion) => request.put(`/api/sites/${siteId}/planning/lld?base_version=${baseVersion}`),
+  createLldCell: (siteId, cellData, baseVersion) => request.post(`/api/sites/${siteId}/planning/lld/cells?base_version=${baseVersion}`, cellData),
+  updateLldCell: (siteId, cellId, cellData, baseVersion) => request.put(`/api/sites/${siteId}/planning/lld/cells/${cellId}?base_version=${baseVersion}`, cellData),
+  deleteLldCell: (siteId, cellId, baseVersion) => request.delete(`/api/sites/${siteId}/planning/lld/cells/${cellId}?base_version=${baseVersion}`),
 }
 
 export default sitePlanningApi

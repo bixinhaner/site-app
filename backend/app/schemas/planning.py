@@ -149,7 +149,7 @@ class PlanningCell(BaseModel):
 
     rat: str
     band_code: str
-    sheet_name: str
+    sheet_name: Optional[str] = None
 
     tower_id: str
     site_information: Optional[str] = None
@@ -243,3 +243,151 @@ class SitePlanningLldResponse(BaseModel):
     planning: Optional[SitePlanningResponse] = None
     cells: List[PlanningCell] = []
     summary: SitePlanningLldSummary
+
+
+class PlanningCellCreate(BaseModel):
+    """用于创建新 LLD Cell 的请求模型"""
+    rat: str = Field(..., description="Radio Access Technology: LTE or NR")
+    band_code: str = Field(..., description="Band code like n41, n78, B1, B3")
+    sheet_name: Optional[str] = None
+    local_cell_id: Optional[int] = Field(None, ge=1, le=65535, description="Local Cell ID (1-65535)")
+    cell_name: Optional[str] = None
+    enb_id: Optional[int] = Field(None, ge=0, description="eNodeB ID for LTE")
+    eci: Optional[int] = Field(None, ge=0, description="E-UTRAN Cell Identity")
+    plmn: Optional[str] = None
+    tac: Optional[str] = None
+    pci: Optional[int] = Field(None, ge=0, le=503, description="Physical Cell ID (0-503)")
+    zc_root_index: Optional[int] = None
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    power_dbm: Optional[float] = Field(None, ge=-50, le=80, description="Power in dBm")
+    pa: Optional[str] = None
+    pb: Optional[str] = None
+    cover_type: Optional[str] = None
+    band_in_file: Optional[str] = None
+    frequency: Optional[int] = None
+    bandwidth: Optional[str] = None
+    mechanical_downtilt_deg: Optional[float] = Field(None, ge=0, le=90, description="Mechanical downtilt in degrees")
+    electrical_downtilt_deg: Optional[float] = Field(None, ge=0, le=90, description="Electrical downtilt in degrees")
+    azimuth_deg: Optional[float] = Field(None, ge=0, le=360, description="Azimuth in degrees")
+    tower_height: Optional[float] = None
+    antenna_height: Optional[float] = None
+    tower_merchants: Optional[str] = None
+    band_combination: Optional[str] = None
+    antenna_ports: Optional[int] = None
+    cell_allocation: Optional[str] = None
+    tower_name: Optional[str] = None
+    town: Optional[str] = None
+    region: Optional[str] = None
+    coverage_area: Optional[str] = None
+    coverage_weight: Optional[str] = None
+    scenario: Optional[str] = None
+    scenario_weight: Optional[str] = None
+    weight: Optional[str] = None
+    remark: Optional[str] = None
+    # 5G 专有字段
+    gnb_id: Optional[int] = Field(None, ge=0, description="gNodeB ID for 5G")
+    gnb_length: Optional[int] = None
+    nci: Optional[int] = Field(None, ge=0, description="NR Cell Identity")
+    gnb_wan_ip: Optional[str] = None
+    master_5gc_ip1: Optional[str] = None
+    master_5gc_ip2: Optional[str] = None
+    master_5gc_ip3: Optional[str] = None
+    backup_5gc_ip1: Optional[str] = None
+    backup_5gc_ip2: Optional[str] = None
+    backup_5gc_ip3: Optional[str] = None
+    master_omc_ip: Optional[str] = None
+    backup_omc_ip: Optional[str] = None
+    ntp_ip1: Optional[str] = None
+    ntp_ip2: Optional[str] = None
+    kssb: Optional[float] = None
+    offset_to_point_a: Optional[str] = None
+    slot_config: Optional[str] = None
+    slot_config_dl_ul: Optional[str] = None
+    symbol_config_dl_ul: Optional[str] = None
+
+    @validator('rat')
+    def validate_rat(cls, v):
+        if v not in ['LTE', 'NR']:
+            raise ValueError('rat must be either LTE or NR')
+        return v
+
+    @validator('pci')
+    def validate_pci(cls, v):
+        if v is not None and (v < 0 or v > 503):
+            raise ValueError('PCI must be between 0 and 503')
+        return v
+
+
+class PlanningCellUpdate(BaseModel):
+    """用于更新 LLD Cell 的请求模型"""
+    rat: Optional[str] = Field(None, description="Radio Access Technology: LTE or NR")
+    band_code: Optional[str] = Field(None, description="Band code like n41, n78, B1, B3")
+    sheet_name: Optional[str] = None
+    local_cell_id: Optional[int] = Field(None, ge=1, le=65535, description="Local Cell ID (1-65535)")
+    cell_name: Optional[str] = None
+    enb_id: Optional[int] = Field(None, ge=0, description="eNodeB ID for LTE")
+    eci: Optional[int] = Field(None, ge=0, description="E-UTRAN Cell Identity")
+    plmn: Optional[str] = None
+    tac: Optional[str] = None
+    pci: Optional[int] = Field(None, ge=0, le=503, description="Physical Cell ID (0-503)")
+    zc_root_index: Optional[int] = None
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    power_dbm: Optional[float] = Field(None, ge=-50, le=80, description="Power in dBm")
+    pa: Optional[str] = None
+    pb: Optional[str] = None
+    cover_type: Optional[str] = None
+    band_in_file: Optional[str] = None
+    frequency: Optional[int] = None
+    bandwidth: Optional[str] = None
+    mechanical_downtilt_deg: Optional[float] = Field(None, ge=0, le=90, description="Mechanical downtilt in degrees")
+    electrical_downtilt_deg: Optional[float] = Field(None, ge=0, le=90, description="Electrical downtilt in degrees")
+    azimuth_deg: Optional[float] = Field(None, ge=0, le=360, description="Azimuth in degrees")
+    tower_height: Optional[float] = None
+    antenna_height: Optional[float] = None
+    tower_merchants: Optional[str] = None
+    band_combination: Optional[str] = None
+    antenna_ports: Optional[int] = None
+    cell_allocation: Optional[str] = None
+    tower_name: Optional[str] = None
+    town: Optional[str] = None
+    region: Optional[str] = None
+    coverage_area: Optional[str] = None
+    coverage_weight: Optional[str] = None
+    scenario: Optional[str] = None
+    scenario_weight: Optional[str] = None
+    weight: Optional[str] = None
+    remark: Optional[str] = None
+    # 5G 专有字段
+    gnb_id: Optional[int] = Field(None, ge=0, description="gNodeB ID for 5G")
+    gnb_length: Optional[int] = None
+    nci: Optional[int] = Field(None, ge=0, description="NR Cell Identity")
+    gnb_wan_ip: Optional[str] = None
+    master_5gc_ip1: Optional[str] = None
+    master_5gc_ip2: Optional[str] = None
+    master_5gc_ip3: Optional[str] = None
+    backup_5gc_ip1: Optional[str] = None
+    backup_5gc_ip2: Optional[str] = None
+    backup_5gc_ip3: Optional[str] = None
+    master_omc_ip: Optional[str] = None
+    backup_omc_ip: Optional[str] = None
+    ntp_ip1: Optional[str] = None
+    ntp_ip2: Optional[str] = None
+    kssb: Optional[float] = None
+    offset_to_point_a: Optional[str] = None
+    slot_config: Optional[str] = None
+    slot_config_dl_ul: Optional[str] = None
+    symbol_config_dl_ul: Optional[str] = None
+
+    @validator('rat')
+    def validate_rat(cls, v):
+        if v is not None and v not in ['LTE', 'NR']:
+            raise ValueError('rat must be either LTE or NR')
+        return v
+
+    @validator('pci')
+    def validate_pci(cls, v):
+        if v is not None and (v < 0 or v > 503):
+            raise ValueError('PCI must be between 0 and 503')
+        return v

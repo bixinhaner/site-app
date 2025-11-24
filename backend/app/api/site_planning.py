@@ -30,6 +30,8 @@ from app.schemas.planning import (
     PlanningCell,
     SitePlanningLldResponse,
     SitePlanningLldSummary,
+    PlanningCellUpdate,
+    PlanningCellCreate,
 )
 
 
@@ -450,6 +452,163 @@ def _build_lld_summary_from_cells(planning: SitePlanning, cells: List[SitePlanni
         electrical_downtilt_min=min(elec_vals) if elec_vals else None,
         electrical_downtilt_max=max(elec_vals) if elec_vals else None,
     )
+
+
+def _sync_planning_from_cells(db: Session, planning: SitePlanning, cells: List[SitePlanningCell]):
+    """根据 Cell 明细同步更新基础规划数据，确保数据一致性。"""
+    if not cells:
+        return planning
+
+    # 从 Cells 聚合基础规划数据
+    bands = sorted({c.band_code for c in cells if c.band_code})
+
+    # 获取唯一的扇区ID（基于LOCAL CELL ID）
+    sector_ids = sorted({c.local_cell_id for c in cells if c.local_cell_id is not None})
+
+    # 构建或更新扇区数据
+    sectors = []
+    for sector_id in sector_ids:
+        sector_cells = [c for c in cells if c.local_cell_id == sector_id]
+
+        # 从该扇区的Cell中获取方位角和下倾角
+        azimuth = 0.0
+        mechanical_downtilt = 0.0
+        electrical_downtilt = 0.0
+        sector_bands = []
+
+        for cell in sector_cells:
+            if cell.azimuth_deg is not None:
+                azimuth = float(cell.azimuth_deg)
+            if cell.mechanical_downtilt_deg is not None:
+                mechanical_downtilt = float(cell.mechanical_downtilt_deg)
+            if cell.electrical_downtilt_deg is not None:
+                electrical_downtilt = float(cell.electrical_downtilt_deg)
+            if cell.band_code:
+                sector_bands.append(cell.band_code)
+
+        total_downtilt = mechanical_downtilt + electrical_downtilt
+
+        sectors.append({
+            "sector_index": int(sector_id),
+            "azimuth_deg": azimuth,
+            "downtilt_deg": total_downtilt,
+            "bands": sorted(set(sector_bands)),
+        })
+
+    # 更新基础规划数据
+    planning.bands = bands
+    planning.sector_count = len(sector_ids)
+
+    # 删除旧的扇区数据并重新创建
+    for sector in planning.sectors or []:
+        db.delete(sector)
+
+    for sector_data in sectors:
+        db.add(SitePlanningSector(
+            planning_id=planning.id,
+            sector_index=sector_data["sector_index"],
+            azimuth_deg=sector_data["azimuth_deg"],
+            downtilt_deg=sector_data["downtilt_deg"],
+            bands=sector_data["bands"],
+        ))
+
+    db.flush()
+    return planning
+
+
+def _validate_cell_data(cell_data: dict, operation: str = "create") -> List[str]:
+    """验证Cell数据的业务规则，返回错误信息列表。"""
+    errors = []
+
+    # RAT 验证（如果是更新且RAT不在更新数据中，则跳过）
+    rat = cell_data.get("rat")
+    if rat is not None and rat not in ["LTE", "NR"]:
+        errors.append("RAT必须是LTE或NR")
+
+    # 频段验证（如果是更新且band_code不在更新数据中，则跳过）
+    band_code = cell_data.get("band_code")
+    if band_code is not None and not band_code:
+        errors.append("频段代码不能为空")
+
+    # PCI验证 (如果提供)
+    pci = cell_data.get("pci")
+    if pci is not None:
+        if not isinstance(pci, int) or pci < 0 or pci > 503:
+            errors.append("PCI必须是0-503之间的整数")
+
+    # 经纬度验证
+    longitude = cell_data.get("longitude")
+    if longitude is not None and (longitude < -180 or longitude > 180):
+        errors.append("经度必须在-180到180之间")
+
+    latitude = cell_data.get("latitude")
+    if latitude is not None and (latitude < -90 or latitude > 90):
+        errors.append("纬度必须在-90到90之间")
+
+    # 功率验证
+    power_dbm = cell_data.get("power_dbm")
+    if power_dbm is not None and (power_dbm < -50 or power_dbm > 80):
+        errors.append("功率必须在-50到80dBm之间")
+
+    # 角度验证
+    azimuth_deg = cell_data.get("azimuth_deg")
+    if azimuth_deg is not None and (azimuth_deg < 0 or azimuth_deg > 360):
+        errors.append("方位角必须在0到360度之间")
+
+    mechanical_downtilt_deg = cell_data.get("mechanical_downtilt_deg")
+    if mechanical_downtilt_deg is not None and (mechanical_downtilt_deg < 0 or mechanical_downtilt_deg > 90):
+        errors.append("机械下倾角必须在0到90度之间")
+
+    electrical_downtilt_deg = cell_data.get("electrical_downtilt_deg")
+    if electrical_downtilt_deg is not None and (electrical_downtilt_deg < 0 or electrical_downtilt_deg > 90):
+        errors.append("电子下倾角必须在0到90度之间")
+
+    # Local Cell ID验证
+    local_cell_id = cell_data.get("local_cell_id")
+    if local_cell_id is not None:
+        if not isinstance(local_cell_id, int) or local_cell_id < 1 or local_cell_id > 65535:
+            errors.append("Local Cell ID必须是1-65535之间的整数")
+
+    return errors
+
+
+def _check_cell_conflicts(db: Session, site_id: int, cell_data: dict, exclude_cell_id: Optional[int] = None) -> List[str]:
+    """检查Cell冲突（相同频段和扇区的重复Cell）。"""
+    conflicts = []
+
+    local_cell_id = cell_data.get("local_cell_id")
+    band_code = cell_data.get("band_code")
+    rat = cell_data.get("rat")
+
+    if local_cell_id is None or band_code is None or rat is None:
+        return conflicts
+
+    # 查找当前规划版本
+    current_planning = _get_current_planning(db, site_id)
+    if not current_planning:
+        return conflicts
+
+    # 查找冲突的Cell
+    conflict_cells = (
+        db.query(SitePlanningCell)
+        .filter(
+            SitePlanningCell.planning_id == current_planning.id,
+            SitePlanningCell.site_id == site_id,
+            SitePlanningCell.local_cell_id == local_cell_id,
+            SitePlanningCell.band_code == band_code,
+            SitePlanningCell.rat == rat,
+        )
+    )
+
+    if exclude_cell_id:
+        conflict_cells = conflict_cells.filter(SitePlanningCell.id != exclude_cell_id)
+
+    conflict_cells = conflict_cells.all()
+
+    if conflict_cells:
+        conflicts.append(f"已存在相同的Cell: 扇区{local_cell_id} - {rat} {band_code}")
+
+    return conflicts
 
 
 @router.get("/{site_id}/planning", response_model=SitePlanningResponse)
@@ -1358,3 +1517,574 @@ async def get_lld_planning(
         cells=cell_models,
         summary=summary,
     )
+
+
+@router.put("/{site_id}/planning/lld", response_model=SitePlanningLldResponse)
+async def update_lld_planning(
+    site_id: int,
+    base_version: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    批量更新 LLD 规划（基于现有规划创建新版本）。
+    主要用于前端编辑后保存整个规划状态，保持版本管理。
+    """
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    _ensure_site_plannable(site)
+
+    current = _get_current_planning(db, site_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="No existing planning found for this site")
+
+    # 乐观锁检查
+    if current.version != base_version:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Version conflict: current={current.version}, base={base_version}"
+        )
+
+    # 创建新版本（当前无变更，只是版本递增）
+    old_snapshot = _snapshot(current)
+    data = SitePlanningBase(
+        bands=current.bands or [],
+        sector_count=current.sector_count or 0,
+        notes=current.notes,
+        sectors=[
+            {
+                "sector_index": s.sector_index,
+                "azimuth_deg": s.azimuth_deg,
+                "downtilt_deg": s.downtilt_deg,
+                "bands": s.bands or [],
+            }
+            for s in (current.sectors or [])
+        ],
+        antenna_ports=[
+            {
+                "port_label": p.port_label,
+                "sector_index": p.sector_index,
+                "band": p.band,
+                "mimo_chain": p.mimo_chain,
+                "remarks": p.remarks,
+            }
+            for p in (current.antenna_ports or [])
+        ],
+        switch_ports=[
+            {
+                "port_no": sp.port_no,
+                "vlan_ids": sp.vlan_ids or [],
+                "is_uplink": sp.is_uplink,
+                "poe": sp.poe,
+                "description": sp.description,
+            }
+            for sp in (current.switch_ports or [])
+        ],
+    )
+
+    new_planning = _create_new_version(
+        db,
+        site_id,
+        data,
+        current_user.id,
+        operation="lld_update",
+        summary="Manual LLD planning update",
+    )
+
+    return await get_lld_planning(site_id, db, current_user)
+
+
+@router.post("/{site_id}/planning/lld/cells", response_model=PlanningCell)
+async def create_lld_cell(
+    site_id: int,
+    cell_data: PlanningCellCreate,
+    base_version: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    添加新的 LLD Cell。
+    会自动创建新规划版本并更新基础规划数据。
+    """
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    _ensure_site_plannable(site)
+
+    current = _get_current_planning(db, site_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="No existing planning found for this site")
+
+    # 乐观锁检查
+    if current.version != base_version:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Version conflict: current={current.version}, base={base_version}"
+        )
+
+    # 验证Cell数据
+    cell_dict = cell_data.model_dump()
+    validation_errors = _validate_cell_data(cell_dict, "create")
+    if validation_errors:
+        raise HTTPException(status_code=400, detail={"errors": validation_errors})
+
+    # 检查Cell冲突
+    conflicts = _check_cell_conflicts(db, site_id, cell_dict)
+    if conflicts:
+        raise HTTPException(status_code=409, detail={"conflicts": conflicts})
+
+    # 创建新规划版本
+    old_snapshot = _snapshot(current)
+    data = SitePlanningBase(
+        bands=current.bands or [],
+        sector_count=current.sector_count or 0,
+        notes=current.notes,
+        sectors=[
+            {
+                "sector_index": s.sector_index,
+                "azimuth_deg": s.azimuth_deg,
+                "downtilt_deg": s.downtilt_deg,
+                "bands": s.bands or [],
+            }
+            for s in (current.sectors or [])
+        ],
+        antenna_ports=[
+            {
+                "port_label": p.port_label,
+                "sector_index": p.sector_index,
+                "band": p.band,
+                "mimo_chain": p.mimo_chain,
+                "remarks": p.remarks,
+            }
+            for p in (current.antenna_ports or [])
+        ],
+        switch_ports=[
+            {
+                "port_no": sp.port_no,
+                "vlan_ids": sp.vlan_ids or [],
+                "is_uplink": sp.is_uplink,
+                "poe": sp.poe,
+                "description": sp.description,
+            }
+            for sp in (current.switch_ports or [])
+        ],
+    )
+
+    new_planning = _create_new_version(
+        db,
+        site_id,
+        data,
+        current_user.id,
+        operation="lld_add_cell",
+        summary=f"Add new {cell_data.rat} cell: {cell_data.band_code}",
+    )
+
+    # 创建新的 Cell
+    cell_data = cell_dict.copy()
+    if 'sheet_name' not in cell_data or not cell_data['sheet_name']:
+        cell_data['sheet_name'] = f"{cell_data.get('rat', 'UNKNOWN')}-{cell_data.get('band_code', 'UNKNOWN')}"
+
+    cell = SitePlanningCell(
+        planning_id=new_planning.id,
+        site_id=site_id,
+        tower_id=site.site_code,
+        **cell_data
+    )
+    db.add(cell)
+    db.commit()
+    db.refresh(cell)
+
+    # 同步基础规划数据
+    all_cells = db.query(SitePlanningCell).filter(SitePlanningCell.planning_id == new_planning.id).all()
+    _sync_planning_from_cells(db, new_planning, all_cells)
+    db.commit()
+
+    return PlanningCell.model_validate(cell, from_attributes=True)
+
+
+@router.put("/{site_id}/planning/lld/cells/{cell_id}", response_model=PlanningCell)
+async def update_lld_cell(
+    site_id: int,
+    cell_id: int,
+    cell_data: PlanningCellUpdate,
+    base_version: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    更新指定的 LLD Cell。
+    会自动创建新规划版本并复制其他 Cell 到新版本。
+    """
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    _ensure_site_plannable(site)
+
+    current = _get_current_planning(db, site_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="No existing planning found for this site")
+
+    # 乐观锁检查
+    if current.version != base_version:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Version conflict: current={current.version}, base={base_version}"
+        )
+
+    # 查找要更新的 Cell
+    existing_cell = (
+        db.query(SitePlanningCell)
+        .filter(
+            SitePlanningCell.id == cell_id,
+            SitePlanningCell.site_id == site_id,
+            SitePlanningCell.planning_id == current.id,
+        )
+        .first()
+    )
+    if not existing_cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    # 验证更新数据
+    update_dict = cell_data.model_dump(exclude_unset=True)
+    if update_dict:
+        validation_errors = _validate_cell_data(update_dict, "update")
+        if validation_errors:
+            raise HTTPException(status_code=400, detail={"errors": validation_errors})
+
+        # 检查更新后的数据是否会造成冲突
+        merged_data = existing_cell.__dict__.copy()
+        merged_data.update(update_dict)
+        conflicts = _check_cell_conflicts(db, site_id, merged_data, exclude_cell_id=cell_id)
+        if conflicts:
+            raise HTTPException(status_code=409, detail={"conflicts": conflicts})
+
+    # 创建新规划版本
+    old_snapshot = _snapshot(current)
+    data = SitePlanningBase(
+        bands=current.bands or [],
+        sector_count=current.sector_count or 0,
+        notes=current.notes,
+        sectors=[
+            {
+                "sector_index": s.sector_index,
+                "azimuth_deg": s.azimuth_deg,
+                "downtilt_deg": s.downtilt_deg,
+                "bands": s.bands or [],
+            }
+            for s in (current.sectors or [])
+        ],
+        antenna_ports=[
+            {
+                "port_label": p.port_label,
+                "sector_index": p.sector_index,
+                "band": p.band,
+                "mimo_chain": p.mimo_chain,
+                "remarks": p.remarks,
+            }
+            for p in (current.antenna_ports or [])
+        ],
+        switch_ports=[
+            {
+                "port_no": sp.port_no,
+                "vlan_ids": sp.vlan_ids or [],
+                "is_uplink": sp.is_uplink,
+                "poe": sp.poe,
+                "description": sp.description,
+            }
+            for sp in (current.switch_ports or [])
+        ],
+    )
+
+    new_planning = _create_new_version(
+        db,
+        site_id,
+        data,
+        current_user.id,
+        operation="lld_update_cell",
+        summary=f"Update {existing_cell.rat} cell: {existing_cell.band_code}",
+    )
+
+    # 复制所有现有的 Cell 到新版本
+    old_cells = (
+        db.query(SitePlanningCell)
+        .filter(SitePlanningCell.planning_id == current.id)
+        .all()
+    )
+    for old_cell in old_cells:
+        if old_cell.id == cell_id:
+            # 更新目标 Cell
+            update_data = cell_data.model_dump(exclude_unset=True)
+            for key, value in update_data.items():
+                setattr(old_cell, key, value)
+            old_cell.planning_id = new_planning.id
+            db.add(old_cell)
+        else:
+            # 复制其他 Cell
+            cell_kwargs = {
+                "site_id": old_cell.site_id,
+                "rat": old_cell.rat,
+                "band_code": old_cell.band_code,
+                "sheet_name": old_cell.sheet_name,
+                "tower_id": old_cell.tower_id,
+                "site_information": old_cell.site_information,
+                "site_name": old_cell.site_name,
+                "local_cell_id": old_cell.local_cell_id,
+                "cell_name": old_cell.cell_name,
+                "enb_id": old_cell.enb_id,
+                "eci": old_cell.eci,
+                "plmn": old_cell.plmn,
+                "tac": old_cell.tac,
+                "pci": old_cell.pci,
+                "zc_root_index": old_cell.zc_root_index,
+                "longitude": old_cell.longitude,
+                "latitude": old_cell.latitude,
+                "power_dbm": old_cell.power_dbm,
+                "pa": old_cell.pa,
+                "pb": old_cell.pb,
+                "cover_type": old_cell.cover_type,
+                "band_in_file": old_cell.band_in_file,
+                "frequency": old_cell.frequency,
+                "bandwidth": old_cell.bandwidth,
+                "mechanical_downtilt_deg": old_cell.mechanical_downtilt_deg,
+                "electrical_downtilt_deg": old_cell.electrical_downtilt_deg,
+                "azimuth_deg": old_cell.azimuth_deg,
+                "tower_height": old_cell.tower_height,
+                "antenna_height": old_cell.antenna_height,
+                "tower_merchants": old_cell.tower_merchants,
+                "band_combination": old_cell.band_combination,
+                "antenna_ports": old_cell.antenna_ports,
+                "cell_allocation": old_cell.cell_allocation,
+                "tower_name": old_cell.tower_name,
+                "town": old_cell.town,
+                "region": old_cell.region,
+                "coverage_area": old_cell.coverage_area,
+                "coverage_weight": old_cell.coverage_weight,
+                "scenario": old_cell.scenario,
+                "scenario_weight": old_cell.scenario_weight,
+                "weight": old_cell.weight,
+                "remark": old_cell.remark,
+                "gnb_id": old_cell.gnb_id,
+                "gnb_length": old_cell.gnb_length,
+                "nci": old_cell.nci,
+                "gnb_wan_ip": old_cell.gnb_wan_ip,
+                "master_5gc_ip1": old_cell.master_5gc_ip1,
+                "master_5gc_ip2": old_cell.master_5gc_ip2,
+                "master_5gc_ip3": old_cell.master_5gc_ip3,
+                "backup_5gc_ip1": old_cell.backup_5gc_ip1,
+                "backup_5gc_ip2": old_cell.backup_5gc_ip2,
+                "backup_5gc_ip3": old_cell.backup_5gc_ip3,
+                "master_omc_ip": old_cell.master_omc_ip,
+                "backup_omc_ip": old_cell.backup_omc_ip,
+                "ntp_ip1": old_cell.ntp_ip1,
+                "ntp_ip2": old_cell.ntp_ip2,
+                "kssb": old_cell.kssb,
+                "offset_to_point_a": old_cell.offset_to_point_a,
+                "slot_config": old_cell.slot_config,
+                "slot_config_dl_ul": old_cell.slot_config_dl_ul,
+                "symbol_config_dl_ul": old_cell.symbol_config_dl_ul,
+                "extra_params": old_cell.extra_params,
+            }
+            db.add(SitePlanningCell(planning_id=new_planning.id, **cell_kwargs))
+
+    db.commit()
+
+    # 同步基础规划数据
+    all_cells = db.query(SitePlanningCell).filter(SitePlanningCell.planning_id == new_planning.id).all()
+    _sync_planning_from_cells(db, new_planning, all_cells)
+    db.commit()
+
+    # 返回更新后的 Cell
+    updated_cell = (
+        db.query(SitePlanningCell)
+        .filter(
+            SitePlanningCell.planning_id == new_planning.id,
+            SitePlanningCell.local_cell_id == existing_cell.local_cell_id,
+            SitePlanningCell.band_code == existing_cell.band_code,
+        )
+        .first()
+    )
+    return PlanningCell.model_validate(updated_cell, from_attributes=True)
+
+
+@router.delete("/{site_id}/planning/lld/cells/{cell_id}")
+async def delete_lld_cell(
+    site_id: int,
+    cell_id: int,
+    base_version: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    删除指定的 LLD Cell。
+    会自动创建新规划版本并复制其他 Cell 到新版本。
+    """
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    _ensure_site_plannable(site)
+
+    current = _get_current_planning(db, site_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="No existing planning found for this site")
+
+    # 乐观锁检查
+    if current.version != base_version:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Version conflict: current={current.version}, base={base_version}"
+        )
+
+    # 查找要删除的 Cell
+    existing_cell = (
+        db.query(SitePlanningCell)
+        .filter(
+            SitePlanningCell.id == cell_id,
+            SitePlanningCell.site_id == site_id,
+            SitePlanningCell.planning_id == current.id,
+        )
+        .first()
+    )
+    if not existing_cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    # 创建新规划版本
+    old_snapshot = _snapshot(current)
+    data = SitePlanningBase(
+        bands=current.bands or [],
+        sector_count=current.sector_count or 0,
+        notes=current.notes,
+        sectors=[
+            {
+                "sector_index": s.sector_index,
+                "azimuth_deg": s.azimuth_deg,
+                "downtilt_deg": s.downtilt_deg,
+                "bands": s.bands or [],
+            }
+            for s in (current.sectors or [])
+        ],
+        antenna_ports=[
+            {
+                "port_label": p.port_label,
+                "sector_index": p.sector_index,
+                "band": p.band,
+                "mimo_chain": p.mimo_chain,
+                "remarks": p.remarks,
+            }
+            for p in (current.antenna_ports or [])
+        ],
+        switch_ports=[
+            {
+                "port_no": sp.port_no,
+                "vlan_ids": sp.vlan_ids or [],
+                "is_uplink": sp.is_uplink,
+                "poe": sp.poe,
+                "description": sp.description,
+            }
+            for sp in (current.switch_ports or [])
+        ],
+    )
+
+    new_planning = _create_new_version(
+        db,
+        site_id,
+        data,
+        current_user.id,
+        operation="lld_delete_cell",
+        summary=f"Delete {existing_cell.rat} cell: {existing_cell.band_code}",
+    )
+
+    # 复制除要删除的 Cell 之外的所有 Cell
+    old_cells = (
+        db.query(SitePlanningCell)
+        .filter(SitePlanningCell.planning_id == current.id)
+        .all()
+    )
+    for old_cell in old_cells:
+        if old_cell.id != cell_id:
+            cell_kwargs = {
+                "site_id": old_cell.site_id,
+                "rat": old_cell.rat,
+                "band_code": old_cell.band_code,
+                "sheet_name": old_cell.sheet_name,
+                "tower_id": old_cell.tower_id,
+                "site_information": old_cell.site_information,
+                "site_name": old_cell.site_name,
+                "local_cell_id": old_cell.local_cell_id,
+                "cell_name": old_cell.cell_name,
+                "enb_id": old_cell.enb_id,
+                "eci": old_cell.eci,
+                "plmn": old_cell.plmn,
+                "tac": old_cell.tac,
+                "pci": old_cell.pci,
+                "zc_root_index": old_cell.zc_root_index,
+                "longitude": old_cell.longitude,
+                "latitude": old_cell.latitude,
+                "power_dbm": old_cell.power_dbm,
+                "pa": old_cell.pa,
+                "pb": old_cell.pb,
+                "cover_type": old_cell.cover_type,
+                "band_in_file": old_cell.band_in_file,
+                "frequency": old_cell.frequency,
+                "bandwidth": old_cell.bandwidth,
+                "mechanical_downtilt_deg": old_cell.mechanical_downtilt_deg,
+                "electrical_downtilt_deg": old_cell.electrical_downtilt_deg,
+                "azimuth_deg": old_cell.azimuth_deg,
+                "tower_height": old_cell.tower_height,
+                "antenna_height": old_cell.antenna_height,
+                "tower_merchants": old_cell.tower_merchants,
+                "band_combination": old_cell.band_combination,
+                "antenna_ports": old_cell.antenna_ports,
+                "cell_allocation": old_cell.cell_allocation,
+                "tower_name": old_cell.tower_name,
+                "town": old_cell.town,
+                "region": old_cell.region,
+                "coverage_area": old_cell.coverage_area,
+                "coverage_weight": old_cell.coverage_weight,
+                "scenario": old_cell.scenario,
+                "scenario_weight": old_cell.scenario_weight,
+                "weight": old_cell.weight,
+                "remark": old_cell.remark,
+                "gnb_id": old_cell.gnb_id,
+                "gnb_length": old_cell.gnb_length,
+                "nci": old_cell.nci,
+                "gnb_wan_ip": old_cell.gnb_wan_ip,
+                "master_5gc_ip1": old_cell.master_5gc_ip1,
+                "master_5gc_ip2": old_cell.master_5gc_ip2,
+                "master_5gc_ip3": old_cell.master_5gc_ip3,
+                "backup_5gc_ip1": old_cell.backup_5gc_ip1,
+                "backup_5gc_ip2": old_cell.backup_5gc_ip2,
+                "backup_5gc_ip3": old_cell.backup_5gc_ip3,
+                "master_omc_ip": old_cell.master_omc_ip,
+                "backup_omc_ip": old_cell.backup_omc_ip,
+                "ntp_ip1": old_cell.ntp_ip1,
+                "ntp_ip2": old_cell.ntp_ip2,
+                "kssb": old_cell.kssb,
+                "offset_to_point_a": old_cell.offset_to_point_a,
+                "slot_config": old_cell.slot_config,
+                "slot_config_dl_ul": old_cell.slot_config_dl_ul,
+                "symbol_config_dl_ul": old_cell.symbol_config_dl_ul,
+                "extra_params": old_cell.extra_params,
+            }
+            db.add(SitePlanningCell(planning_id=new_planning.id, **cell_kwargs))
+
+    db.commit()
+
+    # 同步基础规划数据
+    all_cells = db.query(SitePlanningCell).filter(SitePlanningCell.planning_id == new_planning.id).all()
+    _sync_planning_from_cells(db, new_planning, all_cells)
+    db.commit()
+
+    return {"message": "Cell deleted successfully", "deleted_cell_id": cell_id}
