@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>规划信息导入（LLD新）</h1>
+      <h1>规划信息导入（LLD）</h1>
       <div class="header-actions">
         <el-button @click="goBack"><el-icon><Back /></el-icon>返回</el-button>
       </div>
@@ -138,4 +138,3 @@ const onUploadRequest = async (opts) => {
 .import-row { display:flex; align-items:center; gap: 12px; }
 .import-info { color: #666; }
 </style>
-

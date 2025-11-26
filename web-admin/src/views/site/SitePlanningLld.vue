@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>站点规划（LLD新）</h1>
+      <h1>站点规划（LLD）</h1>
       <div class="header-actions">
         <el-button v-if="hasEditPermission && planning" @click="toggleEditMode" :type="editMode ? 'warning' : 'primary'">
           <el-icon><Edit v-if="!editMode" /><Check v-else /></el-icon>

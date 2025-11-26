@@ -38,39 +38,15 @@
       </div>
     </div>
 
-    <!-- 检查待审 -->
-    <div class="stat-card" @click="emit('card-click', { route: { name: 'InspectionReview' } })">
+    <!-- 待审工单 -->
+    <div class="stat-card" @click="emit('card-click', { route: { name: 'WorkOrderReview' } })">
       <div class="stat-header">
         <el-icon class="stat-icon primary"><Stamp /></el-icon>
-        <span class="stat-title">检查待审</span>
+        <span class="stat-title">待审工单</span>
       </div>
       <div class="stat-body">
-        <div class="stat-value">{{ data?.inspections?.pending_review_count || 0 }}</div>
-        <div class="stat-description">待审核与已提交</div>
-      </div>
-    </div>
-
-    <!-- 勘察近况 -->
-    <div class="stat-card" @click="emit('card-click', { route: { name: 'SiteSurveys' } })">
-      <div class="stat-header">
-        <el-icon class="stat-icon success"><PictureFilled /></el-icon>
-        <span class="stat-title">勘察（近7日）</span>
-      </div>
-      <div class="stat-body">
-        <div class="stat-value">{{ data?.surveys?.last7d_new || 0 }}</div>
-        <div class="stat-description">新增记录</div>
-      </div>
-    </div>
-
-    <!-- 站点（近似） -->
-    <div class="stat-card" @click="emit('card-click', { route: { name: 'SiteList' } })">
-      <div class="stat-header">
-        <el-icon class="stat-icon info"><Location /></el-icon>
-        <span class="stat-title">站点概况 <small v-if="data?.sites?.approx" class="approx">近似</small></span>
-      </div>
-      <div class="stat-body">
-        <div class="stat-value">{{ approxTotal }}</div>
-        <div class="stat-description">规划 {{ stat('planning') }} · 施工 {{ stat('construction') }} · 开通 {{ stat('operational') }}</div>
+        <div class="stat-value">{{ data?.work_orders?.status?.UNDER_REVIEW || 0 }}</div>
+        <div class="stat-description">审核中工单</div>
       </div>
     </div>
   </div>
@@ -86,12 +62,9 @@ const props = defineProps({
 
 const emit = defineEmits(['card-click'])
 
-const approxTotal = computed(() => {
-  const st = props.data?.sites?.status || {}
-  return Object.values(st).reduce((a, b) => a + Number(b || 0), 0)
-})
-
-const stat = (k) => Number(props.data?.sites?.status?.[k] || 0)
+// 保留空实现，避免模板引用报错（站点概况卡已移除）
+const approxTotal = computed(() => 0)
+const stat = () => 0
 </script>
 
 <style scoped lang="scss">

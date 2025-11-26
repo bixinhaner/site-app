@@ -26,24 +26,7 @@
       </el-timeline>
     </div>
 
-    <div class="section" v-if="reviewInspections && reviewInspections.length">
-      <div class="section-title">待审核的检查</div>
-      <el-timeline>
-        <el-timeline-item
-          v-for="x in reviewInspections"
-          :key="x.id"
-          :timestamp="formatDateTime(x.updated_at || x.created_at)"
-        >
-          <div class="item-row">
-            <span class="title" @click="emit('goto', { name:'InspectionReview', query: { inspectionId: x.id } })">
-              {{ x.site_name || x.site_id || '-' }}
-            </span>
-            <el-tag size="small" type="warning">待审</el-tag>
-          </div>
-          <div class="sub">检查员：{{ x.inspector_name || '-' }}</div>
-        </el-timeline-item>
-      </el-timeline>
-    </div>
+    <!-- 待审核的检查板块已移除按需展示，如需恢复请从 API 返回数据并渲染 -->
   </el-card>
 </template>
 
@@ -54,7 +37,7 @@ const props = defineProps({ data: { type: Object, default: null }, loading: { ty
 const emit = defineEmits(['goto'])
 
 const orders = computed(() => props.data?.my_orders || [])
-const reviewInspections = computed(() => props.data?.review_inspections || [])
+const reviewInspections = computed(() => [])
 
 const statusText = (s) => ({ PENDING:'待分配', ACTIVE:'已分配', SUBMITTED:'已提交', UNDER_REVIEW:'审核中', APPROVED:'已通过', REJECTED:'已驳回', COMPLETED:'已完成' }[s] || s)
 const formatDateTime = (v) => v ? new Date(v).toLocaleString() : ''
@@ -72,4 +55,3 @@ const formatDateTime = (v) => v ? new Date(v).toLocaleString() : ''
 .title:hover { text-decoration: underline; }
 .sub { color: var(--text-light); font-size: 12px; margin-top: 2px; }
 </style>
-

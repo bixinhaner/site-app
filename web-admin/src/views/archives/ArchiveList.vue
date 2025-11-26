@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>勘察档案（新）</h1>
+      <h1>勘察档案</h1>
     </div>
 
     <div class="filter-bar">

@@ -10,7 +10,10 @@
       </div>
     </div>
 
-    <!-- 顶部概览 -->
+    <!-- 站点概况（新卡组，置顶） -->
+    <SiteProgressOverview :progress="topStats?.site_progress" @goto="handleGoto" />
+
+    <!-- 顶部概览（保留原工单/库存等卡片） -->
     <StatsOverview :data="topStats" :loading="loading" @card-click="handleCardClick" />
 
     <!-- 中部：待办 + 风险预警 -->
@@ -71,6 +74,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import StatsOverview from '@/components/dashboard/StatsOverview.vue'
+import SiteProgressOverview from '@/components/dashboard/SiteProgressOverview.vue'
 import MyTodos from '@/components/dashboard/MyTodos.vue'
 import RisksPanel from '@/components/dashboard/RisksPanel.vue'
 import ActivityFeed from '@/components/dashboard/ActivityFeed.vue'
@@ -166,4 +170,3 @@ onMounted(loadAll)
   .dashboard-page { padding: 16px; }
 }
 </style>
-

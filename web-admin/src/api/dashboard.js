@@ -1,72 +1,11 @@
 import request from '@/utils/request'
-import { stockApi } from '@/api/stock'
 import { workOrderAPI } from '@/api/workorder'
-import { userAPI } from '@/api/user'
+import { stockApi } from '@/api/stock'
 import { siteSurveysApi } from '@/api/siteSurveys'
 import { useUserStore } from '@/stores/user'
-
-// 顶部概览：并发拉取核心统计
+// 顶部概览：使用后端聚合结果（要求精确，不做近似兜底）
 export async function fetchTopStats() {
-  const userStore = useUserStore()
-
-  const now = new Date()
-  const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-
-  // 优先尝试后端聚合接口（Phase 2）
-  const aggregated = await safeGet(() => request.get('/api/dashboard/summary'), null)
-  if (aggregated && aggregated.work_orders) {
-    return aggregated
-  }
-
-  const [woStats, userStats, invDash, sitesApprox, inspUnder, inspSubmitted, surveys7d] = await Promise.all([
-    // 工单统计
-    safeGet(() => workOrderAPI.getWorkOrderStats(), {}),
-    // 用户统计
-    safeGet(() => userAPI.getUserStats(), {}),
-    // 库存看板（含低库存计数 + 最近出入库）
-    safeGet(() => stockApi.getInventoryDashboard(), {}),
-    // 站点状态“近似”统计：拉取前100条本页数据进行分组
-    safeGet(() => request.get('/api/sites/', { params: { limit: 100 } }), []),
-    // 待审核检查（under_review）
-    safeGet(() => request.get('/api/inspections/', { params: { status: 'under_review' } }), []),
-    // 待审核检查（submitted）
-    safeGet(() => request.get('/api/inspections/', { params: { status: 'submitted' } }), []),
-    // 勘察近7日新增：用分页接口 total 作为计数
-    safeGet(() => siteSurveysApi.page({ page: 1, page_size: 1, date_from: from.toISOString(), date_to: now.toISOString() }), { total: 0 }),
-  ])
-
-  // 站点状态分布（近似）
-  const siteStatusCounts = Array.isArray(sitesApprox)
-    ? sitesApprox.reduce((acc, s) => { const k = s.status || 'unknown'; acc[k] = (acc[k] || 0) + 1; return acc }, {})
-    : {}
-
-  return {
-    work_orders: {
-      total: Number(woStats.total_work_orders || 0),
-      status: woStats.status_stats || {},
-    },
-    users: {
-      total: Number(userStats.total_users || 0),
-      active: Number(userStats.active_users || 0),
-    },
-    inventory: {
-      low_stock_count: Number(invDash?.summary?.low_stock_items || 0),
-      main_device_total_stock: Number(invDash?.summary?.main_device_total_stock || 0),
-      recent_transactions: invDash?.recent_transactions || [],
-    },
-    sites: {
-      approx: true,
-      status: siteStatusCounts,
-      sample_size: Array.isArray(sitesApprox) ? sitesApprox.length : 0,
-    },
-    inspections: {
-      pending_review_count: Number((inspUnder?.length || 0) + (inspSubmitted?.length || 0)),
-    },
-    surveys: {
-      last7d_new: Number(surveys7d?.total || 0),
-    },
-    time_range: { from: from.toISOString(), to: now.toISOString() },
-  }
+  return request.get('/api/dashboard/summary')
 }
 
 // 我的待办（工单、检查）
@@ -86,17 +25,7 @@ export async function fetchTodos() {
     .sort((a, b) => dateVal(a?.due_date) - dateVal(b?.due_date))
     .slice(0, 5)
 
-  // 待我审核的检查（仅管理员/经理展示）：under_review + submitted 合并 Top5
-  let reviewList = []
-  if (isAdmin || isManager) {
-    const [underV, submittedV] = await Promise.all([
-      safeGet(() => request.get('/api/inspections/', { params: { status: 'under_review' } }), []),
-      safeGet(() => request.get('/api/inspections/', { params: { status: 'submitted' } }), []),
-    ])
-    reviewList = [...(underV || []), ...(submittedV || [])].slice(0, 5)
-  }
-
-  return { my_orders: myOrders, review_inspections: reviewList }
+  return { my_orders: myOrders }
 }
 
 // 风险与预警（低库存、逾期工单）
@@ -157,6 +86,4 @@ export async function fetchActivity() {
 function dateVal(d) { return d ? new Date(d).getTime() : Number.MAX_SAFE_INTEGER }
 function daysBetween(t0, t1) { return Math.floor((t1 - t0) / (24 * 3600 * 1000)) }
 
-async function safeGet(fn, fallback) {
-  try { return await fn() } catch (e) { return fallback }
-}
+async function safeGet(fn, fallback) { try { return await fn() } catch (e) { return fallback } }

@@ -53,7 +53,7 @@
               </div>
             </el-timeline-item>
           </el-timeline>
-          <el-button link size="small" @click="emit('goto', { name: 'SiteSurveys' })">查看全部</el-button>
+          <el-button link size="small" @click="emit('goto', { name: 'SurveyArchives' })">查看全部</el-button>
         </div>
       </el-col>
 
@@ -101,4 +101,3 @@ const formatDateTime = (v) => v ? new Date(v).toLocaleString() : ''
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color:#909399; font-size: 12px; }
 .mt-16 { margin-top: 16px; }
 </style>
-

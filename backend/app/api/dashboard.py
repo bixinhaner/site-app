@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from typing import Optional
+from typing import Optional, Dict
 
 from app.core.database import get_db
 from app.api.auth import get_current_user
@@ -10,6 +10,7 @@ from app.models.user import User as UserModel
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum
 from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
+from app.models.survey_archive import SiteSurveyArchive
 from app.models.equipment import Inventory, Equipment, StockTransaction
 
 router = APIRouter()
@@ -78,6 +79,30 @@ async def get_dashboard_summary(
         SiteSurvey.created_at <= end
     ).scalar() or 0
 
+    # 站点进度统计（精确计算）
+    def count_with_status(statuses) -> int:
+        return int(
+            db.query(func.count(Site.id)).filter(Site.status.in_(statuses)).scalar() or 0
+        )
+
+    total_sites = int(db.query(func.count(Site.id)).scalar() or 0)
+    survey_done = int(db.query(func.count(func.distinct(SiteSurveyArchive.site_id))).scalar() or 0)
+    planning_done = count_with_status([
+        "planned", "construction", "pending_online", "online_pending_activation", "operational", "maintenance"
+    ])
+    online = count_with_status(["pending_online", "online_pending_activation", "operational", "maintenance"])
+    activated = count_with_status(["operational", "maintenance"])
+    ssv_passed_cnt = int(db.query(func.count(Site.id)).filter(Site.ssv_passed == True).scalar() or 0)
+
+    site_progress: Dict[str, int] = {
+        "total": total_sites,
+        "survey_done": survey_done,
+        "planning_done": planning_done,
+        "online": online,
+        "activated": activated,
+        "ssv_passed": ssv_passed_cnt,
+    }
+
     return {
         "work_orders": {"total": int(total_work_orders), "status": work_order_status},
         "users": {"total": users_total, "active": users_active},
@@ -87,8 +112,8 @@ async def get_dashboard_summary(
             "recent_transactions": transactions_data,
         },
         "sites": {"approx": False, "status": site_status},
+        "site_progress": site_progress,
         "inspections": {"pending_review_count": int(pending_review_count)},
         "surveys": {"last7d_new": int(surveys_last7d)},
         "time_range": {"from": start.isoformat(), "to": end.isoformat()},
     }
-
