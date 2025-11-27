@@ -5,6 +5,8 @@ import { authApi } from '../api/auth'
 export const useUserStore = defineStore('user', () => {
   const user = ref(JSON.parse(localStorage.getItem('user_info') || 'null'))
   const token = ref(localStorage.getItem('access_token'))
+  const refreshToken = ref(localStorage.getItem('refresh_token'))
+  const refreshing = ref(false)
 
   const isLoggedIn = computed(() => !!token.value && !!user.value)
   // Treat manager as admin-equivalent for UI gating
@@ -26,8 +28,10 @@ export const useUserStore = defineStore('user', () => {
       
       if (response.access_token) {
         token.value = response.access_token
+        refreshToken.value = response.refresh_token
         user.value = response.user
         localStorage.setItem('access_token', response.access_token)
+        if (response.refresh_token) localStorage.setItem('refresh_token', response.refresh_token)
         localStorage.setItem('user_info', JSON.stringify(response.user))
         return { success: true, user: response.user }
       }
@@ -55,7 +59,9 @@ export const useUserStore = defineStore('user', () => {
   function logout() {
     user.value = null
     token.value = null
+    refreshToken.value = null
     localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
     localStorage.removeItem('user_info')
   }
 
@@ -69,6 +75,8 @@ export const useUserStore = defineStore('user', () => {
   return {
     user,
     token,
+    refreshToken,
+    refreshing,
     currentUser: user, // 添加 currentUser 别名
     isLoggedIn,
     isAdmin,

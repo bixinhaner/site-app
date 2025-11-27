@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.security import create_access_token, verify_password, get_password_hash
+from app.core.security import create_access_token, create_refresh_token, verify_password, get_password_hash
 from app.models.user import User
 from app.schemas.user import UserLogin, Token, UserResponse, UserCreate
 
@@ -62,7 +62,10 @@ def get_current_user(
             credentials.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
         username: str = payload.get("sub")
+        token_type: str = payload.get("type")
         if username is None:
+            raise credentials_exception
+        if token_type != "access":
             raise credentials_exception
     except JWTError:
         raise credentials_exception
@@ -83,12 +86,14 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        subject=user.username, expires_delta=access_token_expires
-    )
+    refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+
+    access_token = create_access_token(subject=user.username, expires_delta=access_token_expires)
+    refresh_token = create_refresh_token(subject=user.username, expires_delta=refresh_token_expires)
     
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": UserResponse.from_orm(user)
     }
@@ -141,23 +146,30 @@ async def get_current_user_info(
     raw = get_user_by_username(db, current_user.username)
     return UserResponse.from_orm(raw)
 
+
 @router.post("/refresh", response_model=Token)
-async def refresh_token(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """刷新访问令牌
-    
-    使用当前有效的token换取新的token，延长登录时间
-    """
+async def refresh_token(request: dict):
+    """使用 refresh_token 换取新的 access_token（支持滚动刷新）。"""
+    refresh_token = request.get("refresh_token") if isinstance(request, dict) else None
+    if not refresh_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 refresh_token")
+    try:
+        payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token 类型")
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效或过期的 refresh_token")
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        subject=current_user.username, expires_delta=access_token_expires
-    )
-    
-    raw = get_user_by_username(db, current_user.username)
+    refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    new_access = create_access_token(subject=username, expires_delta=access_token_expires)
+    new_refresh = create_refresh_token(subject=username, expires_delta=refresh_token_expires)
+
     return {
-        "access_token": access_token,
+        "access_token": new_access,
+        "refresh_token": new_refresh,
         "token_type": "bearer",
-        "user": UserResponse.from_orm(raw)
     }

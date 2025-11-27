@@ -13,7 +13,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./site_manager.db"  # 开发环境使用 SQLite
     
     # JWT 配置
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # 短期 Access Token 过期时间（分钟）
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
+    # 长期 Refresh Token 过期时间（天）
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ALGORITHM: str = "HS256"
     
     # 文件上传配置
