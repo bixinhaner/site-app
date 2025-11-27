@@ -32,6 +32,7 @@ from app.services.omc_client import (
     is_success_status_payload,
 )
 from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_state
+from app.services.omc_monitor import advance_opening_work_orders_by_ever
 
 router = APIRouter()
 
@@ -638,6 +639,14 @@ async def get_site_omc_devices(
         except Exception as exc:  # pragma: no cover
             db.rollback()
             print(f"[OMC] 提交 OmcDeviceState 变更失败 site_id={site_id}: {exc}")
+
+        # 刷新完成后，基于最新聚合表尝试推进工单/站点状态（只升不降，不再二次查询 OMC）
+        try:
+            advance_opening_work_orders_by_ever(db, site_id)
+            db.commit()
+        except Exception as exc:  # pragma: no cover
+            db.rollback()
+            print(f"[OMC] 手动刷新后推进工单/站点失败 site_id={site_id}: {exc}")
 
     # 将状态填充到设备列表：实时在线/激活 + ever 在线/激活
     for d in devices:

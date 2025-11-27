@@ -23,6 +23,7 @@ from app.services.omc_client import (
   is_success_status_payload,
 )
 from app.services.omc_state import upsert_omc_device_state
+from app.services.omc_monitor import advance_opening_work_orders_by_ever
 
 router = APIRouter()
 
@@ -352,6 +353,18 @@ async def get_device_status_by_sn(
     source="api_poll",
     status_payload=status_payload,
   )
+
+  # 若该 SN 当前绑定站点存在，则基于聚合表尝试推进开站工单/站点状态（仅向前推进）
+  try:
+    binding = db.query(EquipmentBindingHistory).filter(
+      EquipmentBindingHistory.equipment_sn == sn,
+      EquipmentBindingHistory.action != BindingActionEnum.UNBIND
+    ).order_by(EquipmentBindingHistory.operated_at.desc()).first()
+    if binding and binding.site_id:
+      advance_opening_work_orders_by_ever(db, binding.site_id)
+  except Exception as exc:  # pragma: no cover
+    print(f"[OMC] SN={sn} 推进工单/站点状态失败: {exc}")
+
   db.commit()
 
   return OmcDeviceStatusBySnResponse(

@@ -410,6 +410,25 @@ async def create_work_order(
                 ),
             )
 
+    # SSV 工单创建规则校验：站点必须 operational，且同站点仅一条进行中
+    if data.type == WorkOrderTypeEnum.SSV:
+        if site.status != "operational":
+            raise HTTPException(status_code=409, detail="站点尚未运营，不能创建 SSV 工单")
+        existing_ssv = db.query(WorkOrder).filter(
+            WorkOrder.site_id == data.site_id,
+            WorkOrder.type == WorkOrderTypeEnum.SSV,
+            WorkOrder.status.in_([
+                WorkOrderStatusEnum.PENDING,
+                WorkOrderStatusEnum.ACTIVE,
+                WorkOrderStatusEnum.SUBMITTED,
+                WorkOrderStatusEnum.UNDER_REVIEW,
+                WorkOrderStatusEnum.APPROVED,
+                WorkOrderStatusEnum.ACTIVATED,
+            ])
+        ).first()
+        if existing_ssv:
+            raise HTTPException(status_code=409, detail="该站点已有进行中的 SSV 工单")
+
     # 重复校验：仅针对安装工单，任意状态都视为存在历史记录，需用户确认后方可继续
     if data.type == WorkOrderTypeEnum.OPENING_INSPECTION and not (getattr(data, "confirm_duplicate", False)):
         existing_wos = db.query(WorkOrder).filter(

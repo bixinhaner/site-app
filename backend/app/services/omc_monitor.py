@@ -228,6 +228,63 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
   return summary
 
 
+def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
+  """根据聚合表的 ever 状态推进开站工单/站点状态，不再调用 OMC 实时接口。
+
+  - 使用 summarize_site_omc_state 的 all_ever_online / all_ever_activated
+  - 仅做“只升不降”的推进：APPROVED -> ACTIVATED -> COMPLETED；站点 construction/pending_online -> online_pending_activation -> operational
+  - 返回推进结果摘要，便于日志/调试
+  """
+
+  summary = summarize_site_omc_state(db, site_id)
+  ever_all_online = bool(summary.get("all_ever_online"))
+  ever_all_activated = bool(summary.get("all_ever_activated"))
+
+  result = {
+    "site_id": site_id,
+    "ever_all_online": ever_all_online,
+    "ever_all_activated": ever_all_activated,
+    "work_orders": [],
+  }
+
+  wos = db.query(WorkOrder).filter(
+    WorkOrder.site_id == site_id,
+    WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+    WorkOrder.status.in_([WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED]),
+  ).all()
+
+  site = db.query(Site).filter(Site.id == site_id).first()
+
+  for wo in wos:
+    changed = False
+    # ever 全在线 -> 已上线待激活
+    if ever_all_online and wo.status == WorkOrderStatusEnum.APPROVED:
+      wo.status = WorkOrderStatusEnum.ACTIVATED
+      wo.activated_at = datetime.utcnow()
+      changed = True
+      if site and site.status in ("construction", "pending_online"):
+        site.status = "online_pending_activation"
+
+    # ever 全激活 -> 完成
+    if ever_all_activated and wo.status in (WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED):
+      wo.status = WorkOrderStatusEnum.COMPLETED
+      wo.completed_at = datetime.utcnow()
+      changed = True
+      if site:
+        # 如果该站点所有开站工单都已完成，则站点 operational
+        opening_wos = db.query(WorkOrder).filter(
+          WorkOrder.site_id == site_id,
+          WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+        ).all()
+        if opening_wos and all(item.status == WorkOrderStatusEnum.COMPLETED for item in opening_wos):
+          site.status = "operational"
+
+    if changed:
+      result["work_orders"].append({"id": wo.id, "status": wo.status.value})
+
+  return result
+
+
 def run_omc_check_for_work_order(work_order_id: str) -> None:
   """
   针对单个工单执行一次 OMC 状态检查（供 API / 审核后触发调用）。
