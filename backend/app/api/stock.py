@@ -810,12 +810,15 @@ async def import_sn_batch(
 
         # 用于后续一次性生成出入库记录
         total_import_quantity = 0
-        
+
         # 逐行处理数据
         for index, row in excel_data.iterrows():
             line_number = index + 2  # Excel行号从2开始（除去表头）
-            
+
             try:
+                # 确保上一轮新增的库存记录已写入数据库，避免 autoflush=False 导致查询不到，产生重复 Inventory
+                db.flush()
+
                 serial_number = str(row.get('SN序列号', '')).strip()
                 if not serial_number or serial_number == 'nan':
                     raise ValueError("SN序列号不能为空")
@@ -921,6 +924,7 @@ async def import_sn_batch(
                         last_updated_by=current_user.id
                     )
                     db.add(new_inventory)
+                    db.flush()  # 立即落库，后续循环能命中，避免重复新增
                     
             except Exception as e:
                 failed_count += 1
