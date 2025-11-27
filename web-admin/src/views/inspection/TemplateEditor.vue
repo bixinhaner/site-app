@@ -387,23 +387,30 @@
             </div>
           </el-card>
           
-          <el-card class="json-preview-card" style="margin-top: 20px;">
+          <el-card class="preview-card" style="margin-top: 20px;">
             <template #header>
               <div class="card-header">
-                <span>JSON 预览</span>
-                <el-button size="small" @click="copyJson">
-                  <el-icon><DocumentCopy /></el-icon>
-                  复制
+                <span>模板预览</span>
+                <el-button size="small" @click="previewTemplate">
+                  <el-icon><View /></el-icon>
+                  打开预览
                 </el-button>
               </div>
             </template>
-            
-            <pre class="json-content">{{ JSON.stringify(templateData, null, 2) }}</pre>
+            <div class="preview-hint">点击“打开预览”查看拟真 App 端检查表单效果</div>
           </el-card>
         </el-col>
       </el-row>
     </div>
   </div>
+
+  <el-drawer v-model="previewVisible" title="模板预览" size="80%">
+    <archive-form-renderer
+      v-if="previewVisible"
+      :content="previewContent"
+      :disabled="false"
+    />
+  </el-drawer>
 </template>
 
 <script setup>
@@ -420,6 +427,7 @@ import {
   getOperationDisabledReason,
   canChangeRequired
 } from '../../config/template-field-rules'
+import ArchiveFormRenderer from '@/components/archives/ArchiveFormRenderer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -781,14 +789,20 @@ const removeOption = (field, index) => {
   field.options.splice(index, 1)
 }
 
+const previewVisible = ref(false)
+const previewContent = computed(() => ({
+  meta: {
+    template: { name: templateForm.template_name, version: template.value?.template_data?.template_version }
+  },
+  check_categories: templateData.check_categories
+}))
+
 const previewTemplate = () => {
-  ElMessageBox.alert(
-    JSON.stringify(templateData, null, 2),
-    '模板预览',
-    {
-      customClass: 'json-preview-dialog'
-    }
-  )
+  if (!templateData.check_categories.length) {
+    ElMessage.warning('请先添加检查项再预览')
+    return
+  }
+  previewVisible.value = true
 }
 
 const copyJson = async () => {

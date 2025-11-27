@@ -8,6 +8,7 @@
             <strong>{{ displayItemName(it) }}</strong>
             <el-tag v-if="it.required_type" size="small" effect="plain">{{ it.required_type }}</el-tag>
           </div>
+          <div v-if="it.description" class="item-desc">{{ it.description }}</div>
         </div>
 
         <!-- 站点级字段 -->
@@ -66,6 +67,9 @@
               :model-value="getValue(cat, it, fd)"
               @update:modelValue="val => setValue(cat, it, fd, val)"
               :disabled="disabled"
+              :maxlength="fd?.constraints?.max_length || null"
+              :minlength="fd?.constraints?.min_length || null"
+              show-word-limit
             />
           </div>
         </div>
@@ -107,7 +111,7 @@
           </div>
         </div>
 
-        <div class="photos" v-if="(it.photos && it.photos.length) || !disabled">
+        <div class="photos" v-if="(it.photos && it.photos.length) || (!disabled && needsPhoto(it))">
           <div class="photos-header" v-if="it.photos && it.photos.length">照片</div>
           <div class="grid" v-if="it.photos && it.photos.length">
             <div v-for="p in it.photos" :key="p.id" class="item photo-card">
@@ -123,7 +127,7 @@
               </div>
             </div>
           </div>
-          <div class="upload-bar" v-if="!disabled">
+          <div class="upload-bar" v-if="!disabled && needsPhoto(it)">
             <el-upload :show-file-list="false" :http-request="(opt) => onUpload(cat, it, opt)" accept="image/*">
               <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
             </el-upload>
@@ -143,6 +147,12 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
 })
 const emit = defineEmits(['change', 'upload-photo', 'delete-photo'])
+
+const needsPhoto = (it) => {
+  const t = (it?.required_type || '').toLowerCase()
+  // 需要拍照：包含 photo 或 both 关键字（兼容 photo, photo_and_data, photo+data, both 等写法）
+  return t.includes('photo') || t.includes('both')
+}
 
 const state = reactive({ values: {} })
 
