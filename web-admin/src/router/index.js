@@ -87,12 +87,9 @@ const routes = [
         children: [
           { path: 'list', name: 'SiteList', component: () => import('../views/site/SiteList.vue'), meta: { title: '站点列表', icon: 'Location' } },
           { path: 'detail/:id', name: 'SiteDetail', component: () => import('../views/site/SiteDetail.vue'), meta: { title: '站点详情', hidden: true } },
-          // 旧版站点规划页面（逐步下线）
-          { path: 'planning/:id', name: 'SitePlanning', component: () => import('../views/site/SitePlanning.vue'), meta: { title: '站点规划（旧）', hidden: true } },
           // 新版 LLD 站点规划页面
           { path: 'planning-lld/:id', name: 'SitePlanningLld', component: () => import('../views/site/SitePlanningLld.vue'), meta: { title: '站点规划（LLD）', hidden: true } },
           { path: 'basic-import', name: 'SiteBasicBatch', component: () => import('../views/site/SiteBasicBatch.vue'), meta: { title: '站点信息导入', icon: 'Plus' } },
-          // 旧版规划导入页面
           // 新版 LLD 规划导入页面
           { path: 'planning-batch-lld', name: 'SitePlanningBatchLld', component: () => import('../views/site/SitePlanningBatchLld.vue'), meta: { title: '规划信息导入（LLD）', icon: 'Operation' } },
           { path: 'basic-import-history', name: 'SiteBasicImportHistory', component: () => import('../views/site/SiteBasicImportHistory.vue'), meta: { title: '导入历史', hidden: true } },

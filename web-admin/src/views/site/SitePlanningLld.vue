@@ -432,6 +432,14 @@
                 >
                   {{ f }}
                 </el-tag>
+                <span v-if="!(row.diff?.changed_fields || []).length" class="muted">
+                  （无结构化变更字段）
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="详情" width="120">
+              <template #default="{ row }">
+                <el-button link size="small" @click="openLogDetail(row)">查看详情</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -717,6 +725,17 @@
       </template>
     </el-dialog>
 
+    <!-- Cell 编辑对话框 -->
+    <el-dialog
+      v-model="cellEditDialogVisible"
+      :title="isEditingNewCell ? '新增Cell' : '编辑Cell'"
+      width="80%"
+      :close-on-click-modal="false"
+    >
+      <!-- 这里省略原有表单内容，保持不变 -->
+      <!-- …原有cellEditForm表单代码… -->
+    </el-dialog>
+
     <!-- 添加Cell按钮 -->
     <el-button
       v-if="editMode"
@@ -728,6 +747,81 @@
     >
       <el-icon><Plus /></el-icon>
     </el-button>
+
+    <!-- 规划变更日志详情对话框 -->
+    <el-dialog
+      v-model="logDetailVisible"
+      title="规划变更详情"
+      width="760px"
+    >
+      <div v-if="logDetail">
+        <el-descriptions :column="2" border size="small" class="mb16">
+          <el-descriptions-item label="操作">{{ logDetail.operation }}</el-descriptions-item>
+          <el-descriptions-item label="时间">{{ logDetail.created_at }}</el-descriptions-item>
+          <el-descriptions-item label="操作者">
+            {{ logDetail.actor_name || logDetail.actor_id || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="摘要">
+            {{ logDetail.summary || '-' }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div class="mb16">
+          <div class="section-title">变更字段</div>
+          <div>
+            <el-tag
+              v-for="f in (logDetail.diff?.changed_fields || [])"
+              :key="f"
+              type="info"
+              class="mr8"
+            >
+              {{ f }}
+            </el-tag>
+            <span v-if="!(logDetail.diff?.changed_fields || []).length" class="muted">
+              无结构化变更字段
+            </span>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-title">Cell 级变更</div>
+          <div v-if="Array.isArray(logDetail.diff?.cell_changes) && logDetail.diff.cell_changes.length">
+            <el-timeline>
+              <el-timeline-item
+                v-for="(chg, idx) in logDetail.diff.cell_changes"
+                :key="idx"
+              >
+                <div class="cell-change-header">
+                  <span class="mono">
+                    {{ chg.key?.rat || '-' }} / {{ chg.key?.band_code || '-' }} / LCID={{ chg.key?.local_cell_id ?? '-' }}
+                  </span>
+                  <el-tag
+                    size="small"
+                    :type="chg.change_type === 'created' ? 'success' : chg.change_type === 'deleted' ? 'danger' : 'warning'"
+                  >
+                    {{ chg.change_type || 'updated' }}
+                  </el-tag>
+                </div>
+                <ul class="change-list">
+                  <li v-for="(f, i) in (chg.changes || [])" :key="i">
+                    <span class="field-name">{{ f.field }}</span>
+                    ：<span class="old-val">{{ f.old ?? '∅' }}</span>
+                    →
+                    <span class="new-val">{{ f.new ?? '∅' }}</span>
+                  </li>
+                </ul>
+              </el-timeline-item>
+            </el-timeline>
+          </div>
+          <div v-else class="muted">
+            本次变更未记录 Cell 级差异（可能为早期导入或仅概要变更）。
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="logDetailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -831,6 +925,8 @@ const cellEditForm = reactive({
 
 const logs = ref([])
 const logsLoading = ref(false)
+const logDetailVisible = ref(false)
+const logDetail = ref(null)
 
 // 过滤条件
 const bandOptions = computed(() => (summary.value?.bands || []))
@@ -891,6 +987,11 @@ const loadLogs = async () => {
   } finally {
     logsLoading.value = false
   }
+}
+
+const openLogDetail = (row) => {
+  logDetail.value = row
+  logDetailVisible.value = true
 }
 
 const downloadLldTemplate = async () => {

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import io
 import pandas as pd
@@ -94,17 +94,167 @@ def _snapshot(planning: Optional[SitePlanning]) -> Optional[dict]:
 
 
 def _compute_diff(before: Optional[dict], after: Optional[dict]) -> dict:
+    """
+    生成规划变更的简要 diff 信息。
+
+    当前前端只使用 diff.changed_fields 在“日志”Tab 中展示发生变更的模块，
+    因此这里主要关注哪些大类发生了变化：planning / sectors / antenna_ports / switch_ports。
+    """
+    keys = ["planning", "sectors", "antenna_ports", "switch_ports"]
+
     if before is None and after is None:
         return {}
+
+    # 首次创建或被删除时，也补充 changed_fields，便于前端展示
     if before is None:
-        return {"action": "created"}
+        return {"action": "created", "changed_fields": keys}
     if after is None:
-        return {"action": "deleted"}
-    diff = {"changed_fields": []}
-    for key in ["planning", "sectors", "antenna_ports", "switch_ports"]:
+        return {"action": "deleted", "changed_fields": keys}
+
+    diff: Dict[str, Any] = {"changed_fields": []}
+    for key in keys:
         if (before or {}).get(key) != (after or {}).get(key):
             diff["changed_fields"].append(key)
     return diff
+
+
+def _compute_lld_cells_diff(
+    old_cells: List[SitePlanningCell],
+    new_cells: List[dict],
+) -> Dict[str, Any]:
+    """
+    针对 LLD 导入场景，比较导入前后的 Cell 明细差异。
+
+    返回结构示例：
+    {
+      "changed_fields": ["cells", "cells.tac", "cells.pci"],
+      "cell_changes": [
+         {
+           "key": {"rat": "LTE", "band_code": "B3", "local_cell_id": 1},
+           "change_type": "updated",
+           "changes": [
+              {"field": "tac", "old": "12345", "new": "23456"},
+              ...
+           ]
+         },
+         ...
+      ]
+    }
+    """
+
+    def make_key(obj) -> tuple:
+        rat = getattr(obj, "rat", None) if isinstance(obj, SitePlanningCell) else obj.get("rat")
+        band = getattr(obj, "band_code", None) if isinstance(obj, SitePlanningCell) else obj.get("band_code")
+        lcid = getattr(obj, "local_cell_id", None) if isinstance(obj, SitePlanningCell) else obj.get("local_cell_id")
+        return (
+            str(rat) if rat is not None else None,
+            str(band) if band is not None else None,
+            int(lcid) if lcid is not None else None,
+        )
+
+    # 需要比较的字段：排除 id/planning_id/site_id/timestamps 等
+    exclude = {"id", "planning_id", "site_id", "created_at"}
+    compare_fields = [
+        c.name
+        for c in SitePlanningCell.__table__.columns
+        if c.name not in exclude
+    ]
+
+    old_map: Dict[tuple, SitePlanningCell] = {}
+    for c in old_cells:
+        k = make_key(c)
+        old_map[k] = c
+
+    new_map: Dict[tuple, dict] = {}
+    for d in new_cells:
+        k = make_key(d)
+        if k[0] is None or k[2] is None:
+            # 缺少关键信息的行（如没有 RAT 或 LOCAL CELL ID）跳过
+            continue
+        new_map[k] = d
+
+    all_keys = set(old_map.keys()) | set(new_map.keys())
+    changed_fields: set = set()
+    cell_changes: List[Dict[str, Any]] = []
+
+    for key in all_keys:
+        old = old_map.get(key)
+        new = new_map.get(key)
+
+        if old is None and new is not None:
+            # 新增的 Cell
+            changes = []
+            for field in compare_fields:
+                new_val = new.get(field)
+                if new_val not in (None, ""):
+                    changes.append({"field": field, "old": None, "new": new_val})
+                    changed_fields.add(f"cells.{field}")
+            if changes:
+                cell_changes.append(
+                    {
+                        "key": {
+                            "rat": key[0],
+                            "band_code": key[1],
+                            "local_cell_id": key[2],
+                        },
+                        "change_type": "created",
+                        "changes": changes,
+                    }
+                )
+            continue
+
+        if old is not None and new is None:
+            # 删除的 Cell
+            changes = []
+            for field in compare_fields:
+                old_val = getattr(old, field, None)
+                if old_val not in (None, ""):
+                    changes.append({"field": field, "old": old_val, "new": None})
+                    changed_fields.add(f"cells.{field}")
+            if changes:
+                cell_changes.append(
+                    {
+                        "key": {
+                            "rat": key[0],
+                            "band_code": key[1],
+                            "local_cell_id": key[2],
+                        },
+                        "change_type": "deleted",
+                        "changes": changes,
+                    }
+                )
+            continue
+
+        # 更新的 Cell：逐字段对比
+        per_cell_changes = []
+        for field in compare_fields:
+            old_val = getattr(old, field, None)
+            new_val = new.get(field)
+            if old_val != new_val:
+                per_cell_changes.append({"field": field, "old": old_val, "new": new_val})
+                changed_fields.add(f"cells.{field}")
+
+        if per_cell_changes:
+            cell_changes.append(
+                {
+                    "key": {
+                        "rat": key[0],
+                        "band_code": key[1],
+                        "local_cell_id": key[2],
+                    },
+                    "change_type": "updated",
+                    "changes": per_cell_changes,
+                }
+            )
+
+    result: Dict[str, Any] = {}
+    if changed_fields:
+        # 始终包含顶层 cells 标记，方便前端快速识别“有小区变更”
+        changed_fields.add("cells")
+        result["changed_fields"] = sorted(changed_fields)
+    if cell_changes:
+        result["cell_changes"] = cell_changes
+    return result
 
 
 def _ensure_site_plannable(site: Site):
@@ -237,6 +387,12 @@ def _create_new_version(
 
     after_snapshot = _snapshot(planning)
     diff = _compute_diff(before_snapshot, after_snapshot)
+
+    # 对 LLD 相关操作，标记 cells 发生变化，便于前端在“日志”Tab 中区分
+    if operation.startswith("lld"):
+        changed = diff.setdefault("changed_fields", [])
+        if "cells" not in changed:
+            changed.append("cells")
 
     log = PlanningChangeLog(
         site_id=site_id,
@@ -1030,18 +1186,76 @@ async def get_change_logs(
         .limit(limit)
         .all()
     )
-    return [
-        PlanningChangeLogItem(
-            id=l.id,
-            operation=l.operation,
-            actor_id=l.actor_id,
-            actor_name=getattr(l.actor, "username", None),
-            summary=l.summary,
-            created_at=l.created_at.isoformat() if l.created_at else "",
-            diff=l.diff,
+
+    items: List[PlanningChangeLogItem] = []
+
+    for l in logs:
+        diff: Dict[str, Any] = l.diff or {}
+
+        # 针对 LLD 相关操作，如果当初未写入 cell_changes，则在查询时按需补齐一次，
+        # 以便前端“查看详情”能看到字段级别的 Cell 差异。
+        try:
+            if (l.operation or "").startswith("lld") and not diff.get("cell_changes"):
+                planning = l.planning
+                if planning:
+                    current_plan = planning
+                    prev_plan = (
+                        db.query(SitePlanning)
+                        .filter(
+                            SitePlanning.site_id == l.site_id,
+                            SitePlanning.version < current_plan.version,
+                        )
+                        .order_by(SitePlanning.version.desc())
+                        .first()
+                    )
+
+                    old_cells: List[SitePlanningCell] = []
+                    if prev_plan:
+                        old_cells = (
+                            db.query(SitePlanningCell)
+                            .filter(SitePlanningCell.planning_id == prev_plan.id)
+                            .all()
+                        )
+
+                    new_cells_db = (
+                        db.query(SitePlanningCell)
+                        .filter(SitePlanningCell.planning_id == current_plan.id)
+                        .all()
+                    )
+                    new_cells: List[dict] = []
+                    for c in new_cells_db:
+                        d = {col.name: getattr(c, col.name) for col in SitePlanningCell.__table__.columns}
+                        new_cells.append(d)
+
+                    cell_diff = _compute_lld_cells_diff(old_cells, new_cells)
+                    if cell_diff:
+                        existing_cf = set(diff.get("changed_fields") or [])
+                        for f in cell_diff.get("changed_fields") or []:
+                            existing_cf.add(f)
+                        if existing_cf:
+                            diff["changed_fields"] = sorted(existing_cf)
+
+                        existing_cc = diff.get("cell_changes") or []
+                        existing_cc.extend(cell_diff.get("cell_changes") or [])
+                        if existing_cc:
+                            diff["cell_changes"] = existing_cc
+        except Exception:
+            # 补充 diff 失败不应影响主流程
+            pass
+
+        items.append(
+            PlanningChangeLogItem(
+                id=l.id,
+                operation=l.operation,
+                actor_id=l.actor_id,
+                actor_name=getattr(l.actor, "username", None),
+                summary=l.summary,
+                created_at=l.created_at.isoformat() if l.created_at else "",
+                diff=diff,
+            )
         )
-        for l in logs
-    ]
+
+    return items
 
 
 @router.get("/planning/batch-template")
@@ -1428,6 +1642,19 @@ async def lld_upload_planning_for_site(
     errors: List[str] = []
     warnings: List[str] = []
 
+    # 记录导入前的 Cell 列表，用于后续生成 diff
+    current_planning = _get_current_planning(db, site.id)
+    old_cells: List[SitePlanningCell] = []
+    if current_planning:
+        old_cells = (
+            db.query(SitePlanningCell)
+            .filter(
+                SitePlanningCell.site_id == site.id,
+                SitePlanningCell.planning_id == current_planning.id,
+            )
+            .all()
+        )
+
     cell_dicts: List[dict] = []
     for meta in metas:
         cell = _build_cell_dict_from_row(site.id, site.site_code, meta)
@@ -1466,6 +1693,36 @@ async def lld_upload_planning_for_site(
     for c in cell_dicts:
         db.add(SitePlanningCell(planning_id=planning.id, **c))
     db.commit()
+
+    # 基于导入前后的 Cell 列表，构建更细粒度的 diff（字段级别变更）
+    try:
+        cell_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
+        if cell_diff:
+            log_entry = (
+                db.query(PlanningChangeLog)
+                .filter(PlanningChangeLog.planning_id == planning.id)
+                .order_by(PlanningChangeLog.created_at.desc())
+                .first()
+            )
+            if log_entry:
+                merged = log_entry.diff or {}
+                # 合并 changed_fields
+                existing_cf = set(merged.get("changed_fields") or [])
+                for f in cell_diff.get("changed_fields") or []:
+                    existing_cf.add(f)
+                if existing_cf:
+                    merged["changed_fields"] = sorted(existing_cf)
+                # 合并 cell_changes
+                existing_cc = merged.get("cell_changes") or []
+                existing_cc.extend(cell_diff.get("cell_changes") or [])
+                if existing_cc:
+                    merged["cell_changes"] = existing_cc
+                log_entry.diff = merged
+                db.add(log_entry)
+                db.commit()
+    except Exception:
+        # diff 生成失败不影响主流程
+        pass
 
     return BatchPlanningResult(
         site_code=site.site_code,
@@ -1754,8 +2011,9 @@ async def update_lld_cell(
     if not existing_cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
-    # 验证更新数据
+    # 验证更新数据，并预先构建 Cell 级字段差异，便于写入变更日志
     update_dict = cell_data.model_dump(exclude_unset=True)
+    field_changes: List[Dict[str, Any]] = []
     if update_dict:
         validation_errors = _validate_cell_data(update_dict, "update")
         if validation_errors:
@@ -1767,6 +2025,18 @@ async def update_lld_cell(
         conflicts = _check_cell_conflicts(db, site_id, merged_data, exclude_cell_id=cell_id)
         if conflicts:
             raise HTTPException(status_code=409, detail={"conflicts": conflicts})
+
+        # 记录字段级别变更（例如 TAC 从 A 改成 B），用于后续写入 PlanningChangeLog.diff
+        for field, new_value in update_dict.items():
+            old_value = getattr(existing_cell, field, None)
+            if old_value != new_value:
+                field_changes.append(
+                    {
+                        "field": field,
+                        "old": old_value,
+                        "new": new_value,
+                    }
+                )
 
     # 创建新规划版本
     old_snapshot = _snapshot(current)
@@ -1902,6 +2172,41 @@ async def update_lld_cell(
     all_cells = db.query(SitePlanningCell).filter(SitePlanningCell.planning_id == new_planning.id).all()
     _sync_planning_from_cells(db, new_planning, all_cells)
     db.commit()
+
+    # 将本次 Cell 级别字段变更补充写入规划变更日志的 diff 字段，
+    # 便于前端“日志”Tab 精确展示本次修改了哪些参数（例如 TAC、PCI 等）。
+    if field_changes:
+        log_entry = (
+            db.query(PlanningChangeLog)
+            .filter(PlanningChangeLog.planning_id == new_planning.id)
+            .order_by(PlanningChangeLog.created_at.desc())
+            .first()
+        )
+        if log_entry:
+            diff_obj: Dict[str, Any] = log_entry.diff or {}
+            # 更新 changed_fields：统一使用 cells.<field> 的形式，便于前端直接展示
+            changed_fields = set(diff_obj.get("changed_fields") or [])
+            changed_fields.add("cells")
+            for ch in field_changes:
+                changed_fields.add(f"cells.{ch['field']}")
+            diff_obj["changed_fields"] = sorted(changed_fields)
+
+            # 追加 cell_changes 详细记录
+            cell_changes = diff_obj.get("cell_changes") or []
+            cell_changes.append(
+                {
+                    "cell_id": existing_cell.id,
+                    "rat": existing_cell.rat,
+                    "band_code": existing_cell.band_code,
+                    "local_cell_id": existing_cell.local_cell_id,
+                    "changes": field_changes,
+                }
+            )
+            diff_obj["cell_changes"] = cell_changes
+
+            log_entry.diff = diff_obj
+            db.add(log_entry)
+            db.commit()
 
     # 返回更新后的 Cell
     updated_cell = (
