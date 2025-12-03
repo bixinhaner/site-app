@@ -15,7 +15,7 @@
         </el-button>
         <el-button v-if="editing" @click="cancelEdit">取消编辑</el-button>
         <el-dropdown>
-          <el-button>
+          <el-button :loading="exporting">
             导出
             <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
@@ -92,6 +92,7 @@ const id = route.params.id
 
 const loading = ref(false)
 const saving = ref(false)
+const exporting = ref(false)
 const editing = ref(false)
 const isAdmin = userStore.isAdmin
 const archive = ref(null)
@@ -149,6 +150,8 @@ const load = async (preserveEdits = false) => {
 
 async function exportZip() {
   try {
+    exporting.value = true
+    ElMessage.info('正在生成Zip压缩包，请稍候…')
     const blob = await surveyArchivesApi.exportZip(id)
     const url = window.URL.createObjectURL(new Blob([blob]))
     const a = document.createElement('a')
@@ -156,14 +159,19 @@ async function exportZip() {
     a.download = buildExportName('zip')
     a.click()
     window.URL.revokeObjectURL(url)
+    ElMessage.success('Zip导出成功，浏览器将开始下载')
   } catch (e) {
     console.error(e)
-    ElMessage.error('导出失败')
+    ElMessage.error('导出Zip失败，请稍后重试')
+  } finally {
+    exporting.value = false
   }
 }
 
 async function exportPdf() {
   try {
+    exporting.value = true
+    ElMessage.info('正在生成PDF，请稍候…')
     const blob = await surveyArchivesApi.exportPdf(id)
     const url = window.URL.createObjectURL(new Blob([blob]))
     const a = document.createElement('a')
@@ -171,9 +179,12 @@ async function exportPdf() {
     a.download = buildExportName('pdf')
     a.click()
     window.URL.revokeObjectURL(url)
+    ElMessage.success('PDF导出成功，浏览器将开始下载')
   } catch (e) {
     console.error(e)
-    ElMessage.error('导出失败')
+    ElMessage.error('导出PDF失败，请稍后重试')
+  } finally {
+    exporting.value = false
   }
 }
 
