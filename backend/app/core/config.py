@@ -14,9 +14,11 @@ class Settings(BaseSettings):
     
     # JWT 配置
     # 短期 Access Token 过期时间（分钟）
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
+    # 默认与 .env 示例保持一致：4320 分钟（3 天）
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 4320
     # 长期 Refresh Token 过期时间（天）
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # 默认 3 天，无操作超过 3 天需要重新登录
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 3
     ALGORITHM: str = "HS256"
     
     # 文件上传配置
