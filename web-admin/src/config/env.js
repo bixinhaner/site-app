@@ -22,8 +22,12 @@ const config = {
   // API基础地址
   API_BASE_URL: getBaseURL(),
   
-  // 请求超时时间
+  // 普通请求超时时间（毫秒）
   TIMEOUT: 10000,
+  
+  // 长耗时请求超时时间（毫秒），用于导出PDF/ZIP等操作
+  // 可通过 VITE_LONG_REQUEST_TIMEOUT 覆盖，默认 10 分钟
+  LONG_REQUEST_TIMEOUT: Number(import.meta.env.VITE_LONG_REQUEST_TIMEOUT) || 600000,
   
   // 是否启用请求日志
   ENABLE_REQUEST_LOG: import.meta.env.DEV,

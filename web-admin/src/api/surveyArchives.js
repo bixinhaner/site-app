@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import config from '@/config/env.js'
 
 export const surveyArchivesApi = {
   page(params) {
@@ -51,9 +52,15 @@ export const surveyArchivesApi = {
     return request.get('/api/survey-archives/search', { params })
   },
   exportZip(id) {
-    return request.get(`/api/survey-archives/${id}/export`, { responseType: 'blob' })
+    return request.get(`/api/survey-archives/${id}/export`, {
+      responseType: 'blob',
+      timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
+    })
   },
   exportPdf(id) {
-    return request.get(`/api/survey-archives/${id}/export-pdf`, { responseType: 'blob' })
+    return request.get(`/api/survey-archives/${id}/export-pdf`, {
+      responseType: 'blob',
+      timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
+    })
   },
 }

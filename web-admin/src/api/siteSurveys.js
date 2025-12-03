@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import config from '@/config/env.js'
 
 export const siteSurveysApi = {
   // surveys
@@ -8,9 +9,19 @@ export const siteSurveysApi = {
   create: (data) => request.post('/api/site-surveys/', data),
   update: (id, data) => request.put(`/api/site-surveys/${id}`, data),
   remove: (id) => request.delete(`/api/site-surveys/${id}`),
-  exportZip: (id) => request.get(`/api/site-surveys/${id}/export`, { responseType: 'blob' }),
-  exportBatch: (params) => request.get('/api/site-surveys/export-batch', { params, responseType: 'blob' }),
-  exportPdf: (id) => request.get(`/api/site-surveys/${id}/export-pdf`, { responseType: 'blob' }),
+  exportZip: (id) => request.get(`/api/site-surveys/${id}/export`, {
+    responseType: 'blob',
+    timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
+  }),
+  exportBatch: (params) => request.get('/api/site-surveys/export-batch', {
+    params,
+    responseType: 'blob',
+    timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
+  }),
+  exportPdf: (id) => request.get(`/api/site-surveys/${id}/export-pdf`, {
+    responseType: 'blob',
+    timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
+  }),
   getAuditLogs: (id, params) => request.get(`/api/site-surveys/${id}/audit-logs`, { params }),
 
   // photos

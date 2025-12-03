@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import config from '@/config/env.js'
 
 export const openingArchivesApi = {
   page(params) {
@@ -50,9 +51,15 @@ export const openingArchivesApi = {
     return request.get('/api/opening-archives/search', { params })
   },
   exportZip(id) {
-    return request.get(`/api/opening-archives/${id}/export`, { responseType: 'blob' })
+    return request.get(`/api/opening-archives/${id}/export`, {
+      responseType: 'blob',
+      timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
+    })
   },
   exportPdf(id) {
-    return request.get(`/api/opening-archives/${id}/export-pdf`, { responseType: 'blob' })
+    return request.get(`/api/opening-archives/${id}/export-pdf`, {
+      responseType: 'blob',
+      timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
+    })
   },
 }
