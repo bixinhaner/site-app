@@ -1547,7 +1547,17 @@ async def lld_batch_upload_planning(
             bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
 
             if dry_run:
-                # 试运行仅返回统计信息，不落库
+                # 试运行：不落库，但返回更详细的 Cell 变更预览，方便前端展示
+                current_planning = _get_current_planning(db, site.id)
+                old_cells: List[SitePlanningCell] = []
+                if current_planning:
+                    old_cells = (
+                        db.query(SitePlanningCell)
+                        .filter(SitePlanningCell.planning_id == current_planning.id)
+                        .all()
+                    )
+                preview_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
+
                 results.append(
                     BatchPlanningResult(
                         site_code=tower_id,
@@ -1557,6 +1567,7 @@ async def lld_batch_upload_planning(
                         lte_cell_count=lte_cell_count,
                         nr_cell_count=nr_cell_count,
                         bands=bands,
+                        preview_diff=preview_diff or None,
                     )
                 )
                 success_count += 1

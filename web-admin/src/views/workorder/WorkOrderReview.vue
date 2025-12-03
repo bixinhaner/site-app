@@ -238,7 +238,11 @@
         <div v-if="selectedItem.data_value && selectedItem.data_value.length > 0" style="margin-top: 20px;">
           <h4>填写数据</h4>
           <el-table :data="selectedItem.data_value" size="small" border>
-            <el-table-column prop="field_name" label="字段名称" width="200" />
+            <el-table-column label="字段名称" width="200">
+              <template #default="{ row }">
+                {{ resolveFieldLabel(row.field_name) }}
+              </template>
+            </el-table-column>
             <el-table-column prop="value" label="填写值" min-width="150" />
             <el-table-column prop="unit" label="单位" width="100" />
           </el-table>
@@ -637,6 +641,17 @@ const getImageUrl = (filePath) => {
     return `${config.API_BASE_URL}/${filePath}`
   }
   return filePath
+}
+
+// 将后端存储的 field_name（通常是字段ID）转换为可读的显示名称
+const resolveFieldLabel = (fieldName) => {
+  const item = selectedItem.value
+  if (!item || !Array.isArray(item.fields)) {
+    // 没有字段定义时，退回显示原始字段名
+    return fieldName
+  }
+  const def = item.fields.find(f => f.field_id === fieldName || f.label === fieldName)
+  return def?.label || fieldName
 }
 
 const viewItemDetail = (item) => {

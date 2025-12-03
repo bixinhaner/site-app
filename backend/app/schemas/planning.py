@@ -130,6 +130,8 @@ class BatchPlanningResult(BaseModel):
     lte_cell_count: Optional[int] = None
     nr_cell_count: Optional[int] = None
     bands: Optional[List[str]] = None
+    # 仅在 dry_run 场景下使用：用于在前端预览本次导入将带来的 Cell 级变更
+    preview_diff: Optional[Dict[str, Any]] = None
 
 
 class BatchImportReport(BaseModel):

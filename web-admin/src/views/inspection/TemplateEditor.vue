@@ -229,6 +229,26 @@
                         </template>
                         <div v-if="!item.fields || item.fields.length === 0" class="empty-fields">暂无字段，点击“添加字段”新增</div>
                         <div v-for="(field, fieldIndex) in (item.fields || (item.fields = []))" :key="field.field_id || fieldIndex" class="field-row">
+                          <div class="field-line-labels">
+                            <div class="field-label-with-help" style="width: 180px">
+                              <span>字段ID（英文）</span>
+                              <el-tooltip content="用于系统内部存储和匹配数据，请保持稳定，不要随意修改" placement="top">
+                                <el-icon class="field-help-icon"><QuestionFilled /></el-icon>
+                              </el-tooltip>
+                            </div>
+                            <div class="field-label-with-help" style="width: 180px; margin-left:8px;">
+                              <span>显示名称</span>
+                              <el-tooltip content="用于 App 和档案中的展示标题，可根据业务语言调整文案" placement="top">
+                                <el-icon class="field-help-icon"><QuestionFilled /></el-icon>
+                              </el-tooltip>
+                            </div>
+                            <div class="field-label-with-help" style="width: 160px; margin-left:8px;">
+                              <span>类型</span>
+                              <el-tooltip content="决定该字段在检查表单中的输入控件类型，例如文本、数字、单选、多选等" placement="top">
+                                <el-icon class="field-help-icon"><QuestionFilled /></el-icon>
+                              </el-tooltip>
+                            </div>
+                          </div>
                           <div class="field-line">
                             <el-input 
                               v-model="field.field_id" 
@@ -418,7 +438,7 @@ import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { 
-  ArrowLeft, Check, View, Plus, Delete, DocumentCopy 
+  ArrowLeft, Check, View, Plus, Delete, DocumentCopy, QuestionFilled 
 } from '@element-plus/icons-vue'
 import { templateAPI } from '../../api/templates'
 import { 
@@ -1019,6 +1039,21 @@ onMounted(() => {
 
 .fields-card {
   margin-top: 8px;
+}
+.field-line-labels {
+  display: flex;
+  margin-bottom: 4px;
+}
+.field-label-with-help {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #666;
+}
+.field-help-icon {
+  cursor: pointer;
+  font-size: 14px;
 }
 .field-row { border-top: 1px dashed #eee; padding-top: 8px; margin-top: 8px; }
 .field-line { display:flex; align-items:center; }
