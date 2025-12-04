@@ -593,21 +593,45 @@ async def delete_work_order(
     # 检查工单状态：只能删除待分配或已分配状态的工单
     if wo.status not in [WorkOrderStatusEnum.PENDING, WorkOrderStatusEnum.ACTIVE]:
         raise HTTPException(status_code=400, detail=f"无法删除{wo.status}状态的工单")
-    
+
+    # 记录原始状态用于审计
+    old_status = wo.status
+
     # 如果有关联的检查记录，需要同时删除
+    inspections_to_delete = []
+    seen_inspection_ids = set()
+
+    # 1) 通过 work_orders.inspection_id 关联的检查
     if wo.inspection_id:
         inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
         if inspection:
-            # 删除检查记录及其相关数据
-            db.delete(inspection)
-    
-    # 删除工单
+            inspections_to_delete.append(inspection)
+            seen_inspection_ids.add(inspection.id)
+
+    # 2) 通过 site_inspections.work_order_id 反向关联的检查（可能存在多条）
+    extra_inspections = db.query(SiteInspection).filter(SiteInspection.work_order_id == wo.id).all()
+    for insp in extra_inspections:
+        if insp.id not in seen_inspection_ids:
+            inspections_to_delete.append(insp)
+            seen_inspection_ids.add(insp.id)
+
+    # 先打断双向外键关联，避免 SQLAlchemy 计算删除依赖时出现环形依赖
+    if inspections_to_delete:
+        for insp in inspections_to_delete:
+            insp.work_order_id = None
+        wo.inspection_id = None
+        # 先 flush 一次更新外键，再标记删除
+        db.flush()
+        for insp in inspections_to_delete:
+            db.delete(insp)
+
+    # 最后删除工单本身
     db.delete(wo)
     db.commit()
-    
+
     # 记录审计日志
     _audit(db, "work_order", work_order_id, "delete", current_user.id,
-           from_status=wo.status.value, to_status="deleted")
+           from_status=old_status.value, to_status="deleted")
     
     return {"message": "工单删除成功"}
 
@@ -2344,17 +2368,38 @@ async def batch_work_order_operation(
                     errors.append(f"工单 {wo.id} 状态不允许删除: {wo.status}")
                     error_count += 1
                     continue
-                
-                # 如果有关联的检查记录，需要同时删除
+
+                # 记录原始状态用于审计
+                old_status = wo.status
+
+                # 如果有关联的检查记录，需要同时删除，逻辑与单条删除保持一致
+                inspections_to_delete = []
+                seen_inspection_ids = set()
+
                 if wo.inspection_id:
                     inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
                     if inspection:
-                        db.delete(inspection)
-                
+                        inspections_to_delete.append(inspection)
+                        seen_inspection_ids.add(inspection.id)
+
+                extra_inspections = db.query(SiteInspection).filter(SiteInspection.work_order_id == wo.id).all()
+                for insp in extra_inspections:
+                    if insp.id not in seen_inspection_ids:
+                        inspections_to_delete.append(insp)
+                        seen_inspection_ids.add(insp.id)
+
+                if inspections_to_delete:
+                    for insp in inspections_to_delete:
+                        insp.work_order_id = None
+                    wo.inspection_id = None
+                    db.flush()
+                    for insp in inspections_to_delete:
+                        db.delete(insp)
+
                 # 删除工单
                 db.delete(wo)
                 _audit(db, "work_order", wo.id, "batch_delete", current_user.id,
-                       from_status=wo.status.value, to_status="deleted")
+                       from_status=old_status.value, to_status="deleted")
                 updated_count += 1
                 
             elif operation.operation == "change_status" and operation.value:
