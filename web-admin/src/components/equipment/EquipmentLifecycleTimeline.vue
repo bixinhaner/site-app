@@ -259,7 +259,8 @@ const lifecycleStages = computed(() => {
   if (equipmentInfo.value?.created_at) {
     stages.push({
       title: '📦 设备入库',
-      timestamp: formatTime(equipmentInfo.value.created_at),
+      // 直接使用后端返回的 UTC ISO 字符串作为排序依据
+      timestamp: equipmentInfo.value.created_at,
       type: 'primary',
       color: '#409EFF',
       tagType: 'primary',
@@ -279,7 +280,7 @@ const lifecycleStages = computed(() => {
   if (equipmentInfo.value?.issued_at) {
     stages.push({
       title: '🚚 设备出库',
-      timestamp: formatTime(equipmentInfo.value.issued_at),
+      timestamp: equipmentInfo.value.issued_at,
       type: 'success',
       color: '#67C23A',
       tagType: 'success',
@@ -301,7 +302,7 @@ const lifecycleStages = computed(() => {
     if (record.action === 'bind') {
       stages.push({
         title: isFirst ? '🔗 首次绑定' : '🔗 设备绑定',
-        timestamp: formatTime(record.operated_at),
+        timestamp: record.operated_at,
         type: 'success',
         color: '#10b981',
         tagType: 'success',
@@ -321,7 +322,7 @@ const lifecycleStages = computed(() => {
     } else if (record.action === 'unbind') {
       stages.push({
         title: '🔓 设备解绑',
-        timestamp: formatTime(record.operated_at),
+        timestamp: record.operated_at,
         type: 'warning',
         color: '#ef4444',
         tagType: 'danger',
@@ -337,7 +338,7 @@ const lifecycleStages = computed(() => {
     } else if (record.action === 'rebind') {
       stages.push({
         title: '🔄 重新绑定',
-        timestamp: formatTime(record.operated_at),
+        timestamp: record.operated_at,
         type: 'warning',
         color: '#f59e0b',
         tagType: 'warning',
@@ -354,7 +355,7 @@ const lifecycleStages = computed(() => {
     } else if (record.action === 'omc_first_online') {
       stages.push({
         title: '🌐 首次上线',
-        timestamp: formatTime(record.operated_at),
+        timestamp: record.operated_at,
         type: 'info',
         color: '#0ea5e9',
         tagType: 'info',
@@ -370,7 +371,7 @@ const lifecycleStages = computed(() => {
     } else if (record.action === 'omc_first_activated') {
       stages.push({
         title: '⚡ 首次激活',
-        timestamp: formatTime(record.operated_at),
+        timestamp: record.operated_at,
         type: 'success',
         color: '#22c55e',
         tagType: 'success',
@@ -390,7 +391,7 @@ const lifecycleStages = computed(() => {
   if (equipmentInfo.value?.status === 'activated') {
     stages.push({
       title: '✅ 投入使用',
-      timestamp: formatTime(equipmentInfo.value.updated_at),
+      timestamp: equipmentInfo.value.updated_at,
       type: 'success',
       color: '#10b981',
       tagType: 'success',

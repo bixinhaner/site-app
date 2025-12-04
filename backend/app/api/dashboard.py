@@ -12,6 +12,7 @@ from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
 from app.models.survey_archive import SiteSurveyArchive
 from app.models.equipment import Inventory, Equipment, StockTransaction
+from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
 
@@ -56,7 +57,7 @@ async def get_dashboard_summary(
         "type": t.transaction_type,
         "document_number": t.document_number,
         "operator_name": t.operator.full_name if t.operator else None,
-        "operation_time": t.operation_time.isoformat() if t.operation_time else None,
+        "operation_time": to_utc_iso(t.operation_time) if t.operation_time else None,
         "total_quantity": t.total_quantity,
     } for t in recent_transactions]
 
@@ -115,5 +116,5 @@ async def get_dashboard_summary(
         "site_progress": site_progress,
         "inspections": {"pending_review_count": int(pending_review_count)},
         "surveys": {"last7d_new": int(surveys_last7d)},
-        "time_range": {"from": start.isoformat(), "to": end.isoformat()},
+        "time_range": {"from": to_utc_iso(start), "to": to_utc_iso(end)},
     }

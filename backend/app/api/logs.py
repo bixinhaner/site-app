@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.user_log import UserLog
+from app.utils.timezone import to_utc_iso
 from app.schemas.user_log import (
     UserLogCreate, 
     UserLogBatchCreate, 
@@ -367,5 +368,6 @@ async def cleanup_old_logs(
     return {
         "success": True,
         "deleted_count": deleted_count,
-        "cutoff_date": cutoff_date.isoformat()
+        # 返回给前端的截止时间统一按 UTC 输出
+        "cutoff_date": to_utc_iso(cutoff_date, assume_local=True)
     }

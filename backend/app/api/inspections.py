@@ -2292,6 +2292,8 @@ async def get_binding_history(
     ).all()
     
     # 格式化返回数据
+    from app.utils.timezone import to_utc_iso
+
     result = []
     for record in history_records:
         result.append({
@@ -2303,7 +2305,8 @@ async def get_binding_history(
                 "id": record.operator.id,
                 "name": record.operator.full_name or record.operator.username
             },
-            "operated_at": record.operated_at.isoformat() if record.operated_at else None,
+            # operated_at 由数据库 CURRENT_TIMESTAMP 写入，视为 UTC
+            "operated_at": to_utc_iso(record.operated_at) if record.operated_at else None,
             "latitude": record.latitude,
             "longitude": record.longitude,
             "gps_accuracy": record.gps_accuracy,
@@ -2361,6 +2364,8 @@ async def get_equipment_binding_history(
         }
     
     # 格式化返回数据
+    from app.utils.timezone import to_utc_iso
+
     result = []
     for record in history_records:
         result.append({
@@ -2379,7 +2384,8 @@ async def get_equipment_binding_history(
                 "id": record.operator.id,
                 "name": record.operator.full_name or record.operator.username
             },
-            "operated_at": record.operated_at.isoformat() if record.operated_at else None,
+            # operated_at 由数据库 CURRENT_TIMESTAMP 写入，视为 UTC
+            "operated_at": to_utc_iso(record.operated_at) if record.operated_at else None,
             "previous_equipment_sn": record.previous_equipment_sn,
             "latitude": record.latitude,
             "longitude": record.longitude,
@@ -2400,7 +2406,8 @@ async def get_equipment_binding_history(
                     "site": None,
                     "cell_info": {},
                     "operator": {"id": None, "name": "系统(OMC)"},
-                    "operated_at": state.first_online_at.isoformat(),
+                    # OMC 时间在写入时使用 utcnow，直接视为 UTC
+                    "operated_at": to_utc_iso(state.first_online_at),
                     "previous_equipment_sn": None,
                     "latitude": None,
                     "longitude": None,
@@ -2415,7 +2422,7 @@ async def get_equipment_binding_history(
                     "site": None,
                     "cell_info": {},
                     "operator": {"id": None, "name": "系统(OMC)"},
-                    "operated_at": state.first_activated_at.isoformat(),
+                    "operated_at": to_utc_iso(state.first_activated_at),
                     "previous_equipment_sn": None,
                     "latitude": None,
                     "longitude": None,

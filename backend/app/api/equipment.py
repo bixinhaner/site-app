@@ -9,13 +9,14 @@ from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.equipment import (
-    Equipment, 
-    EquipmentPackage, 
+    Equipment,
+    EquipmentPackage,
     EquipmentPackageItem,
     EquipmentCategoryEnum,
-    EquipmentStatusEnum
+    EquipmentStatusEnum,
 )
 from app.models.equipment import EquipmentInstance  # noqa: E402
+from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
 
@@ -483,9 +484,11 @@ async def search_equipment_instance(
         "equipment_name": equipment.equipment_name if equipment else None,
         "equipment_code": equipment.equipment_code if equipment else None,
         "warehouse_name": warehouse.warehouse_name if warehouse else None,
-        "issued_at": instance.issued_date.isoformat() if instance.issued_date else None,
+        # issued_date 历史上使用 datetime.now()（本地时间）写入，这里按本地时间换算到 UTC
+        "issued_at": to_utc_iso(instance.issued_date, assume_local=True) if instance.issued_date else None,
         "issued_to": issuer.id if issuer else None,
         "issued_to_name": (issuer.full_name or issuer.username) if issuer else None,
-        "created_at": instance.created_at.isoformat() if instance.created_at else None,
-        "updated_at": instance.updated_at.isoformat() if instance.updated_at else None,
+        # created_at / updated_at 多数来源于数据库 CURRENT_TIMESTAMP 或 utcnow，视为 UTC
+        "created_at": to_utc_iso(instance.created_at) if instance.created_at else None,
+        "updated_at": to_utc_iso(instance.updated_at) if instance.updated_at else None,
     }

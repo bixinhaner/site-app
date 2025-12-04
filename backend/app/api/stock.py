@@ -24,6 +24,7 @@ from app.models.equipment import (
     InventoryStatusEnum,
     EquipmentStatusEnum
 )
+from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
 
@@ -71,7 +72,8 @@ async def get_inventory_list(
             "min_stock": inv.min_stock,
             "max_stock": inv.max_stock,
             "is_low_stock": inv.current_stock <= inv.min_stock,
-            "last_updated_at": inv.last_updated_at.isoformat() if inv.last_updated_at else None
+            # 库存更新时间来自数据库 CURRENT_TIMESTAMP，按 UTC 输出
+            "last_updated_at": to_utc_iso(inv.last_updated_at) if inv.last_updated_at else None
         })
     
     return {"inventory": result}
@@ -115,7 +117,8 @@ async def get_inventory_dashboard(
             "type": trans.transaction_type,
             "document_number": trans.document_number,
             "operator_name": trans.operator.full_name if trans.operator else None,
-            "operation_time": trans.operation_time.isoformat() if trans.operation_time else None,
+            # 出入库操作时间采用数据库时间，按 UTC 输出
+            "operation_time": to_utc_iso(trans.operation_time) if trans.operation_time else None,
             "total_quantity": trans.total_quantity
         })
     
@@ -279,6 +282,7 @@ async def scan_equipment_checkout(
         package_id=package.id,
         operator_id=current_user.id,
         scan_barcode=barcode,
+        # 扫描时间使用服务器本地时间记录
         scan_time=datetime.now(),
         scan_location=gps_location,
         document_number=document_number,
@@ -328,6 +332,7 @@ async def scan_equipment_checkout(
         equipment_instance_id=equipment_instance.id if equipment_instance else None,  # 关联设备实例
         scan_location=gps_location,
         is_confirmed=True,  # 直接设置为已确认
+        # 确认时间使用服务器本地时间记录
         confirmed_at=datetime.now(),  # 设置确认时间
         confirmation_notes="扫码领料自动确认"  # 添加确认备注
     )
@@ -352,7 +357,8 @@ async def scan_equipment_checkout(
             "name": package.package_name
         },
         "checkout_items": checkout_items,
-        "pickup_time": datetime.now().isoformat()
+        # 返回给前端时统一按 UTC 输出
+        "pickup_time": to_utc_iso(datetime.now(), assume_local=True)
     }
 
 @router.post("/confirm-pickup")
@@ -402,9 +408,14 @@ async def get_my_pickup_records(
     query = db.query(PickupRecord).filter(PickupRecord.picker_id == current_user.id)
     
     if start_date:
-        query = query.filter(PickupRecord.pickup_time >= datetime.fromisoformat(start_date))
+        # 支持带 Z 的 UTC 字符串和本地时间字符串
+        query = query.filter(
+            PickupRecord.pickup_time >= datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+        )
     if end_date:
-        query = query.filter(PickupRecord.pickup_time <= datetime.fromisoformat(end_date))
+        query = query.filter(
+            PickupRecord.pickup_time <= datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        )
     
     records = query.order_by(desc(PickupRecord.pickup_time)).all()
     
@@ -423,11 +434,13 @@ async def get_my_pickup_records(
                 "status": record.equipment_instance.status if record.equipment_instance else None,
                 "warehouse_name": record.equipment_instance.warehouse.warehouse_name if record.equipment_instance and record.equipment_instance.warehouse else None
             } if record.equipment_instance else None,
-            "pickup_time": record.pickup_time.isoformat() if record.pickup_time else None,
+            # pickup_time 使用数据库时间（默认 CURRENT_TIMESTAMP），视为 UTC
+            "pickup_time": to_utc_iso(record.pickup_time) if record.pickup_time else None,
             "is_confirmed": record.is_confirmed,
             "is_returned": record.is_returned,
-            "returned_at": record.returned_at.isoformat() if record.returned_at else None,
-            "confirmed_at": record.confirmed_at.isoformat() if record.confirmed_at else None,
+            # returned_at / confirmed_at 使用 datetime.now() 写入，按本地->UTC 输出
+            "returned_at": to_utc_iso(record.returned_at, assume_local=True) if record.returned_at else None,
+            "confirmed_at": to_utc_iso(record.confirmed_at, assume_local=True) if record.confirmed_at else None,
             "work_order_id": record.work_order_id
         })
     
@@ -509,7 +522,7 @@ async def return_equipment_pickup(
         "message": "归还成功",
         "pickup_record_id": pickup_record.id,
         "serial_number": pickup_record.serial_number,
-        "returned_at": pickup_record.returned_at.isoformat() if pickup_record.returned_at else None
+        "returned_at": to_utc_iso(pickup_record.returned_at, assume_local=True) if pickup_record.returned_at else None
     }
 
 # ===== 入库管理 =====
@@ -659,9 +672,13 @@ async def get_stock_transactions(
     if warehouse_id:
         query = query.filter(StockTransaction.warehouse_id == warehouse_id)
     if start_date:
-        query = query.filter(StockTransaction.operation_time >= datetime.fromisoformat(start_date))
+        query = query.filter(
+            StockTransaction.operation_time >= datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+        )
     if end_date:
-        query = query.filter(StockTransaction.operation_time <= datetime.fromisoformat(end_date))
+        query = query.filter(
+            StockTransaction.operation_time <= datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        )
     
     # 非管理员只能查看自己的记录
     if current_user.role not in ["admin", "warehouse_manager"]:
@@ -689,7 +706,7 @@ async def get_stock_transactions(
             "transaction_type": trans.transaction_type,
             "warehouse_id": trans.warehouse_id,
             "operator_name": trans.operator.full_name if trans.operator else None,
-            "operation_time": trans.operation_time.isoformat() if trans.operation_time else None,
+            "operation_time": to_utc_iso(trans.operation_time) if trans.operation_time else None,
             "total_quantity": trans.total_quantity,
             "approval_status": trans.approval_status,
             "scan_barcode": trans.scan_barcode,
@@ -1071,7 +1088,7 @@ async def get_import_history(
         result.append({
             "id": record.id,
             "file_name": record.file_name,
-            "import_date": record.import_date.isoformat() if record.import_date else None,
+            "import_date": to_utc_iso(record.import_date) if record.import_date else None,
             "equipment_type_name": record.equipment_type.equipment_name if record.equipment_type else None,
             "warehouse_name": record.warehouse.warehouse_name if record.warehouse else None,
             "total_count": record.total_count,
@@ -1156,7 +1173,8 @@ async def check_sn_batch(
                 "status": existing.status,
                 "warehouse_name": existing.warehouse.warehouse_name if existing.warehouse else None,
                 "vendor": existing.vendor,
-                "created_at": existing.created_at.isoformat() if existing.created_at else None
+                # 设备实例创建时间来自数据库时间，视为 UTC
+                "created_at": to_utc_iso(existing.created_at) if existing.created_at else None
             })
         else:
             results.append({
@@ -1196,16 +1214,17 @@ async def get_equipment_instances(
             "imei": instance.imei,
             "firmware_version": instance.firmware_version,
             "hardware_version": instance.hardware_version,
-            "manufacture_date": instance.manufacture_date.isoformat() if instance.manufacture_date else None,
-            "warranty_start_date": instance.warranty_start_date.isoformat() if instance.warranty_start_date else None,
-            "warranty_end_date": instance.warranty_end_date.isoformat() if instance.warranty_end_date else None,
+            # 这些日期字段来源导入文件，多为日期意义，统一视为 UTC
+            "manufacture_date": to_utc_iso(instance.manufacture_date) if instance.manufacture_date else None,
+            "warranty_start_date": to_utc_iso(instance.warranty_start_date) if instance.warranty_start_date else None,
+            "warranty_end_date": to_utc_iso(instance.warranty_end_date) if instance.warranty_end_date else None,
             "vendor": instance.vendor,
             "batch_number": instance.batch_number,
             "quality_status": instance.quality_status,
             "status": instance.status,
             "location": instance.location,
             "warehouse_name": instance.warehouse.warehouse_name if instance.warehouse else None,
-            "created_at": instance.created_at.isoformat() if instance.created_at else None
+            "created_at": to_utc_iso(instance.created_at) if instance.created_at else None
         })
     
     return {"instances": result}

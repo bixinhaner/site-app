@@ -32,6 +32,7 @@ from app.services.omc_client import (
     is_success_status_payload,
 )
 from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_state
+from app.utils.timezone import to_utc_iso
 from app.services.omc_monitor import advance_opening_work_orders_by_ever
 
 router = APIRouter()
@@ -567,7 +568,8 @@ async def get_site_omc_devices(
                 "cell_id": row.cell_id,
                 "installer_id": row.operator_id,
                 "installer_name": installer_name,
-                "bound_at": row.operated_at.isoformat() if row.operated_at else None,
+                # operated_at 使用数据库时间，视为 UTC
+                "bound_at": to_utc_iso(row.operated_at) if row.operated_at else None,
                 "online": None,
                 "activated": None,
             }
@@ -632,7 +634,8 @@ async def get_site_omc_devices(
             except Exception as exc:  # pragma: no cover
                 print(f"[OMC] 查询激活状态失败 SN={sn}: {exc}")
                 activated_map[sn] = False
-        checked_at = datetime.utcnow().isoformat()
+        # 检查时间统一按 UTC ISO 输出
+        checked_at = to_utc_iso(datetime.utcnow())
         # 提交本次刷新中写入的 OmcDeviceState 变更
         try:
             db.commit()

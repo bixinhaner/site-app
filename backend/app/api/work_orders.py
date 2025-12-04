@@ -44,6 +44,7 @@ from app.utils.gps_utils import reverse_geocode
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
 from app.services.omc_monitor import run_omc_check_for_work_order
+from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
 
@@ -383,7 +384,8 @@ async def create_work_order(
                     "assigned_to": enriched.get("assigned_to"),
                     "assignee_name": enriched.get("assignee_name"),
                     "assigner_name": enriched.get("assigner_name"),
-                    "assigned_at": enriched.get("assigned_at").isoformat() if enriched.get("assigned_at") else None,
+                    # assigned_at 在 WorkOrder 中使用数据库/utcnow，视为 UTC 输出
+                    "assigned_at": to_utc_iso(enriched.get("assigned_at")) if enriched.get("assigned_at") else None,
                 })
 
             raise HTTPException(
@@ -446,7 +448,7 @@ async def create_work_order(
                     "assigned_to": enriched.get("assigned_to"),
                     "assignee_name": enriched.get("assignee_name"),
                     "assigner_name": enriched.get("assigner_name"),
-                    "assigned_at": enriched.get("assigned_at").isoformat() if enriched.get("assigned_at") else None,
+                    "assigned_at": to_utc_iso(enriched.get("assigned_at")) if enriched.get("assigned_at") else None,
                 })
             raise HTTPException(
                 status_code=409,
@@ -2276,7 +2278,8 @@ async def review_work_order(
                     'status': 'approved',
                     'score': getattr(wo, 'score', None),
                     'reviewed_by': current_user.id,
-                    'reviewed_at': datetime.utcnow().isoformat(),
+                    # 审核时间按 UTC ISO 输出，便于前端统一解析
+                    'reviewed_at': to_utc_iso(datetime.utcnow()),
                     'comments': review_data.comments,
                 }
                 try:
@@ -2556,7 +2559,8 @@ async def get_activation_status(
         "status": wo.status.value,
         "activation_check": activation_check,
         "last_check_time": wo.extra_data.get("activation_check_time") if wo.extra_data else None,
-        "activated_at": wo.activated_at.isoformat() if wo.activated_at else None
+        # activated_at 使用 utcnow 写入，视为 UTC 输出
+        "activated_at": to_utc_iso(wo.activated_at) if wo.activated_at else None
     }
 
 
@@ -2710,7 +2714,8 @@ async def get_work_order_audit_logs(
             "operator_username": operator.username if operator else "unknown",
             "comments": log.comments,
             "details": log.details,
-            "created_at": log.created_at.isoformat() if log.created_at else None
+            # 审计日志创建时间来自数据库时间，视为 UTC
+            "created_at": to_utc_iso(log.created_at) if log.created_at else None
         })
     
     # 如果有关联的检查，也获取检查的审核日志
@@ -2734,7 +2739,7 @@ async def get_work_order_audit_logs(
                 "operator_username": operator.username if operator else "unknown",
                 "comments": log.comments,
                 "details": log.details,
-                "created_at": log.created_at.isoformat() if log.created_at else None
+                "created_at": to_utc_iso(log.created_at) if log.created_at else None
             })
     
     return {
