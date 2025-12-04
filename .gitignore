@@ -74,3 +74,6 @@ LocationPluginBuilder/*/build/
 # 测试文件
 *-test.html
 test.html
+
+# 数据库备份文件
+backend/db-backups/

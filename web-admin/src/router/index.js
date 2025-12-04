@@ -160,6 +160,12 @@ const routes = [
             name: 'MockOmc',
             component: () => import('../views/system/MockOmc.vue'),
             meta: { title: '模拟 OMC 测试桩', icon: 'Cpu' }
+          },
+          {
+            path: 'backup',
+            name: 'DataBackup',
+            component: () => import('../views/system/DataBackup.vue'),
+            meta: { title: '数据备份', icon: 'FolderOpened' }
           }
         ]
       },
