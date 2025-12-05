@@ -47,6 +47,16 @@ export const templateAPI = {
   // 获取模板使用情况
   async getTemplateUsage(templateId) {
     return request.get(`${API_BASE}/templates/${templateId}/usage`)
+  },
+
+  // 导出模板（JSON）
+  async exportTemplate(templateId) {
+    return request.get(`${API_BASE}/templates/${templateId}/export`)
+  },
+
+  // 导入模板（JSON）
+  async importTemplate(payload) {
+    return request.post(`${API_BASE}/templates/import`, payload)
   }
 }
 

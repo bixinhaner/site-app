@@ -2,7 +2,7 @@
 模板绑定相关的 Pydantic 模式
 """
 
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field, validator
 
@@ -182,6 +182,33 @@ class InspectionTemplateCreate(BaseModel):
                 if item['required_type'] not in ['photo', 'data', 'both']:
                     raise ValueError("Item required_type must be 'photo', 'data', or 'both'")
         
+        return v
+
+
+class TemplateExportResponse(BaseModel):
+    """检查模板导出响应（JSON 内容）"""
+    template_name: str
+    template_data: Dict[str, Any]
+    description: Optional[str] = None
+    metadata: Dict[str, Any]
+
+
+class TemplateImportPayload(BaseModel):
+    """检查模板导入请求（JSON 内容）"""
+    template_name: str = Field(..., min_length=1, max_length=100, description="新模板名称，必须唯一")
+    template: Dict[str, Any] = Field(..., description="完整模板JSON，至少包含 template_data")
+
+    @validator("template")
+    def validate_template(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(v, dict):
+            raise ValueError("template must be a JSON object")
+
+        template_data = v.get("template_data")
+        if template_data is None:
+            raise ValueError("template.template_data is required")
+
+        # 复用 InspectionTemplateCreate 的校验逻辑
+        InspectionTemplateCreate.validate_template_data(template_data)  # type: ignore[arg-type]
         return v
 
 

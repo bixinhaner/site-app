@@ -24,10 +24,16 @@
         </el-button>
       </div>
       
-      <el-button type="primary" @click="handleCreateTemplate">
-        <el-icon><Plus /></el-icon>
-        新建模板
-      </el-button>
+      <div class="action-buttons">
+        <el-button type="primary" @click="handleCreateTemplate">
+          <el-icon><Plus /></el-icon>
+          新建模板
+        </el-button>
+        <el-button @click="handleImportTemplate">
+          <el-icon><Upload /></el-icon>
+          导入模板(JSON)
+        </el-button>
+      </div>
     </div>
 
     <el-table 
@@ -108,6 +114,12 @@
           >
             删除
           </el-button>
+          <el-button 
+            size="small" 
+            @click="handleExportTemplate(row)"
+          >
+            导出
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -178,13 +190,57 @@
         @refresh="loadTemplates"
       />
     </el-dialog>
+
+    <!-- 导入模板对话框 -->
+    <el-dialog
+      v-model="importDialogVisible"
+      title="导入检查模板(JSON)"
+      width="600px"
+    >
+      <p class="hint">
+        请选择从本系统导出的模板 JSON 文件，或符合结构的自定义模板 JSON 文件。
+      </p>
+      <el-form
+        :model="importForm"
+        label-width="120px"
+        style="margin-top: 12px;"
+      >
+        <el-form-item label="选择文件">
+          <input
+            type="file"
+            accept=".json,application/json"
+            @change="handleImportFileChange"
+          />
+          <div v-if="importFileName" class="file-name">已选择：{{ importFileName }}</div>
+        </el-form-item>
+        <el-form-item label="模板名称(可选)">
+          <el-input
+            v-model="importForm.template_name"
+            placeholder="请输入新模板名称（必填且唯一）"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="importDialogVisible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="importing"
+            @click="confirmImportTemplate"
+          >
+            确认导入
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Plus } from '@element-plus/icons-vue'
+import { Search, Plus, Upload } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { templateAPI } from '../../api/templates'
 import BindingManagement from './components/BindingManagement.vue'
@@ -205,6 +261,14 @@ const templateDialogVisible = ref(false)
 const bindingDialogVisible = ref(false)
 const isEditingTemplate = ref(false)
 const currentTemplate = ref(null)
+
+const importDialogVisible = ref(false)
+const importing = ref(false)
+const importForm = reactive({
+  template_name: ''
+})
+const importFileName = ref('')
+const importTemplateObject = ref(null)
 
 // 表单数据
 const templateFormRef = ref()
@@ -279,6 +343,97 @@ const handleEditTemplate = (template) => {
 const handleManageBindings = (template) => {
   currentTemplate.value = template
   bindingDialogVisible.value = true
+}
+
+const handleExportTemplate = async (template) => {
+  try {
+    const data = await templateAPI.exportTemplate(template.id)
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    })
+    const link = document.createElement('a')
+    const ts = new Date().toISOString().replace(/[:.]/g, '-')
+    const filename = `template_${template.id}_${ts}.json`
+    link.href = URL.createObjectURL(blob)
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(link.href)
+    ElMessage.success('模板导出成功')
+  } catch (error) {
+    console.error('导出模板失败:', error)
+    ElMessage.error('导出模板失败')
+  }
+}
+
+const handleImportTemplate = () => {
+  importFileName.value = ''
+  importTemplateObject.value = null
+  importForm.template_name = ''
+  importDialogVisible.value = true
+}
+
+const handleImportFileChange = (event) => {
+  const file = event.target.files && event.target.files[0]
+  if (!file) {
+    importFileName.value = ''
+    importTemplateObject.value = null
+    return
+  }
+  importFileName.value = file.name
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const text = e.target.result
+      const parsed = JSON.parse(text)
+      importTemplateObject.value = parsed
+    } catch (err) {
+      importTemplateObject.value = null
+      ElMessage.error('JSON 解析失败，请检查文件内容')
+    }
+  }
+  reader.onerror = () => {
+    importTemplateObject.value = null
+    ElMessage.error('读取文件失败')
+  }
+  reader.readAsText(file, 'utf-8')
+}
+
+const confirmImportTemplate = async () => {
+  if (!importTemplateObject.value) {
+    ElMessage.warning('请先选择要导入的 JSON 文件')
+    return
+  }
+  if (!importForm.template_name || !importForm.template_name.trim()) {
+    ElMessage.warning('请填写新模板名称')
+    return
+  }
+
+  const payload = {
+    template_name: importForm.template_name.trim(),
+    template: importTemplateObject.value
+  }
+
+  importing.value = true
+  try {
+    const res = await templateAPI.importTemplate(payload)
+    ElMessage.success(`导入成功，已创建模板：${res.template_name}`)
+    importDialogVisible.value = false
+    await loadTemplates()
+  } catch (error) {
+    console.error('导入模板失败:', error)
+    const detail = error?.response?.data?.detail
+    if (typeof detail === 'string') {
+      ElMessage.error(`导入失败：${detail}`)
+    } else if (detail?.message) {
+      ElMessage.error(`导入失败：${detail.message}`)
+    } else {
+      ElMessage.error('导入模板失败，请检查 JSON 结构')
+    }
+  } finally {
+    importing.value = false
+  }
 }
 
 const handleDeleteTemplate = async (template) => {
@@ -392,6 +547,12 @@ onMounted(() => {
   align-items: center;
 }
 
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .template-name {
   line-height: 1.4;
 }
@@ -432,5 +593,16 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.hint {
+  color: #909399;
+  font-size: 13px;
+}
+
+.file-name {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #606266;
 }
 </style>

@@ -6,7 +6,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, or_, desc
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
@@ -16,11 +16,12 @@ from app.models.site import Site
 from app.models.inspection import (
     InspectionTemplate, TemplateBinding, SiteInspection
 )
+from app.models.user_log import UserLog
 from app.schemas.template_binding import (
     TemplateBindingCreate, TemplateBindingUpdate, TemplateBindingResponse,
     TemplateBindingBatchUpdate, ResolveContextSchema, TemplateResolveResponse,
     TemplateMatchResultSchema, InspectionTemplateCreate, InspectionTemplateUpdate,
-    InspectionTemplateResponse
+    InspectionTemplateResponse, TemplateExportResponse, TemplateImportPayload
 )
 from app.api.auth import get_current_user
 from app.services.template_resolver import (
@@ -246,6 +247,176 @@ async def get_template_usage(
         "completed_inspections": total - active,
         "inspection_details": details
     }
+
+
+@router.get("/templates/{template_id}/export", response_model=TemplateExportResponse)
+async def export_template(
+    template_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """导出检查模板为 JSON（不含绑定规则）"""
+    # 仅管理员 / 经理
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有管理员或项目经理可以导出模板",
+        )
+
+    template = (
+        db.query(InspectionTemplate)
+        .options(joinedload(InspectionTemplate.creator))
+        .filter(InspectionTemplate.id == template_id)
+        .first()
+    )
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="模板不存在",
+        )
+
+    metadata: Dict[str, Any] = {
+        "template_id": template.id,
+        "created_by": template.created_by,
+        "creator_name": template.creator.full_name if template.creator else None,
+        "created_at": template.created_at.isoformat() if template.created_at else None,
+        "updated_at": template.updated_at.isoformat() if template.updated_at else None,
+        "exported_by": current_user.id,
+        "exported_username": current_user.username,
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "version": "1.0",
+    }
+
+    # 记录导出日志
+    try:
+        log = UserLog(
+            session_id="template-export",
+            user_id=current_user.id,
+            username=current_user.username,
+            timestamp=datetime.utcnow(),
+            action="template_export",
+            level="INFO",
+            page_route="web-admin/inspections/templates",
+            page_options=None,
+            action_data={
+                "template_id": template.id,
+                "template_name": template.template_name,
+            },
+            device_platform="web-admin",
+            device_model="browser",
+            screen_width=None,
+            screen_height=None,
+            error_message=None,
+            error_stack=None,
+            error_context=None,
+        )
+        db.add(log)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return TemplateExportResponse(
+        template_name=template.template_name,
+        template_data=template.template_data,
+        description=template.template_data.get("description") if isinstance(template.template_data, dict) else None,
+        metadata=metadata,
+    )
+
+
+@router.post("/templates/import", response_model=InspectionTemplateResponse)
+async def import_template(
+    payload: TemplateImportPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """从 JSON 导入检查模板（始终新建一个模板，不覆盖现有）"""
+    # 仅管理员 / 经理
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有管理员或项目经理可以导入模板",
+        )
+
+    # 名称必填且需唯一
+    template_name = payload.template_name.strip()
+    if not template_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="模板名称不能为空",
+        )
+
+    exists = (
+        db.query(InspectionTemplate)
+        .filter(InspectionTemplate.template_name == template_name)
+        .first()
+    )
+    if exists:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="模板名称已存在，请修改后再导入",
+        )
+
+    template_json = payload.template
+    template_data = template_json.get("template_data") or {}
+    description = template_json.get("description") or template_data.get("description") or ""
+
+    # 生成新的模板 ID
+    new_id = str(uuid.uuid4())
+
+    # 创建模板记录
+    template = InspectionTemplate(
+        id=new_id,
+        template_name=template_name,
+        template_data={
+            **template_data,
+            "description": description,
+        },
+        created_by=current_user.id,
+    )
+
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+
+    # 记录导入日志
+    try:
+        log = UserLog(
+            session_id="template-import",
+            user_id=current_user.id,
+            username=current_user.username,
+            timestamp=datetime.utcnow(),
+            action="template_import",
+            level="INFO",
+            page_route="web-admin/inspections/templates",
+            page_options=None,
+            action_data={
+                "template_id": template.id,
+                "template_name": template.template_name,
+            },
+            device_platform="web-admin",
+            device_model="browser",
+            screen_width=None,
+            screen_height=None,
+            error_message=None,
+            error_stack=None,
+            error_context=None,
+        )
+        db.add(log)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return InspectionTemplateResponse(
+        id=template.id,
+        template_name=template.template_name,
+        template_data=template.template_data,
+        created_by=template.created_by,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+        creator_name=current_user.full_name,
+        bindings_count=0,
+        active_bindings_count=0,
+    )
 
 
 @router.put("/templates/{template_id}", response_model=dict)
