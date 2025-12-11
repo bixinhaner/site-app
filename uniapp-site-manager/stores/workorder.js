@@ -9,6 +9,7 @@ export const useWorkOrderStore = defineStore('workorder', () => {
   const items = ref([])
   const photos = ref([])
   const loading = ref(false)
+  const focusedWorkOrderId = ref(null)
 
   const userStore = useUserStore()
 
@@ -279,7 +280,14 @@ export const useWorkOrderStore = defineStore('workorder', () => {
   }
 
   return { 
-    list, current, items, photos, loading, 
+    list, current, items, photos, loading,
+    focusedWorkOrderId,
+    setFocusedWorkOrder(id) {
+      focusedWorkOrderId.value = id || null
+    },
+    clearFocusedWorkOrder() {
+      focusedWorkOrderId.value = null
+    },
     getMyWorkOrders, getWorkOrder, getItems, getPhotos, 
     acceptWorkOrder, getInspection, completeWorkOrder,
     uploadPhoto, deletePhoto, updateItem, getItemFieldSchema,

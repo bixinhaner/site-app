@@ -43,6 +43,7 @@
       refresher-enabled 
       :refresher-triggered="refreshing" 
       @refresherrefresh="handleRefresh"
+      :scroll-into-view="scrollIntoView"
       refresher-background="#f7f8fb"
     >
       <view class="order-list">
@@ -51,7 +52,14 @@
           <text class="empty-icon">📭</text>
           <text class="empty-text">{{ $t('messages.noData') }}</text>
         </view>
-        <view class="order-item" v-for="wo in orders" :key="wo.id" @click="openDetail(wo)">
+        <view
+          class="order-item"
+          v-for="wo in orders"
+          :key="wo.id"
+          :id="`wo-${wo.id}`"
+          :class="{ 'order-item-focused': highlightedWorkOrderId === wo.id }"
+          @click="openDetail(wo)"
+        >
           <view class="order-header">
             <text class="order-title">{{ wo.title }}</text>
             <text class="order-status" :class="'status-' + wo.status">{{ statusText(wo.status) }}</text>
@@ -92,6 +100,8 @@ const store = useWorkOrderStore()
 const languageStore = useLanguageStore()
 const userStore = useUserStore()
 const orders = ref([])
+const scrollIntoView = ref('')
+const highlightedWorkOrderId = ref(null)
 const status = ref('')
 const searchKeyword = ref('')
 const showSearch = ref(false)
@@ -109,6 +119,30 @@ const reload = async () => {
     if (res.success) {
       orders.value = res.data
       console.log('✅ 工单列表刷新成功', { count: res.data?.length })
+
+      // 如果有需要聚焦的工单，则滚动到对应卡片位置并短暂高亮
+      if (store.focusedWorkOrderId) {
+        const targetId = store.focusedWorkOrderId
+        const exists = (res.data || []).some(wo => wo.id === targetId)
+        if (exists) {
+          scrollIntoView.value = `wo-${targetId}`
+          highlightedWorkOrderId.value = targetId
+          // 2 秒后取消高亮，并清理聚焦标记
+          setTimeout(() => {
+            if (highlightedWorkOrderId.value === targetId) {
+              highlightedWorkOrderId.value = null
+            }
+            store.clearFocusedWorkOrder()
+          }, 2000)
+        } else {
+          scrollIntoView.value = ''
+          highlightedWorkOrderId.value = null
+          store.clearFocusedWorkOrder()
+        }
+      } else {
+        scrollIntoView.value = ''
+        highlightedWorkOrderId.value = null
+      }
     } else {
       console.error('❌ 工单列表刷新失败', res.error)
       uni.showToast({ title: $t('messages.dataLoadFailed'), icon: 'none' })
@@ -465,16 +499,22 @@ onShow(() => {
 		color: var(--text-secondary);
 	}
 
-	// 工单卡片 - 统一卡片样式
+// 工单卡片 - 统一卡片样式
 	.order-item {
 		background: var(--bg-elevated);
 		margin: 16rpx 0;
 		padding: 24rpx;
 		border-radius: 24rpx;
 		box-shadow: var(--shadow-card);
-		transition: transform 0.2s ease;
+		transition: transform 0.2s ease, background-color 0.3s ease, box-shadow 0.3s ease;
 		
 		&:active { transform: translateY(2rpx); }
+	}
+
+	// 高亮聚焦的工单卡片（从首页最近活动跳转时短暂高亮）
+	.order-item-focused {
+		background-color: #fff7ed; /* tailwind amber-50 */
+		box-shadow: 0 0 0 3rpx #fed7aa;
 	}
 	
 	.order-header {

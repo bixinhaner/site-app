@@ -350,6 +350,17 @@
 	}
 	
 	const viewActivity = (activity) => {
+		// 最近活动目前主要是工单，点击时跳转到工单列表并聚焦对应工单卡片
+		if (activity.type === 'work_order') {
+			// 记录需要聚焦的工单ID
+			workOrderStore.setFocusedWorkOrder(activity.id)
+			uni.switchTab({
+				url: '/pages/workorder/list'
+			})
+			return
+		}
+		
+		// 预留检查跳转
 		if (activity.type === 'inspection') {
 			uni.navigateTo({
 				url: `/pages/inspection/detail?id=${activity.id}`
