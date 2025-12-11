@@ -127,6 +127,7 @@ import { ref, getCurrentInstance, computed } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 import { useUserStore } from '@/stores/user'
+import { getLocationWithAddressOfflineFirst } from '@/utils/nativeLocation.js'
 
 const { $t } = getCurrentInstance().appContext.config.globalProperties
 const store = useWorkOrderStore()
@@ -381,56 +382,35 @@ const deletePhoto = async (photo) => {
   }
 }
 
-// 使用原生插件获取高精度GPS定位
+// 使用原生插件获取高精度GPS定位（离线优先 + 在线15秒超时）
 const getHighAccuracyGPS = async () => {
   try {
-    console.log('开始通过原生插件获取GPS定位...')
-    
-    // 获取原生定位插件
-    const locationPlugin = uni.requireNativePlugin('my-location-plugin')
-    
-    if (!locationPlugin) {
-      throw new Error('原生定位插件未加载')
+    console.log('开始通过封装获取高精度GPS定位...')
+
+    const result = await getLocationWithAddressOfflineFirst()
+    console.log('封装定位结果:', result)
+
+    if (!result || !result.success || !result.data) {
+      throw new Error(result?.message || '原生定位失败')
     }
-    
-    const gpsResult = await new Promise((resolve, reject) => {
-      // 调用插件的异步定位方法
-      locationPlugin.getLocationWithAddress((result) => {
-        console.log('原生插件定位结果:', result)
-        
-        // 解析结果
-        let parsedResult = result
-        if (typeof result === 'string') {
-          try {
-            parsedResult = JSON.parse(result)
-          } catch (parseError) {
-            console.error('解析原生插件结果失败:', parseError)
-            reject(new Error('解析原生插件结果失败'))
-            return
-          }
-        }
-        
-        if (parsedResult && parsedResult.success && parsedResult.data) {
-          const data = parsedResult.data
-          const address = parsedResult.address
-          
-          // 转换为旧的格式，保持兼容性
-          const compatibleResult = {
-            latitude: data.latitude,
-            longitude: data.longitude,
-            accuracy: data.accuracy || 0,
-            altitude: data.altitude || 0,
-            address: address,
-            provider: 'native-plugin'
-          }
-          
-          resolve(compatibleResult)
-        } else {
-          reject(new Error(parsedResult?.message || '原生插件定位失败'))
-        }
-      })
-    })
-    
+
+    const data = result.data
+    const latitude = Number(data.latitude)
+    const longitude = Number(data.longitude)
+
+    if (!isFinite(latitude) || !isFinite(longitude) || (latitude === 0 && longitude === 0)) {
+      throw new Error('GPS坐标无效')
+    }
+
+    const gpsResult = {
+      latitude,
+      longitude,
+      accuracy: Number(data.accuracy || 0),
+      altitude: Number(data.altitude || 0),
+      address: result.address || null,
+      provider: data.provider || 'native-plugin',
+    }
+
     console.log('原生插件GPS定位成功:', gpsResult)
     
     // 检查GPS精度

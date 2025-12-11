@@ -1303,74 +1303,57 @@
 		}
 	}
 
-	// 使用原生插件的GPS高精度定位函数
-	const getHighAccuracyLocation = () => {
-		return new Promise((resolve, reject) => {
-			try {
-				console.log('使用原生插件获取高精度定位...')
-				
-				// 获取原生定位插件
-				const locationPlugin = uni.requireNativePlugin('my-location-plugin')
-				
-				if (!locationPlugin) {
-					throw new Error('原生定位插件未加载')
-				}
-				
-				// 调用插件的异步定位方法
-				locationPlugin.getLocationWithAddress((result) => {
-					console.log('原生插件定位结果:', result)
-					
-					// 解析结果
-					let parsedResult = result
-					if (typeof result === 'string') {
-						try {
-							parsedResult = JSON.parse(result)
-						} catch (parseError) {
-							console.error('解析原生插件结果失败:', parseError)
-							reject(new Error('解析原生插件结果失败'))
-							return
-						}
-					}
-					
-					if (parsedResult && parsedResult.success && parsedResult.data) {
-						const data = parsedResult.data
-						const address = parsedResult.address
-						
-						// 构建地址字符串
-						let addressString = ''
-						if (address && typeof address === 'object') {
-							const addressParts = [
-								address.country,
-								address.province,
-								address.city,
-								address.district,
-								address.street,
-								address.streetNum
-							].filter(part => part && part.trim())
-							
-							if (addressParts.length > 0) {
-								addressString = addressParts.join('')
-							}
-						}
-						
-						resolve({
-							latitude: data.latitude,
-							longitude: data.longitude,
-							accuracy: data.accuracy || 0,
-							address: addressString,
-							addressInfo: address, // 传回原生插件的地址对象，供水印使用
-							provider: 'native-plugin'
-						})
-					} else {
-						reject(new Error(parsedResult?.message || '原生插件定位失败'))
-					}
-				})
-				
-			} catch (error) {
-				console.error('原生插件定位调用失败:', error)
-				reject(error)
+	// 使用原生插件的GPS高精度定位函数（离线优先 + 在线15秒超时）
+	const getHighAccuracyLocation = async () => {
+		try {
+			console.log('使用原生定位封装获取高精度定位...')
+			
+			const { getLocationWithAddressOfflineFirst } = await import('@/utils/nativeLocation.js')
+			const result = await getLocationWithAddressOfflineFirst()
+			console.log('封装定位结果:', result)
+
+			if (!result || !result.success || !result.data) {
+				throw new Error(result?.message || '原生定位失败')
 			}
-		})
+
+			const data = result.data
+			const latitude = Number(data.latitude)
+			const longitude = Number(data.longitude)
+
+			if (!isFinite(latitude) || !isFinite(longitude) || (latitude === 0 && longitude === 0)) {
+				throw new Error('GPS坐标无效')
+			}
+
+			const addressObj = result.address
+			let addressString = ''
+			if (addressObj && typeof addressObj === 'object') {
+				const addressParts = [
+					addressObj.country,
+					addressObj.province,
+					addressObj.city,
+					addressObj.district,
+					addressObj.street,
+					addressObj.streetNum,
+					addressObj.streetNumber
+				].filter(part => part && String(part).trim())
+
+				if (addressParts.length > 0) {
+					addressString = addressParts.join('')
+				}
+			}
+
+			return {
+				latitude,
+				longitude,
+				accuracy: Number(data.accuracy || 0),
+				address: addressString,
+				addressInfo: addressObj || null,
+				provider: data.provider || 'native-plugin'
+			}
+		} catch (error) {
+			console.error('原生定位获取高精度位置失败:', error)
+			throw error
+		}
 	}
 	
 	// 逆地理编码函数

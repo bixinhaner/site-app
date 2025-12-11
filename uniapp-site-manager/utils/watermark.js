@@ -6,6 +6,8 @@
 
 // 移除复杂的geocoding依赖，使用UniApp内置功能
 
+import { getLocationWithAddressOfflineFirst } from './nativeLocation.js'
+
 export class WatermarkTool {
   constructor() {
     this.canvasContext = null
@@ -759,45 +761,20 @@ export class WatermarkTool {
    * @returns {Promise<Object>} 原生插件返回的位置结果
    */
   async getLocationFromNativePlugin() {
-    return new Promise((resolve, reject) => {
-      try {
-        console.log('开始调用原生定位插件...')
-        
-        // 获取原生定位插件实例
-        const locationPlugin = uni.requireNativePlugin('my-location-plugin')
-        
-        if (!locationPlugin) {
-          throw new Error('原生定位插件未加载或不可用')
-        }
-        
-        // 调用插件的getLocationWithAddress方法获取位置和地址
-        locationPlugin.getLocationWithAddress((result) => {
-          console.log('原生插件返回结果:', result)
-          
-          // 如果返回字符串，尝试解析为JSON
-          let parsedResult = result
-          if (typeof result === 'string') {
-            try {
-              parsedResult = JSON.parse(result)
-            } catch (parseError) {
-              console.error('解析原生插件结果失败:', parseError)
-              reject(new Error('原生插件返回数据解析失败: ' + parseError.message))
-              return
-            }
-          }
-          
-          if (parsedResult && parsedResult.success) {
-            resolve(parsedResult)
-          } else {
-            reject(new Error(parsedResult?.message || '原生插件定位失败'))
-          }
-        })
-        
-      } catch (error) {
-        console.error('调用原生定位插件失败:', error)
-        reject(new Error('无法调用原生定位插件: ' + error.message))
+    try {
+      console.log('开始通过封装获取原生定位信息...')
+      const result = await getLocationWithAddressOfflineFirst()
+      console.log('封装定位结果:', result)
+
+      if (result && result.success && result.data) {
+        return result
       }
-    })
+
+      throw new Error(result?.message || '原生定位插件定位失败')
+    } catch (error) {
+      console.error('调用原生定位封装失败:', error)
+      throw new Error('无法获取原生定位信息: ' + error.message)
+    }
   }
 
   /**
