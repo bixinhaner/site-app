@@ -208,14 +208,20 @@ async def delete_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 只有admin可以删除用户
+    """保留向后兼容的用户“删除”接口，实际行为为禁用用户。
+
+    - 仅 admin（含运行时视为 admin 的 manager）可以操作；
+    - 禁止对当前登录用户自身调用；
+    - 等价于将 `is_active` 置为 False。
+    """
+    # 只有admin可以删除/禁用用户
     if current_user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin can delete users"
         )
     
-    # 不能删除自己
+    # 不能删除/禁用自己
     if current_user.id == user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -229,7 +235,7 @@ async def delete_user(
             detail="User not found"
         )
     
-    # 软删除 - 标记为不活跃
+    # 软删除 - 标记为不活跃（禁用）
     user.is_active = False
     db.commit()
     

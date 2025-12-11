@@ -37,7 +37,10 @@ export const useUserStore = defineStore('user', () => {
       }
     } catch (error) {
       console.error('登录失败:', error)
-      return { success: false, error: error.message }
+      // 优先使用后端返回的 detail 提示，例如 "Account disabled"
+      const backendDetail = error.response?.data?.detail
+      const message = backendDetail || error.message || 'Login failed'
+      return { success: false, error: message }
     }
   }
 

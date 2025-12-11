@@ -737,6 +737,7 @@ async def get_warehouses(
             "address": warehouse.address,
             "contact_person": warehouse.contact_person,
             "contact_phone": warehouse.contact_phone,
+            "manager_id": warehouse.manager_id,
             "manager_name": warehouse.manager.full_name if warehouse.manager else None
         })
     
@@ -771,6 +772,48 @@ async def create_warehouse(
     db.refresh(warehouse)
     
     return {"message": "仓库创建成功", "warehouse_id": warehouse.id}
+
+@router.put("/warehouses/{warehouse_id}")
+async def update_warehouse(
+    warehouse_id: int,
+    warehouse_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """更新仓库信息"""
+    if current_user.role not in ["admin"]:
+        raise HTTPException(status_code=403, detail="权限不足")
+    
+    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    if not warehouse:
+        raise HTTPException(status_code=404, detail="仓库不存在")
+    
+    # 如果修改编码，需要检查唯一性
+    new_code = warehouse_data.get("warehouse_code")
+    if new_code and new_code != warehouse.warehouse_code:
+        existing = db.query(Warehouse).filter(Warehouse.warehouse_code == new_code).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="仓库编码已存在")
+        warehouse.warehouse_code = new_code
+    
+    if "warehouse_name" in warehouse_data:
+        warehouse.warehouse_name = warehouse_data["warehouse_name"]
+    if "address" in warehouse_data:
+        warehouse.address = warehouse_data["address"]
+    if "contact_person" in warehouse_data:
+        warehouse.contact_person = warehouse_data["contact_person"]
+    if "contact_phone" in warehouse_data:
+        warehouse.contact_phone = warehouse_data["contact_phone"]
+    if "manager_id" in warehouse_data:
+        warehouse.manager_id = warehouse_data["manager_id"]
+    
+    db.commit()
+    db.refresh(warehouse)
+    
+    return {
+        "message": "仓库更新成功",
+        "warehouse_id": warehouse.id
+    }
 
 # ===== SN批量导入管理 =====
 

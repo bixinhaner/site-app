@@ -15,10 +15,22 @@
         <el-table-column prop="contact_person" label="联系人" width="120" />
         <el-table-column prop="contact_phone" label="电话" width="140" />
         <el-table-column prop="manager_name" label="管理员" width="140" />
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="openEdit(row)">
+              编辑
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
 
-    <el-dialog v-model="createVisible" title="新增仓库" width="520px" @close="resetForm">
+    <el-dialog
+      v-model="formVisible"
+      :title="editingId ? '编辑仓库' : '新增仓库'"
+      width="520px"
+      @close="resetForm"
+    >
       <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
         <el-form-item label="仓库编码" prop="warehouse_code">
           <el-input v-model="form.warehouse_code" placeholder="唯一编码" />
@@ -42,8 +54,10 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+        <el-button @click="formVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">
+          {{ editingId ? '保存修改' : '保存' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -57,9 +71,10 @@ import request from '@/utils/request'
 
 const loading = ref(false)
 const warehouses = ref([])
-const createVisible = ref(false)
+const formVisible = ref(false)
 const saving = ref(false)
 const formRef = ref()
+const editingId = ref(null)
 const form = ref({
   warehouse_code: '',
   warehouse_name: '',
@@ -97,11 +112,34 @@ const loadUsers = async () => {
 }
 
 const openCreate = () => {
-  createVisible.value = true
+  editingId.value = null
+  resetForm()
+  formVisible.value = true
+}
+
+const openEdit = (row) => {
+  editingId.value = row.id
+  form.value = {
+    warehouse_code: row.warehouse_code,
+    warehouse_name: row.warehouse_name,
+    address: row.address,
+    contact_person: row.contact_person,
+    contact_phone: row.contact_phone,
+    manager_id: row.manager_id || null
+  }
+  if (formRef.value) formRef.value.clearValidate()
+  formVisible.value = true
 }
 
 const resetForm = () => {
-  form.value = { warehouse_code: '', warehouse_name: '', address: '', contact_person: '', contact_phone: '', manager_id: null }
+  form.value = {
+    warehouse_code: '',
+    warehouse_name: '',
+    address: '',
+    contact_person: '',
+    contact_phone: '',
+    manager_id: null
+  }
   if (formRef.value) formRef.value.clearValidate()
 }
 
@@ -109,15 +147,20 @@ const submit = async () => {
   try {
     await formRef.value.validate()
     saving.value = true
-    await stockApi.createWarehouse(form.value)
-    ElMessage.success('创建成功')
-    createVisible.value = false
+    if (editingId.value) {
+      await stockApi.updateWarehouse(editingId.value, form.value)
+      ElMessage.success('更新成功')
+    } else {
+      await stockApi.createWarehouse(form.value)
+      ElMessage.success('创建成功')
+    }
+    formVisible.value = false
     resetForm()
     await load()
   } catch (e) {
     if (e !== 'cancel') {
       console.error(e)
-      ElMessage.error(e?.response?.data?.detail || '创建失败')
+      ElMessage.error(e?.response?.data?.detail || '保存失败')
     }
   } finally {
     saving.value = false

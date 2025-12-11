@@ -91,10 +91,6 @@
             <el-icon><Close /></el-icon>
             批量禁用
           </el-button>
-          <el-button type="danger" size="small" @click="batchDelete" v-if="canBatchOperate">
-            <el-icon><Delete /></el-icon>
-            批量删除
-          </el-button>
         </el-button-group>
       </div>
     </el-card>
@@ -158,7 +154,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button-group>
               <el-button type="primary" size="small" @click="viewUser(row)" link>
@@ -173,9 +169,15 @@
                 <el-icon><Key /></el-icon>
                 重置密码
               </el-button>
-              <el-button type="danger" size="small" @click="deleteUser(row)" link v-if="canDelete(row)">
-                <el-icon><Delete /></el-icon>
-                删除
+              <el-button
+                type="danger"
+                size="small"
+                @click="toggleUserStatus(row)"
+                link
+                v-if="canToggleStatus(row)"
+              >
+                <el-icon><Switch /></el-icon>
+                {{ row.is_active ? '禁用用户' : '启用用户' }}
               </el-button>
             </el-button-group>
           </template>
@@ -253,7 +255,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Plus, Refresh, Search, RefreshRight, View, Edit, Delete, Key,
+  Plus, Refresh, Search, RefreshRight, View, Edit, Key, Switch,
   Check, Close
 } from '@element-plus/icons-vue'
 import { userAPI } from '@/api/user'
@@ -330,7 +332,7 @@ const canEdit = (user) => {
   return userStore.isAdmin || currentUser?.id === user.id
 }
 
-const canDelete = (user) => {
+const canToggleStatus = (user) => {
   return userStore.isAdmin && userStore.currentUser?.id !== user.id
 }
 
@@ -428,24 +430,27 @@ const editUser = (user) => {
   showCreateDialog.value = true
 }
 
-const deleteUser = async (user) => {
+const toggleUserStatus = async (user) => {
   try {
+    const action = user.is_active ? '禁用' : '启用'
     await ElMessageBox.confirm(
-      `确定要删除用户 "${user.username}" 吗？删除后用户将被禁用。`,
-      '确认删除',
+      `确定要${action}用户 "${user.username}" 吗？`,
+      `确认${action}`,
       {
-        confirmButtonText: '删除',
+        confirmButtonText: action,
         cancelButtonText: '取消',
         type: 'warning'
       }
     )
     
-    await userAPI.deleteUser(user.id)
-    ElMessage.success('删除成功')
+    await userAPI.updateUser(user.id, {
+      is_active: !user.is_active
+    })
+    ElMessage.success(`${action}成功`)
     loadUserList()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('删除失败: ' + error.message)
+      ElMessage.error(`操作失败: ${error.message}`)
     }
   }
 }
@@ -497,30 +502,6 @@ const batchDeactivate = async () => {
     loadUserList()
   } catch (error) {
     ElMessage.error('批量禁用失败: ' + error.message)
-  }
-}
-
-const batchDelete = async () => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除选中的 ${selectedUsers.value.length} 个用户吗？`,
-      '确认批量删除',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
-    const userIds = selectedUsers.value.map(user => user.id)
-    await userAPI.batchOperation(userIds, 'delete')
-    ElMessage.success(`成功删除 ${userIds.length} 个用户`)
-    selectedUsers.value = []
-    loadUserList()
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('批量删除失败: ' + error.message)
-    }
   }
 }
 

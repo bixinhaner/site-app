@@ -69,9 +69,9 @@ def get_current_user(
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
     user = get_user_by_username(db, username=username)
-    if user is None:
+    # 用户不存在或已被禁用，都视为凭证无效
+    if user is None or not user.is_active:
         raise credentials_exception
     # Return a proxy so that role checks treat 'manager' the same as 'admin'
     return _EffectiveRoleUser(user)
@@ -83,6 +83,13 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # 禁用用户：登录时返回专门提示，状态仍为401，方便现有客户端复用错误处理
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account disabled",
             headers={"WWW-Authenticate": "Bearer"},
         )
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

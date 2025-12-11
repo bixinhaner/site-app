@@ -73,6 +73,11 @@ request.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
+    // 登录接口返回401时，不做自动刷新，直接把错误抛给调用方处理
+    if (error.response?.status === 401 && originalRequest?.url?.includes('/api/auth/login')) {
+      return Promise.reject(error)
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
         return addRequestToQueue(originalRequest)

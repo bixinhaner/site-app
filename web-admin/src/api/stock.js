@@ -37,6 +37,10 @@ export const stockApi = {
   createWarehouse: (data) => 
     request.post('/api/stock/warehouses', data),
 
+  // 更新仓库
+  updateWarehouse: (id, data) =>
+    request.put(`/api/stock/warehouses/${id}`, data),
+
   // SN批量导入相关
   importSN: (data) => 
     request.post('/api/stock/import-sn', data),

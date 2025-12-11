@@ -80,11 +80,6 @@
           <el-icon><Key /></el-icon>
           重置密码
         </el-button>
-        
-        <el-button type="danger" @click="deleteUser" v-if="canDelete">
-          <el-icon><Delete /></el-icon>
-          删除用户
-        </el-button>
       </div>
     </el-card>
 
@@ -230,12 +225,8 @@ const canToggleStatus = computed(() => {
 
 const canResetPassword = computed(() => userStore.isAdmin)
 
-const canDelete = computed(() => {
-  return userStore.isAdmin && userStore.currentUser?.id !== props.user.id
-})
-
 const hasActions = computed(() => {
-  return canToggleStatus.value || canResetPassword.value || canDelete.value
+  return canToggleStatus.value || canResetPassword.value
 })
 
 // 角色相关
@@ -300,28 +291,6 @@ const resetPassword = () => {
   passwordForm.password = ''
   passwordForm.confirmPassword = ''
   showPasswordDialog.value = true
-}
-
-const deleteUser = async () => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除用户 "${props.user.username}" 吗？删除后用户将被禁用。`,
-      '确认删除',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
-    await userAPI.deleteUser(props.user.id)
-    ElMessage.success('删除成功')
-    emit('refresh')
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('删除失败: ' + error.message)
-    }
-  }
 }
 
 // 密码重置处理
