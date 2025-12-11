@@ -24,6 +24,107 @@
 			</view>
 		</view>
 		
+		<!-- 用户信息编辑弹窗 -->
+		<view class="user-modal-mask" v-if="showUserInfoModal" @click="closeUserInfoModal">
+			<view class="user-modal" @click.stop>
+				<view class="user-modal-header">
+					<text class="user-modal-title">{{ t('profile.userInfo') }}</text>
+					<text class="user-modal-close" @click="closeUserInfoModal">✕</text>
+				</view>
+				
+				<view class="user-modal-body" v-if="userInfo">
+					<view class="form-item">
+						<text class="form-label">{{ t('login.username') }}</text>
+						<text class="form-value readonly">{{ userInfo.username }}</text>
+					</view>
+					
+					<view class="form-item">
+						<text class="form-label">{{ t('profile.name') }}</text>
+						<input class="form-input" v-model="userForm.full_name" :placeholder="t('profile.name')" />
+					</view>
+					
+					<view class="form-item">
+						<text class="form-label">{{ t('profile.email') }}</text>
+						<input class="form-input" v-model="userForm.email" :placeholder="t('profile.email')" />
+					</view>
+					
+					<view class="form-item">
+						<text class="form-label">{{ t('profile.phone') }}</text>
+						<input class="form-input" v-model="userForm.phone" :placeholder="t('profile.phone')" />
+					</view>
+					
+					<view class="form-item">
+						<text class="form-label">{{ t('profile.department') }}</text>
+						<input class="form-input" v-model="userForm.department" :placeholder="t('profile.department')" />
+					</view>
+					
+					<view class="form-item">
+						<text class="form-label">{{ t('profile.role') }}</text>
+						<text class="form-value readonly">{{ getRoleText(userInfo.role) }}</text>
+					</view>
+					
+					<view class="form-item" v-if="userInfo.created_at">
+						<text class="form-label">{{ t('profile.joinDate') }}</text>
+						<text class="form-value readonly">{{ formatDateTime(userInfo.created_at) }}</text>
+					</view>
+				</view>
+				
+				<view class="user-modal-footer">
+					<button class="btn-secondary" @click="closeUserInfoModal">{{ t('common.cancel') }}</button>
+					<button class="btn-primary" @click="saveProfile">{{ t('common.save') }}</button>
+				</view>
+			</view>
+		</view>
+
+		<!-- 修改密码弹窗 -->
+		<view class="user-modal-mask" v-if="showPasswordModal" @click="closePasswordModal">
+			<view class="user-modal" @click.stop>
+				<view class="user-modal-header">
+					<text class="user-modal-title">{{ t('profile.changePassword') }}</text>
+					<text class="user-modal-close" @click="closePasswordModal">✕</text>
+				</view>
+
+				<view class="user-modal-body">
+					<view class="form-item">
+						<text class="form-label">{{ t('profile.oldPassword') }}</text>
+						<input
+							class="form-input"
+							:type="'password'"
+							v-model="passwordForm.current"
+							:placeholder="t('profile.oldPassword')"
+						/>
+					</view>
+
+					<view class="form-item">
+						<text class="form-label">{{ t('profile.newPassword') }}</text>
+						<input
+							class="form-input"
+							:type="'password'"
+							v-model="passwordForm.next"
+							:placeholder="t('profile.newPassword')"
+						/>
+					</view>
+
+					<view class="form-item">
+						<text class="form-label">{{ t('profile.confirmPassword') }}</text>
+						<input
+							class="form-input"
+							:type="'password'"
+							v-model="passwordForm.confirm"
+							:placeholder="t('profile.confirmPassword')"
+						/>
+					</view>
+				</view>
+
+				<view class="user-modal-footer">
+					<button class="btn-secondary" @click="closePasswordModal">{{ t('common.cancel') }}</button>
+					<button class="btn-primary" @click="savePassword" :disabled="passwordSaving">
+						{{ passwordSaving ? t('inspection.savingInProgress') : t('common.confirm') }}
+					</button>
+				</view>
+			</view>
+		</view>
+		
 		<!-- 统计信息 -->
 		<view class="stats-section">
 			<view class="stat-item">
@@ -57,7 +158,7 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="changePassword">
+				<view class="menu-item" @click="openPasswordModal">
 					<view class="menu-left">
 						<text class="menu-icon">🔒</text>
 						<text class="menu-text">{{ $t('profile.changePassword') }}</text>
@@ -95,7 +196,7 @@
 					</view>
 				</view>
 				
-				<view class="menu-item" @click="showSettings">
+				<view class="menu-item" @click="showSettings" v-if="isAdmin">
 					<view class="menu-left">
 						<text class="menu-icon">⚙️</text>
 						<text class="menu-text">{{ $t('profile.settings') }}</text>
@@ -193,10 +294,11 @@
 
 <script setup>
 	import { ref, reactive, computed, onMounted, watch, getCurrentInstance } from 'vue'
-import { useUserStore } from '@/stores/user'
+	import { useUserStore } from '@/stores/user'
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useLanguageStore } from '@/stores/language'
+	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
@@ -214,6 +316,23 @@ import { useUserStore } from '@/stores/user'
 	}
 	
 	const showLanguageModal = ref(false)
+	const showUserInfoModal = ref(false)
+	const showPasswordModal = ref(false)
+	const userForm = reactive({
+		full_name: '',
+		email: '',
+		phone: '',
+		department: '',
+		position: '',
+	})
+
+	const passwordForm = reactive({
+		current: '',
+		next: '',
+		confirm: '',
+	})
+
+	const passwordSaving = ref(false)
 	
 	const userStats = reactive({
 		totalSites: 0,
@@ -302,13 +421,94 @@ const isAdmin = computed(() => userStore.isAdmin)
 		}, 2000)
 	}
 	
-	// 编辑个人信息
+	// 打开用户信息编辑弹窗
 	const editProfile = () => {
-		uni.showModal({
-			title: '编辑资料',
-			content: '个人信息编辑功能正在开发中',
-			showCancel: false
-		})
+		if (!userInfo.value) return
+		userForm.full_name = userInfo.value.full_name || ''
+		userForm.email = userInfo.value.email || ''
+		userForm.phone = userInfo.value.phone || ''
+		userForm.department = userInfo.value.department || ''
+		userForm.position = userInfo.value.position || ''
+		showUserInfoModal.value = true
+	}
+
+	const closeUserInfoModal = () => {
+		showUserInfoModal.value = false
+	}
+
+	const formatDateTime = (val) => {
+		if (!val) return ''
+		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		return new Date(val).toLocaleString(locale)
+	}
+
+	const saveProfile = async () => {
+		if (!userInfo.value?.id) return
+
+		// 简单校验
+		if (!userForm.full_name) {
+			uni.showToast({
+				title: t('profile.nameRequired'),
+				icon: 'none',
+			})
+			return
+		}
+		if (!userForm.email) {
+			uni.showToast({
+				title: t('profile.emailRequired'),
+				icon: 'none',
+			})
+			return
+		}
+
+		try {
+			uni.showLoading({ title: t('common.save') })
+
+			const url = buildApiUrl(API_ENDPOINTS.USERS.UPDATE(userInfo.value.id))
+			const res = await new Promise((resolve, reject) => {
+				uni.request({
+					url,
+					...createRequestConfig({
+						method: 'PUT',
+						headers: getAuthHeaders(userStore.token),
+						data: {
+							full_name: userForm.full_name,
+							email: userForm.email,
+							phone: userForm.phone || null,
+							department: userForm.department || null,
+							position: userForm.position || null,
+						},
+					}),
+					success: resolve,
+					fail: reject,
+				})
+			})
+
+			if (res.statusCode === 200 && res.data) {
+				userStore.userInfo = res.data
+				uni.setStorageSync('userInfo', res.data)
+				uni.showToast({
+					title: t('profile.saveSuccess'),
+					icon: 'success',
+				})
+				showUserInfoModal.value = false
+			} else {
+				const msg = res.data?.detail || t('profile.saveFailed')
+				uni.showToast({
+					title: msg,
+					icon: 'none',
+				})
+			}
+		} catch (error) {
+			console.error('Save profile error:', error)
+			const msg = error?.data?.detail || t('profile.saveFailed')
+			uni.showToast({
+				title: msg,
+				icon: 'none',
+			})
+		} finally {
+			uni.hideLoading()
+		}
 	}
 	
 	// 修改密码
@@ -444,6 +644,87 @@ const isAdmin = computed(() => userStore.isAdmin)
 			}
 		} catch (error) {
 			console.error('Load user stats error:', error)
+		}
+	}
+
+	const openPasswordModal = () => {
+		passwordForm.current = ''
+		passwordForm.next = ''
+		passwordForm.confirm = ''
+		showPasswordModal.value = true
+	}
+
+	const closePasswordModal = () => {
+		if (passwordSaving.value) return
+		showPasswordModal.value = false
+	}
+
+	const savePassword = async () => {
+		if (!passwordForm.current || !passwordForm.next || !passwordForm.confirm) {
+			uni.showToast({
+				title: t('profile.passwordFieldsRequired'),
+				icon: 'none',
+			})
+			return
+		}
+
+		if (passwordForm.next.length < 8) {
+			uni.showToast({
+				title: t('profile.passwordTooShort'),
+				icon: 'none',
+			})
+			return
+		}
+
+		if (passwordForm.next !== passwordForm.confirm) {
+			uni.showToast({
+				title: t('profile.passwordsMismatch'),
+				icon: 'none',
+			})
+			return
+		}
+
+		try {
+			passwordSaving.value = true
+			const url = buildApiUrl(API_ENDPOINTS.AUTH.CHANGE_PASSWORD)
+			const res = await new Promise((resolve, reject) => {
+				uni.request({
+					url,
+					...createRequestConfig({
+						method: 'POST',
+						headers: getAuthHeaders(userStore.token),
+						data: {
+							current_password: passwordForm.current,
+							new_password: passwordForm.next,
+						},
+					}),
+					success: resolve,
+					fail: reject,
+				})
+			})
+
+			if (res.statusCode === 200) {
+				uni.showToast({
+					title: t('profile.passwordChangeSuccess'),
+					icon: 'success',
+				})
+				showPasswordModal.value = false
+			} else {
+				const msg = res.data?.detail || t('profile.passwordChangeFailed')
+				uni.showToast({
+					title: msg,
+					icon: 'none',
+				})
+			}
+		} catch (error) {
+			console.error('Change password error:', error)
+			const msg = error?.data?.detail || t('profile.passwordChangeFailed')
+			uni.showToast({
+				title: msg,
+				icon: 'none',
+			})
+		} finally {
+			passwordSaving.value = false
 		}
 	}
 	
@@ -625,6 +906,106 @@ const isAdmin = computed(() => userStore.isAdmin)
 		display: flex;
 		align-items: flex-end;
 		justify-content: center;
+	}
+
+	// 用户信息弹窗
+	.user-modal-mask {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.4);
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+		z-index: 2000;
+	}
+
+	.user-modal {
+		width: 100%;
+		background: var(--bg-elevated);
+		border-radius: 24rpx 24rpx 0 0;
+		padding: 24rpx 32rpx env(safe-area-inset-bottom);
+		box-shadow: 0 -4rpx 16rpx rgba(0, 0, 0, 0.1);
+	}
+
+	.user-modal-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 16px;
+	}
+
+	.user-modal-title {
+		font-size: 18px;
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.user-modal-close {
+		font-size: 20px;
+		color: #9ca3af;
+	}
+
+	.user-modal-body {
+		max-height: 60vh;
+		overflow-y: auto;
+		padding-bottom: 12px;
+	}
+
+	.form-item {
+		margin-bottom: 12px;
+	}
+
+	.form-label {
+		font-size: 13px;
+		color: #6b7280;
+		margin-bottom: 4px;
+		display: block;
+	}
+
+	.form-input {
+		width: 100%;
+		border-radius: 10px;
+		border: 1px solid #e5e7eb;
+		padding: 8px 12px;
+		font-size: 14px;
+		color: var(--text-primary);
+		background: #fff;
+	}
+
+	.form-value {
+		font-size: 14px;
+		color: var(--text-primary);
+	}
+
+	.form-value.readonly {
+		color: #4b5563;
+	}
+
+	.user-modal-footer {
+		margin-top: 12px;
+		display: flex;
+		gap: 12px;
+	}
+
+	.btn-secondary,
+	.btn-primary {
+		flex: 1;
+		border-radius: 999px;
+		padding: 10px 0;
+		font-size: 15px;
+	}
+
+	.btn-secondary {
+		background: #f3f4f6;
+		color: #4b5563;
+	}
+
+	.btn-primary {
+		background: var(--color-primary);
+		color: #fff;
 	}
 	
 	.language-popup {

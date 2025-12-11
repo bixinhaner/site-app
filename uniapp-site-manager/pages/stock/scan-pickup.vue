@@ -179,10 +179,30 @@
 import { parseBarcode, formatMacAddress, getParseResultSummary, isValidParseResult } from '@/utils/barcode-parser.js'
 import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 import { useUserStore } from '@/stores/user'
+import { useLanguageStore } from '@/stores/language'
+import { getCurrentInstance, watch, onMounted } from 'vue'
 
 export default {
   setup() {
     const userStore = useUserStore()
+    const languageStore = useLanguageStore()
+    const { appContext } = getCurrentInstance()
+    const { $t } = appContext.config.globalProperties
+
+    // 进入页面时设置标题
+    onMounted(() => {
+      uni.setNavigationBarTitle({
+        title: $t('stock.scanPickup')
+      })
+    })
+
+    // 语言切换时更新标题
+    watch(() => languageStore.currentLocale, () => {
+      uni.setNavigationBarTitle({
+        title: $t('stock.scanPickup')
+      })
+    })
+
     return {
       userStore
     }

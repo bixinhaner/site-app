@@ -23,7 +23,8 @@ export const API_ENDPOINTS = {
     LOGIN: '/api/auth/login',
     REGISTER: '/api/auth/register',
     ME: '/api/auth/me',
-    REFRESH: '/api/auth/refresh'
+    REFRESH: '/api/auth/refresh',
+    CHANGE_PASSWORD: '/api/auth/change-password',
   },
   
   // 用户相关

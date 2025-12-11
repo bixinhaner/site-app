@@ -267,15 +267,16 @@
 		const date = new Date(timeStr)
 		const now = new Date()
 		const diff = now - date
+		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
 		
 		if (diff < 86400000) { // 24小时内
-			return date.toLocaleTimeString('zh-CN', { 
+			return date.toLocaleTimeString(locale, { 
 				hour: '2-digit', 
 				minute: '2-digit' 
 			})
 		}
 		
-		return date.toLocaleDateString('zh-CN', {
+		return date.toLocaleDateString(locale, {
 			month: '2-digit',
 			day: '2-digit'
 		})
@@ -307,7 +308,7 @@
 		} catch (error) {
 			console.error('Load sites error:', error)
 			uni.showToast({
-				title: '加载失败',
+				title: $t('site.loadFailed'),
 				icon: 'error'
 			})
 		} finally {

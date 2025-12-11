@@ -403,21 +403,21 @@
 		
 		<!-- 底部操作栏 -->
 		<view class="bottom-actions" v-if="inspectionData">
-			<view
-				class="action-btn continue-btn"
+			<button 
+				class="action-btn continue-btn" 
 				v-if="canContinue"
 				@click="continueInspection"
 			>
 				{{ inspectionData.status === 'rejected' ? $t('inspection.modifyResult') : $t('inspection.continueInspection') }}
-			</view>
+			</button>
 			
-			<view
-				class="action-btn review-btn"
+			<button 
+				class="action-btn review-btn" 
 				v-if="canReview"
 				@click="reviewInspection"
 			>
 				{{ $t('inspection.review') }}
-			</view>
+			</button>
 			
 			<!-- 导出报告按钮为占位功能，已移除 -->
 		</view>

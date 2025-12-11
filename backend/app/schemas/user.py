@@ -53,6 +53,11 @@ class UserPasswordReset(BaseModel):
     user_id: int
     new_password: str
 
+
+class UserPasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
 class UserBatchOperation(BaseModel):
     user_ids: List[int]
     operation: str  # 'activate', 'deactivate', 'delete'

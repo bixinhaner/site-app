@@ -19,11 +19,13 @@
 			<view class="site-basic">
 				<text class="site-name">{{ site?.site_name }}</text>
 				<text class="site-code">{{ site?.site_code }}</text>
-				<view class="site-status" :class="getStatusClass(site?.status)">
-					{{ getStatusText(site?.status) }}
-				</view>
-				<view class="site-status ssv-tag" :class="site?.ssv_passed ? 'status-success' : 'status-default'">
-					{{ site?.ssv_passed ? 'SSV 已通过' : 'SSV 未通过' }}
+				<view class="status-wrap" v-if="site">
+					<view class="site-status" :class="getStatusClass(site?.status)">
+						{{ getStatusText(site?.status) }}
+					</view>
+					<view class="ssv-tag" :class="site?.ssv_passed ? 'status-success' : 'status-default'">
+						{{ site?.ssv_passed ? $t('site.ssvPassed') : $t('site.ssvNotPassed') }}
+					</view>
 				</view>
 			</view>
 		</view>
@@ -60,9 +62,9 @@
 			<!-- 设备状态（OMC） -->
 			<view class="info-section">
 				<view class="section-header">
-					<view class="section-title">设备状态（OMC）</view>
+					<view class="section-title">{{ $t('site.omcStatusTitle') }}</view>
 					<button class="refresh-btn" @click="loadOmcStatus(true)" :disabled="omcLoading">
-						{{ omcLoading ? '刷新中…' : '刷新' }}
+						{{ omcLoading ? $t('site.refreshing') : $t('site.refresh') }}
 					</button>
 				</view>
 				<view v-if="omcError" class="omc-error">{{ omcError }}</view>
@@ -71,18 +73,24 @@
 						<view class="device-header">
 							<text class="device-sn">{{ dev.sn }}</text>
 							<view class="device-tags">
-								<text class="tag" :class="dev.online ? 'tag-online' : 'tag-offline'">{{ dev.online ? '在线' : '离线' }}</text>
-								<text class="tag" :class="dev.activated ? 'tag-activated' : 'tag-inactive'">{{ dev.activated ? '已激活' : '未激活' }}</text>
+								<text class="tag" :class="dev.online ? 'tag-online' : 'tag-offline'">
+									{{ dev.online ? $t('site.online') : $t('site.offline') }}
+								</text>
+								<text class="tag" :class="dev.activated ? 'tag-activated' : 'tag-inactive'">
+									{{ dev.activated ? $t('site.activated') : $t('site.notActivated') }}
+								</text>
 							</view>
 						</view>
 						<view class="device-meta">
-							<text v-if="dev.ever_online" class="meta">曾上线</text>
-							<text v-if="dev.ever_activated" class="meta">曾激活</text>
+							<text v-if="dev.ever_online" class="meta">{{ $t('site.everOnline') }}</text>
+							<text v-if="dev.ever_activated" class="meta">{{ $t('site.everActivated') }}</text>
 						</view>
 					</view>
-					<view class="checked-at" v-if="omcStatus.checked_at">最近检测：{{ formatTime(omcStatus.checked_at) }}</view>
+					<view class="checked-at" v-if="omcStatus.checked_at">
+						{{ $t('site.lastCheckedAt', { time: formatTime(omcStatus.checked_at) }) }}
+					</view>
 				</view>
-				<view v-else class="omc-empty">暂无设备状态数据</view>
+				<view v-else class="omc-empty">{{ $t('site.noOmcData') }}</view>
 			</view>
 			
 			<!-- 位置信息 -->
@@ -121,7 +129,7 @@
 			<!-- 站点规划信息 -->
 			<view class="info-section" v-if="planning">
 				<view class="section-header expandable" @click="planningExpanded = !planningExpanded">
-					<text class="section-title">站点规划</text>
+					<text class="section-title">{{ $t('site.planningTitle') }}</text>
 					<text class="expand-icon">{{ planningExpanded ? '▼' : '▶' }}</text>
 				</view>
 
@@ -129,35 +137,39 @@
 					<!-- 基本信息 -->
 					<view class="planning-basic">
 						<view class="planning-item">
-							<text class="planning-label">频段配置</text>
+							<text class="planning-label">{{ $t('site.planningBands') }}</text>
 							<text class="planning-value">{{ planning.bands.join(', ') }}</text>
 						</view>
 						<view class="planning-item">
-							<text class="planning-label">扇区数量</text>
-							<text class="planning-value">{{ planning.sector_count }} 个</text>
+							<text class="planning-label">{{ $t('site.planningSectorCount') }}</text>
+							<text class="planning-value">
+								{{ $t('site.planningSectorCountUnit', { count: planning.sector_count }) }}
+							</text>
 						</view>
 						<view class="planning-item" v-if="planning.notes">
-							<text class="planning-label">备注</text>
+							<text class="planning-label">{{ $t('site.planningNotes') }}</text>
 							<text class="planning-value">{{ planning.notes }}</text>
 						</view>
 					</view>
 
 					<!-- 扇区配置 -->
 					<view class="planning-subsection" v-if="planning.sectors && planning.sectors.length > 0">
-						<text class="subsection-title">扇区配置</text>
+						<text class="subsection-title">{{ $t('site.planningSectorsTitle') }}</text>
 						<view class="sector-list">
 							<view class="sector-card" v-for="sector in planning.sectors" :key="sector.sector_index">
 								<view class="sector-header">
-									<text class="sector-title">扇区 {{ sector.sector_index }}</text>
+									<text class="sector-title">
+										{{ $t('site.planningSectorTitle', { index: sector.sector_index }) }}
+									</text>
 									<text class="sector-bands">{{ sector.bands.join(', ') }}</text>
 								</view>
 								<view class="sector-params">
 									<view class="param-item">
-										<text class="param-label">方位角</text>
+										<text class="param-label">{{ $t('site.azimuth') }}</text>
 										<text class="param-value">{{ sector.azimuth_deg }}°</text>
 									</view>
 									<view class="param-item">
-										<text class="param-label">下倾角</text>
+										<text class="param-label">{{ $t('site.downtilt') }}</text>
 										<text class="param-value">{{ sector.downtilt_deg }}°</text>
 									</view>
 								</view>
@@ -167,7 +179,7 @@
 
 					<!-- 天线端口 -->
 					<view class="planning-subsection" v-if="planning.antenna_ports && planning.antenna_ports.length > 0">
-						<text class="subsection-title">天线端口</text>
+						<text class="subsection-title">{{ $t('site.antennaPortsTitle') }}</text>
 						<view class="port-list">
 							<view class="port-item" v-for="(port, index) in planning.antenna_ports" :key="index">
 								<view class="port-header">
@@ -175,7 +187,9 @@
 									<text class="port-band">{{ port.band }}</text>
 								</view>
 								<view class="port-details">
-									<text class="port-detail">扇区: {{ port.sector_index }}</text>
+									<text class="port-detail">
+										{{ $t('site.antennaSector', { index: port.sector_index }) }}
+									</text>
 									<text class="port-detail" v-if="port.mimo_chain">MIMO: {{ port.mimo_chain }}</text>
 									<text class="port-detail" v-if="port.remarks">{{ port.remarks }}</text>
 								</view>
@@ -185,13 +199,13 @@
 
 					<!-- 交换机端口 -->
 					<view class="planning-subsection" v-if="planning.switch_ports && planning.switch_ports.length > 0">
-						<text class="subsection-title">交换机端口</text>
+						<text class="subsection-title">{{ $t('site.switchPortsTitle') }}</text>
 						<view class="port-list">
 							<view class="port-item" v-for="(port, index) in planning.switch_ports" :key="index">
 								<view class="port-header">
 									<text class="port-label">{{ port.port_no }}</text>
 									<view class="port-tags">
-										<text class="port-tag uplink" v-if="port.is_uplink">上行</text>
+										<text class="port-tag uplink" v-if="port.is_uplink">{{ $t('site.uplink') }}</text>
 										<text class="port-tag poe" v-if="port.poe">POE</text>
 									</view>
 								</view>
@@ -241,7 +255,7 @@
 		<!-- 地图选择器 -->
 		<view class="map-selector-overlay" v-if="showMapSelector" @click="showMapSelector = false">
 			<view class="map-selector" @click.stop>
-				<view class="selector-title">选择地图</view>
+				<view class="selector-title">{{ $t('site.mapSelectorTitle') }}</view>
 				<view class="map-options">
 					<view 
 						class="map-option" 
@@ -249,8 +263,8 @@
 					>
 						<view class="option-icon">🗺️</view>
 						<view class="option-info">
-							<text class="option-name">高德地图</text>
-							<text class="option-desc">国内定位精准</text>
+							<text class="option-name">{{ $t('site.mapAmapName') }}</text>
+							<text class="option-desc">{{ $t('site.mapAmapDesc') }}</text>
 						</view>
 						<text class="option-arrow">›</text>
 					</view>
@@ -260,8 +274,8 @@
 					>
 						<view class="option-icon">🌏</view>
 						<view class="option-info">
-							<text class="option-name">谷歌地图</text>
-							<text class="option-desc">全球地图覆盖</text>
+							<text class="option-name">{{ $t('site.mapGoogleName') }}</text>
+							<text class="option-desc">{{ $t('site.mapGoogleDesc') }}</text>
 						</view>
 						<text class="option-arrow">›</text>
 					</view>
@@ -313,10 +327,10 @@
 	// 获取状态文本
 	const getStatusText = (status) => {
 		const statusMap = {
-			'planning': '规划中',
-			'construction': '建设中',
-			'operational': '运营中',
-			'maintenance': '维护中'
+			'planning': $t('site.planning'),
+			'construction': $t('site.construction'),
+			'operational': $t('site.operational'),
+			'maintenance': $t('site.maintenance')
 		}
 		return statusMap[status] || status
 	}
@@ -324,10 +338,10 @@
 	// 获取站点类型文本
 	const getSiteTypeText = (type) => {
 		const typeMap = {
-			'base_station': '基站',
-			'tower': '铁塔',
-			'indoor': '室内分布',
-			'micro': '微基站'
+			'base_station': $t('site.baseStation'),
+			'tower': $t('site.tower'),
+			'indoor': $t('site.indoor'),
+			'micro': $t('site.micro')
 		}
 		return typeMap[type] || type
 	}
@@ -345,19 +359,19 @@
 	// 获取优先级文本
 	const getPriorityText = (priority) => {
 		const priorityMap = {
-			'high': '高',
-			'normal': '普通',
-			'low': '低'
+			'high': $t('inspection.priorityHigh') || '高',
+			'normal': $t('inspection.priorityNormal') || '普通',
+			'low': $t('inspection.priorityLow') || '低'
 		}
-		return priorityMap[priority] || '普通'
+		return priorityMap[priority] || ( $t('inspection.priorityNormal') || '普通' )
 	}
 	
 	// 获取检查类型文本
 	const getInspectionTypeText = (type) => {
 		const typeMap = {
-			'opening': '新站点设备安装',
-			'installation': '安装检查',
-			'maintenance': '维护检查'
+			'opening': $t('inspection.opening'),
+			'installation': $t('inspection.installation'),
+			'maintenance': $t('inspection.maintenance')
 		}
 		return typeMap[type] || type
 	}
@@ -387,7 +401,8 @@
 	// 格式化时间
 	const formatTime = (timeStr) => {
 		const date = new Date(timeStr)
-		return date.toLocaleDateString('zh-CN', {
+		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		return date.toLocaleString(locale, {
 			month: '2-digit',
 			day: '2-digit',
 			hour: '2-digit',
@@ -431,11 +446,11 @@
 			if (res.statusCode === 200) {
 				omcStatus.value = res.data
 			} else {
-				omcError.value = res.data?.detail || '获取设备状态失败'
+				omcError.value = res.data?.detail || $t('site.loadOmcFailed')
 			}
 		} catch (error) {
 			console.warn('获取站点设备状态失败:', error)
-			omcError.value = '获取设备状态失败'
+			omcError.value = $t('site.loadOmcFailed')
 		} finally {
 			omcLoading.value = false
 		}
@@ -471,7 +486,7 @@
 		} catch (error) {
 			console.error('Load site detail error:', error)
 			uni.showToast({
-				title: '加载失败',
+				title: $t('site.loadFailed'),
 				icon: 'error'
 			})
 		} finally {
@@ -624,6 +639,17 @@
 	.site-basic {
 		position: relative;
 	}
+
+	.status-wrap {
+		position: absolute;
+		top: 0;
+		right: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 4px;
+		z-index: 1;
+	}
 	
 	.site-name {
 		font-size: 22px;
@@ -639,45 +665,58 @@
 		margin-bottom: 12px;
 	}
 
-	.ssv-tag {
-		display: inline-flex;
-		align-items: center;
-		padding: 6rpx 12rpx;
-		border-radius: 12rpx;
-		font-size: 24rpx;
-		background: #f5f7fa;
-		color: #606266;
-		margin-top: 4px;
-	}
-	.status-success {
-		background: #e6f9f0;
-		color: #2f9e5f;
-	}
-	
 	.site-status {
-		position: absolute;
-		top: 0;
-		right: 0;
-		padding: 6px 12px;
-		border-radius: 12px;
+		padding: 4px 10px;
+		border-radius: 999px;
 		font-size: 12px;
 		font-weight: 500;
-		background: rgba(255, 255, 255, 0.2);
+		background: #ffffff;
+		color: #111827;
+		border: 1px solid rgba(148, 163, 184, 0.5);
+		box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+		white-space: nowrap;
 		
 		&.status-operational {
-			background: rgba(16, 185, 129, 0.2);
+			background: #dcfce7;
+			color: #166534;
+			border-color: rgba(22, 101, 52, 0.35);
 		}
 		
 		&.status-maintenance {
-			background: rgba(239, 68, 68, 0.2);
+			background: #fee2e2;
+			color: #b91c1c;
+			border-color: rgba(185, 28, 28, 0.35);
 		}
 		
 		&.status-construction {
-			background: rgba(245, 158, 11, 0.2);
+			background: #fef3c7;
+			color: #b45309;
+			border-color: rgba(180, 83, 9, 0.35);
 		}
 		
 		&.status-planning {
-			background: rgba(107, 114, 128, 0.2);
+			background: #e5e7eb;
+			color: #374151;
+			border-color: rgba(55, 65, 81, 0.25);
+		}
+	}
+
+	.ssv-tag {
+		display: inline-flex;
+		align-items: center;
+		padding: 4px 10px;
+		border-radius: 999px;
+		font-size: 12px;
+		background: #e0f2fe;
+		color: #0369a1;
+		border: 1px solid rgba(37, 99, 235, 0.35);
+		box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+		white-space: nowrap;
+
+		&.status-success {
+			background: #dcfce7;
+			color: #166534;
+			border-color: rgba(22, 101, 52, 0.35);
 		}
 	}
 	
