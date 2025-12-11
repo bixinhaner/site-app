@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'native_location_cache_v1'
-const DEFAULT_CACHE_MAX_AGE_MS = 10 * 60 * 1000 // 10分钟
+const DEFAULT_CACHE_MAX_AGE_MS = 3 * 60 * 1000 // 3分钟
 
 let pluginInstance = null
 
@@ -192,7 +192,8 @@ export const getLocationWithAddressOfflineFirst = async (options = {}) => {
   const plugin = getNativeLocationPlugin()
   console.log('[nativeLocation] 调用封装开始:', { timeoutMs, cacheMaxAgeMs, hasPlugin: !!plugin })
   const cachedLoc = loadOfflineCache()
-  const syncLoc = tryGetLocationSyncFromPlugin(plugin, cacheMaxAgeMs)
+  // 不再使用系统级 lastKnownLocation 同步缓存，避免拿到过期的系统级 GPS
+  const syncLoc = null
   const offlineFallback = pickOfflineFallback(syncLoc, cachedLoc, cacheMaxAgeMs)
   console.log('[nativeLocation] 离线候选结果:', {
     hasSync: !!syncLoc,
@@ -203,8 +204,8 @@ export const getLocationWithAddressOfflineFirst = async (options = {}) => {
   let timeoutId
 
   const onlinePromise = new Promise((resolve) => {
-    if (!plugin || typeof plugin.getLocation !== 'function') {
-      console.warn('[nativeLocation] 原生插件不可用或不支持 getLocation')
+    if (!plugin) {
+      console.warn('[nativeLocation] 原生插件不可用')
       resolve(null)
       return
     }
@@ -216,64 +217,118 @@ export const getLocationWithAddressOfflineFirst = async (options = {}) => {
       resolve(val)
     }
 
-    try {
-      plugin.getLocation((locationResult) => {
-        if (settled) return
-        const parsed = safeParseJSON(locationResult) || locationResult
-        if (!parsed || !parsed.success || !parsed.data) {
-          console.warn('[nativeLocation] 在线 getLocation 失败:', parsed)
-          safeResolve(null)
-          return
-        }
+    const callLegacyGetLocation = () => {
+      if (typeof plugin.getLocation !== 'function') {
+        console.warn('[nativeLocation] 原生插件不支持 getLocation，无法在线获取位置')
+        safeResolve(null)
+        return
+      }
 
-        const data = normalizeLocationData(parsed.data)
-        if (!isValidCoordinate(data)) {
-          console.warn('[nativeLocation] 在线 getLocation 返回坐标无效:', data)
-          safeResolve(null)
-          return
-        }
+      try {
+        plugin.getLocation((locationResult) => {
+          if (settled) return
+          const parsed = safeParseJSON(locationResult) || locationResult
+          if (!parsed || !parsed.success || !parsed.data) {
+            console.warn('[nativeLocation] 在线 getLocation 失败:', parsed)
+            safeResolve(null)
+            return
+          }
 
-        if (!plugin.reverseGeocode || typeof plugin.reverseGeocode !== 'function') {
-          const result = buildSuccessResult(data, null, '获取位置成功，地址解析接口不可用', 'online')
+          const data = normalizeLocationData(parsed.data)
+          if (!isValidCoordinate(data)) {
+            console.warn('[nativeLocation] 在线 getLocation 返回坐标无效:', data)
+            safeResolve(null)
+            return
+          }
+
+          if (!plugin.reverseGeocode || typeof plugin.reverseGeocode !== 'function') {
+            const result = buildSuccessResult(data, null, '获取位置成功，地址解析接口不可用', 'online')
+            saveOfflineCache(result)
+            safeResolve(result)
+            return
+          }
+
+          try {
+            plugin.reverseGeocode(
+              {
+                latitude: data.latitude,
+                longitude: data.longitude,
+              },
+              (addressResult) => {
+                if (settled) return
+                const parsedAddr = safeParseJSON(addressResult) || addressResult
+                let address = null
+                let message = '获取位置成功'
+
+                if (parsedAddr && parsedAddr.success && parsedAddr.data) {
+                  address = parsedAddr.data
+                  message = '获取位置和地址成功'
+                } else {
+                  message = '获取位置成功，地址解析失败'
+                }
+
+                const finalResult = buildSuccessResult(data, address, message, 'online')
+                saveOfflineCache(finalResult)
+                safeResolve(finalResult)
+              },
+            )
+          } catch (error) {
+            console.warn('[nativeLocation] reverseGeocode 调用异常:', error)
+            const result = buildSuccessResult(data, null, '获取位置成功，地址解析异常', 'online')
+            saveOfflineCache(result)
+            safeResolve(result)
+          }
+        })
+      } catch (error) {
+        console.error('[nativeLocation] getLocation 调用异常:', error)
+        safeResolve(null)
+      }
+    }
+
+    // 优先使用插件内置的 getLocationWithAddress（与调试页一致的行为）
+    if (typeof plugin.getLocationWithAddress === 'function') {
+      console.log('[nativeLocation] 使用 getLocationWithAddress 获取位置和地址')
+      try {
+        plugin.getLocationWithAddress((locationResult) => {
+          if (settled) return
+          const parsed = safeParseJSON(locationResult) || locationResult
+
+          if (!parsed || parsed.success === false || !parsed.data) {
+            console.warn('[nativeLocation] getLocationWithAddress 返回无效，回退到 getLocation + reverseGeocode:', parsed)
+            callLegacyGetLocation()
+            return
+          }
+
+          const data = normalizeLocationData(parsed.data)
+          if (!isValidCoordinate(data)) {
+            console.warn('[nativeLocation] getLocationWithAddress 返回坐标无效，回退到 getLocation + reverseGeocode:', data)
+            callLegacyGetLocation()
+            return
+          }
+
+          let address = null
+          if (parsed.address && typeof parsed.address === 'object') {
+            address = parsed.address
+          }
+
+          const message =
+            parsed.message ||
+            (address ? '获取位置和地址成功' : '获取位置成功，地址信息不可用')
+
+          const result = buildSuccessResult(data, address, message, parsed.source || 'online')
           saveOfflineCache(result)
           safeResolve(result)
-          return
-        }
-
-        try {
-          plugin.reverseGeocode(
-            {
-              latitude: data.latitude,
-              longitude: data.longitude,
-            },
-            (addressResult) => {
-              if (settled) return
-              const parsedAddr = safeParseJSON(addressResult) || addressResult
-              let address = null
-              let message = '获取位置成功'
-
-              if (parsedAddr && parsedAddr.success && parsedAddr.data) {
-                address = parsedAddr.data
-                message = '获取位置和地址成功'
-              } else {
-                message = '获取位置成功，地址解析失败'
-              }
-
-              const finalResult = buildSuccessResult(data, address, message, 'online')
-              saveOfflineCache(finalResult)
-              safeResolve(finalResult)
-            },
-          )
-        } catch (error) {
-          console.warn('[nativeLocation] reverseGeocode 调用异常:', error)
-          const result = buildSuccessResult(data, null, '获取位置成功，地址解析异常', 'online')
-          saveOfflineCache(result)
-          safeResolve(result)
-        }
-      })
-    } catch (error) {
-      console.error('[nativeLocation] getLocation 调用异常:', error)
-      safeResolve(null)
+        })
+      } catch (error) {
+        console.error(
+          '[nativeLocation] getLocationWithAddress 调用异常，回退到 getLocation + reverseGeocode:',
+          error,
+        )
+        callLegacyGetLocation()
+      }
+    } else {
+      console.log('[nativeLocation] 插件不支持 getLocationWithAddress，使用 getLocation + reverseGeocode')
+      callLegacyGetLocation()
     }
   })
 

@@ -924,10 +924,25 @@ export default {
 	
 	const drawWatermarkOnCanvas = (ctx, lines, imageInfo) => {
 		const config = watermarkConfig.style
-		const fontSize = config.fontSize
-		const padding = config.padding
-		const margin = config.margin
-		const lineHeight = config.lineHeight
+		
+		// 基于图片短边按 2.5% 计算动态字号，并对缩放比例做限制
+		const baseFontSize = config.fontSize
+		const basePadding = config.padding
+		const baseMargin = config.margin
+		const baseLineHeight = config.lineHeight
+
+		const shortEdge = Math.min(imageInfo.width || 0, imageInfo.height || 0)
+		const targetFontSize = shortEdge * 0.025
+		let scale = baseFontSize > 0 ? targetFontSize / baseFontSize : 1
+		const minScale = 0.8
+		const maxScale = 3.0
+		if (!isFinite(scale) || scale <= 0) scale = 1
+		scale = Math.max(minScale, Math.min(maxScale, scale))
+
+		const fontSize = baseFontSize * scale
+		const padding = basePadding * scale
+		const margin = baseMargin * scale
+		const lineHeight = baseLineHeight * scale
 		const backgroundColor = config.backgroundColor
 		const textColor = config.textColor
 		

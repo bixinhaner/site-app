@@ -131,25 +131,25 @@
 			<!-- 检查项统计 -->
 			<view class="detail-card">
 				<view class="card-header">
-					<text class="card-title">检查项统计</text>
+					<text class="card-title">{{ $t('inspection.checkItemsStats') }}</text>
 				</view>
 				<view class="card-content">
 					<view class="stats-grid">
 						<view class="stat-item">
 							<text class="stat-number">{{ inspectionData.total_items || 0 }}</text>
-							<text class="stat-label">总检查项</text>
+							<text class="stat-label">{{ $t('inspection.totalCheckItems') }}</text>
 						</view>
 						<view class="stat-item">
 							<text class="stat-number success">{{ inspectionData.completed_items || 0 }}</text>
-							<text class="stat-label">已完成</text>
+							<text class="stat-label">{{ $t('inspection.completedChecks') }}</text>
 						</view>
 						<view class="stat-item">
 							<text class="stat-number warning">{{ inspectionData.failed_items || 0 }}</text>
-							<text class="stat-label">失败项</text>
+							<text class="stat-label">{{ $t('inspection.failedChecks') }}</text>
 						</view>
 						<view class="stat-item">
 							<text class="stat-number info">{{ (inspectionData.total_items || 0) - (inspectionData.completed_items || 0) - (inspectionData.failed_items || 0) }}</text>
-							<text class="stat-label">待处理</text>
+							<text class="stat-label">{{ $t('inspection.pendingChecks') }}</text>
 						</view>
 					</view>
 				</view>
@@ -158,14 +158,14 @@
 			<!-- 驳回意见卡片 -->
 			<view class="detail-card reject-card" v-if="inspectionData.status === 'rejected' && inspectionData.review_comments">
 				<view class="card-header">
-					<text class="card-title reject-title">🚫 驳回意见</text>
+					<text class="card-title reject-title">🚫 {{ $t('inspection.rejectOpinion') }}</text>
 				</view>
 				<view class="card-content">
 					<view class="reject-content">
 						<text class="reject-text">{{ inspectionData.review_comments }}</text>
 					</view>
 					<view class="reject-tip">
-						<text class="tip-text">📝 请根据上述意见修改检查结果后重新提交</text>
+						<text class="tip-text">📝 {{ $t('inspection.rejectTip') }}</text>
 					</view>
 				</view>
 			</view>
@@ -190,7 +190,7 @@
 			<!-- 检查项详情 -->
 			<view class="detail-card">
 				<view class="card-header">
-					<text class="card-title">检查项详情</text>
+					<text class="card-title">{{ $t('inspection.checkItems') }}</text>
 					<view class="filter-tabs">
 						<view 
 							class="filter-tab"
@@ -210,7 +210,6 @@
 							v-for="item in filteredCheckItems"
 							:key="item.id"
 							:class="getCheckItemClass(item.status)"
-							@click="viewCheckItem(item)"
 						>
 							<view class="item-header">
 								<view class="item-status">
@@ -220,7 +219,7 @@
 									<text class="item-name">{{ item.item_name }}</text>
 									<view class="item-meta">
 										<text class="item-category">{{ item.category_name }}</text>
-										<text class="item-sector" v-if="item.sector_id">扇区{{ item.sector_id }}</text>
+										<text class="item-sector" v-if="item.sector_id">{{ $t('inspection.sector') }}{{ item.sector_id }}</text>
 										<text class="item-cell" v-if="item.cell_id">{{ item.cell_id }}</text>
 									</view>
 									
@@ -239,7 +238,7 @@
 										</view>
 									</view>
 								</view>
-								<view class="item-result">
+								<view class="item-result" @click.stop="viewCheckItem(item)">
 									<text class="review-status" v-if="item.review_status" :class="'review-'+item.review_status">
 										{{ getReviewStatusText(item.review_status) }}
 									</text>
@@ -250,10 +249,10 @@
 							
 							<view class="item-summary" v-if="item.status !== 'pending'">
 								<text class="summary-text" v-if="item.photos && item.photos.length > 0">
-									📷 {{ item.photos.length }}张照片
+									📷 {{ item.photos.length }}{{ $t('inspection.photosUnit') }}
 								</text>
 								<text class="summary-text" v-if="item.data_value && item.data_value.length > 0">
-									📊 {{ item.data_value.length }}项数据
+									📊 {{ item.data_value.length }}{{ $t('inspection.itemsUnit') }}
 								</text>
 								<text class="summary-text" v-if="item.checked_at">
 									⏰ {{ formatTime(item.checked_at) }}
@@ -264,7 +263,9 @@
 					
 					<!-- 空状态 -->
 					<view class="empty-items" v-if="filteredCheckItems.length === 0">
-						<text class="empty-text">暂无{{ getCurrentFilterText() }}检查项</text>
+						<text class="empty-text">
+							{{ $t('inspection.noInspectionItems') }}
+						</text>
 					</view>
 				</view>
 			</view>
@@ -272,19 +273,19 @@
 			<!-- 审核信息 -->
 			<view class="detail-card" v-if="inspectionData.reviewed_by || inspectionData.review_comments">
 				<view class="card-header">
-					<text class="card-title">审核信息</text>
+					<text class="card-title">{{ $t('inspection.reviewInfo') }}</text>
 				</view>
 				<view class="card-content">
 					<view class="info-row" v-if="inspectionData.reviewer_name">
-						<text class="info-label">审核人:</text>
+						<text class="info-label">{{ $t('inspection.reviewer') }}:</text>
 						<text class="info-value">{{ inspectionData.reviewer_name }}</text>
 					</view>
 					<view class="info-row" v-if="inspectionData.reviewed_at">
-						<text class="info-label">审核时间:</text>
+						<text class="info-label">{{ $t('inspection.reviewTime') }}:</text>
 						<text class="info-value">{{ formatDateTime(inspectionData.reviewed_at) }}</text>
 					</view>
 					<view class="info-row" v-if="inspectionData.review_comments">
-						<text class="info-label">审核意见:</text>
+						<text class="info-label">{{ $t('inspection.reviewComments') }}:</text>
 						<text class="info-value">{{ inspectionData.review_comments }}</text>
 					</view>
 				</view>
@@ -293,19 +294,19 @@
 			<!-- 备注信息 -->
 			<view class="detail-card" v-if="inspectionData.notes || inspectionData.issues_found || inspectionData.recommendations">
 				<view class="card-header">
-					<text class="card-title">备注信息</text>
+					<text class="card-title">{{ $t('inspection.noteInfo') }}</text>
 				</view>
 				<view class="card-content">
 					<view class="note-section" v-if="inspectionData.notes">
-						<text class="note-label">检查备注:</text>
+						<text class="note-label">{{ $t('inspection.notes') }}:</text>
 						<text class="note-content">{{ inspectionData.notes }}</text>
 					</view>
 					<view class="note-section" v-if="inspectionData.issues_found">
-						<text class="note-label">发现问题:</text>
+						<text class="note-label">{{ $t('inspection.issuesFound') }}:</text>
 						<text class="note-content">{{ inspectionData.issues_found }}</text>
 					</view>
 					<view class="note-section" v-if="inspectionData.recommendations">
-						<text class="note-label">建议措施:</text>
+						<text class="note-label">{{ $t('inspection.recommendations') }}:</text>
 						<text class="note-content">{{ inspectionData.recommendations }}</text>
 					</view>
 				</view>
@@ -402,28 +403,35 @@
 		
 		<!-- 底部操作栏 -->
 		<view class="bottom-actions" v-if="inspectionData">
-			<button 
-				class="action-btn continue-btn" 
+			<view
+				class="action-btn continue-btn"
 				v-if="canContinue"
 				@click="continueInspection"
 			>
-				{{ inspectionData.status === 'rejected' ? '修改检查结果' : '继续检查' }}
-			</button>
+				{{ inspectionData.status === 'rejected' ? $t('inspection.modifyResult') : $t('inspection.continueInspection') }}
+			</view>
 			
-			<button 
-				class="action-btn review-btn" 
+			<view
+				class="action-btn review-btn"
 				v-if="canReview"
 				@click="reviewInspection"
 			>
-				审核
-			</button>
+				{{ $t('inspection.review') }}
+			</view>
 			
 			<!-- 导出报告按钮为占位功能，已移除 -->
 		</view>
 		
 		<!-- 加载状态 -->
 		<view class="loading-container" v-if="loading">
-			<uni-load-more status="loading" :content-text="{ contentdown: '加载中...', contentrefresh: '加载中...', contentnomore: '加载完成' }"></uni-load-more>
+			<uni-load-more
+				status="loading"
+				:content-text="{
+					contentdown: $t('messages.loadingInspection'),
+					contentrefresh: $t('messages.loadingInspection'),
+					contentnomore: $t('messages.loadFailed')
+				}"
+			></uni-load-more>
 		</view>
 		
 		<!-- 检查项详情弹窗 -->
@@ -439,20 +447,20 @@
 				<scroll-view class="modal-content" scroll-y>
 					<!-- 检查项基本信息 -->
 					<view class="modal-section">
-						<text class="section-title">基本信息</text>
+						<text class="section-title">{{ $t('inspection.basicInfo') }}</text>
 						<view class="info-grid">
 							<view class="grid-item">
-								<text class="grid-label">状态:</text>
+								<text class="grid-label">{{ $t('inspection.status') }}:</text>
 								<text class="grid-value" :class="getStatusClass(currentItem.status)">
 									{{ getStatusText(currentItem.status) }}
 								</text>
 							</view>
 							<view class="grid-item" v-if="currentItem.sector_id">
-								<text class="grid-label">扇区:</text>
+								<text class="grid-label">{{ $t('inspection.sector') }}:</text>
 								<text class="grid-value">{{ currentItem.sector_id }}</text>
 							</view>
 							<view class="grid-item">
-								<text class="grid-label">类型:</text>
+								<text class="grid-label">{{ $t('inspection.checkType') }}:</text>
 								<text class="grid-value">{{ getRequiredTypeText(currentItem.required_type) }}</text>
 							</view>
 						</view>
@@ -460,7 +468,7 @@
 					
 					<!-- 检查数据 -->
 					<view class="modal-section" v-if="currentItem.data_value && currentItem.data_value.length > 0">
-						<text class="section-title">检查数据</text>
+						<text class="section-title">{{ $t('inspection.data') }}</text>
 						<view class="data-list">
 							<view 
 								class="data-item"
@@ -475,7 +483,7 @@
 					
 					<!-- 照片 -->
 					<view class="modal-section" v-if="currentItem.photos && currentItem.photos.length > 0">
-						<text class="section-title">照片 ({{ currentItem.photos.length }})</text>
+						<text class="section-title">{{ $t('inspection.photos') }} ({{ currentItem.photos.length }})</text>
 						<view class="photo-grid">
 							<view 
 								class="photo-item" 
@@ -490,7 +498,7 @@
 					
 					<!-- 验证结果 -->
 					<view class="modal-section" v-if="currentItem.validation_result">
-						<text class="section-title">验证结果</text>
+						<text class="section-title">{{ $t('inspection.validationResult') }}</text>
 						<view class="validation-info">
 							<view class="validation-status" :class="currentItem.validation_result.valid ? 'valid' : 'invalid'">
 								<text class="status-icon">{{ currentItem.validation_result.valid ? '✅' : '❌' }}</text>
@@ -510,20 +518,20 @@
 					
 					<!-- 审核信息 -->
 					<view class="modal-section" v-if="currentItem.review_status || currentItem.review_comments">
-						<text class="section-title">审核信息</text>
+						<text class="section-title">{{ $t('inspection.reviewInfo') }}</text>
 						<view class="review-info">
 							<view class="review-status-item" v-if="currentItem.review_status">
-								<text class="review-label">审核状态:</text>
+								<text class="review-label">{{ $t('inspection.reviewStatus') }}:</text>
 								<text class="review-value" :class="'review-'+currentItem.review_status">
 									{{ getReviewStatusText(currentItem.review_status) }}
 								</text>
 							</view>
 							<view class="review-comments-item" v-if="currentItem.review_comments">
-								<text class="review-label">审核意见:</text>
+								<text class="review-label">{{ $t('inspection.reviewComments') }}:</text>
 								<text class="review-comments-text">{{ currentItem.review_comments }}</text>
 							</view>
 							<view class="review-time-item" v-if="currentItem.reviewed_at">
-								<text class="review-label">审核时间:</text>
+								<text class="review-label">{{ $t('inspection.reviewTime') }}:</text>
 								<text class="review-time">{{ formatDateTime(currentItem.reviewed_at) }}</text>
 							</view>
 						</view>
@@ -531,7 +539,7 @@
 					
 					<!-- 备注 -->
 					<view class="modal-section" v-if="currentItem.notes">
-						<text class="section-title">备注</text>
+						<text class="section-title">{{ $t('inspection.notes') }}</text>
 						<text class="note-text">{{ currentItem.notes }}</text>
 					</view>
 				</scroll-view>
@@ -606,11 +614,11 @@
 	
 	// 筛选选项
 	const statusFilters = [
-		{ label: '全部', value: 'all' },
-		{ label: '已完成', value: 'completed' },
-		{ label: '失败', value: 'failed' },
-		{ label: '进行中', value: 'in_progress' },
-		{ label: '待处理', value: 'pending' }
+		{ label: $t('inspection.allChecks'), value: 'all' },
+		{ label: $t('inspection.completedChecks'), value: 'completed' },
+		{ label: $t('inspection.failedChecks'), value: 'failed' },
+		{ label: $t('inspection.inProgress'), value: 'in_progress' },
+		{ label: $t('inspection.pendingChecks'), value: 'pending' }
 	]
 	
 	// 计算属性
@@ -1040,11 +1048,11 @@
 	// 工具函数
 	const getInspectionTypeText = (type) => {
 		const typeMap = {
-			installation: '安装检查',
-			opening: '新站点设备安装',
-			maintenance: '维护检查'
+			installation: $t('inspection.installation'),
+			opening: $t('inspection.opening'),
+			maintenance: $t('inspection.maintenance')
 		}
-		return typeMap[type] || '检查'
+		return typeMap[type] || $t('inspection.check')
 	}
 	
 	const getStatusClass = (status) => {
@@ -1087,40 +1095,40 @@
 	// 获取优先级文本
 	const getPriorityText = (priority) => {
 		const priorityMap = {
-			low: '低',
-			normal: '正常',
-			high: '高',
-			urgent: '紧急'
+			low: $t('workorder.priorityLow') || $t('inspection.priorityLow'),
+			normal: $t('workorder.priorityNormal') || $t('inspection.priorityNormal'),
+			high: $t('workorder.priorityHigh') || $t('inspection.priorityHigh'),
+			urgent: $t('workorder.priorityUrgent') || $t('inspection.priorityUrgent')
 		}
-		return priorityMap[priority] || '正常'
+		return priorityMap[priority] || ( $t('workorder.priorityNormal') || $t('inspection.priorityNormal') )
 	}
 	
 	// 获取工单类型文本
 	const getWorkOrderTypeText = (taskType) => {
 		const typeMap = {
-			opening_inspection: '新站开通检查',
-			maintenance: '维护工单',
-			power_issue: '电源问题',
-			transmission_issue: '传输问题',
-			gps_issue: 'GPS问题',
-			signal_issue: '信号问题'
+			opening_inspection: $t('workorder.typeOpening') || $t('inspection.opening'),
+			maintenance: $t('workorder.typeMaintenance') || $t('inspection.maintenance'),
+			power_issue: $t('workorder.typePowerIssue') || 'Power Issue',
+			transmission_issue: $t('workorder.typeTransmissionIssue') || 'Transmission Issue',
+			gps_issue: $t('workorder.typeGPSIssue') || 'GPS Issue',
+			signal_issue: $t('workorder.typeSignalIssue') || 'Signal Issue'
 		}
-		return typeMap[taskType] || '其他'
+		return typeMap[taskType] || ($t('workorder.typeOther') || 'Other')
 	}
 
 	const getStatusText = (status) => {
 		const statusMap = {
-			draft: '草稿',
-			in_progress: '进行中',
-			submitted: '已提交',
-			under_review: '审核中',
-			approved: '已通过',
-			rejected: '已驳回',
-			completed: '已完成',
-			pending: '待处理',
-			failed: '失败'
+			draft: $t('inspection.draft'),
+			in_progress: $t('inspection.inProgress'),
+			submitted: $t('inspection.submitted') || $t('inspection.completed'),
+			under_review: $t('inspection.inReview'),
+			approved: $t('inspection.approved') || $t('inspection.completed'),
+			rejected: $t('inspection.rejected') || $t('inspection.failed'),
+			completed: $t('inspection.completed'),
+			pending: $t('inspection.pending'),
+			failed: $t('inspection.failed')
 		}
-		return statusMap[status] || '未知'
+		return statusMap[status] || $t('inspection.unknown')
 	}
 	
 	const getCheckItemClass = (status) => {
@@ -1147,11 +1155,11 @@
 	
 	const getRequiredTypeText = (type) => {
 		const typeMap = {
-			photo: '仅照片',
-			data: '仅数据',
-			both: '照片+数据'
+			photo: $t('inspection.photoOnly'),
+			data: $t('inspection.dataOnly'),
+			both: $t('inspection.photoAndData')
 		}
-		return typeMap[type] || '未知'
+		return typeMap[type] || $t('inspection.unknown')
 	}
 	
 	const formatDateTime = (dateTime) => {
@@ -1166,37 +1174,38 @@
 	
 	const getReviewStatusText = (status) => {
 		const statusMap = {
-			pass: '✅ 通过',
-			fail: '❌ 不合格', 
-			warning: '⚠️ 警告'
+			pass: `✅ ${$t('inspection.pass')}`,
+			fail: `❌ ${$t('inspection.fail')}`,
+			warning: `⚠️ ${$t('inspection.warning')}`
 		}
 		return statusMap[status] || status
 	}
 	
 	const getWorkOrderStatusText = (status) => {
 		const type = workOrderData.value?.type
+		// 开站检查看成一条单独文案（如果有）
 		if (type === 'opening_inspection') {
 			const openingMap = {
-				PENDING: '待处理',
-				ACTIVE: '执行中',
-				SUBMITTED: '已提交',
-				UNDER_REVIEW: '审核中',
-				APPROVED: '待上线',
-				ACTIVATED: '已上线待激活',
-				COMPLETED: '已激活',
-				REJECTED: '已驳回'
+				PENDING: $t('workorder.statusPending') || $t('inspection.pending'),
+				ACTIVE: $t('workorder.statusActive') || $t('inspection.inProgress'),
+				SUBMITTED: $t('workorder.statusSubmitted') || $t('inspection.submitted') || $t('inspection.completed'),
+				UNDER_REVIEW: $t('workorder.statusUnderReview') || $t('inspection.inReview'),
+				APPROVED: $t('workorder.statusApproved') || 'Approved',
+				ACTIVATED: $t('workorder.statusActivated') || 'Activated',
+				COMPLETED: $t('workorder.statusCompleted') || $t('inspection.completed'),
+				REJECTED: $t('workorder.statusRejected') || $t('inspection.rejected') || $t('inspection.failed')
 			}
 			return openingMap[status] || status
 		}
 		const statusMap = {
-			PENDING: '待处理',
-			ACTIVE: '执行中',
-			SUBMITTED: '已提交',
-			UNDER_REVIEW: '审核中',
-			APPROVED: '已审核',
-			ACTIVATED: '已开通',
-			COMPLETED: '已完成',
-			REJECTED: '已驳回'
+			PENDING: $t('workorder.statusPending') || $t('inspection.pending'),
+			ACTIVE: $t('workorder.statusActive') || $t('inspection.inProgress'),
+			SUBMITTED: $t('workorder.statusSubmitted') || $t('inspection.submitted') || $t('inspection.completed'),
+			UNDER_REVIEW: $t('workorder.statusUnderReview') || $t('inspection.inReview'),
+			APPROVED: $t('workorder.statusApproved') || 'Approved',
+			ACTIVATED: $t('workorder.statusActivated') || 'Activated',
+			COMPLETED: $t('workorder.statusCompleted') || $t('inspection.completed'),
+			REJECTED: $t('workorder.statusRejected') || $t('inspection.rejected') || $t('inspection.failed')
 		}
 		return statusMap[status] || status
 	}

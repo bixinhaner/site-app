@@ -139,18 +139,21 @@ export class WatermarkTool {
     
     // 准备水印文本
     const watermarkLines = this.prepareWatermarkText(watermarkData)
+
+    // 基于图片尺寸计算动态样式（短边约 2.5% 作为字号基准）
+    const style = this.getScaledStyle(imageInfo)
     
     // 计算水印尺寸
-    const watermarkSize = this.calculateWatermarkSize(ctx, watermarkLines)
+    const watermarkSize = this.calculateWatermarkSize(ctx, watermarkLines, style, imageInfo)
     
     // 计算水印位置
-    const position = this.calculateWatermarkPosition(imageInfo, watermarkSize)
+    const position = this.calculateWatermarkPosition(imageInfo, watermarkSize, style)
     
     // 绘制水印背景
-    this.drawWatermarkBackground(ctx, position, watermarkSize)
+    this.drawWatermarkBackground(ctx, position, watermarkSize, style)
     
     // 绘制水印文本
-    this.drawWatermarkText(ctx, watermarkLines, position)
+    this.drawWatermarkText(ctx, watermarkLines, position, style)
     
     // 绘制到canvas
     return new Promise((resolve) => {
@@ -242,32 +245,71 @@ export class WatermarkTool {
   }
 
   /**
+   * 根据图片尺寸计算缩放后的样式
+   * 使用图片短边约 2.5% 作为目标字号，并对缩放比例做上下限约束
+   */
+  getScaledStyle(imageInfo) {
+    const base = Math.min(imageInfo.width, imageInfo.height) || 0
+    const config = this.config
+
+    // 目标字号：短边的 2.5%
+    const targetFontSize = base * 0.025
+    // 以配置中的 fontSize 作为参考，计算缩放因子
+    let scale = config.fontSize > 0 ? targetFontSize / config.fontSize : 1
+
+    // 限制缩放范围，避免极端大图或小图
+    const minScale = 0.8
+    const maxScale = 3.0
+    if (!isFinite(scale) || scale <= 0) scale = 1
+    scale = Math.max(minScale, Math.min(maxScale, scale))
+
+    return {
+      fontSize: config.fontSize * scale,
+      padding: config.padding * scale,
+      margin: config.margin * scale,
+      lineHeight: config.lineHeight * scale,
+      borderRadius: config.borderRadius * scale,
+    }
+  }
+
+  /**
    * 计算水印尺寸
    */
-  calculateWatermarkSize(ctx, lines) {
+  calculateWatermarkSize(ctx, lines, style, imageInfo) {
     const config = this.config
-    
+
     // 设置字体
-    ctx.setFontSize(config.fontSize)
+    ctx.setFontSize(style.fontSize)
     
     let maxWidth = 0
     lines.forEach(line => {
       const width = ctx.measureText(line).width
       maxWidth = Math.max(maxWidth, width)
     })
-    
+
+    let width = maxWidth + style.padding * 2
+    const height = lines.length * style.lineHeight + style.padding * 2
+
+    // 可选：限制水印宽度不超过图片宽度的一定比例
+    if (typeof config.maxWidth === 'number' && config.maxWidth > 0 && config.maxWidth <= 1 && imageInfo?.width) {
+      const maxAllowedWidth = imageInfo.width * config.maxWidth
+      if (width > maxAllowedWidth) {
+        width = maxAllowedWidth
+      }
+    }
+
     return {
-      width: maxWidth + config.padding * 2,
-      height: lines.length * config.lineHeight + config.padding * 2
+      width,
+      height,
     }
   }
 
   /**
    * 计算水印位置
    */
-  calculateWatermarkPosition(imageInfo, watermarkSize) {
+  calculateWatermarkPosition(imageInfo, watermarkSize, style) {
     const config = this.config
-    const margin = config.margin
+    const margin = style.margin
     
     let x, y
     
@@ -297,32 +339,32 @@ export class WatermarkTool {
   /**
    * 绘制水印背景
    */
-  drawWatermarkBackground(ctx, position, size) {
+  drawWatermarkBackground(ctx, position, size, style) {
     const config = this.config
     
     // 设置背景样式
     ctx.setFillStyle(config.backgroundColor)
     
     // 绘制圆角矩形背景
-    this.drawRoundedRect(ctx, position.x, position.y, size.width, size.height, config.borderRadius)
+    this.drawRoundedRect(ctx, position.x, position.y, size.width, size.height, style.borderRadius)
     ctx.fill()
   }
 
   /**
    * 绘制水印文本
    */
-  drawWatermarkText(ctx, lines, position) {
+  drawWatermarkText(ctx, lines, position, style) {
     const config = this.config
     
     // 设置文本样式
     ctx.setFillStyle(config.watermarkColor)
-    ctx.setFontSize(config.fontSize)
+    ctx.setFontSize(style.fontSize)
     ctx.setTextAlign('left')
     
     // 绘制每一行文本
     lines.forEach((line, index) => {
-      const x = position.x + config.padding
-      const y = position.y + config.padding + (index + 1) * config.lineHeight - 8
+      const x = position.x + style.padding
+      const y = position.y + style.padding + (index + 1) * style.lineHeight - 8
       
       ctx.fillText(line, x, y)
     })

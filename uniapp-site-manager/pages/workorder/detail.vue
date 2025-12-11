@@ -554,12 +554,27 @@ const processImageWithWatermark = async (imagePath, imageInfo, checkItem, gpsDat
 
 // 在canvas上绘制水印
 const drawWatermarkOnCanvas = (ctx, lines, imageInfo) => {
-  const fontSize = 28
-  const padding = 15
-  const margin = 20
-  const lineHeight = 35
+  // 基础样式配置
+  const baseFontSize = 28
+  const basePadding = 15
+  const baseMargin = 20
+  const baseLineHeight = 35
   const backgroundColor = 'rgba(0, 0, 0, 0.7)'
   const textColor = '#FF6600'
+  
+  // 基于图片短边按 2.5% 计算动态字号，并对缩放比例做限制
+  const shortEdge = Math.min(imageInfo.width || 0, imageInfo.height || 0)
+  const targetFontSize = shortEdge * 0.025
+  let scale = baseFontSize > 0 ? targetFontSize / baseFontSize : 1
+  const minScale = 0.8
+  const maxScale = 3.0
+  if (!isFinite(scale) || scale <= 0) scale = 1
+  scale = Math.max(minScale, Math.min(maxScale, scale))
+
+  const fontSize = baseFontSize * scale
+  const padding = basePadding * scale
+  const margin = baseMargin * scale
+  const lineHeight = baseLineHeight * scale
   
   // 计算水印尺寸
   ctx.setFontSize(fontSize)
