@@ -637,6 +637,12 @@ onMounted(async () => {
   if (route.query.type === 'import') {
     recordTypeFilter.value = 'import'
   }
+  if (route.query.type === 'transaction') {
+    recordTypeFilter.value = 'transaction'
+  }
+  if (route.query.keyword) {
+    keyword.value = String(route.query.keyword)
+  }
   await loadAll()
   // 兼容历史链接：附带 importId 时，自动打开对应导入记录的 SN 明细
   const importId = route.query.importId
