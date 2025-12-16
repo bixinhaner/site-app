@@ -139,6 +139,8 @@
 		</view>
 		
 		</scroll-view>
+		<!-- 自定义底部导航栏（替代原生 tabBar 图标） -->
+		<custom-tabbar />
 	</view>
 </template>
 
@@ -303,17 +305,17 @@
 	
 	// 页面跳转方法
 	const goToSites = () => {
-		uni.switchTab({ url: '/pages/site/list' })
+		uni.reLaunch({ url: '/pages/site/list' })
 	}
 	
 	const goToWorkOrders = () => {
-		uni.switchTab({ url: '/pages/workorder/list' })
+		uni.reLaunch({ url: '/pages/workorder/list' })
 	}
 	
 	const goToNewInspection = () => { goToWorkOrders() }
 	
 	const goToSiteList = () => {
-		uni.switchTab({ url: '/pages/site/list' })
+		uni.reLaunch({ url: '/pages/site/list' })
 	}
 	
 	const goToMap = () => {
@@ -333,7 +335,7 @@
 			itemList: ['个人信息', '退出登录'],
 			success: (res) => {
 				if (res.tapIndex === 0) {
-					uni.switchTab({ url: '/pages/profile/profile' })
+					uni.reLaunch({ url: '/pages/profile/profile' })
 				} else if (res.tapIndex === 1) {
 					uni.showModal({
 						title: '确认退出',
@@ -354,7 +356,7 @@
 		if (activity.type === 'work_order') {
 			// 记录需要聚焦的工单ID
 			workOrderStore.setFocusedWorkOrder(activity.id)
-			uni.switchTab({
+			uni.reLaunch({
 				url: '/pages/workorder/list'
 			})
 			return

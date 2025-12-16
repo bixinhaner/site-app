@@ -174,11 +174,10 @@ const setupPageInterceptor = () => {
 	// 保存原始页面跳转方法
 	const originalNavigateTo = uni.navigateTo
 	const originalRedirectTo = uni.redirectTo
-	const originalSwitchTab = uni.switchTab
 	const originalReLaunch = uni.reLaunch
 	const originalNavigateBack = uni.navigateBack
 	
-	// 包装页面跳转方法
+	// 包装页面跳转方法（保留日志记录，但不再单独包装 switchTab）
 	uni.navigateTo = (options) => {
 		logger.logAction('PAGE_NAVIGATE', {
 			type: 'navigateTo',
@@ -195,15 +194,6 @@ const setupPageInterceptor = () => {
 			timestamp: new Date().toISOString()
 		})
 		return originalRedirectTo.call(uni, options)
-	}
-	
-	uni.switchTab = (options) => {
-		logger.logAction('PAGE_NAVIGATE', {
-			type: 'switchTab',
-			url: options.url,
-			timestamp: new Date().toISOString()
-		})
-		return originalSwitchTab.call(uni, options)
 	}
 	
 	uni.reLaunch = (options) => {

@@ -107,6 +107,9 @@
 		<view class="fab" @click="addSite" v-if="canAddSite">
 			<text class="fab-icon">+</text>
 		</view>
+
+    <!-- 自定义底部导航栏 -->
+    <custom-tabbar />
 	</view>
 </template>
 

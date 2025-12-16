@@ -130,10 +130,9 @@
 					duration: 1500
 				})
 				
-				// 跳转到首页
+				// 跳转到首页（自定义底部导航，使用 reLaunch 作为入口）
 				setTimeout(() => {
-					// logger.logAction('LOGIN_REDIRECT_TO_HOME')
-					uni.switchTab({
+					uni.reLaunch({
 						url: '/pages/home/home'
 					})
 				}, 1500)

@@ -140,38 +140,6 @@
 		"navigationBarBackgroundColor": "#F8F8F8",
 		"backgroundColor": "#F8F8F8"
 	},
-	"tabBar": {
-		"color": "#7A7E83",
-		"selectedColor": "#f97316",
-		"borderStyle": "black",
-		"backgroundColor": "#ffffff",
-		"list": [
-			{
-				"pagePath": "pages/home/home",
-				"iconPath": "static/icons/home.png",
-				"selectedIconPath": "static/icons/home-active.png",
-				"text": "首页"
-			},
-			{
-				"pagePath": "pages/site/list",
-				"iconPath": "static/icons/site.png",
-				"selectedIconPath": "static/icons/site-active.png",
-				"text": "站点"
-			},
-			{
-				"pagePath": "pages/workorder/list",
-				"iconPath": "static/icons/task.png",
-				"selectedIconPath": "static/icons/task-active.png",
-				"text": "工单"
-			},
-			{
-				"pagePath": "pages/profile/profile",
-				"iconPath": "static/icons/profile.png",
-				"selectedIconPath": "static/icons/profile-active.png",
-				"text": "我的"
-			}
-		]
-	},
 	"condition": {
 		"current": 0,
 		"list": [

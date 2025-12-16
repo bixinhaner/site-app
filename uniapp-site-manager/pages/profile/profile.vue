@@ -255,6 +255,9 @@
 				</view>
 			</view>
 		</view>
+
+		<!-- 自定义底部导航栏 -->
+		<custom-tabbar />
 		
 		<!-- 语言设置弹窗 -->
 		<view class="language-modal" v-if="showLanguageModal" @click="closeLanguagePopup">
@@ -522,14 +525,14 @@ const isAdmin = computed(() => userStore.isAdmin)
 	
 	// 查看我的检查记录
 	const viewMyInspections = () => {
-		uni.switchTab({
+		uni.reLaunch({
 			url: '/pages/workorder/list'
 		})
 	}
 	
 	// 查看我的站点
 	const viewMySites = () => {
-		uni.switchTab({
+		uni.reLaunch({
 			url: '/pages/site/list'
 		})
 	}

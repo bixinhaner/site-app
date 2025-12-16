@@ -1,13 +1,19 @@
 <template>
 	<view class="custom-tabbar">
-		<view 
-			class="tab-item"
-			v-for="(item, index) in visibleTabs"
-			:key="index"
-			:class="{ active: currentPath === item.pagePath }"
-			@click="switchTab(item)"
-		>
-			<view class="tab-icon">{{ item.icon }}</view>
+		<view
+      class="tab-item"
+      v-for="(item, index) in visibleTabs"
+      :key="index"
+      :class="{ active: currentPath === item.pagePath }"
+      @click="switchTab(item)"
+    >
+			<view class="tab-icon">
+        <uni-icons
+          :type="getIconType(item.icon)"
+          :size="20"
+          :color="currentPath === item.pagePath ? ACTIVE_COLOR : INACTIVE_COLOR"
+        />
+      </view>
 			<text class="tab-text">{{ getTabText(item) }}</text>
 		</view>
 	</view>
@@ -19,59 +25,59 @@
 	
 	const userStore = useUserStore()
 	const currentPath = ref('')
-	
-	// 所有标签页配置
+
+  const ALL_ROLES = ['admin', 'manager', 'inspector', 'surveyor', 'user']
+  const ACTIVE_COLOR = 'var(--color-primary)'
+  const INACTIVE_COLOR = '#9ca3af'
+
+	// 所有标签页配置（使用图标名称，而非图片文件）
 	const allTabs = [
 		{
 			pagePath: 'pages/home/home',
-			icon: '🏠',
+			icon: 'home',
 			text: 'navigation.home',
-			roles: ['admin', 'manager', 'inspector'] // 所有角色可见
+			roles: ALL_ROLES
 		},
 		{
 			pagePath: 'pages/site/list',
-			icon: '📍',
+			icon: 'site',
 			text: 'navigation.sites',
-			roles: ['admin', 'manager'] // 管理员与项目经理可管理站点
+			roles: ALL_ROLES
 		},
 		{
 			pagePath: 'pages/workorder/list',
-			icon: '🔍',
+			icon: 'workorder',
 			text: 'navigation.inspection',
-			roles: ['admin', 'manager', 'inspector'] // 管理员、经理和检查员可见
-		},
-		{
-			pagePath: 'pages/task/list',
-			icon: '📋',
-			text: 'navigation.workorders',
-			roles: ['admin', 'manager', 'inspector'] // 管理员、经理可以管理任务，检查员可以查看自己的任务
+			roles: ALL_ROLES
 		},
 		{
 			pagePath: 'pages/profile/profile',
-			icon: '👤',
+			icon: 'profile',
 			text: 'navigation.profile',
-			roles: ['admin', 'manager', 'inspector'] // 所有角色可见
+			roles: ALL_ROLES
 		}
 	]
-	
+
 	// 根据用户角色筛选可见标签页
 	const visibleTabs = computed(() => {
 		const userRole = userStore.userInfo?.role || 'user'
 		return allTabs.filter(tab => tab.roles.includes(userRole))
 	})
+
+  // 将图标名称映射为 uni-icons 的 type
+  const getIconType = (name) => {
+    const map = {
+      home: 'home-filled',
+      site: 'location-filled',
+      workorder: 'list',
+      profile: 'person-filled',
+    }
+    return map[name] || 'circle'
+  }
 	
-	// 获取标签文本（根据用户角色调整）
+	// 获取标签文本
 	const getTabText = (item) => {
 		const { $t } = getCurrentInstance().appContext.config.globalProperties
-		const userRole = userStore.userInfo?.role
-		
-		// 为inspector角色调整特定标签的显示文本
-		if (userRole === 'inspector') {
-			if (item.pagePath === 'pages/task/list') {
-				return $t('navigation.myTasks')
-			}
-		}
-		
 		return $t(item.text)
 	}
 	
@@ -86,7 +92,8 @@
 	// 切换标签页
 	const switchTab = (item) => {
 		const targetPath = `/${item.pagePath}`
-		uni.switchTab({
+		// 使用 reLaunch 模拟 tab 切换，不依赖原生 tabBar 图标
+		uni.reLaunch({
 			url: targetPath
 		})
 	}
@@ -95,7 +102,7 @@
 <style scoped>
     .custom-tabbar {
         display: flex;
-        background: rgba(255, 255, 255, 0.86);
+        background: rgba(255, 255, 255, 0.92);
         -webkit-backdrop-filter: saturate(180%) blur(12px);
         backdrop-filter: saturate(180%) blur(12px);
         border-top: 1px solid var(--border-soft);
@@ -114,10 +121,10 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 6px 0 10px;
-        color: #7a7e83;
+        padding: 4px 0 6px;
+        color: #9ca3af; /* 默认灰色文字 + 图标 */
         transition: color 0.2s ease, transform 0.2s ease;
-        min-height: 54px;
+        min-height: 48px;
     }
     
     .tab-item.active {
@@ -125,15 +132,16 @@
     }
     
     .tab-item.active .tab-icon {
-        transform: scale(1.05);
+        transform: scale(1.03);
     }
     
     .tab-icon {
-        font-size: 22px;
-        margin-bottom: 4px;
+        font-size: 18px;
+        margin-bottom: 2px;
+        line-height: 1;
     }
     
     .tab-text {
-        font-size: 12px;
+        font-size: 11px;
     }
 </style>
