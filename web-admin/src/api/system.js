@@ -35,12 +35,21 @@ export const systemBackupApi = {
 
 // 移动端设置相关 API（包含定位模式）
 export const mobileSettingsApi = {
-  // 获取当前移动端定位模式
+  // 获取完整移动端配置（包含默认 / 按角色 / 按用户）
+  getMobileSettings() {
+    return request.get('/api/system/mobile-settings')
+  },
+
+  // 更新完整移动端配置
+  updateMobileSettings(data) {
+    return request.put('/api/system/mobile-settings', data)
+  },
+
+  // 兼容旧接口：仅获取/设置全局默认定位模式
   getLocationMode() {
     return request.get('/api/system/location-mode')
   },
 
-  // 更新移动端定位模式
   updateLocationMode(mode) {
     return request.put('/api/system/location-mode', { mode })
   },

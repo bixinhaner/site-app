@@ -5,12 +5,18 @@
  * - native：使用原生插件封装（getLocationWithAddressOfflineFirst）
  * - baidu：使用 uni.getLocation(wgs84) + 后端百度逆地理接口
  *
- * 模式由后端 SystemConfig(key='mobile_location_mode') 控制：
- *   GET  /api/system/location-mode  -> { mode: 'native' | 'baidu' }
- *   PUT  /api/system/location-mode  -> { mode: 'native' | 'baidu' }
+ * 模式由后端 SystemConfig(key='mobile_settings') 控制：
+ *   - location_mode.default: 全局默认
+ *   - location_mode.per_role: 按角色覆盖
+ *   - location_mode.per_user: 按用户覆盖
+ *
+ * APP 侧：
+ *   - 启动时可通过 GET /api/system/location-mode 读取“全局默认模式”作为兜底
+ *   - 登录后建议由 userStore 调用 /api/system/mobile-settings/effective，
+ *     并使用 setLocationMode 更新为“对当前用户生效”的模式。
  *
  * 默认模式为 'baidu'。调用方只需使用 getLocationWithAddressStrategy 即可，
- * 无需关心底层实现细节。
+ * 无需关心底层实现或生效范围。
  */
 
 import { buildApiUrl } from '@/config/api.js'
@@ -18,6 +24,8 @@ import { getLocationWithAddressOfflineFirst } from './nativeLocation.js'
 
 // 当前定位模式，默认 baidu
 let locationMode = 'baidu'
+// 是否允许检查详情本地上传图片，默认允许
+let allowLocalPhotoUpload = true
 
 export const getLocationMode = () => locationMode
 
@@ -30,9 +38,17 @@ export const setLocationMode = (mode) => {
   }
 }
 
+export const getAllowLocalPhotoUpload = () => allowLocalPhotoUpload
+
+export const setAllowLocalPhotoUpload = (flag) => {
+  // 任何非严格 false 的传入都视为允许，避免因为后端缺字段导致意外禁用
+  allowLocalPhotoUpload = flag !== false
+}
+
 /**
- * 在 App 启动时调用，向后端拉取当前定位模式。
- * 失败时保持默认 'baidu'。
+ * 在 App 启动时调用，向后端拉取“全局默认定位模式”作为兜底。
+ * 登录后，userStore 会根据当前用户再调用 /mobile-settings/effective
+ * 覆盖为对该用户生效的模式。
  */
 export const initLocationMode = async () => {
   try {
@@ -223,4 +239,3 @@ export const getLocationWithAddressStrategy = async (options = {}) => {
   // mode === 'baidu'
   return await getLocationWithBaidu(options)
 }
-

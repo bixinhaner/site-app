@@ -1036,12 +1036,20 @@
 	}
 	
 	const takePhoto = async () => {
+		// 根据移动端配置决定是否允许本地上传
+		const { getAllowLocalPhotoUpload } = await import('@/utils/locationStrategy.js')
+		const allowAlbum = getAllowLocalPhotoUpload()
+
+		const itemList = allowAlbum
+			? [$t('common.takePhoto'), $t('common.selectFromAlbum')]
+			: [$t('common.takePhoto')]
+
 		// 显示操作选择弹窗
 		uni.showActionSheet({
-			itemList: [$t('common.takePhoto'), $t('common.selectFromAlbum')],
+			itemList,
 			success: async function (res) {
-				const sourceType = res.tapIndex === 0 ? ['camera'] : ['album']
-				const isCamera = res.tapIndex === 0
+				const isCamera = !allowAlbum || res.tapIndex === 0
+				const sourceType = isCamera ? ['camera'] : ['album']
 				
 				try {
 					// 如果是拍照，先获取GPS坐标

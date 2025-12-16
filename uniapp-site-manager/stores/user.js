@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { buildApiUrl, API_ENDPOINTS, createRequestConfig } from '@/config/api.js'
+import { setLocationMode, setAllowLocalPhotoUpload } from '@/utils/locationStrategy.js'
 
 export const useUserStore = defineStore('user', () => {
 const token = ref(uni.getStorageSync('token') || '')
@@ -65,6 +66,31 @@ const isLoggedIn = computed(() => !!token.value)
                 uni.setStorageSync('token', access_token)
                 if (refresh_token) uni.setStorageSync('refreshToken', refresh_token)
                 uni.setStorageSync('userInfo', user)
+
+                // 登录成功后，根据当前用户刷新移动端配置（例如定位模式、本地上传开关）
+                try {
+                  const settingsRes = await uni.request({
+                    url: buildApiUrl('/api/system/mobile-settings/effective'),
+                    method: 'GET',
+                    header: {
+                      Authorization: `Bearer ${token.value}`,
+                    },
+                  })
+                  if (settingsRes.statusCode === 200 && settingsRes.data) {
+                    const mode = (settingsRes.data.location_mode || '').toLowerCase()
+                    if (mode === 'baidu' || mode === 'native') {
+                      setLocationMode(mode)
+                    }
+                    if (typeof settingsRes.data.allow_local_photo_upload === 'boolean') {
+                      setAllowLocalPhotoUpload(settingsRes.data.allow_local_photo_upload)
+                    } else {
+                      // 未返回时默认允许
+                      setAllowLocalPhotoUpload(true)
+                    }
+                  }
+                } catch (e) {
+                  console.warn('刷新移动端配置失败（登录后）:', e)
+                }
 				
 				console.log('登录成功:', user)
 				return { success: true }
@@ -192,6 +218,31 @@ const validateToken = async () => {
 			if (response.statusCode === 200) {
 				userInfo.value = response.data
 				uni.setStorageSync('userInfo', response.data)
+
+        // 验证通过后，同步一次当前用户的移动端配置（例如定位模式、本地上传开关）
+        try {
+          const settingsRes = await uni.request({
+            url: buildApiUrl('/api/system/mobile-settings/effective'),
+            method: 'GET',
+            header: {
+              Authorization: `Bearer ${token.value}`,
+            },
+          })
+          if (settingsRes.statusCode === 200 && settingsRes.data) {
+            const mode = (settingsRes.data.location_mode || '').toLowerCase()
+            if (mode === 'baidu' || mode === 'native') {
+              setLocationMode(mode)
+            }
+            if (typeof settingsRes.data.allow_local_photo_upload === 'boolean') {
+              setAllowLocalPhotoUpload(settingsRes.data.allow_local_photo_upload)
+            } else {
+              setAllowLocalPhotoUpload(true)
+            }
+          }
+        } catch (e) {
+          console.warn('刷新移动端配置失败（validateToken）:', e)
+        }
+
 				return true
 			} else if (response.statusCode === 401) {
 				// Token无效，清除存储
