@@ -187,6 +187,7 @@ export default {
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { watermarkTool } from '@/utils/watermark.js'
 	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
+	import { getLocationMode, getLocationWithAddressStrategy } from '@/utils/locationStrategy.js'
 	
 	const userStore = useUserStore()
 	const inspectionStore = useInspectionStore()
@@ -365,40 +366,51 @@ export default {
 		}
 	}
 	
-	const startGpsWatch = () => {
-		// 立即获取一次位置
-		getCurrentLocation()
-		
-		// 开始监听位置变化
-		gpsWatcher.value = uni.onLocationChange((res) => {
-			updateGpsInfo(res)
-		})
-		
-		// 开始位置更新
-		uni.startLocationUpdate({
-			success: () => {
-				console.log('开始位置更新')
-			},
-			fail: (error) => {
-				console.error('开始位置更新失败:', error)
-			}
-		})
+	const startGpsWatch = async () => {
+		const mode = getLocationMode()
+		console.log('Camera 页面启动GPS监听，当前模式:', mode)
+
+		if (mode === 'baidu') {
+			// Baidu 模式下使用 uni 的持续定位能力
+			getCurrentLocationWithUni()
+
+			gpsWatcher.value = uni.onLocationChange((res) => {
+				updateGpsInfoFromUni(res)
+			})
+
+			uni.startLocationUpdate({
+				success: () => {
+					console.log('开始位置更新 (Baidu 模式)')
+				},
+				fail: (error) => {
+					console.error('开始位置更新失败:', error)
+				}
+			})
+		} else {
+			// 原生模式下使用定位策略获取一次位置（不启用 uni 持续监听）
+			await getCurrentLocationWithStrategy()
+		}
 	}
 	
 	const stopGpsWatch = () => {
 		if (gpsWatcher.value) {
 			uni.offLocationChange(gpsWatcher.value)
+			gpsWatcher.value = null
 		}
 		
-		uni.stopLocationUpdate()
+		try {
+			uni.stopLocationUpdate()
+		} catch (error) {
+			console.warn('停止位置更新失败:', error)
+		}
 	}
 	
-	const getCurrentLocation = () => {
+	const getCurrentLocationWithUni = () => {
 		uni.getLocation({
-			type: 'gcj02',
+			type: 'wgs84',
 			altitude: true,
 			success: (res) => {
-				updateGpsInfo(res)
+				updateGpsInfoFromUni(res)
 			},
 			fail: (error) => {
 				console.error('获取位置失败:', error)
@@ -409,22 +421,61 @@ export default {
 			}
 		})
 	}
-	
-	const updateGpsInfo = async (locationData) => {
+
+	const updateGpsInfoFromUni = async (locationData) => {
+		const lat = Number(locationData.latitude)
+		const lon = Number(locationData.longitude)
 		gpsInfo.value = {
-			latitude: locationData.latitude,
-			longitude: locationData.longitude,
-			accuracy: locationData.accuracy,
-			altitude: locationData.altitude,
-			speed: locationData.speed
+			latitude: lat,
+			longitude: lon,
+			accuracy: Number(locationData.accuracy || 0),
+			altitude: Number(locationData.altitude || 0),
+			speed: Number(locationData.speed || 0),
+			address: gpsInfo.value.address || ''
 		}
-		
-		// 获取地址信息
+	}
+
+	const getCurrentLocationWithStrategy = async () => {
 		try {
-			const address = await reverseGeocode(locationData.latitude, locationData.longitude)
-			gpsInfo.value.address = address
+			console.log('Camera 页面通过定位策略获取当前位置...')
+			const result = await getLocationWithAddressStrategy()
+			console.log('Camera 页面定位策略结果:', result)
+
+			if (!result || !result.success || !result.data) {
+				console.warn('Camera 页面定位失败:', result?.message)
+				return
+			}
+
+			const data = result.data
+			const lat = Number(data.latitude)
+			const lon = Number(data.longitude)
+			let addressStr = ''
+
+			const addressObj = result.address
+			if (addressObj && typeof addressObj === 'object') {
+				const parts = [
+					addressObj.country,
+					addressObj.province,
+					addressObj.city,
+					addressObj.district,
+					addressObj.street,
+					addressObj.streetNumber
+				].filter(part => part && String(part).trim())
+				if (parts.length > 0) {
+					addressStr = parts.join('')
+				}
+			}
+
+			gpsInfo.value = {
+				latitude: lat,
+				longitude: lon,
+				accuracy: Number(data.accuracy || 0),
+				altitude: Number(data.altitude || 0),
+				speed: Number(data.speed || 0),
+				address: addressStr
+			}
 		} catch (error) {
-			console.error('逆地理编码失败:', error)
+			console.error('Camera 页面通过定位策略获取位置失败:', error)
 		}
 	}
 	

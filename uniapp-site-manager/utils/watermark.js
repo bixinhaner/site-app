@@ -4,9 +4,9 @@
  * 集成地理编码服务，自动获取详细地址信息
  */
 
-// 移除复杂的geocoding依赖，使用UniApp内置功能
+// 移除复杂的geocoding依赖，使用统一定位策略
 
-import { getLocationWithAddressOfflineFirst } from './nativeLocation.js'
+import { getLocationWithAddressStrategy } from './locationStrategy.js'
 
 export class WatermarkTool {
   constructor() {
@@ -799,23 +799,23 @@ export class WatermarkTool {
   }
 
   /**
-   * 使用原生定位插件获取位置和地址信息
-   * @returns {Promise<Object>} 原生插件返回的位置结果
+   * 使用定位策略获取位置和地址信息
+   * @returns {Promise<Object>} 定位结果（结构与原生封装保持一致）
    */
   async getLocationFromNativePlugin() {
     try {
-      console.log('开始通过封装获取原生定位信息...')
-      const result = await getLocationWithAddressOfflineFirst()
-      console.log('封装定位结果:', result)
+      console.log('开始通过定位策略获取定位信息...')
+      const result = await getLocationWithAddressStrategy()
+      console.log('定位策略结果:', result)
 
       if (result && result.success && result.data) {
         return result
       }
 
-      throw new Error(result?.message || '原生定位插件定位失败')
+      throw new Error(result?.message || '定位失败')
     } catch (error) {
-      console.error('调用原生定位封装失败:', error)
-      throw new Error('无法获取原生定位信息: ' + error.message)
+      console.error('调用定位策略封装失败:', error)
+      throw new Error('无法获取定位信息: ' + error.message)
     }
   }
 

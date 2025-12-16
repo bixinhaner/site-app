@@ -127,7 +127,7 @@ import { ref, getCurrentInstance, computed } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 import { useUserStore } from '@/stores/user'
-import { getLocationWithAddressOfflineFirst } from '@/utils/nativeLocation.js'
+import { getLocationWithAddressStrategy } from '@/utils/locationStrategy.js'
 
 const { $t } = getCurrentInstance().appContext.config.globalProperties
 const store = useWorkOrderStore()
@@ -382,13 +382,13 @@ const deletePhoto = async (photo) => {
   }
 }
 
-// 使用原生插件获取高精度GPS定位（离线优先 + 在线15秒超时）
+// 使用定位策略获取高精度GPS定位（支持原生插件 / Baidu 模式）
 const getHighAccuracyGPS = async () => {
   try {
-    console.log('开始通过封装获取高精度GPS定位...')
+    console.log('开始通过定位策略获取高精度GPS定位...')
 
-    const result = await getLocationWithAddressOfflineFirst()
-    console.log('封装定位结果:', result)
+    const result = await getLocationWithAddressStrategy()
+    console.log('定位策略结果:', result)
 
     if (!result || !result.success || !result.data) {
       throw new Error(result?.message || '原生定位失败')
@@ -424,7 +424,7 @@ const getHighAccuracyGPS = async () => {
     
     return gpsResult
   } catch (error) {
-    console.error('原生插件GPS定位失败:', error)
+    console.error('定位策略GPS定位失败:', error)
     uni.showToast({
       title: $t('messages.nativePluginLocationFailed'),
       icon: 'error'

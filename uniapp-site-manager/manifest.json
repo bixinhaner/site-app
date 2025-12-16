@@ -64,9 +64,19 @@
                 "geolocation" : {
                     "system" : {
                         "__platform__" : [ "android" ]
+                    },
+                    "baidu" : {
+                        "__platform__" : [ "ios", "android" ],
+                        "appkey_ios" : "89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ",
+                        "appkey_android" : "89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ"
                     }
                 },
-                "maps" : {},
+                "maps" : {
+                    "baidu" : {
+                        "appkey_ios" : "89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ",
+                        "appkey_android" : "89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ"
+                    }
+                },
                 "speech" : {},
                 "push" : {}
             },

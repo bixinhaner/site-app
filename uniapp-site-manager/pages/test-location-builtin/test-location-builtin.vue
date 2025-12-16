@@ -18,6 +18,8 @@
       <button @click="testOpenLocation" class="test-btn info" :disabled="!currentLocation">在地图中查看</button>
       <button @click="startLocationWatch" class="test-btn warning" v-if="!isWatching">开始位置监听</button>
       <button @click="stopLocationWatch" class="test-btn danger" v-if="isWatching">停止位置监听</button>
+      <button @click="testBaiduReverse" class="test-btn info" :disabled="!currentLocation">测试百度逆地理(后端)</button>
+      <button @click="testBaiduReverseUni" class="test-btn info" :disabled="!currentLocation">测试百度逆地理(前端)</button>
     </view>
     
     <view class="result-section" v-if="currentLocation">
@@ -97,6 +99,11 @@
 </template>
 
 <script>
+import { buildApiUrl } from '@/config/api.js'
+
+// 仅用于测试页面的前端直连百度逆地理
+const BAIDU_AK = '89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ'
+
 export default {
   name: 'TestLocationBuiltin',
   data() {
@@ -129,8 +136,9 @@ export default {
       this.updateStatus('定位中...', '正在获取位置信息', 'status-loading');
       
       uni.getLocation({
-        type: 'gcj02', // 国测局坐标系
-        geocode: true,  // 解析地址信息
+        // 部分平台（尤其是某些 Web/H5 或低版本 SDK）不支持 gcj02，这里统一用 wgs84
+        type: 'wgs84',
+        geocode: true,  // 尽量让内置接口解析地址信息
         success: (res) => {
           this.currentLocation = {
             ...res,
@@ -279,6 +287,118 @@ export default {
     // 清空日志
     clearLogs() {
       this.logs = [];
+    },
+
+    // 调用后端百度逆地理接口测试
+    testBaiduReverse() {
+      if (!this.currentLocation) {
+        uni.showToast({
+          title: '请先获取位置',
+          icon: 'none'
+        });
+        return;
+      }
+
+      const { latitude, longitude } = this.currentLocation;
+      this.addLog('百度逆地理', `请求后端，lat=${latitude}, lng=${longitude}`, 'info');
+
+      const url = buildApiUrl('/api/geo/baidu-reverse');
+      uni.request({
+        url,
+        method: 'GET',
+        data: {
+          lat: latitude,
+          lng: longitude
+        },
+        success: (res) => {
+          if (res.statusCode === 200 && res.data) {
+            const addr = res.data.address || '[无地址]';
+            this.addLog('百度逆地理成功', addr, 'success');
+            // 同步到当前地址字段，方便观察
+            this.currentLocation = {
+              ...this.currentLocation,
+              address: addr
+            };
+            uni.showToast({
+              title: '百度逆地理成功',
+              icon: 'success'
+            });
+          } else {
+            const msg = res.data?.detail || `HTTP ${res.statusCode}`;
+            this.addLog('百度逆地理失败', msg, 'error');
+            uni.showToast({
+              title: '百度逆地理失败',
+              icon: 'none'
+            });
+          }
+        },
+        fail: (err) => {
+          this.addLog('百度逆地理失败', err.errMsg || '请求失败', 'error');
+          uni.showToast({
+            title: '请求失败',
+            icon: 'none'
+          });
+        }
+      });
+    },
+
+    // 使用前端直接调用百度逆地理API（仅测试用）
+    testBaiduReverseUni() {
+      if (!this.currentLocation) {
+        uni.showToast({
+          title: '请先获取位置',
+          icon: 'none'
+        });
+        return;
+      }
+
+      const { latitude, longitude } = this.currentLocation;
+      this.addLog('前端百度逆地理', `直接调用百度API，lat=${latitude}, lng=${longitude}`, 'info');
+
+      uni.request({
+        url: 'https://api.map.baidu.com/reverse_geocoding/v3/',
+        method: 'GET',
+        data: {
+          ak: BAIDU_AK,
+          output: 'json',
+          // uni.getLocation 当前使用 wgs84，因此这里使用 wgs84ll
+          coordtype: 'wgs84ll',
+          location: `${latitude},${longitude}`
+        },
+        success: (res) => {
+          if (res.statusCode === 200 && res.data && res.data.status === 0) {
+            const result = res.data.result || {};
+            const addr = result.formatted_address || '[无地址]';
+            const desc = result.sematic_description || '';
+            this.addLog('前端百度逆地理成功', `${addr} ${desc}`, 'success');
+
+            // 同步更新当前地址，方便在页面上查看
+            this.currentLocation = {
+              ...this.currentLocation,
+              address: addr
+            };
+
+            uni.showToast({
+              title: '前端百度逆地理成功',
+              icon: 'success'
+            });
+          } else {
+            const msg = (res.data && (res.data.msg || res.data.message)) || `HTTP ${res.statusCode}`;
+            this.addLog('前端百度逆地理失败', msg, 'error');
+            uni.showToast({
+              title: '前端百度逆地理失败',
+              icon: 'none'
+            });
+          }
+        },
+        fail: (err) => {
+          this.addLog('前端百度逆地理失败', err.errMsg || '请求失败', 'error');
+          uni.showToast({
+            title: '请求失败',
+            icon: 'none'
+          });
+        }
+      });
     },
     
     // 格式化时间

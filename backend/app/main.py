@@ -15,8 +15,8 @@ from app.models import ssv_archive as _ssv_archive_models  # noqa: F401
 from app.models import omc_cellname_sync as _omc_cellname_sync_models  # noqa: F401
 from app.models import system_config as _system_config_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
-from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders
-from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup
+from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode
+from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
 
@@ -66,9 +66,11 @@ app.include_router(inspections.router, prefix="/api/inspections", tags=["检查�
 app.include_router(template_binding.router, prefix="/api/inspections", tags=["模板绑定"])
 app.include_router(equipment.router, prefix="/api/equipment", tags=["设备管理"])
 app.include_router(stock.router, prefix="/api/stock", tags=["库存管理"])
+app.include_router(geocode.router, prefix="/api", tags=["地理编码"])
 app.include_router(site_planning.router, prefix="/api/sites", tags=["站点规划"])
 app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单管理"])
 app.include_router(logs.router, prefix="/api", tags=["用户日志"])
+app.include_router(mobile_settings.router, prefix="/api/system", tags=["系统配置"])
 app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])
 app.include_router(survey_archives.router, prefix="/api/survey-archives", tags=["勘察档案"])
 app.include_router(opening_archives.router, prefix="/api/opening-archives", tags=["开站档案"])

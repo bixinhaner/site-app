@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # 默认 3 天，无操作超过 3 天需要重新登录
     REFRESH_TOKEN_EXPIRE_DAYS: int = 3
     ALGORITHM: str = "HS256"
+
+    # Baidu Map API
+    BAIDU_MAP_AK: str = os.getenv("BAIDU_MAP_AK", "")
     
     # 文件上传配置
     UPLOAD_DIR: str = "./uploads"

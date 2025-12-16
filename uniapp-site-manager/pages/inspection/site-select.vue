@@ -172,6 +172,7 @@
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
+	import { getLocationWithAddressStrategy } from '@/utils/locationStrategy.js'
 	
 	const siteStore = useSiteStore()
 	const inspectionStore = useInspectionStore()
@@ -320,40 +321,30 @@
 	
 	const getCurrentLocation = async () => {
 		try {
-			console.log('使用原生插件获取当前位置...')
+			console.log('使用定位策略获取当前位置用于站点距离排序...')
 			
-			// 获取原生定位插件
-			const locationPlugin = uni.requireNativePlugin('my-location-plugin')
+			const result = await getLocationWithAddressStrategy()
+			console.log('站点选择页定位结果:', result)
 			
-			if (!locationPlugin) {
-				throw new Error('原生定位插件未加载')
+			if (!result || !result.success || !result.data) {
+				console.warn('站点选择页获取位置失败:', result?.message)
+				return
 			}
 			
-			// 调用插件的同步定位方法（更快）
-			const result = locationPlugin.getLocationSync()
-			console.log('原生插件位置结果:', result)
+			const data = result.data
+			const lat = Number(data.latitude)
+			const lon = Number(data.longitude)
 			
-			// 解析结果
-			let parsedResult = result
-			if (typeof result === 'string') {
-				try {
-					parsedResult = JSON.parse(result)
-				} catch (parseError) {
-					console.error('解析原生插件结果失败:', parseError)
-					return
-				}
+			if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) {
+				console.warn('站点选择页定位坐标无效:', { lat, lon })
+				return
 			}
 			
-			if (parsedResult && parsedResult.success && parsedResult.data) {
-				const data = parsedResult.data
-				// 计算站点距离
-				calculateDistances(data.latitude, data.longitude)
-			} else {
-				console.warn('原生插件获取位置失败:', parsedResult?.message)
-			}
+			// 计算站点距离
+			calculateDistances(lat, lon)
 			
 		} catch (error) {
-			console.warn('原生插件获取位置失败:', error.message)
+			console.warn('站点选择页定位失败:', error.message || error)
 		}
 	}
 	

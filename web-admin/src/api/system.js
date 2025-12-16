@@ -33,4 +33,17 @@ export const systemBackupApi = {
   },
 }
 
+// 移动端设置相关 API（包含定位模式）
+export const mobileSettingsApi = {
+  // 获取当前移动端定位模式
+  getLocationMode() {
+    return request.get('/api/system/location-mode')
+  },
+
+  // 更新移动端定位模式
+  updateLocationMode(mode) {
+    return request.put('/api/system/location-mode', { mode })
+  },
+}
+
 export default systemBackupApi

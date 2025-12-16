@@ -144,6 +144,12 @@ const routes = [
         meta: { title: '系统配置', icon: 'Setting' },
         children: [
           {
+            path: 'mobile-location',
+            name: 'MobileLocationSettings',
+            component: () => import('../views/system/MobileLocationSettings.vue'),
+            meta: { title: '移动端配置', icon: 'Iphone' }
+          },
+          {
             path: 'omc',
             name: 'OmcConfig',
             component: () => import('../views/system/OmcConfig.vue'),

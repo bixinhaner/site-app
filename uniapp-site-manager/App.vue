@@ -13,6 +13,7 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
 	import { initInterceptors } from '@/utils/api-interceptor'
+	import { initLocationMode } from '@/utils/locationStrategy.js'
 	
 	const globalLoading = ref(false)
 	const loadingText = ref({
@@ -38,6 +39,13 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 		
 		// 暂时不初始化API拦截器
 		console.log('⚠️ API interceptors temporarily disabled for debugging')
+		
+		// 初始化移动端定位模式（native / baidu），失败时默认使用 baidu
+		try {
+			await initLocationMode()
+		} catch (error) {
+			console.warn('初始化定位模式失败，将使用默认模式 baidu:', error)
+		}
 		
 		try {
 			// 初始化离线存储

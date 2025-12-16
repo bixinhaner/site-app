@@ -1303,14 +1303,14 @@
 		}
 	}
 
-	// 使用原生插件的GPS高精度定位函数（离线优先 + 在线15秒超时）
+	// 通过定位策略获取高精度定位（支持原生插件 / Baidu 模式）
 	const getHighAccuracyLocation = async () => {
 		try {
-			console.log('使用原生定位封装获取高精度定位...')
+			console.log('使用定位策略封装获取高精度定位...')
 			
-			const { getLocationWithAddressOfflineFirst } = await import('@/utils/nativeLocation.js')
-			const result = await getLocationWithAddressOfflineFirst()
-			console.log('封装定位结果:', result)
+			const { getLocationWithAddressStrategy } = await import('@/utils/locationStrategy.js')
+			const result = await getLocationWithAddressStrategy()
+			console.log('定位策略结果:', result)
 
 			if (!result || !result.success || !result.data) {
 				throw new Error(result?.message || '原生定位失败')
@@ -1351,7 +1351,7 @@
 				provider: data.provider || 'native-plugin'
 			}
 		} catch (error) {
-			console.error('原生定位获取高精度位置失败:', error)
+			console.error('定位策略获取高精度位置失败:', error)
 			throw error
 		}
 	}
