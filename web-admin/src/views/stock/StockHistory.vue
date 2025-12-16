@@ -191,6 +191,15 @@
           <div class="table-header">
             <span>导入 SN 明细</span>
             <div class="table-actions">
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                :disabled="selectedImportRows.length === 0"
+                @click="openBatchVoid"
+              >
+                批量撤销入库
+              </el-button>
               <el-input
                 v-model="importDetailKeyword"
                 placeholder="按SN/MAC/供应商过滤"
@@ -203,11 +212,18 @@
         </template>
 
         <el-table
+          ref="importDetailsTableRef"
           :data="filteredImportDetails"
           v-loading="importDetailsLoading"
           height="60vh"
           stripe
+          @selection-change="onImportSelectionChange"
         >
+          <el-table-column
+            type="selection"
+            width="52"
+            :selectable="importDetailSelectable"
+          />
           <el-table-column prop="line_number" label="行号" width="80" />
           <el-table-column prop="serial_number" label="SN序列号" width="200" />
           <el-table-column prop="mac_address" label="MAC地址" width="160" />
@@ -230,6 +246,27 @@
         </el-table>
       </el-card>
     </el-drawer>
+
+    <!-- SN 导入明细：批量撤销 -->
+    <el-dialog v-model="batchVoidVisible" title="批量撤销入库" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="数量">
+          <el-input :model-value="`已选择 ${selectedImportRows.length} 条`" disabled />
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-input v-model="batchVoidForm.reason" placeholder="请填写撤销原因" />
+        </el-form-item>
+        <el-alert
+          type="warning"
+          :closable="false"
+          title="撤销会释放 SN 以便重导，并生成“调整”记录。"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="batchVoidVisible = false">取消</el-button>
+        <el-button type="danger" :loading="batchVoidSubmitting" @click="submitBatchVoid">确认撤销</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 出入库记录详情抽屉 -->
     <el-drawer v-model="transactionDetailsVisible" size="60%" :with-header="false">
@@ -277,7 +314,10 @@
           </div>
           <div class="summary-item">
             <span class="label">备注</span>
-            <span class="value">{{ currentTransactionRecord.notes || '-' }}</span>
+            <span class="value notes-value">
+              <span>{{ currentTransactionRecord.notes || '-' }}</span>
+              <el-button link type="primary" size="small" @click="openEditTxNotes">编辑</el-button>
+            </span>
           </div>
         </div>
       </el-card>
@@ -292,9 +332,52 @@
         <el-table :data="currentTransactionRecord.items || []" size="small" stripe>
           <el-table-column prop="equipment_code" label="设备编码" width="120" />
           <el-table-column prop="equipment_name" label="设备名称" width="200" />
-          <el-table-column prop="serial_number" label="SN" width="200" />
+          <el-table-column prop="serial_number" label="SN" width="220">
+            <template #default="{ row }">
+              <el-space>
+                <span>{{ row.serial_number || '-' }}</span>
+                <el-tag v-if="row.instance_is_voided" size="small" type="info">已撤销</el-tag>
+              </el-space>
+            </template>
+          </el-table-column>
+          <el-table-column prop="batch_number" label="批次号" width="140" />
+          <el-table-column prop="vendor" label="供应商" width="120" />
+          <el-table-column prop="item_notes" label="行备注" min-width="160" show-overflow-tooltip />
           <el-table-column prop="quantity" label="数量" width="80" />
           <el-table-column prop="unit" label="单位" width="80" />
+          <el-table-column label="操作" width="240" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="primary"
+                link
+                :disabled="!canEditCurrentTransaction"
+                @click="openEditItem(row)"
+              >
+                编辑信息
+              </el-button>
+              <el-button
+                v-if="!row.equipment_instance_id && row.equipment_category === 'auxiliary'"
+                size="small"
+                type="warning"
+                link
+                :disabled="!canEditCurrentTransaction"
+                @click="openAdjustQty(row)"
+              >
+                更正数量
+              </el-button>
+              <el-button
+                v-if="row.equipment_instance_id"
+                size="small"
+                type="danger"
+                link
+                :disabled="!canEditCurrentTransaction || row.instance_is_voided"
+                @click="openVoidInstance(row)"
+              >
+                撤销入库
+              </el-button>
+            </template>
+          </el-table-column>
         </el-table>
 
         <div
@@ -312,6 +395,102 @@
         </div>
       </el-card>
     </el-drawer>
+
+    <!-- 编辑单据备注 -->
+    <el-dialog v-model="editTxNotesVisible" title="编辑备注" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="备注">
+          <el-input v-model="editTxNotesForm.notes" type="textarea" :rows="3" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-input v-model="editTxNotesForm.reason" placeholder="请填写修改原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editTxNotesVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editTxNotesSubmitting" @click="submitEditTxNotes">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑明细信息 -->
+    <el-dialog v-model="editItemVisible" title="编辑明细信息" width="560px">
+      <el-form label-width="90px">
+        <el-form-item label="设备">
+          <el-input :model-value="editItemTitle" disabled />
+        </el-form-item>
+        <el-form-item label="批次号">
+          <el-input v-model="editItemForm.batch_number" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="供应商">
+          <el-input v-model="editItemForm.vendor" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="行备注">
+          <el-input v-model="editItemForm.item_notes" type="textarea" :rows="3" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-input v-model="editItemForm.reason" placeholder="请填写修改原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editItemVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editItemSubmitting" @click="submitEditItem">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 更正数量（辅材） -->
+    <el-dialog v-model="adjustQtyVisible" title="更正数量" width="560px">
+      <el-form label-width="90px">
+        <el-form-item label="设备">
+          <el-input :model-value="adjustQtyTitle" disabled />
+        </el-form-item>
+        <el-form-item label="本次数量" required>
+          <el-row :gutter="12" style="width: 100%">
+            <el-col :span="8">
+              <el-select v-model="adjustQtyForm.mode" style="width: 100%">
+                <el-option label="增加" value="increase" />
+                <el-option label="减少" value="decrease" />
+              </el-select>
+            </el-col>
+            <el-col :span="16">
+              <el-input-number v-model="adjustQtyForm.amount" :min="1" :step="1" style="width: 100%" />
+            </el-col>
+          </el-row>
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-input v-model="adjustQtyForm.reason" placeholder="请填写更正原因" />
+        </el-form-item>
+        <el-alert
+          type="info"
+          :closable="false"
+          title="说明：更正会生成一条“调整”记录，不修改原入库明细。"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="adjustQtyVisible = false">取消</el-button>
+        <el-button type="primary" :loading="adjustQtySubmitting" @click="submitAdjustQty">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 撤销入库（主设备） -->
+    <el-dialog v-model="voidVisible" title="撤销入库" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="SN">
+          <el-input :model-value="voidSn" disabled />
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-input v-model="voidForm.reason" placeholder="请填写撤销原因" />
+        </el-form-item>
+        <el-alert
+          type="warning"
+          :closable="false"
+          title="撤销会释放 SN 以便重导，并生成一条“调整”记录。"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="voidVisible = false">取消</el-button>
+        <el-button type="danger" :loading="voidSubmitting" @click="submitVoid">确认撤销</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -348,11 +527,52 @@ const currentImportRecord = ref(null)
 const importDetailsLoading = ref(false)
 const importDetails = ref([])
 const importDetailKeyword = ref('')
+const importDetailsTableRef = ref(null)
+const selectedImportRows = ref([])
+
+const batchVoidVisible = ref(false)
+const batchVoidSubmitting = ref(false)
+const batchVoidForm = ref({ reason: '' })
 
 const transactionDetailsVisible = ref(false)
 const currentTransactionRecord = ref(null)
 
 const showNotesColumn = computed(() => recordTypeFilter.value !== 'import')
+const canEditCurrentTransaction = computed(() => currentTransactionRecord.value?.transaction_type === 'stock_in')
+
+// ===== 编辑/更正/撤销相关状态 =====
+const editTxNotesVisible = ref(false)
+const editTxNotesSubmitting = ref(false)
+const editTxNotesForm = ref({ notes: '', reason: '' })
+
+const editItemVisible = ref(false)
+const editItemSubmitting = ref(false)
+const editingItem = ref(null)
+const editItemForm = ref({ batch_number: '', vendor: '', item_notes: '', reason: '' })
+
+const adjustQtyVisible = ref(false)
+const adjustQtySubmitting = ref(false)
+const adjustingItem = ref(null)
+const adjustQtyForm = ref({ mode: 'increase', amount: 1, reason: '' })
+
+const voidVisible = ref(false)
+const voidSubmitting = ref(false)
+const voidingItem = ref(null)
+const voidForm = ref({ reason: '' })
+
+const editItemTitle = computed(() => {
+  const row = editingItem.value
+  if (!row) return '-'
+  return `${row.equipment_name || '-'} (${row.equipment_code || '-'})`
+})
+
+const adjustQtyTitle = computed(() => {
+  const row = adjustingItem.value
+  if (!row) return '-'
+  return `${row.equipment_name || '-'} (${row.equipment_code || '-'})`
+})
+
+const voidSn = computed(() => voidingItem.value?.serial_number || '-')
 
 const currentTransactionWarehouseName = computed(() => {
   const rec = currentTransactionRecord.value
@@ -380,10 +600,10 @@ const importStatusTagType = (s) =>
   ({ processing: 'info', completed: 'success', failed: 'danger' }[s] || 'info')
 
 const importDetailStatusText = (s) =>
-  ({ success: '成功', failed: '失败', duplicate: '重复' }[s] || s || '-')
+  ({ success: '成功', failed: '失败', duplicate: '重复', voided: '已撤销' }[s] || s || '-')
 
 const importDetailStatusTagType = (s) =>
-  ({ success: 'success', failed: 'danger', duplicate: 'warning' }[s] || 'info')
+  ({ success: 'success', failed: 'danger', duplicate: 'warning', voided: 'info' }[s] || 'info')
 
 const txTypeText = (type) => {
   const map = {
@@ -578,6 +798,14 @@ const filteredImportDetails = computed(() => {
   })
 })
 
+const importDetailSelectable = (row) => {
+  return row.import_status === 'success' && !!row.equipment_instance_id && !row.instance_is_voided
+}
+
+const onImportSelectionChange = (rows) => {
+  selectedImportRows.value = rows || []
+}
+
 const loadTransactions = async () => {
   try {
     const res = await stockApi.getStockTransactions(filters.value)
@@ -585,6 +813,15 @@ const loadTransactions = async () => {
   } catch (error) {
     console.error('加载出入库记录失败:', error)
     ElMessage.error('加载出入库记录失败')
+  }
+}
+
+const reloadTransactionsAndKeepDrawer = async () => {
+  const keepId = currentTransactionRecord.value?.id
+  await loadTransactions()
+  if (keepId) {
+    const found = rawTransactions.value.find((t) => t.id === keepId)
+    if (found) currentTransactionRecord.value = found
   }
 }
 
@@ -632,11 +869,65 @@ const loadImportDetails = async (importId) => {
     importDetailsLoading.value = true
     const res = await stockApi.getImportDetails(importId)
     importDetails.value = res.details || []
+    selectedImportRows.value = []
+    importDetailsTableRef.value?.clearSelection?.()
   } catch (error) {
     console.error('加载导入明细失败:', error)
     ElMessage.error('加载导入明细失败')
   } finally {
     importDetailsLoading.value = false
+  }
+}
+
+const openBatchVoid = () => {
+  if (selectedImportRows.value.length === 0) return
+  batchVoidForm.value = { reason: '' }
+  batchVoidVisible.value = true
+}
+
+const submitBatchVoid = async () => {
+  if (selectedImportRows.value.length === 0) return
+  if (!batchVoidForm.value.reason?.trim()) {
+    ElMessage.warning('请填写撤销原因')
+    return
+  }
+  const instanceIds = selectedImportRows.value
+    .map((r) => r.equipment_instance_id)
+    .filter(Boolean)
+
+  if (instanceIds.length === 0) {
+    ElMessage.warning('所选行缺少实例信息，无法撤销')
+    return
+  }
+
+  try {
+    batchVoidSubmitting.value = true
+    const res = await stockApi.voidInstances({
+      instance_ids: instanceIds,
+      reason: batchVoidForm.value.reason
+    })
+    const ok = (res?.success_count || 0) > 0
+    if (!ok) {
+      const firstErr = res?.results?.find((r) => !r.success)?.error
+      ElMessage.error(firstErr || '撤销失败')
+      return
+    }
+    const failedCount = res?.failed_count || 0
+    if (failedCount > 0) {
+      ElMessage.warning(`撤销完成：成功 ${res.success_count} 条，失败 ${failedCount} 条`)
+    } else {
+      ElMessage.success(`撤销成功：共 ${res.success_count} 条`)
+    }
+    batchVoidVisible.value = false
+    await Promise.all([
+      currentImportRecord.value?.importId ? loadImportDetails(currentImportRecord.value.importId) : Promise.resolve(),
+      reloadTransactionsAndKeepDrawer(),
+    ])
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '撤销失败')
+  } finally {
+    batchVoidSubmitting.value = false
   }
 }
 
@@ -648,6 +939,148 @@ const viewTransaction = (row) => {
     return
   }
   transactionDetailsVisible.value = true
+}
+
+const openEditTxNotes = () => {
+  if (!currentTransactionRecord.value) return
+  editTxNotesForm.value = {
+    notes: currentTransactionRecord.value.notes || '',
+    reason: ''
+  }
+  editTxNotesVisible.value = true
+}
+
+const submitEditTxNotes = async () => {
+  if (!currentTransactionRecord.value) return
+  if (!editTxNotesForm.value.reason?.trim()) {
+    ElMessage.warning('请填写修改原因')
+    return
+  }
+  try {
+    editTxNotesSubmitting.value = true
+    await stockApi.updateTransactionNotes(currentTransactionRecord.value.id, {
+      notes: editTxNotesForm.value.notes,
+      reason: editTxNotesForm.value.reason
+    })
+    ElMessage.success('备注已更新')
+    editTxNotesVisible.value = false
+    currentTransactionRecord.value.notes = editTxNotesForm.value.notes
+    await reloadTransactionsAndKeepDrawer()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '更新失败')
+  } finally {
+    editTxNotesSubmitting.value = false
+  }
+}
+
+const openEditItem = (row) => {
+  editingItem.value = row
+  editItemForm.value = {
+    batch_number: row.batch_number || '',
+    vendor: row.vendor || '',
+    item_notes: row.item_notes || '',
+    reason: ''
+  }
+  editItemVisible.value = true
+}
+
+const submitEditItem = async () => {
+  const row = editingItem.value
+  if (!row) return
+  if (!editItemForm.value.reason?.trim()) {
+    ElMessage.warning('请填写修改原因')
+    return
+  }
+  try {
+    editItemSubmitting.value = true
+    await stockApi.updateTransactionItem(row.item_id, {
+      batch_number: editItemForm.value.batch_number,
+      vendor: editItemForm.value.vendor,
+      item_notes: editItemForm.value.item_notes,
+      reason: editItemForm.value.reason
+    })
+    ElMessage.success('明细信息已更新')
+    editItemVisible.value = false
+    await reloadTransactionsAndKeepDrawer()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '更新失败')
+  } finally {
+    editItemSubmitting.value = false
+  }
+}
+
+const openAdjustQty = (row) => {
+  adjustingItem.value = row
+  adjustQtyForm.value = { mode: 'increase', amount: 1, reason: '' }
+  adjustQtyVisible.value = true
+}
+
+const submitAdjustQty = async () => {
+  const row = adjustingItem.value
+  if (!row) return
+  const amount = Number(adjustQtyForm.value.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    ElMessage.warning('请输入正确的数量')
+    return
+  }
+  if (!adjustQtyForm.value.reason?.trim()) {
+    ElMessage.warning('请填写更正原因')
+    return
+  }
+  const delta = adjustQtyForm.value.mode === 'decrease' ? -Math.abs(amount) : Math.abs(amount)
+  try {
+    adjustQtySubmitting.value = true
+    await stockApi.adjustTransactionItem(row.item_id, {
+      delta,
+      reason: adjustQtyForm.value.reason
+    })
+    ElMessage.success('数量更正成功（已生成调整记录）')
+    adjustQtyVisible.value = false
+    await reloadTransactionsAndKeepDrawer()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '更正失败')
+  } finally {
+    adjustQtySubmitting.value = false
+  }
+}
+
+const openVoidInstance = (row) => {
+  voidingItem.value = row
+  voidForm.value = { reason: '' }
+  voidVisible.value = true
+}
+
+const submitVoid = async () => {
+  const row = voidingItem.value
+  if (!row?.equipment_instance_id) return
+  if (!voidForm.value.reason?.trim()) {
+    ElMessage.warning('请填写撤销原因')
+    return
+  }
+  try {
+    voidSubmitting.value = true
+    const res = await stockApi.voidInstances({
+      instance_ids: [row.equipment_instance_id],
+      reason: voidForm.value.reason
+    })
+    const ok = (res?.success_count || 0) > 0
+    if (ok) {
+      ElMessage.success('撤销成功')
+      voidVisible.value = false
+      await reloadTransactionsAndKeepDrawer()
+      return
+    }
+    const firstErr = res?.results?.find((r) => !r.success)?.error
+    ElMessage.error(firstErr || '撤销失败')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '撤销失败')
+  } finally {
+    voidSubmitting.value = false
+  }
 }
 
 onMounted(async () => {
@@ -783,6 +1216,12 @@ onMounted(async () => {
 .summary-item .value {
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.notes-value {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .details-card .table-header {

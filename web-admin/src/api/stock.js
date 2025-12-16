@@ -63,5 +63,21 @@ export const stockApi = {
     
   // 批量检查SN是否存在
   checkSNBatch: (snList) => 
-    request.post('/api/stock/check-sn-batch', { sn_list: snList })
+    request.post('/api/stock/check-sn-batch', { sn_list: snList }),
+
+  // ===== 库存更正/撤销/编辑 =====
+  updateTransactionNotes: (transactionId, data) =>
+    request.patch(`/api/stock/transactions/${transactionId}`, data),
+
+  updateTransactionItem: (itemId, data) =>
+    request.patch(`/api/stock/transaction-items/${itemId}`, data),
+
+  adjustTransactionItem: (itemId, data) =>
+    request.post(`/api/stock/transaction-items/${itemId}/adjust`, data),
+
+  voidInstances: (data) =>
+    request.post('/api/stock/instances/void', data),
+
+  updateEquipmentInstance: (instanceId, data) =>
+    request.patch(`/api/stock/instances/${instanceId}`, data),
 }

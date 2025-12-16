@@ -5,6 +5,7 @@ import os
 
 from app.core.config import settings
 from app.core.database import engine, Base
+from app.utils.stock_schema import ensure_stock_schema
 # Ensure new models are imported before creating tables
 from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
@@ -22,6 +23,8 @@ from app.services.backup_scheduler import start_backup_scheduler
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
+# 轻量迁移：为库存相关旧表补列（SQLite 友好）
+ensure_stock_schema(engine)
 
 app = FastAPI(
     title="站点信息管理系统 API",

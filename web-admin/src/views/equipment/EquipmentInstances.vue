@@ -12,6 +12,7 @@
           <el-option label="已出库" value="issued" />
           <el-option label="已退库" value="returned" />
         </el-select>
+        <el-checkbox v-model="includeVoided">显示已撤销</el-checkbox>
         <el-input v-model="keyword" placeholder="搜索SN/条码/供应商" clearable style="width: 220px" />
         <el-button type="primary" @click="load"><el-icon><Search /></el-icon>查询</el-button>
       </div>
@@ -22,6 +23,7 @@
           <template #default="{ row }">
             <el-space>
               <span>{{ row.serial_number }}</span>
+              <el-tag v-if="row.is_voided" size="small" type="info">已撤销</el-tag>
               <el-button text size="small" @click="copy(row.serial_number)">复制</el-button>
             </el-space>
           </template>
@@ -55,6 +57,24 @@
               size="small"
               type="primary"
               text
+              @click="openEdit(row)"
+            >
+              编辑信息
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              text
+              :disabled="row.is_voided || row.status !== 'in_stock'"
+              @click="openVoid(row)"
+            >
+              撤销入库
+            </el-button>
+            <el-button
+              size="small"
+              type="primary"
+              text
+              :disabled="row.is_voided"
               @click="gotoLifecycle(row)"
             >
               设备跟踪
@@ -63,6 +83,64 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 编辑设备信息 -->
+    <el-dialog v-model="editVisible" title="编辑设备信息" width="600px">
+      <el-form label-width="90px">
+        <el-form-item label="SN">
+          <el-input :model-value="editSn" disabled />
+        </el-form-item>
+        <el-form-item label="供应商">
+          <el-input v-model="editForm.vendor" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="批次号">
+          <el-input v-model="editForm.batch_number" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="MAC">
+          <el-input v-model="editForm.mac_address" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="IMEI">
+          <el-input v-model="editForm.imei" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="固件版本">
+          <el-input v-model="editForm.firmware_version" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="硬件版本">
+          <el-input v-model="editForm.hardware_version" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="库位">
+          <el-input v-model="editForm.location" placeholder="可为空" />
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-input v-model="editForm.reason" placeholder="请填写修改原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSubmitting" @click="submitEdit">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 撤销入库 -->
+    <el-dialog v-model="voidVisible" title="撤销入库" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="SN">
+          <el-input :model-value="voidSn" disabled />
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-input v-model="voidForm.reason" placeholder="请填写撤销原因" />
+        </el-form-item>
+        <el-alert
+          type="warning"
+          :closable="false"
+          title="撤销会释放 SN 以便重导，并生成“调整”记录。"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="voidVisible = false">取消</el-button>
+        <el-button type="danger" :loading="voidSubmitting" @click="submitVoid">确认撤销</el-button>
+      </template>
+    </el-dialog>
     
     <!-- 绑定历史弹窗（改为生命周期视图） -->
     <el-dialog
@@ -101,6 +179,29 @@ const status = ref('')
 const items = ref([])
 const keyword = ref('')
 const equipmentOptions = ref([])
+const includeVoided = ref(false)
+
+const editVisible = ref(false)
+const editSubmitting = ref(false)
+const editingRow = ref(null)
+const editForm = ref({
+  vendor: '',
+  batch_number: '',
+  mac_address: '',
+  imei: '',
+  firmware_version: '',
+  hardware_version: '',
+  location: '',
+  reason: '',
+})
+
+const voidVisible = ref(false)
+const voidSubmitting = ref(false)
+const voidingRow = ref(null)
+const voidForm = ref({ reason: '' })
+
+const editSn = computed(() => editingRow.value?.serial_number || '-')
+const voidSn = computed(() => voidingRow.value?.serial_number || '-')
 
 // 绑定历史 / 生命周期弹窗相关
 const historyDialogVisible = ref(false)
@@ -113,7 +214,10 @@ const load = async () => {
   }
   try {
     loading.value = true
-    const res = await stockApi.getEquipmentInstances(selectedEquipmentId.value, status.value ? { status: status.value } : {})
+    const params = {}
+    if (status.value) params.status = status.value
+    if (includeVoided.value) params.include_voided = true
+    const res = await stockApi.getEquipmentInstances(selectedEquipmentId.value, params)
     items.value = res?.instances || []
   } catch (e) {
     console.error(e)
@@ -167,6 +271,92 @@ const gotoLifecycle = (row) => {
 const showBindingHistory = (equipment) => {
   currentEquipment.value = equipment
   historyDialogVisible.value = true
+}
+
+const openEdit = (row) => {
+  if (!row || row.is_voided) {
+    ElMessage.warning('已撤销实例不可编辑')
+    return
+  }
+  editingRow.value = row
+  editForm.value = {
+    vendor: row.vendor || '',
+    batch_number: row.batch_number || '',
+    mac_address: row.mac_address || '',
+    imei: row.imei || '',
+    firmware_version: row.firmware_version || '',
+    hardware_version: row.hardware_version || '',
+    location: row.location || '',
+    reason: '',
+  }
+  editVisible.value = true
+}
+
+const submitEdit = async () => {
+  const row = editingRow.value
+  if (!row) return
+  if (!editForm.value.reason?.trim()) {
+    ElMessage.warning('请填写修改原因')
+    return
+  }
+  try {
+    editSubmitting.value = true
+    await stockApi.updateEquipmentInstance(row.id, {
+      vendor: editForm.value.vendor,
+      batch_number: editForm.value.batch_number,
+      mac_address: editForm.value.mac_address,
+      imei: editForm.value.imei,
+      firmware_version: editForm.value.firmware_version,
+      hardware_version: editForm.value.hardware_version,
+      location: editForm.value.location,
+      reason: editForm.value.reason,
+    })
+    ElMessage.success('设备信息已更新')
+    editVisible.value = false
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '更新失败')
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
+const openVoid = (row) => {
+  if (!row || row.is_voided) return
+  voidingRow.value = row
+  voidForm.value = { reason: '' }
+  voidVisible.value = true
+}
+
+const submitVoid = async () => {
+  const row = voidingRow.value
+  if (!row) return
+  if (!voidForm.value.reason?.trim()) {
+    ElMessage.warning('请填写撤销原因')
+    return
+  }
+  try {
+    voidSubmitting.value = true
+    const res = await stockApi.voidInstances({
+      instance_ids: [row.id],
+      reason: voidForm.value.reason
+    })
+    const ok = (res?.success_count || 0) > 0
+    if (!ok) {
+      const firstErr = res?.results?.find((r) => !r.success)?.error
+      ElMessage.error(firstErr || '撤销失败')
+      return
+    }
+    ElMessage.success('撤销成功')
+    voidVisible.value = false
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '撤销失败')
+  } finally {
+    voidSubmitting.value = false
+  }
 }
 </script>
 

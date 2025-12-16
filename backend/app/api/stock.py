@@ -24,9 +24,43 @@ from app.models.equipment import (
     InventoryStatusEnum,
     EquipmentStatusEnum
 )
+from app.models.work_order import AuditEvent
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
+
+
+def _ensure_stock_operator(current_user: User) -> None:
+    if current_user.role not in ["admin", "warehouse_manager", "manager"]:
+        raise HTTPException(status_code=403, detail="权限不足")
+
+
+def _add_audit_event(
+    db: Session,
+    *,
+    resource_type: str,
+    resource_id: str,
+    action: str,
+    operator_id: int,
+    comments: Optional[str] = None,
+    details: Optional[dict] = None,
+    from_status: Optional[str] = None,
+    to_status: Optional[str] = None,
+) -> None:
+    db.add(
+        AuditEvent(
+            id=uuid.uuid4().hex,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            action=action,
+            from_status=from_status,
+            to_status=to_status,
+            operator_id=operator_id,
+            comments=comments,
+            details=details,
+        )
+    )
+
 
 # Pydantic模型
 class SNBatchCheckRequest(BaseModel):
@@ -534,8 +568,7 @@ async def create_stock_in(
     current_user: User = Depends(get_current_user)
 ):
     """创建入库单"""
-    if current_user.role not in ["admin", "warehouse_manager"]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _ensure_stock_operator(current_user)
     
     warehouse_id = stock_in_data.get("warehouse_id", 1)  # 默认仓库
     items = stock_in_data.get("items", [])
@@ -681,7 +714,7 @@ async def get_stock_transactions(
         )
     
     # 非管理员只能查看自己的记录
-    if current_user.role not in ["admin", "warehouse_manager"]:
+    if current_user.role not in ["admin", "warehouse_manager", "manager"]:
         query = query.filter(StockTransaction.operator_id == current_user.id)
     
     transactions = query.order_by(desc(StockTransaction.operation_time)).offset(skip).limit(limit).all()
@@ -691,13 +724,28 @@ async def get_stock_transactions(
         # 获取明细
         items = []
         for item in trans.transaction_items:
-            serial_number = item.equipment_instance.serial_number if item.equipment_instance else None
+            instance = item.equipment_instance
+            instance_is_voided = bool(getattr(instance, "is_voided", False)) if instance else False
+            serial_number = None
+            if instance:
+                if instance_is_voided and getattr(instance, "original_serial_number", None):
+                    serial_number = instance.original_serial_number
+                else:
+                    serial_number = instance.serial_number
             items.append({
+                "item_id": item.id,
+                "equipment_id": item.equipment_id,
+                "equipment_instance_id": item.equipment_instance_id,
                 "equipment_name": item.equipment.equipment_name,
                 "equipment_code": item.equipment.equipment_code,
+                "equipment_category": item.equipment.category,
                 "quantity": item.quantity,
                 "unit": item.equipment.unit,
                 "serial_number": serial_number,
+                "instance_is_voided": instance_is_voided,
+                "batch_number": item.batch_number,
+                "vendor": item.vendor,
+                "item_notes": item.item_notes,
             })
         
         result.append({
@@ -836,8 +884,7 @@ async def import_sn_batch(
     import base64
     from datetime import datetime
     
-    if current_user.role not in ["admin", "warehouse_manager"]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _ensure_stock_operator(current_user)
     
     try:
         # 解析上传的文件数据
@@ -1157,6 +1204,7 @@ async def get_import_details(
     
     result = []
     for detail in details:
+        instance_is_voided = bool(getattr(detail.equipment_instance, "is_voided", False)) if detail.equipment_instance else False
         result.append({
             "line_number": detail.line_number,
             "serial_number": detail.serial_number,
@@ -1167,7 +1215,9 @@ async def get_import_details(
             "vendor": detail.vendor,
             "batch_number": detail.batch_number,
             "import_status": detail.import_status,
-            "error_message": detail.error_message
+            "error_message": detail.error_message,
+            "equipment_instance_id": detail.equipment_instance_id,
+            "instance_is_voided": instance_is_voided,
         })
     
     return {"details": result}
@@ -1236,11 +1286,15 @@ async def check_sn_batch(
 async def get_equipment_instances(
     equipment_id: int,
     status: Optional[str] = None,
+    include_voided: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """获取设备实例列表"""
     query = db.query(EquipmentInstance).filter(EquipmentInstance.equipment_id == equipment_id)
+
+    if not include_voided:
+        query = query.filter(or_(EquipmentInstance.is_voided == False, EquipmentInstance.is_voided.is_(None)))
     
     if status:
         query = query.filter(EquipmentInstance.status == status)
@@ -1249,10 +1303,18 @@ async def get_equipment_instances(
     
     result = []
     for instance in instances:
+        instance_is_voided = bool(getattr(instance, "is_voided", False))
+        display_sn = instance.original_serial_number if instance_is_voided and getattr(instance, "original_serial_number", None) else instance.serial_number
+        display_barcode = display_sn if instance_is_voided and getattr(instance, "original_serial_number", None) else instance.barcode
         result.append({
             "id": instance.id,
-            "serial_number": instance.serial_number,
-            "barcode": instance.barcode,
+            "serial_number": display_sn,
+            "original_serial_number": instance.original_serial_number,
+            "is_voided": instance_is_voided,
+            # voided_at 由 datetime.now() 写入，按本地->UTC 输出
+            "voided_at": to_utc_iso(instance.voided_at, assume_local=True) if instance.voided_at else None,
+            "void_reason": instance.void_reason,
+            "barcode": display_barcode,
             "mac_address": instance.mac_address,
             "imei": instance.imei,
             "firmware_version": instance.firmware_version,
@@ -1271,3 +1333,439 @@ async def get_equipment_instances(
         })
     
     return {"instances": result}
+
+
+@router.patch("/transactions/{transaction_id}")
+async def update_stock_transaction_notes(
+    transaction_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """编辑出入库单据备注（需填写原因，用于审计）"""
+    _ensure_stock_operator(current_user)
+
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写修改原因")
+
+    new_notes = payload.get("notes")
+    new_notes = "" if new_notes is None else str(new_notes)
+
+    trans = db.query(StockTransaction).filter(StockTransaction.id == transaction_id).first()
+    if not trans:
+        raise HTTPException(status_code=404, detail="出入库记录不存在")
+
+    old_notes = trans.notes or ""
+    trans.notes = new_notes
+
+    _add_audit_event(
+        db,
+        resource_type="stock_transaction",
+        resource_id=transaction_id,
+        action="edit_notes",
+        operator_id=current_user.id,
+        comments=reason,
+        details={"from": old_notes, "to": new_notes},
+    )
+
+    db.commit()
+    return {"message": "备注更新成功"}
+
+
+@router.patch("/transaction-items/{item_id}")
+async def update_stock_transaction_item_info(
+    item_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """编辑出入库明细行信息（批次号/供应商/备注等；需填写原因，用于审计）"""
+    _ensure_stock_operator(current_user)
+
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写修改原因")
+
+    item = db.query(StockTransactionItem).filter(StockTransactionItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="出入库明细不存在")
+
+    trans = item.transaction
+    if not trans:
+        raise HTTPException(status_code=404, detail="关联出入库单不存在")
+
+    old = {
+        "batch_number": item.batch_number,
+        "vendor": item.vendor,
+        "item_notes": item.item_notes,
+    }
+
+    if "batch_number" in payload:
+        v = payload.get("batch_number")
+        item.batch_number = None if v is None or str(v).strip() == "" else str(v).strip()
+    if "vendor" in payload:
+        v = payload.get("vendor")
+        item.vendor = None if v is None or str(v).strip() == "" else str(v).strip()
+    if "item_notes" in payload:
+        v = payload.get("item_notes")
+        item.item_notes = None if v is None else str(v)
+
+    new = {
+        "batch_number": item.batch_number,
+        "vendor": item.vendor,
+        "item_notes": item.item_notes,
+    }
+
+    if old == new:
+        return {"message": "没有变更"}
+
+    _add_audit_event(
+        db,
+        resource_type="stock_transaction_item",
+        resource_id=str(item_id),
+        action="edit_item_info",
+        operator_id=current_user.id,
+        comments=reason,
+        details={"transaction_id": trans.id, "from": old, "to": new},
+    )
+
+    db.commit()
+    return {"message": "明细信息更新成功"}
+
+
+@router.post("/transaction-items/{item_id}/adjust")
+async def adjust_stock_transaction_item_quantity(
+    item_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """更正辅材数量：不修改原入库明细，通过生成一条“调整”记录体现（支持正负差量）"""
+    _ensure_stock_operator(current_user)
+
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写更正原因")
+
+    delta = payload.get("delta")
+    try:
+        delta = int(delta)
+    except Exception:
+        raise HTTPException(status_code=400, detail="delta 必须为整数")
+
+    if delta == 0:
+        raise HTTPException(status_code=400, detail="更正数量不能为 0")
+
+    item = db.query(StockTransactionItem).filter(StockTransactionItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="出入库明细不存在")
+
+    equipment = db.query(Equipment).filter(Equipment.id == item.equipment_id).first()
+    if equipment and equipment.category == "main_device":
+        raise HTTPException(status_code=400, detail="主设备不支持更正数量，请按 SN 撤销入库或重导")
+
+    if item.equipment_instance_id:
+        raise HTTPException(status_code=400, detail="带 SN 的主设备不支持改数量，请使用“撤销入库 + 重导”")
+
+    trans = item.transaction
+    if not trans:
+        raise HTTPException(status_code=404, detail="关联出入库单不存在")
+
+    warehouse_id = trans.warehouse_id
+    inventory = db.query(Inventory).filter(
+        and_(Inventory.warehouse_id == warehouse_id, Inventory.equipment_id == item.equipment_id)
+    ).first()
+    if not inventory:
+        raise HTTPException(status_code=404, detail="未找到对应库存记录")
+
+    if delta < 0 and (inventory.available_stock < abs(delta) or inventory.current_stock < abs(delta)):
+        raise HTTPException(status_code=400, detail="可用库存不足，无法减少")
+
+    # 更新库存
+    inventory.current_stock += delta
+    inventory.available_stock += delta
+    inventory.last_updated_by = current_user.id
+
+    # 生成一条调整记录（用于可追溯）
+    adjustment_id = uuid.uuid4().hex
+    document_number = f"ADJ-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}-{uuid.uuid4().hex[:6]}"
+
+    adj_trans = StockTransaction(
+        id=adjustment_id,
+        transaction_type=TransactionTypeEnum.ADJUSTMENT,
+        warehouse_id=warehouse_id,
+        operator_id=current_user.id,
+        document_number=document_number,
+        total_quantity=delta,
+        notes=f"更正数量（原单 {trans.document_number}）：{reason}",
+    )
+    db.add(adj_trans)
+
+    adj_item = StockTransactionItem(
+        transaction_id=adjustment_id,
+        equipment_id=item.equipment_id,
+        quantity=delta,
+        batch_number=item.batch_number,
+        vendor=item.vendor,
+        item_notes=reason,
+    )
+    db.add(adj_item)
+
+    _add_audit_event(
+        db,
+        resource_type="inventory",
+        resource_id=f"{warehouse_id}:{item.equipment_id}",
+        action="adjust_quantity",
+        operator_id=current_user.id,
+        comments=reason,
+        details={
+            "transaction_id": trans.id,
+            "transaction_item_id": item_id,
+            "delta": delta,
+            "adjustment_transaction_id": adjustment_id,
+        },
+    )
+
+    db.commit()
+    return {
+        "message": "更正成功",
+        "adjustment_transaction_id": adjustment_id,
+        "document_number": document_number,
+        "delta": delta,
+    }
+
+
+@router.post("/instances/void")
+async def void_equipment_instances(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """撤销入库（作废设备实例，释放 SN 以便重导），并生成一条“调整”记录"""
+    _ensure_stock_operator(current_user)
+
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写撤销原因")
+
+    instance_ids = payload.get("instance_ids") or []
+    if not isinstance(instance_ids, list) or not instance_ids:
+        raise HTTPException(status_code=400, detail="instance_ids 不能为空")
+
+    # 预加载实例
+    instances = db.query(EquipmentInstance).filter(EquipmentInstance.id.in_(instance_ids)).all()
+    instance_map = {i.id: i for i in instances}
+
+    results = []
+    valid_instances = []
+
+    for instance_id in instance_ids:
+        inst = instance_map.get(instance_id)
+        if not inst:
+            results.append({"instance_id": instance_id, "success": False, "error": "设备实例不存在"})
+            continue
+
+        if bool(getattr(inst, "is_voided", False)):
+            results.append({"instance_id": instance_id, "success": False, "error": "已撤销"})
+            continue
+
+        if inst.status != InventoryStatusEnum.IN_STOCK:
+            results.append({"instance_id": instance_id, "success": False, "error": "非库存中状态，无法撤销"})
+            continue
+
+        if inst.issued_to:
+            results.append({"instance_id": instance_id, "success": False, "error": "已出库/被领料，无法撤销"})
+            continue
+
+        if not inst.warehouse_id:
+            results.append({"instance_id": instance_id, "success": False, "error": "缺少仓库信息，无法撤销"})
+            continue
+
+        valid_instances.append(inst)
+
+    if not valid_instances:
+        return {"message": "无可撤销实例", "success_count": 0, "failed_count": len(results), "results": results}
+
+    # 检查库存是否足够（按 仓库+设备 聚合）
+    needed = {}
+    for inst in valid_instances:
+        key = (inst.warehouse_id, inst.equipment_id)
+        needed[key] = needed.get(key, 0) + 1
+
+    for (warehouse_id, equipment_id), count in needed.items():
+        inventory = db.query(Inventory).filter(
+            and_(Inventory.warehouse_id == warehouse_id, Inventory.equipment_id == equipment_id)
+        ).first()
+        if not inventory or inventory.available_stock < count or inventory.current_stock < count:
+            # 该组全部标记失败
+            for inst in list(valid_instances):
+                if inst.warehouse_id == warehouse_id and inst.equipment_id == equipment_id:
+                    results.append({"instance_id": inst.id, "success": False, "error": "库存不足，无法撤销"})
+                    valid_instances.remove(inst)
+
+    if not valid_instances:
+        return {"message": "库存不足，无法撤销", "success_count": 0, "failed_count": len(results), "results": results}
+
+    # 按仓库生成调整单
+    now = datetime.now()
+    adjustment_ids = []
+    by_warehouse = {}
+    for inst in valid_instances:
+        by_warehouse.setdefault(inst.warehouse_id, []).append(inst)
+
+    for warehouse_id, inst_list in by_warehouse.items():
+        adjustment_id = uuid.uuid4().hex
+        document_number = f"ADJVOID-{now.strftime('%Y%m%d%H%M%S')}-{current_user.id}-{uuid.uuid4().hex[:6]}"
+        adjustment_ids.append({"warehouse_id": warehouse_id, "transaction_id": adjustment_id, "document_number": document_number})
+
+        adj_trans = StockTransaction(
+            id=adjustment_id,
+            transaction_type=TransactionTypeEnum.ADJUSTMENT,
+            warehouse_id=warehouse_id,
+            operator_id=current_user.id,
+            document_number=document_number,
+            total_quantity=-len(inst_list),
+            notes=f"撤销入库（作废实例）：{reason}",
+        )
+        db.add(adj_trans)
+
+        for inst in inst_list:
+            placeholder = f"VOID-{uuid.uuid4().hex}"
+            original_sn = inst.serial_number
+
+            inst.original_serial_number = inst.original_serial_number or original_sn
+            inst.serial_number = placeholder
+            inst.barcode = placeholder
+            inst.is_voided = True
+            inst.voided_at = now
+            inst.voided_by = current_user.id
+            inst.void_reason = reason
+
+            # 扣减库存
+            inventory = db.query(Inventory).filter(
+                and_(Inventory.warehouse_id == warehouse_id, Inventory.equipment_id == inst.equipment_id)
+            ).first()
+            if inventory:
+                inventory.current_stock -= 1
+                inventory.available_stock -= 1
+                inventory.last_updated_by = current_user.id
+
+            db.add(
+                StockTransactionItem(
+                    transaction_id=adjustment_id,
+                    equipment_instance_id=inst.id,
+                    equipment_id=inst.equipment_id,
+                    quantity=-1,
+                    batch_number=inst.batch_number,
+                    vendor=inst.vendor,
+                    item_notes=reason,
+                )
+            )
+
+            # 同步导入明细状态（如存在）
+            import_details = db.query(SNImportDetail).filter(
+                and_(
+                    SNImportDetail.equipment_instance_id == inst.id,
+                    SNImportDetail.import_status == "success",
+                )
+            ).all()
+            for d in import_details:
+                d.import_status = "voided"
+                d.error_message = f"已撤销入库：{reason}"
+
+            _add_audit_event(
+                db,
+                resource_type="equipment_instance",
+                resource_id=inst.id,
+                action="void_stock_in",
+                operator_id=current_user.id,
+                comments=reason,
+                details={"original_serial_number": original_sn},
+            )
+
+            results.append({"instance_id": inst.id, "success": True})
+
+    db.commit()
+
+    success_count = len([r for r in results if r.get("success")])
+    failed_count = len([r for r in results if not r.get("success")])
+    return {
+        "message": "撤销完成",
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "adjustments": adjustment_ids,
+        "results": results,
+    }
+
+
+@router.patch("/instances/{instance_id}")
+async def update_equipment_instance_info(
+    instance_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """编辑设备实例信息（不允许修改 SN；需填写原因，用于审计）"""
+    _ensure_stock_operator(current_user)
+
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写修改原因")
+
+    if "serial_number" in payload or "barcode" in payload:
+        raise HTTPException(status_code=400, detail="SN/条码不允许修改，请使用“撤销入库 + 重导”")
+
+    inst = db.query(EquipmentInstance).filter(EquipmentInstance.id == instance_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="设备实例不存在")
+
+    if bool(getattr(inst, "is_voided", False)):
+        raise HTTPException(status_code=400, detail="已撤销实例不可编辑")
+
+    editable_fields = [
+        "vendor",
+        "batch_number",
+        "mac_address",
+        "imei",
+        "firmware_version",
+        "hardware_version",
+        "manufacture_date",
+        "warranty_start_date",
+        "warranty_end_date",
+        "location",
+    ]
+
+    old = {k: getattr(inst, k) for k in editable_fields}
+
+    for field in editable_fields:
+        if field not in payload:
+            continue
+        value = payload.get(field)
+        if field in {"manufacture_date", "warranty_start_date", "warranty_end_date"}:
+            if value in (None, ""):
+                setattr(inst, field, None)
+            else:
+                try:
+                    setattr(inst, field, datetime.fromisoformat(str(value)).date())
+                except Exception:
+                    raise HTTPException(status_code=400, detail=f"{field} 日期格式不正确")
+        else:
+            setattr(inst, field, None if value is None else str(value))
+
+    new = {k: getattr(inst, k) for k in editable_fields}
+    if old == new:
+        return {"message": "没有变更"}
+
+    _add_audit_event(
+        db,
+        resource_type="equipment_instance",
+        resource_id=instance_id,
+        action="edit_instance_info",
+        operator_id=current_user.id,
+        comments=reason,
+        details={"from": old, "to": new},
+    )
+
+    db.commit()
+    return {"message": "设备信息更新成功"}

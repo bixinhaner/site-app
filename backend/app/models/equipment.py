@@ -107,6 +107,12 @@ class EquipmentInstance(Base):
     package_id = Column(Integer, ForeignKey("equipment_packages.id"))  # 所属套装
     barcode = Column(String(100), unique=True, index=True, nullable=False)  # 设备条码
     serial_number = Column(String(100), unique=True, nullable=False, index=True)  # 序列号（主设备必填）
+    # 撤销/作废支持：释放 SN 以便重导，原 SN 保留用于展示与追溯
+    original_serial_number = Column(String(100), index=True)
+    is_voided = Column(Boolean, default=False)
+    voided_at = Column(DateTime)
+    voided_by = Column(Integer, ForeignKey("users.id"))
+    void_reason = Column(Text)
     batch_number = Column(String(50))  # 批次号
     status = Column(Enum(InventoryStatusEnum), default=InventoryStatusEnum.IN_STOCK)
     
@@ -143,6 +149,7 @@ class EquipmentInstance(Base):
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
     receiver = relationship("User", foreign_keys=[received_by])
     issuer = relationship("User", foreign_keys=[issued_to])
+    voider = relationship("User", foreign_keys=[voided_by])
 
 class Warehouse(Base):
     """仓库表"""
@@ -252,6 +259,8 @@ class StockTransactionItem(Base):
     
     # 批次信息
     batch_number = Column(String(50))
+    vendor = Column(String(100))  # 供应商（主要用于辅材入库/调整）
+    item_notes = Column(Text)  # 行备注（主要用于辅材入库/调整）
     expiry_date = Column(DateTime)  # 过期日期（如适用）
     
     # 位置信息
