@@ -40,14 +40,22 @@
           />
         </el-col>
         <el-col :span="8">
-          <el-input v-model="keyword" placeholder="搜索单据号/文件名/仓库/操作人" clearable>
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-            <template #append>
-              <el-button type="primary" @click="loadAll">查询</el-button>
-            </template>
-          </el-input>
+          <div class="keyword-search">
+            <el-input v-model="keyword" class="keyword-input" placeholder="搜索单据/设备/SN" clearable>
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+              <template #append>
+                <el-button type="primary" @click="loadAll">查询</el-button>
+              </template>
+            </el-input>
+            <el-tooltip
+              content="支持：单据号、文件名、仓库、操作人、设备编码、设备名称、SN"
+              placement="top"
+            >
+              <span class="keyword-help" aria-label="搜索提示">?</span>
+            </el-tooltip>
+          </div>
         </el-col>
       </el-row>
     </div>
@@ -512,10 +520,20 @@ const filteredRecords = computed(() => {
   if (keyword.value) {
     const kw = keyword.value.toLowerCase()
     data = data.filter((r) => {
+      const txItems = r.recordType === 'transaction' ? r.raw?.items || [] : []
+      const hitTxItem = txItems.some((it) => {
+        return (
+          (it.equipment_code || '').toLowerCase().includes(kw) ||
+          (it.equipment_name || '').toLowerCase().includes(kw) ||
+          (it.serial_number || '').toLowerCase().includes(kw)
+        )
+      })
       return (
         (r.documentLabel || '').toLowerCase().includes(kw) ||
         (r.warehouseName || '').toLowerCase().includes(kw) ||
-        (r.operatorName || '').toLowerCase().includes(kw)
+        (r.operatorName || '').toLowerCase().includes(kw) ||
+        (r.notes || '').toLowerCase().includes(kw) ||
+        hitTxItem
       )
     })
   }
@@ -694,6 +712,36 @@ onMounted(async () => {
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.keyword-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keyword-input {
+  flex: 1;
+}
+
+.keyword-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--el-border-color);
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.keyword-help:hover {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
 }
 
 .drawer-header {

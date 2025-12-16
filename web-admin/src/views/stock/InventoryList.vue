@@ -600,8 +600,18 @@ const trackDevice = (serialNumber) => {
 
 // 查看出入库历史
 const viewStockHistory = (equipment) => {
-  ElMessage.info(`查看 ${equipment.equipment_name} 出入库记录`)
-  // 将来可以实现出入库历史弹窗或页面跳转
+  const code = (equipment?.equipment_code || '').trim()
+  if (!code) {
+    ElMessage.warning('缺少设备编码，无法跳转到出入库记录')
+    return
+  }
+  router.push({
+    name: 'StockHistory',
+    query: {
+      type: 'transaction',
+      keyword: code
+    }
+  })
 }
 
 // 获取设备实例按状态筛选
