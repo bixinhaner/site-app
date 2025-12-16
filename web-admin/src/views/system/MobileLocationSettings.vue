@@ -398,6 +398,65 @@ const roleRows = [
   { key: 'user', label: '普通用户 (user)' },
 ]
 
+const roleKeys = roleRows.map(r => r.key)
+
+// 通用布尔规则：后端 -> 表单
+const fillBoolRuleToForm = (formRule, serverRule, roles, defaultValue = true) => {
+  const safeRule = serverRule || {}
+  const perRole = safeRule.per_role || {}
+  const perUser = safeRule.per_user || {}
+
+  // default
+  formRule.default =
+    typeof safeRule.default === 'boolean' ? safeRule.default : defaultValue
+
+  // per_role: 布尔 -> 'allow' / 'deny' / ''
+  const mappedPerRole = {}
+  roles.forEach((role) => {
+    if (Object.prototype.hasOwnProperty.call(perRole, role)) {
+      mappedPerRole[role] = perRole[role] ? 'allow' : 'deny'
+    } else {
+      mappedPerRole[role] = ''
+    }
+  })
+  formRule.per_role = mappedPerRole
+
+  // per_user: { id: bool } -> [{ user_id, flag }]
+  formRule.per_user = Object.entries(perUser).map(([id, flag]) => ({
+    user_id: id,
+    flag: flag ? 'allow' : 'deny',
+  }))
+}
+
+// 通用布尔规则：表单 -> 后端 payload
+const buildBoolRulePayload = (formRule) => {
+  const payload = {
+    default: formRule.default,
+    per_role: {},
+    per_user: {},
+  }
+
+  Object.entries(formRule.per_role || {}).forEach(([role, flag]) => {
+    if (flag === 'allow') {
+      payload.per_role[role] = true
+    } else if (flag === 'deny') {
+      payload.per_role[role] = false
+    }
+  })
+
+  ;(formRule.per_user || []).forEach((rule) => {
+    const id = String(rule.user_id || '').trim()
+    if (!id) return
+    if (rule.flag === 'allow') {
+      payload.per_user[id] = true
+    } else if (rule.flag === 'deny') {
+      payload.per_user[id] = false
+    }
+  })
+
+  return payload
+}
+
 const loadConfig = async () => {
   try {
     loading.value = true
@@ -407,8 +466,6 @@ const loadConfig = async () => {
     const perRole = lm.per_role || {}
     const perUser = lm.per_user || {}
     const uploadRule = raw.allow_local_photo_upload || {}
-    const uploadPerRole = uploadRule.per_role || {}
-    const uploadPerUser = uploadRule.per_user || {}
 
     form.value.location_mode.default =
       (lm.default && lm.default.toLowerCase()) === 'native' ? 'native' : 'baidu'
@@ -424,41 +481,12 @@ const loadConfig = async () => {
       mode: (mode || '').toLowerCase() === 'native' ? 'native' : 'baidu',
     }))
 
-    // allow_local_photo_upload：默认值 + 角色/用户覆盖
-    form.value.allow_local_photo_upload.default =
-      typeof uploadRule.default === 'boolean' ? uploadRule.default : true
-    form.value.allow_local_photo_upload.per_role = {
-      admin: uploadPerRole.hasOwnProperty('admin')
-        ? uploadPerRole.admin
-          ? 'allow'
-          : 'deny'
-        : '',
-      manager: uploadPerRole.hasOwnProperty('manager')
-        ? uploadPerRole.manager
-          ? 'allow'
-          : 'deny'
-        : '',
-      inspector: uploadPerRole.hasOwnProperty('inspector')
-        ? uploadPerRole.inspector
-          ? 'allow'
-          : 'deny'
-        : '',
-      surveyor: uploadPerRole.hasOwnProperty('surveyor')
-        ? uploadPerRole.surveyor
-          ? 'allow'
-          : 'deny'
-        : '',
-      user: uploadPerRole.hasOwnProperty('user')
-        ? uploadPerRole.user
-          ? 'allow'
-          : 'deny'
-        : '',
-    }
-    form.value.allow_local_photo_upload.per_user = Object.entries(uploadPerUser).map(
-      ([id, flag]) => ({
-        user_id: id,
-        flag: flag ? 'allow' : 'deny',
-      }),
+    // allow_local_photo_upload：使用通用布尔规则映射
+    fillBoolRuleToForm(
+      form.value.allow_local_photo_upload,
+      uploadRule,
+      roleKeys,
+      true,
     )
   } catch (e) {
     console.error(e)
@@ -482,11 +510,7 @@ const save = async () => {
         per_role: {},
         per_user: {},
       },
-      allow_local_photo_upload: {
-        default: form.value.allow_local_photo_upload.default,
-        per_role: {},
-        per_user: {},
-      },
+      allow_local_photo_upload: {},
     }
 
     // 构建 per_role：仅提交明确选择的模式
@@ -497,17 +521,6 @@ const save = async () => {
       }
     })
 
-    // 构建 allow_local_photo_upload.per_role：仅提交明确选择的布尔
-    Object.entries(form.value.allow_local_photo_upload.per_role || {}).forEach(
-      ([role, flag]) => {
-        if (flag === 'allow') {
-          payload.allow_local_photo_upload.per_role[role] = true
-        } else if (flag === 'deny') {
-          payload.allow_local_photo_upload.per_role[role] = false
-        }
-      },
-    )
-
     // 构建 per_user：按 user_id -> mode 映射
     ;(form.value.location_mode.per_user || []).forEach((rule) => {
       const id = String(rule.user_id || '').trim()
@@ -517,16 +530,10 @@ const save = async () => {
       payload.location_mode.per_user[id] = val
     })
 
-    // 构建 allow_local_photo_upload.per_user：按 user_id -> bool 映射
-    ;(form.value.allow_local_photo_upload.per_user || []).forEach((rule) => {
-      const id = String(rule.user_id || '').trim()
-      if (!id) return
-      if (rule.flag === 'allow') {
-        payload.allow_local_photo_upload.per_user[id] = true
-      } else if (rule.flag === 'deny') {
-        payload.allow_local_photo_upload.per_user[id] = false
-      }
-    })
+    // 构建 allow_local_photo_upload：使用通用布尔规则映射
+    payload.allow_local_photo_upload = buildBoolRulePayload(
+      form.value.allow_local_photo_upload,
+    )
 
     await mobileSettingsApi.updateMobileSettings(payload)
     ElMessage.success('保存成功，重新打开手机 App 后生效')
