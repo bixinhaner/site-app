@@ -10,6 +10,33 @@
       </div>
     </div>
     <el-card v-loading="loading">
+      <template #header>
+        <div class="card-header">
+          <span>站点基本信息</span>
+          <div v-if="canManageSite" class="card-actions">
+            <el-button size="small" type="primary" @click="openEdit">编辑</el-button>
+            <el-tooltip
+              v-if="deleteCheckLoaded && !deleteCheck.can_delete"
+              :content="deleteDisableTip"
+              placement="top"
+            >
+              <span>
+                <el-button size="small" type="danger" disabled>删除站点</el-button>
+              </span>
+            </el-tooltip>
+            <el-button
+              v-else
+              size="small"
+              type="danger"
+              :loading="deleteCheckLoading"
+              :disabled="!deleteCheckLoaded || !deleteCheck.can_delete"
+              @click="openDelete"
+            >
+              删除站点
+            </el-button>
+          </div>
+        </div>
+      </template>
       <div class="info-grid" v-if="site">
         <div class="item"><span class="label">站点名称</span><span class="value">{{ site.site_name }}</span></div>
         <div class="item"><span class="label">站点编码</span><span class="value">{{ site.site_code }}</span></div>
@@ -19,6 +46,112 @@
         <div class="item"><span class="label">地址</span><span class="value">{{ site.address || '-' }}</span></div>
       </div>
     </el-card>
+
+    <!-- 编辑站点基本信息 -->
+    <el-dialog
+      v-model="editVisible"
+      title="编辑站点基本信息"
+      width="720px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="110px">
+        <el-form-item label="站点编码">
+          <el-input :model-value="editForm.site_code" disabled />
+        </el-form-item>
+        <el-form-item label="站点名称" required>
+          <el-input v-model="editForm.site_name" placeholder="必填" />
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-input v-model="editForm.site_type" placeholder="macro/indoor..." />
+        </el-form-item>
+        <el-form-item label="省市区">
+          <div class="row3">
+            <el-input v-model="editForm.province" placeholder="省" />
+            <el-input v-model="editForm.city" placeholder="市" />
+            <el-input v-model="editForm.district" placeholder="区/县" />
+          </div>
+        </el-form-item>
+        <el-form-item label="地址">
+          <el-input v-model="editForm.address" placeholder="详细地址" />
+        </el-form-item>
+        <el-form-item label="经纬度">
+          <div class="row2">
+            <el-input-number
+              v-model="editForm.latitude"
+              :min="-90"
+              :max="90"
+              :step="0.000001"
+              :controls="false"
+              placeholder="纬度 -90~90"
+              style="width: 100%"
+            />
+            <el-input-number
+              v-model="editForm.longitude"
+              :min="-180"
+              :max="180"
+              :step="0.000001"
+              :controls="false"
+              placeholder="经度 -180~180"
+              style="width: 100%"
+            />
+          </div>
+        </el-form-item>
+        <el-form-item label="优先级">
+          <el-select v-model="editForm.priority" placeholder="优先级" style="width: 100%">
+            <el-option label="high" value="high" />
+            <el-option label="normal" value="normal" />
+            <el-option label="low" value="low" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="联系人">
+          <div class="row2">
+            <el-input v-model="editForm.contact_person" placeholder="姓名" />
+            <el-input v-model="editForm.contact_phone" placeholder="电话" />
+          </div>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="editForm.description" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSubmitting" @click="submitEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 删除站点 -->
+    <el-dialog
+      v-model="deleteVisible"
+      title="删除站点"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <el-alert
+        type="warning"
+        :closable="false"
+        title="删除为物理删除，且仅允许删除无关联数据的站点。删除后不可恢复。"
+      />
+      <div style="margin-top: 12px;">
+        <div>站点名称：{{ site?.site_name || '-' }}</div>
+        <div>站点编码：{{ site?.site_code || '-' }}</div>
+      </div>
+      <el-form label-width="110px" style="margin-top: 12px;">
+        <el-form-item label="确认站点编码" required>
+          <el-input v-model="deleteConfirmCode" placeholder="请输入站点编码以确认删除" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="deleteVisible = false">取消</el-button>
+        <el-button
+          type="danger"
+          :loading="deleteSubmitting"
+          :disabled="deleteConfirmCode !== (site?.site_code || '')"
+          @click="submitDelete"
+        >
+          确认删除
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 当前工单 -->
     <el-card class="mt16" v-loading="workOrdersLoading">
@@ -196,6 +329,33 @@ const loading = ref(false)
 const site = ref(null)
 const userStore = useUserStore()
 const userOptions = ref([])
+const canManageSite = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
+
+const deleteCheckLoading = ref(false)
+const deleteCheckLoaded = ref(false)
+const deleteCheck = ref({ can_delete: false, total_related: 0, counts: {} })
+
+const editVisible = ref(false)
+const editSubmitting = ref(false)
+const editForm = ref({
+  site_code: '',
+  site_name: '',
+  site_type: '',
+  province: '',
+  city: '',
+  district: '',
+  address: '',
+  latitude: null,
+  longitude: null,
+  priority: 'normal',
+  contact_person: '',
+  contact_phone: '',
+  description: '',
+})
+
+const deleteVisible = ref(false)
+const deleteSubmitting = ref(false)
+const deleteConfirmCode = ref('')
 
 // 工单相关
 const workOrdersLoading = ref(false)
@@ -214,6 +374,9 @@ const load = async () => {
     loading.value = true
     const res = await request.get(`/api/sites/${route.params.id}`)
     site.value = res
+    if (canManageSite.value) {
+      await loadDeleteCheck()
+    }
     await loadWorkOrders()
     await loadDeviceStatus(false)
   } catch (e) {
@@ -221,6 +384,136 @@ const load = async () => {
     ElMessage.error('加载站点详情失败')
   } finally {
     loading.value = false
+  }
+}
+
+const loadDeleteCheck = async () => {
+  try {
+    deleteCheckLoading.value = true
+    deleteCheckLoaded.value = false
+    const res = await request.get(`/api/sites/${route.params.id}/delete-check`)
+    deleteCheck.value = res || { can_delete: false, total_related: 0, counts: {} }
+    deleteCheckLoaded.value = true
+  } catch (e) {
+    console.error(e)
+    deleteCheck.value = { can_delete: false, total_related: 0, counts: {} }
+    deleteCheckLoaded.value = true
+  } finally {
+    deleteCheckLoading.value = false
+  }
+}
+
+const deleteDisableTip = computed(() => {
+  const counts = deleteCheck.value?.counts || {}
+  const labelMap = {
+    work_orders: '工单',
+    site_inspections: '检查记录',
+    inspections: '旧版检查记录',
+    site_surveys: '勘察记录',
+    site_survey_archives: '勘察档案',
+    site_opening_archives: '开站档案',
+    site_ssv_archives: 'SSV档案',
+    equipment_binding_history: '设备绑定历史',
+    site_planning: '规划版本',
+    site_planning_cells: '规划小区',
+    base_station_devices: '基站设备',
+    template_bindings: '模板绑定',
+  }
+  const pairs = Object.entries(counts)
+    .filter(([, v]) => Number(v) > 0)
+    .slice(0, 6)
+    .map(([k, v]) => `${labelMap[k] || k} ${v}`)
+  if (!pairs.length) return '存在关联数据，禁止删除'
+  return `存在关联数据，禁止删除（${pairs.join('，')}）`
+})
+
+const openEdit = () => {
+  if (!site.value) return
+  editForm.value = {
+    site_code: site.value.site_code || '',
+    site_name: site.value.site_name || '',
+    site_type: site.value.site_type || '',
+    province: site.value.province || '',
+    city: site.value.city || '',
+    district: site.value.district || '',
+    address: site.value.address || '',
+    latitude: site.value.latitude ?? null,
+    longitude: site.value.longitude ?? null,
+    priority: site.value.priority || 'normal',
+    contact_person: site.value.contact_person || '',
+    contact_phone: site.value.contact_phone || '',
+    description: site.value.description || '',
+  }
+  editVisible.value = true
+}
+
+const submitEdit = async () => {
+  if (!site.value) return
+  if (!editForm.value.site_name?.trim()) {
+    ElMessage.warning('请填写站点名称')
+    return
+  }
+  try {
+    editSubmitting.value = true
+    const payload = {
+      site_name: editForm.value.site_name?.trim(),
+      site_type: editForm.value.site_type?.trim() || null,
+      province: editForm.value.province?.trim() || null,
+      city: editForm.value.city?.trim() || null,
+      district: editForm.value.district?.trim() || null,
+      address: editForm.value.address?.trim() || null,
+      latitude: editForm.value.latitude === null || editForm.value.latitude === '' ? null : editForm.value.latitude,
+      longitude: editForm.value.longitude === null || editForm.value.longitude === '' ? null : editForm.value.longitude,
+      priority: editForm.value.priority || null,
+      contact_person: editForm.value.contact_person?.trim() || null,
+      contact_phone: editForm.value.contact_phone?.trim() || null,
+      description: editForm.value.description || null,
+    }
+    await request.put(`/api/sites/${route.params.id}`, payload)
+    ElMessage.success('保存成功')
+    editVisible.value = false
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
+const openDelete = () => {
+  if (!site.value) return
+  deleteConfirmCode.value = ''
+  deleteVisible.value = true
+}
+
+const submitDelete = async () => {
+  if (!site.value) return
+  if (!deleteCheck.value?.can_delete) {
+    ElMessage.error('站点存在关联数据，禁止删除')
+    return
+  }
+  if (deleteConfirmCode.value !== site.value.site_code) {
+    ElMessage.warning('站点编码不匹配')
+    return
+  }
+  try {
+    deleteSubmitting.value = true
+    await request.delete(`/api/sites/${route.params.id}`)
+    ElMessage.success('删除成功')
+    deleteVisible.value = false
+    router.push({ name: 'SiteList' })
+  } catch (e) {
+    console.error(e)
+    const detail = e?.response?.data?.detail
+    if (detail && typeof detail === 'object') {
+      ElMessage.error(detail.message || '删除失败')
+    } else {
+      ElMessage.error(detail || '删除失败')
+    }
+    await loadDeleteCheck()
+  } finally {
+    deleteSubmitting.value = false
   }
 }
 
@@ -495,6 +788,9 @@ const createSurvey = () => {
 .item .value { color: var(--text-primary); font-weight: 500; }
 .mt16 { margin-top: 16px; }
 .card-header { display: flex; justify-content: space-between; align-items: center; }
+.card-actions { display: flex; gap: 8px; align-items: center; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; width: 100%; }
 .status-cell { display: flex; align-items: center; gap: 4px; }
 .mr4 { margin-right: 4px; }
 </style>

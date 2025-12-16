@@ -1850,6 +1850,12 @@ async def review_inspection_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查项不存在")
 
     try:
+        item_status_value = getattr(check_item.status, "value", check_item.status)
+        if str(item_status_value) != CheckItemStatusEnum.COMPLETED.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"检查项未完成提交，无法审核（当前状态：{item_status_value}）"
+            )
         now = datetime.utcnow()
         check_item.review_status = review.action
         check_item.review_comments = review.comments

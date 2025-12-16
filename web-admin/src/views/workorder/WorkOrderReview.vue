@@ -160,9 +160,9 @@
           </el-table-column>
           <el-table-column prop="status" label="提交状态" width="120">
             <template #default="{ row }">
-              <el-tag v-if="row.status === 'completed'" type="success" size="small">已完成</el-tag>
-              <el-tag v-else-if="row.status === 'pending'" type="info" size="small">待处理</el-tag>
-              <el-tag v-else size="small">{{ row.status }}</el-tag>
+              <el-tag :type="checkItemStatusTagType(row.status)" size="small">
+                {{ checkItemStatusText(row.status) }}
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="review_status" label="审核结果" width="120">
@@ -177,9 +177,12 @@
           <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" size="small" @click="viewItemDetail(row)">详情</el-button>
-              <el-button link type="success" size="small" @click="reviewItem(row, 'pass')">通过</el-button>
-              <el-button link type="warning" size="small" @click="reviewItem(row, 'warning')">警告</el-button>
-              <el-button link type="danger" size="small" @click="reviewItem(row, 'fail')">不合格</el-button>
+              <el-button link type="success" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'pass')">通过</el-button>
+              <el-button link type="warning" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'warning')">警告</el-button>
+              <el-button link type="danger" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'fail')">不合格</el-button>
+              <el-tooltip v-if="!canReviewCheckItem(row)" :content="checkItemReviewDisabledReason(row)" placement="top">
+                <span class="help-tip">?</span>
+              </el-tooltip>
             </template>
           </el-table-column>
         </el-table>
@@ -196,9 +199,7 @@
               <el-button type="success" :disabled="!canApprove" @click="finalReview('approve')">
                 {{ hasFailedItems ? '存在不合格检查项，无法通过' : '通过' }}
               </el-button>
-              <el-button type="danger" :disabled="!canReject" @click="finalReview('reject')">
-                {{ hasPendingItems ? `还有 ${pendingItemsCount} 项未审核` : '驳回' }}
-              </el-button>
+              <el-button type="danger" :disabled="!canReject" @click="finalReview('reject')">驳回</el-button>
               <el-button type="info" @click="showAuditHistory">
                 <el-icon><Clock /></el-icon>查看审核历史
               </el-button>
@@ -220,9 +221,9 @@
             <el-tag v-else-if="selectedItem.required_type === 'both'" type="primary" size="small">数据+照片</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag v-if="selectedItem.status === 'completed'" type="success" size="small">已完成</el-tag>
-            <el-tag v-else-if="selectedItem.status === 'pending'" type="info" size="small">待处理</el-tag>
-            <el-tag v-else size="small">{{ selectedItem.status }}</el-tag>
+            <el-tag :type="checkItemStatusTagType(selectedItem.status)" size="small">
+              {{ checkItemStatusText(selectedItem.status) }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ formatDateTime(selectedItem.checked_at) }}</el-descriptions-item>
           <el-descriptions-item label="审核状态">
@@ -282,9 +283,14 @@
       </div>
       <template #footer>
         <el-button @click="itemDetailVisible = false">关闭</el-button>
-        <el-button v-if="selectedItem && !selectedItem.review_status" type="success" @click="reviewItem(selectedItem, 'pass')">通过</el-button>
-        <el-button v-if="selectedItem && !selectedItem.review_status" type="warning" @click="reviewItem(selectedItem, 'warning')">警告</el-button>
-        <el-button v-if="selectedItem && !selectedItem.review_status" type="danger" @click="reviewItem(selectedItem, 'fail')">不合格</el-button>
+        <template v-if="selectedItem && (!selectedItem.review_status || selectedItem.review_status === 'pending')">
+          <el-button type="success" :disabled="!canReviewCheckItem(selectedItem)" @click="reviewItem(selectedItem, 'pass')">通过</el-button>
+          <el-button type="warning" :disabled="!canReviewCheckItem(selectedItem)" @click="reviewItem(selectedItem, 'warning')">警告</el-button>
+          <el-button type="danger" :disabled="!canReviewCheckItem(selectedItem)" @click="reviewItem(selectedItem, 'fail')">不合格</el-button>
+          <el-tooltip v-if="!canReviewCheckItem(selectedItem)" :content="checkItemReviewDisabledReason(selectedItem)" placement="top">
+            <span class="help-tip">?</span>
+          </el-tooltip>
+        </template>
       </template>
     </el-dialog>
 
@@ -481,6 +487,40 @@ const types = [
 const canStartReview = computed(() => order.value && order.value.status === 'SUBMITTED')
 const canFinalReview = computed(() => order.value && ['SUBMITTED','UNDER_REVIEW'].includes(order.value.status))
 
+const checkItemStatusText = (status) => {
+  const value = (status ?? '').toString()
+  const mapping = {
+    pending: '待处理',
+    in_progress: '进行中',
+    completed: '已完成',
+    failed: '失败',
+    skipped: '跳过',
+  }
+  return mapping[value] || (value || '-')
+}
+
+const checkItemStatusTagType = (status) => {
+  const value = (status ?? '').toString()
+  const mapping = {
+    pending: 'info',
+    in_progress: 'warning',
+    completed: 'success',
+    failed: 'danger',
+    skipped: 'info',
+  }
+  return mapping[value] || 'info'
+}
+
+const canReviewCheckItem = (item) => {
+  const status = (item?.status ?? '').toString()
+  return status === 'completed'
+}
+
+const checkItemReviewDisabledReason = (item) => {
+  const statusText = checkItemStatusText(item?.status)
+  return `该检查项未完成提交（当前：${statusText}），无法审核`
+}
+
 // 检查是否有不合格的检查项
 const hasFailedItems = computed(() => {
   return items.value.some(item => item.review_status === 'fail')
@@ -501,9 +541,9 @@ const canApprove = computed(() => {
   return canFinalReview.value && !hasFailedItems.value && !hasPendingItems.value
 })
 
-// 只有在所有检查项都已审核时才能驳回
+// 允许直接驳回（即使存在未完成/未审核项）
 const canReject = computed(() => {
-  return canFinalReview.value && !hasPendingItems.value
+  return canFinalReview.value
 })
 
 const refresh = async () => {
@@ -606,20 +646,22 @@ const reviewItem = async (row, action) => {
     }
 
     // 如果工单有关联的检查，调用检查项审核API
-    if (order.value && order.value.inspection_id) {
-      await request.post(`/api/inspections/detail/${order.value.inspection_id}/items/${row.id}/review`, { action, comments: value || undefined })
-    } else {
-      // 否则调用工单项审核API
-      await request.post(`/api/work-orders/${id}/items/${row.id}/review`, { action, comments: value || undefined })
-    }
-    ElMessage.success('已提交')
-    await Promise.all([loadItems(), loadSummary()])
-  } catch (e) {
-    if (e === 'cancel') return
-    console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '提交失败')
-  }
-}
+	    if (order.value && order.value.inspection_id) {
+	      await request.post(`/api/inspections/detail/${order.value.inspection_id}/items/${row.id}/review`, { action, comments: value || undefined })
+	    } else {
+	      // 否则调用工单项审核API
+	      await request.post(`/api/work-orders/${id}/items/${row.id}/review`, { action, comments: value || undefined })
+	    }
+	    ElMessage.success('已提交')
+	    // 审核成功后自动关闭“检查项详情”弹窗（不切换下一条）
+	    itemDetailVisible.value = false
+	    await Promise.all([loadItems(), loadSummary()])
+	  } catch (e) {
+	    if (e === 'cancel') return
+	    console.error(e)
+	    ElMessage.error(e?.response?.data?.detail || '提交失败')
+	  }
+	}
 
 const finalReview = async (action) => {
   const id = route.query.id
@@ -920,6 +962,21 @@ onMounted(refresh)
 }
 .mr4 {
   margin-right: 4px;
+}
+
+.help-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  border: 1px solid #dcdfe6;
+  border-radius: 50%;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1;
+  cursor: help;
 }
 
 /* 审核历史样式 */

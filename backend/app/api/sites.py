@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
-from typing import List, Optional
+from typing import List, Optional, Dict
 import uuid
 import io
 import pandas as pd
@@ -25,6 +25,12 @@ from sqlalchemy import func, or_
 from pydantic import BaseModel
 from app.models.work_order import AuditEvent, WorkOrder, WorkOrderTypeEnum
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+from app.models.planning import SitePlanning, SitePlanningCell
+from app.models.inspection import SiteInspection, Inspection as LegacyInspection, BaseStationDevice, TemplateBinding
+from app.models.survey import SiteSurvey
+from app.models.survey_archive import SiteSurveyArchive
+from app.models.opening_archive import SiteOpeningArchive
+from app.models.ssv_archive import SiteSSVArchive
 from app.services.omc_client import (
     get_omc_client,
     parse_online_flag,
@@ -36,6 +42,34 @@ from app.utils.timezone import to_utc_iso
 from app.services.omc_monitor import advance_opening_work_orders_by_ever
 
 router = APIRouter()
+
+
+class SiteDeleteCheckResponse(BaseModel):
+    can_delete: bool
+    total_related: int
+    counts: Dict[str, int]
+
+
+def _get_site_related_counts(db: Session, site_id: int) -> Dict[str, int]:
+    def _count(model, field_name: str = "id") -> int:
+        col = getattr(model, field_name)
+        return int(db.query(func.count(col)).filter(model.site_id == site_id).scalar() or 0)
+
+    counts = {
+        "work_orders": _count(WorkOrder),
+        "site_inspections": _count(SiteInspection),
+        "inspections": _count(LegacyInspection),
+        "site_surveys": _count(SiteSurvey),
+        "site_survey_archives": _count(SiteSurveyArchive),
+        "site_opening_archives": _count(SiteOpeningArchive),
+        "site_ssv_archives": _count(SiteSSVArchive),
+        "equipment_binding_history": _count(EquipmentBindingHistory),
+        "site_planning": _count(SitePlanning),
+        "site_planning_cells": _count(SitePlanningCell),
+        "base_station_devices": _count(BaseStationDevice),
+        "template_bindings": _count(TemplateBinding),
+    }
+    return counts
 
 @router.post("/", response_model=SiteResponse)
 async def create_site(
@@ -395,6 +429,29 @@ async def get_site(
 
     return SiteResponse.from_orm(site)
 
+
+@router.get("/{site_id}/delete-check", response_model=SiteDeleteCheckResponse)
+async def check_site_delete(
+    site_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除前检查：仅允许删除无任何关联数据的站点。"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if site is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+
+    counts = _get_site_related_counts(db, site_id)
+    total_related = int(sum(counts.values()))
+    return SiteDeleteCheckResponse(
+        can_delete=total_related == 0,
+        total_related=total_related,
+        counts=counts,
+    )
+
 @router.put("/{site_id}", response_model=SiteResponse)
 async def update_site(
     site_id: int,
@@ -409,15 +466,18 @@ async def update_site(
             detail="Site not found"
         )
     
-    # 检查权限
-    if (current_user.role in ["user", "inspector"] and 
-        site.created_by != current_user.id):
+    # 权限：仅允许 admin/manager 编辑站点基础信息
+    if current_user.role not in ["admin", "manager"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
     
     update_data = site_update.dict(exclude_unset=True)
+    # 明确不支持：状态/指派人
+    forbidden_fields = [f for f in ["status", "assigned_to"] if f in update_data]
+    if forbidden_fields:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不允许修改状态/指派人")
     for field, value in update_data.items():
         setattr(site, field, value)
     
@@ -443,6 +503,18 @@ async def delete_site(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Site not found"
+        )
+
+    counts = _get_site_related_counts(db, site_id)
+    total_related = int(sum(counts.values()))
+    if total_related > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "站点存在关联数据，禁止删除",
+                "total_related": total_related,
+                "counts": counts,
+            },
         )
     
     db.delete(site)

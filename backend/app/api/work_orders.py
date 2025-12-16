@@ -1715,6 +1715,13 @@ async def review_item(
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="检查项不存在")
+
+    item_status_value = getattr(item.status, "value", item.status)
+    if str(item_status_value) != CheckItemStatusEnum.COMPLETED.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"检查项未完成提交，无法审核（当前状态：{item_status_value}）"
+        )
     
     item.review_status = req.action
     item.review_comments = req.comments
