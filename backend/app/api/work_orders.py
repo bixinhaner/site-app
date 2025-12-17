@@ -88,6 +88,26 @@ def _ensure_surveyor_wo_type(wo: WorkOrder, u: User):
         raise HTTPException(status_code=403, detail="仅可操作勘察工单")
 
 
+def _touch_inspection_item_and_clear_review(item: InspectionCheckItem, now: datetime) -> bool:
+    """检查项内容有变更时：更新时间，并清空该检查项的审核结果（若已审核过）。
+
+    用于实现“驳回后增量复审”：只让变动的检查项回到待审核，未变动的保留原审核结果。
+    """
+    had_review = (
+        item.review_status is not None
+        or item.review_comments is not None
+        or item.reviewed_by is not None
+        or item.reviewed_at is not None
+    )
+    if had_review:
+        item.review_status = None
+        item.review_comments = None
+        item.reviewed_by = None
+        item.reviewed_at = None
+    item.updated_at = now
+    return had_review
+
+
 def _update_site_status_on_work_order_create(db: Session, site_id: int, work_order_type: WorkOrderTypeEnum):
     """
     工单创建时自动更新站点状态
@@ -1108,6 +1128,7 @@ async def update_item(
     
     # 更新检查项
     upd = data.dict(exclude_unset=True)
+    content_changed = False
     if 'data_value' in upd and upd['data_value'] is not None:
         # 严格要求 field_name 与模板 field_id 一致；
         field_ids = set()
@@ -1149,18 +1170,29 @@ async def update_item(
             allowed = ','.join(sorted(field_ids)) if field_ids else '无字段定义'
             raise HTTPException(status_code=400, detail=f"存在未定义字段: {invalid}；允许的 field_id: {allowed}")
 
+        if inspection_item.data_value != normalized:
+            content_changed = True
         inspection_item.data_value = normalized
     if 'status' in upd:
         # 将字符串状态转换为枚举
         status_str = upd['status']
+        before_status = getattr(inspection_item.status, 'value', inspection_item.status)
         if status_str == 'completed':
             inspection_item.status = CheckItemStatusEnum.COMPLETED
             inspection_item.checked_at = datetime.utcnow()
         elif status_str == 'pending':
             inspection_item.status = CheckItemStatusEnum.PENDING
             inspection_item.checked_at = None
+        after_status = getattr(inspection_item.status, 'value', inspection_item.status)
+        if str(before_status) != str(after_status):
+            content_changed = True
     
-    inspection_item.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    inspection_item.updated_at = now
+
+    # 内容变更：清空该检查项既有审核结果（若已审核过），以便驳回后增量复审
+    if content_changed:
+        _touch_inspection_item_and_clear_review(inspection_item, now)
 
     # 可选：按字段定义进行类型校验（非严格，允许部分填写）
     try:
@@ -1865,6 +1897,18 @@ async def final_review(
 
     # 检查是否有不合格的检查项，如果有则不能通过
     if req.action == "approve" and wo.inspection_id:
+        pending_items = db.query(InspectionCheckItem).filter(
+            InspectionCheckItem.inspection_id == wo.inspection_id,
+            (InspectionCheckItem.review_status.is_(None)) | (InspectionCheckItem.review_status.in_(["", "pending"]))
+        ).all()
+        if pending_items:
+            names = [i.item_name for i in pending_items[:10]]
+            extra = f" 等{len(pending_items)}项" if len(pending_items) > 10 else ""
+            raise HTTPException(
+                status_code=400,
+                detail=f"不能通过工单审核，仍有 {len(pending_items)} 项检查项未审核：{', '.join(names)}{extra}"
+            )
+
         failed_items = db.query(InspectionCheckItem).filter(
             InspectionCheckItem.inspection_id == wo.inspection_id,
             InspectionCheckItem.review_status == "fail"
@@ -2119,9 +2163,9 @@ async def submit_work_order(
     wo.status = WorkOrderStatusEnum.SUBMITTED
     wo.submitted_at = datetime.utcnow()
     
-    # 如果是重新提交（从驳回状态），清除旧的审核结果
+    # 如果是重新提交（从驳回状态），清除工单/检查级别的旧审核信息（检查项采用“增量复审”，不再全量清空）
     if is_resubmit:
-        print(f"[重新提交] 工单 {work_order_id} 从驳回状态重新提交，清除旧审核结果")
+        print(f"[重新提交] 工单 {work_order_id} 从驳回状态重新提交，清除工单/检查级审核信息")
         
         # 1. 清除工单级别的审核信息
         wo.review_comments = None
@@ -2137,34 +2181,6 @@ async def submit_work_order(
                 inspection.review_comments = None
                 inspection.reviewed_by = None
                 inspection.reviewed_at = None
-                
-                # 3. 清除所有检查项的审核结果
-                check_items = db.query(InspectionCheckItem).filter(
-                    InspectionCheckItem.inspection_id == wo.inspection_id
-                ).all()
-                
-                cleared_count = 0
-                for item in check_items:
-                    if item.review_status or item.review_comments:
-                        item.review_status = None
-                        item.review_comments = None
-                        item.reviewed_by = None
-                        item.reviewed_at = None
-                        cleared_count += 1
-                
-                print(f"[重新提交] 已清除 {cleared_count} 个检查项的审核结果")
-        
-        # 4. 清除工单项的审核结果（如果使用WorkOrderItem）
-        work_order_items = db.query(WorkOrderItem).filter(
-            WorkOrderItem.work_order_id == work_order_id
-        ).all()
-        
-        for item in work_order_items:
-            if item.review_status or item.review_comments:
-                item.review_status = None
-                item.review_comments = None
-                item.reviewed_by = None
-                item.reviewed_at = None
     
     # 分配审核人（默认分配给分配人，即管理员）
     wo.reviewer_id = wo.assigned_by

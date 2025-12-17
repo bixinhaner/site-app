@@ -100,7 +100,13 @@
           </el-table>
         </el-card>
         <div class="section-header">
-          <h3>检查项审核</h3>
+          <div class="section-title">
+            <h3>检查项审核</h3>
+            <el-radio-group v-model="reviewListMode" size="small">
+              <el-radio-button label="全部" />
+              <el-radio-button label="仅看需复审" />
+            </el-radio-group>
+          </div>
           <div v-if="summary">
             <el-tag type="success">通过 {{ summary.pass_count }}</el-tag>
             <el-tag type="warning" style="margin-left:8px;">警告 {{ summary.warning_count }}</el-tag>
@@ -133,7 +139,7 @@
             />
           </div>
         </div>
-        <el-table :data="items" size="small" stripe v-loading="itemsLoading">
+        <el-table :data="displayedItems" size="small" stripe v-loading="itemsLoading">
           <el-table-column prop="item_name" label="检查项" min-width="220" />
           <el-table-column prop="required_type" label="类型" width="100">
             <template #default="{ row }">
@@ -453,6 +459,7 @@ const items = ref([])
 const itemsLoading = ref(false)
 const summary = ref(null)
 const comments = ref('')
+const reviewListMode = ref('全部')
 const photoDetailVisible = ref(false)
 const selectedPhoto = ref(null)
 const itemDetailVisible = ref(false)
@@ -534,6 +541,13 @@ const checkItemReviewDisabledReason = (item) => {
 // 检查是否有不合格的检查项
 const hasFailedItems = computed(() => {
   return items.value.some(item => item.review_status === 'fail')
+})
+
+const displayedItems = computed(() => {
+  if (reviewListMode.value === '仅看需复审') {
+    return items.value.filter(item => !item.review_status || item.review_status === 'pending')
+  }
+  return items.value
 })
 
 // 检查是否有未审核的检查项
@@ -972,6 +986,7 @@ onMounted(refresh)
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .section-header { display:flex; justify-content: space-between; align-items:center; margin: 8px 0; }
+.section-title { display:flex; align-items:center; gap: 12px; }
 
 .status-cell {
   display: flex;

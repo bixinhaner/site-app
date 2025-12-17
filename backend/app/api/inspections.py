@@ -51,6 +51,26 @@ def _ensure_surveyor_inspection_type(db: Session, u, inspection: SiteInspection)
         if not wo or wo.type != WorkOrderTypeEnum.SITE_SURVEY:
             raise HTTPException(status_code=403, detail="仅可操作勘察检查")
 
+
+def _touch_check_item_and_clear_review(check_item: InspectionCheckItem, now: datetime) -> bool:
+    """检查项内容有变更时：更新时间，并清空该检查项的审核结果（若已审核过）。
+
+    用于实现“驳回后增量复审”：只让变动的检查项回到待审核，未变动的保留原审核结果。
+    """
+    had_review = (
+        check_item.review_status is not None
+        or check_item.review_comments is not None
+        or check_item.reviewed_by is not None
+        or check_item.reviewed_at is not None
+    )
+    if had_review:
+        check_item.review_status = None
+        check_item.review_comments = None
+        check_item.reviewed_by = None
+        check_item.reviewed_at = None
+    check_item.updated_at = now
+    return had_review
+
 # 新增工具函数
 async def create_default_template(db: Session, site_id: int, inspection_type: str) -> InspectionTemplate:
     """创建默认检查模板"""
@@ -596,34 +616,18 @@ async def update_inspection(
     
     inspection.updated_at = datetime.utcnow()
     
-    # 如果从驳回状态重新提交，清除旧的审核结果
+    # 如果从驳回状态重新提交：清除检查级别旧审核信息（检查项采用“增量复审”，不再全量清空）
     is_resubmit = (old_status == InspectionStatusEnum.REJECTED and 
                    "status" in update_fields and 
                    inspection.status == InspectionStatusEnum.SUBMITTED)
     
     if is_resubmit:
-        print(f"[重新提交] 检查 {inspection_id} 从驳回状态重新提交，清除旧审核结果")
+        print(f"[重新提交] 检查 {inspection_id} 从驳回状态重新提交，清除检查级审核信息")
         
         # 1. 清除检查级别的审核信息
         inspection.review_comments = None
         inspection.reviewed_by = None
         inspection.reviewed_at = None
-        
-        # 2. 清除所有检查项的审核结果
-        check_items = db.query(InspectionCheckItem).filter(
-            InspectionCheckItem.inspection_id == inspection_id
-        ).all()
-        
-        cleared_count = 0
-        for item in check_items:
-            if item.review_status or item.review_comments:
-                item.review_status = None
-                item.review_comments = None
-                item.reviewed_by = None
-                item.reviewed_at = None
-                cleared_count += 1
-        
-        print(f"[重新提交] 已清除 {cleared_count} 个检查项的审核结果")
     
     # 如果状态变更为submitted，且没有设置submitted_at，自动设置
     if "status" in update_fields and inspection.status == InspectionStatusEnum.SUBMITTED:
@@ -635,7 +639,7 @@ async def update_inspection(
     if "status" in update_fields and old_status != inspection.status:
         # 区分首次提交和重新提交
         action = "resubmit" if is_resubmit else "update_status"
-        comments = "重新提交检查（已清除旧审核结果）" if is_resubmit else "更新检查状态"
+        comments = "重新提交检查（保留未变更项审核结果）" if is_resubmit else "更新检查状态"
         
         audit_log_to_add = InspectionAuditLog(
             id=str(uuid.uuid4()),
@@ -733,6 +737,14 @@ async def upload_inspection_photo(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="检查记录不存在"
         )
+
+    # 照片变更属于检查项内容变更：触发该检查项回到待审核（仅清空该项，不影响其他项）
+    check_item = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.id == check_item_id,
+        InspectionCheckItem.inspection_id == inspection_id
+    ).first()
+    if check_item:
+        _touch_check_item_and_clear_review(check_item, datetime.utcnow())
     
     # 验证文件类型
     if not file.content_type.startswith("image/"):
@@ -857,6 +869,15 @@ async def delete_inspection_photo(
     # 检查检查状态是否允许删除照片
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
         raise HTTPException(status_code=400, detail=f"检查状态 {inspection.status} 下不允许删除照片")
+
+    # 删除照片属于检查项内容变更：触发该检查项回到待审核（仅清空该项，不影响其他项）
+    if photo.check_item_id:
+        check_item = db.query(InspectionCheckItem).filter(
+            InspectionCheckItem.id == photo.check_item_id,
+            InspectionCheckItem.inspection_id == photo.inspection_id
+        ).first()
+        if check_item:
+            _touch_check_item_and_clear_review(check_item, datetime.utcnow())
     
     # 删除物理文件
     try:
@@ -914,6 +935,15 @@ async def replace_inspection_photo(
     # 检查检查状态是否允许替换照片
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
         raise HTTPException(status_code=400, detail=f"检查状态 {inspection.status} 下不允许替换照片")
+
+    # 替换照片属于检查项内容变更：触发该检查项回到待审核（仅清空该项，不影响其他项）
+    if existing_photo.check_item_id:
+        check_item = db.query(InspectionCheckItem).filter(
+            InspectionCheckItem.id == existing_photo.check_item_id,
+            InspectionCheckItem.inspection_id == existing_photo.inspection_id
+        ).first()
+        if check_item:
+            _touch_check_item_and_clear_review(check_item, datetime.utcnow())
     
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="只支持图片文件")
@@ -1028,6 +1058,7 @@ async def batch_inspection_photo_operations(
         raise HTTPException(status_code=400, detail=f"检查状态 {inspection.status} 下不允许操作照片")
     
     results = []
+    affected_check_item_ids = set()
     
     for i, operation in enumerate(operations):
         try:
@@ -1044,6 +1075,9 @@ async def batch_inspection_photo_operations(
                 if not photo:
                     results.append({"index": i, "action": "delete", "success": False, "error": "照片不存在"})
                     continue
+
+                if photo.check_item_id:
+                    affected_check_item_ids.add(photo.check_item_id)
                 
                 # 删除物理文件
                 try:
@@ -1066,6 +1100,9 @@ async def batch_inspection_photo_operations(
                 if not existing_photo:
                     results.append({"index": i, "action": "replace", "success": False, "error": "照片不存在"})
                     continue
+
+                if existing_photo.check_item_id:
+                    affected_check_item_ids.add(existing_photo.check_item_id)
                 
                 # 处理文件数据
                 try:
@@ -1146,6 +1183,8 @@ async def batch_inspection_photo_operations(
                 if not operation.get("file_data") or not operation.get("check_item_id"):
                     results.append({"index": i, "action": "add", "success": False, "error": "缺少file_data或check_item_id"})
                     continue
+
+                affected_check_item_ids.add(operation.get("check_item_id"))
                 
                 # 处理文件数据
                 try:
@@ -1226,6 +1265,19 @@ async def batch_inspection_photo_operations(
                 
         except Exception as e:
             results.append({"index": i, "action": operation.get("action", "unknown"), "success": False, "error": str(e)})
+
+    # 批量照片操作属于检查项内容变更：触发对应检查项回到待审核（仅清空受影响项）
+    if affected_check_item_ids:
+        now = datetime.utcnow()
+        for cid in affected_check_item_ids:
+            if not cid:
+                continue
+            check_item = db.query(InspectionCheckItem).filter(
+                InspectionCheckItem.id == cid,
+                InspectionCheckItem.inspection_id == inspection_id
+            ).first()
+            if check_item:
+                _touch_check_item_and_clear_review(check_item, now)
     
     # 提交所有更改
     db.commit()
@@ -1305,6 +1357,15 @@ async def cleanup_duplicate_inspection_photos(
             except Exception as e:
                 print(f"清理检查照片失败 {old_photo.id}: {e}")
         
+        # 照片删除属于检查项内容变更：触发对应检查项回到待审核（仅清空该项，不影响其他项）
+        if item_key and item_key != "inspection_level" and photos_to_delete:
+            check_item = db.query(InspectionCheckItem).filter(
+                InspectionCheckItem.id == item_key,
+                InspectionCheckItem.inspection_id == inspection_id
+            ).first()
+            if check_item:
+                _touch_check_item_and_clear_review(check_item, datetime.utcnow())
+
         kept_count += 1  # 保留的最新照片
     
     db.commit()
@@ -1508,6 +1569,7 @@ async def update_inspection_item(
     
     # 更新检查项
     update_fields = item_update.dict(exclude_unset=True)
+    content_changed = False
 
     # 对于勘察类任务，严格要求 data_value 的 field_name 与模板 field_id 一致；
     # 允许客户端使用 field_id/key/field/name 提交，但最终统一写入为 field_name=field_id。
@@ -1603,14 +1665,32 @@ async def update_inspection_item(
         except Exception as e:
             print(f"WARNING: 字段验证过程出错: {e}")
             # 验证出错不阻止保存，但记录错误
+
+    # 判断本次是否存在实际内容变更（仅看客户端提交字段，不包含 checked_at/updated_at 等元数据）
+    def _norm(v):
+        if v is None:
+            return None
+        return getattr(v, 'value', v)
+
+    for field, value in update_fields.items():
+        if field not in ('status', 'data_value', 'sector_id'):
+            continue
+        if _norm(getattr(check_item, field, None)) != _norm(value):
+            content_changed = True
+            break
     
     for field, value in update_fields.items():
         setattr(check_item, field, value)
     
     # 更新检查人员和时间
+    now = datetime.utcnow()
     check_item.checked_by = current_user.id
-    check_item.checked_at = datetime.utcnow()
-    check_item.updated_at = datetime.utcnow()
+    check_item.checked_at = now
+    check_item.updated_at = now
+
+    # 内容变更：清空该检查项既有审核结果（若已审核过），以便增量复审
+    if content_changed:
+        _touch_check_item_and_clear_review(check_item, now)
     
     # 如果检查项已完成且绑定了设备，更新设备状态为"已检查"
     if (check_item.status == CheckItemStatusEnum.COMPLETED and 
@@ -1738,7 +1818,7 @@ async def reset_inspection_for_rejected_task(
             item.notes = None
             item.checked_by = None
             item.checked_at = None
-            item.updated_at = datetime.utcnow()
+            _touch_check_item_and_clear_review(item, datetime.utcnow())
         
         # 重新计算完成率
         total_items = db.query(InspectionCheckItem).filter(
@@ -2183,7 +2263,7 @@ async def bind_equipment_to_sector(
             
             # 更新设备绑定
             item.equipment_sn = equipment_sn if not is_unbind else None
-            item.updated_at = datetime.utcnow()
+            _touch_check_item_and_clear_review(item, datetime.utcnow())
             
             # 创建历史记录
             if not is_unbind or previous_sn:  # 绑定操作或有之前设备的解绑操作才记录
