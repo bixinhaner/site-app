@@ -356,87 +356,80 @@
     </el-dialog>
 
     <!-- 审核历史弹窗 -->
-    <el-dialog v-model="auditHistoryVisible" title="审核历史" width="900px">
-      <el-tabs v-model="activeHistoryTab">
-        <el-tab-pane label="工单操作历史" name="workorder">
-          <el-timeline v-if="workOrderLogs.length > 0">
-            <el-timeline-item
-              v-for="log in workOrderLogs"
-              :key="log.id"
-              :timestamp="formatDateTime(log.created_at)"
-              placement="top"
-              :type="getLogType(log.action)"
-            >
-              <el-card>
-                <template #header>
-                  <div class="card-header">
-                    <span><strong>{{ log.operator_name }}</strong> ({{ log.operator_username }})</span>
-                    <el-tag :type="getActionTagType(log.action)" size="small">{{ getActionText(log.action) }}</el-tag>
-                  </div>
-                </template>
-                <div v-if="log.from_status || log.to_status">
-                  状态变更：
-                  <el-tag v-if="log.from_status" size="small">{{ statusText(log.from_status) }}</el-tag>
-                  <el-icon><Right /></el-icon>
-                  <el-tag v-if="log.to_status" size="small" :type="getStatusTagType(log.to_status)">{{ statusText(log.to_status) }}</el-tag>
-                </div>
-                <div v-if="isAssigneeChange(log)" style="margin-top: 8px;">
-                  指派变更：
-                  <el-tag size="small">
-                    {{ log.details?.old_assignee_name || log.details?.old_assignee_id || '-' }}
-                  </el-tag>
-                  <el-icon><Right /></el-icon>
-                  <el-tag size="small" type="success">
-                    {{ log.details?.new_assignee_name || log.details?.new_assignee_id || log.details?.new_assignee || '-' }}
+    <el-dialog v-model="auditHistoryVisible" title="工单详情历史" width="900px">
+      <el-timeline v-if="timelineLogs.length > 0">
+        <el-timeline-item
+          v-for="log in timelineLogs"
+          :key="log.id"
+          :timestamp="formatDateTime(log.created_at)"
+          placement="top"
+          :type="getTimelineLogType(log)"
+        >
+          <el-card>
+            <template #header>
+              <div class="card-header">
+                <div class="card-header-left">
+                  <span>
+                    <strong>{{ log.operator_name }}</strong>
+                    <span v-if="log.operator_username">({{ log.operator_username }})</span>
+                  </span>
+                  <el-tag :type="getSourceTagType(log.source)" size="small" class="ml8">
+                    {{ log.source_label || sourceText(log.source) }}
                   </el-tag>
                 </div>
-                <div v-if="log.comments" style="margin-top: 8px;">
-                  <strong>意见：</strong>{{ log.comments }}
-                </div>
-                <div v-if="log.details" style="margin-top: 8px; color: #909399; font-size: 12px;">
-                  详情：<pre style="margin: 0;">{{ JSON.stringify(log.details, null, 2) }}</pre>
-                </div>
-              </el-card>
-            </el-timeline-item>
-          </el-timeline>
-          <el-empty v-else description="暂无操作历史" />
-        </el-tab-pane>
-        
-        <el-tab-pane label="检查操作历史" name="inspection">
-          <el-timeline v-if="inspectionLogs.length > 0">
-            <el-timeline-item
-              v-for="log in inspectionLogs"
-              :key="log.id"
-              :timestamp="formatDateTime(log.created_at)"
-              placement="top"
-              :type="getLogType(log.action)"
-            >
-              <el-card>
-                <template #header>
-                  <div class="card-header">
-                    <span><strong>{{ log.operator_name }}</strong> ({{ log.operator_username }})</span>
-                    <el-tag :type="getActionTagType(log.action)" size="small">{{ getActionText(log.action) }}</el-tag>
-                  </div>
-                </template>
-                <div v-if="log.from_status || log.to_status">
-                  状态变更：
-                  <el-tag v-if="log.from_status" size="small">{{ log.from_status }}</el-tag>
+                <el-tag :type="getTimelineActionTagType(log)" size="small">{{ getActionText(log.action, log.source) }}</el-tag>
+              </div>
+            </template>
+
+            <div v-if="log.from_status || log.to_status">
+              状态变更：
+              <el-tag v-if="log.from_status" size="small">{{ formatTimelineStatus(log.from_status) }}</el-tag>
+              <el-icon><Right /></el-icon>
+              <el-tag v-if="log.to_status" size="small" :type="getTimelineStatusTagType(log.to_status)">
+                {{ formatTimelineStatus(log.to_status) }}
+              </el-tag>
+            </div>
+
+            <div v-if="log.source === 'binding'" style="margin-top: 8px;">
+              <div>
+                设备：
+                <el-tag size="small">{{ log.details?.equipment_sn || '-' }}</el-tag>
+                <template v-if="log.action === 'rebind' && log.details?.previous_equipment_sn">
                   <el-icon><Right /></el-icon>
-                  <el-tag v-if="log.to_status" size="small">{{ log.to_status }}</el-tag>
-                </div>
-                <div v-if="log.comments" style="margin-top: 8px;">
-                  <strong>意见：</strong>{{ log.comments }}
-                </div>
-                <div v-if="log.details" style="margin-top: 8px; color: #909399; font-size: 12px;">
-                  详情：<pre style="margin: 0;">{{ JSON.stringify(log.details, null, 2) }}</pre>
-                </div>
-              </el-card>
-            </el-timeline-item>
-          </el-timeline>
-          <el-empty v-else description="暂无操作历史" />
-        </el-tab-pane>
-      </el-tabs>
-      
+                  <el-tag size="small" type="success">{{ log.details.previous_equipment_sn }}</el-tag>
+                </template>
+              </div>
+              <div style="margin-top: 4px;">
+                小区：扇区 {{ log.details?.sector_id || '-' }} / Band {{ log.details?.band || '-' }} / Cell {{ log.details?.cell_id || '-' }}
+              </div>
+            </div>
+
+            <div v-if="isAssigneeChange(log)" style="margin-top: 8px;">
+              指派变更：
+              <el-tag size="small">
+                {{ log.details?.old_assignee_name || log.details?.old_assignee_id || '-' }}
+              </el-tag>
+              <el-icon><Right /></el-icon>
+              <el-tag size="small" type="success">
+                {{ log.details?.new_assignee_name || log.details?.new_assignee_id || log.details?.new_assignee || '-' }}
+              </el-tag>
+            </div>
+
+            <div v-if="log.comments" style="margin-top: 8px;">
+              <strong>意见：</strong>{{ log.comments }}
+            </div>
+
+            <div v-if="hasLogDetails(log)" style="margin-top: 8px; color: #909399; font-size: 12px;">
+              <el-button link size="small" @click="toggleLogDetails(log.id)">
+                {{ isLogDetailsExpanded(log.id) ? '收起详情' : '查看详情' }}
+              </el-button>
+              <pre v-if="isLogDetailsExpanded(log.id)" style="margin: 8px 0 0;">{{ JSON.stringify(log.details, null, 2) }}</pre>
+            </div>
+          </el-card>
+        </el-timeline-item>
+      </el-timeline>
+      <el-empty v-else description="暂无操作历史" />
+
       <template #footer>
         <el-button @click="auditHistoryVisible = false">关闭</el-button>
       </template>
@@ -472,9 +465,8 @@ const isDragging = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const photoImage = ref(null)
 const auditHistoryVisible = ref(false)
-const workOrderLogs = ref([])
-const inspectionLogs = ref([])
-const activeHistoryTab = ref('workorder')
+const timelineLogs = ref([])
+const expandedLogDetails = ref({})
 
 // 设备状态
 const deviceStatusLoading = ref(false)
@@ -907,8 +899,8 @@ const showAuditHistory = async () => {
   try {
     // request 的响应拦截器已经返回了 response.data，所以直接使用
     const data = await request.get(`/api/work-orders/${route.query.id}/audit-logs`)
-    workOrderLogs.value = data.work_order_logs || []
-    inspectionLogs.value = data.inspection_logs || []
+    timelineLogs.value = data.timeline || []
+    expandedLogDetails.value = {}
     auditHistoryVisible.value = true
   } catch (error) {
     console.error('获取审核历史失败:', error)
@@ -916,7 +908,7 @@ const showAuditHistory = async () => {
   }
 }
 
-const getActionText = (action) => {
+const getActionText = (action, source) => {
   const actionMap = {
     'create': '创建',
     'assign': '分配',
@@ -933,7 +925,18 @@ const getActionText = (action) => {
     'update': '更新',
     'delete': '删除',
     'mark_completed': '标记完成',
-    'activate': '激活'
+    'activate': '激活',
+    // 检查相关
+    'item_review': '检查项审核',
+    'photo_review': '照片审核',
+    'delete_photo': '删除照片',
+    'replace_photo': '替换照片',
+    'batch_photo_operations': '批量照片操作',
+    'cleanup_duplicate_photos': '清理重复照片',
+    // 绑定相关
+    'bind': '绑定设备',
+    'unbind': '解绑设备',
+    'rebind': '重新绑定设备'
   }
   return actionMap[action] || action
 }
@@ -944,25 +947,77 @@ const isAssigneeChange = (log) => {
   return ['change_assignee', 'batch_assignee_change'].includes(action)
 }
 
-const getActionTagType = (action) => {
-  if (['approve', 'accept'].includes(action)) return 'success'
-  if (['reject', 'delete'].includes(action)) return 'danger'
-  if (['submit', 'resubmit', 'start_review'].includes(action)) return 'warning'
+const sourceText = (source) => {
+  const map = { work_order: '工单', inspection: '检查', binding: '绑定' }
+  return map[source] || source || '-'
+}
+
+const getSourceTagType = (source) => {
+  if (source === 'work_order') return 'primary'
+  if (source === 'inspection') return 'warning'
+  if (source === 'binding') return 'info'
   return 'info'
 }
 
-const getLogType = (action) => {
+const getTimelineActionTagType = (log) => {
+  const action = log?.action
+  const source = log?.source
+  if (source === 'binding') return 'info'
+  if (['approve', 'accept'].includes(action)) return 'success'
+  if (['reject', 'delete'].includes(action)) return 'danger'
+  if (['submit', 'resubmit', 'start_review'].includes(action)) return 'warning'
+  if (['item_review', 'photo_review'].includes(action)) return 'primary'
+  if (['delete_photo', 'replace_photo', 'batch_photo_operations', 'cleanup_duplicate_photos'].includes(action)) return 'warning'
+  return 'info'
+}
+
+const getTimelineLogType = (log) => {
+  const action = log?.action
+  const source = log?.source
+  if (source === 'binding') return 'info'
   if (['approve', 'accept', 'mark_completed'].includes(action)) return 'success'
   if (['reject', 'delete'].includes(action)) return 'danger'
   if (['submit', 'resubmit'].includes(action)) return 'primary'
   return 'info'
 }
 
-const getStatusTagType = (status) => {
-  if (['APPROVED', 'COMPLETED'].includes(status)) return 'success'
-  if (['REJECTED'].includes(status)) return 'danger'
-  if (['SUBMITTED', 'UNDER_REVIEW'].includes(status)) return 'warning'
+const getTimelineStatusTagType = (status) => {
+  const v = (status ?? '').toString()
+  if (['APPROVED', 'COMPLETED', 'approved', 'completed'].includes(v)) return 'success'
+  if (['REJECTED', 'rejected'].includes(v)) return 'danger'
+  if (['SUBMITTED', 'UNDER_REVIEW', 'submitted', 'under_review'].includes(v)) return 'warning'
   return 'info'
+}
+
+const formatTimelineStatus = (status) => {
+  const v = (status ?? '').toString()
+  const woText = statuses.find(s => s.value === v)?.label
+  if (woText) return woText
+  const inspectionMap = {
+    draft: '草稿',
+    in_progress: '进行中',
+    submitted: '已提交',
+    under_review: '审核中',
+    approved: '已通过',
+    rejected: '已驳回',
+    completed: '已完成',
+  }
+  return inspectionMap[v] || v
+}
+
+const hasLogDetails = (log) => {
+  const d = log?.details
+  if (!d) return false
+  if (typeof d !== 'object') return true
+  return Object.keys(d).length > 0
+}
+
+const toggleLogDetails = (id) => {
+  expandedLogDetails.value[id] = !expandedLogDetails.value[id]
+}
+
+const isLogDetailsExpanded = (id) => {
+  return !!expandedLogDetails.value[id]
 }
 
 const startDeviceCooldown = () => {
@@ -1017,6 +1072,13 @@ onMounted(refresh)
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+.card-header-left {
+  display: flex;
+  align-items: center;
+}
+.ml8 {
+  margin-left: 8px;
 }
 
 /* 照片查看器样式 */

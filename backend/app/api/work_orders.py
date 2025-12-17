@@ -2813,52 +2813,141 @@ async def get_work_order_audit_logs(
         AuditEvent.resource_type == "work_order",
         AuditEvent.resource_id == work_order_id
     ).order_by(AuditEvent.created_at.desc()).all()
-    
-    # 转换为响应格式
+
+    # 如果有关联的检查，也获取检查的审核日志 + 设备绑定历史
+    insp_logs = []
+    binding_logs = []
+    if wo.inspection_id:
+        from app.models.inspection import InspectionAuditLog
+        from app.models.equipment_binding_history import EquipmentBindingHistory
+
+        insp_logs = db.query(InspectionAuditLog).filter(
+            InspectionAuditLog.inspection_id == wo.inspection_id
+        ).order_by(InspectionAuditLog.created_at.desc()).all()
+
+        binding_logs = db.query(EquipmentBindingHistory).filter(
+            EquipmentBindingHistory.inspection_id == wo.inspection_id
+        ).order_by(EquipmentBindingHistory.operated_at.desc()).all()
+
+    # 一次性查询操作人信息，避免 N+1
+    operator_ids = {log.operator_id for log in audit_logs if getattr(log, "operator_id", None)}
+    operator_ids |= {log.operator_id for log in insp_logs if getattr(log, "operator_id", None)}
+    operator_ids |= {log.operator_id for log in binding_logs if getattr(log, "operator_id", None)}
+    users = db.query(User).filter(User.id.in_(list(operator_ids))).all() if operator_ids else []
+    user_map = {u.id: u for u in users}
+
+    # 转换为响应格式（保持兼容：work_order_logs / inspection_logs）
     logs_data = []
     for log in audit_logs:
-        operator = db.query(User).filter(User.id == log.operator_id).first()
+        operator = user_map.get(log.operator_id)
         logs_data.append({
             "id": log.id,
             "action": log.action,
             "from_status": log.from_status,
             "to_status": log.to_status,
             "operator_id": log.operator_id,
-            "operator_name": operator.full_name if operator else "未知",
+            "operator_name": (operator.full_name if operator else None) or (operator.username if operator else None) or "未知",
             "operator_username": operator.username if operator else "unknown",
             "comments": log.comments,
             "details": log.details,
             # 审计日志创建时间来自数据库时间，视为 UTC
             "created_at": to_utc_iso(log.created_at) if log.created_at else None
         })
-    
-    # 如果有关联的检查，也获取检查的审核日志
+
     inspection_logs = []
-    if wo.inspection_id:
-        from app.models.inspection import InspectionAuditLog
-        
-        insp_logs = db.query(InspectionAuditLog).filter(
-            InspectionAuditLog.inspection_id == wo.inspection_id
-        ).order_by(InspectionAuditLog.created_at.desc()).all()
-        
-        for log in insp_logs:
-            operator = db.query(User).filter(User.id == log.operator_id).first()
-            inspection_logs.append({
-                "id": log.id,
-                "action": log.action,
-                "from_status": log.from_status,
-                "to_status": log.to_status,
-                "operator_id": log.operator_id,
-                "operator_name": operator.full_name if operator else "未知",
-                "operator_username": operator.username if operator else "unknown",
-                "comments": log.comments,
-                "details": log.details,
-                "created_at": to_utc_iso(log.created_at) if log.created_at else None
-            })
-    
+    for log in insp_logs:
+        operator = user_map.get(log.operator_id)
+        inspection_logs.append({
+            "id": log.id,
+            "action": log.action,
+            "from_status": log.from_status,
+            "to_status": log.to_status,
+            "operator_id": log.operator_id,
+            "operator_name": (operator.full_name if operator else None) or (operator.username if operator else None) or "未知",
+            "operator_username": operator.username if operator else "unknown",
+            "comments": log.comments,
+            "details": log.details,
+            "created_at": to_utc_iso(log.created_at) if log.created_at else None
+        })
+
+    # 统一时间轴（工单 + 检查 + 绑定）
+    timeline = []
+    for log in audit_logs:
+        operator = user_map.get(log.operator_id)
+        dt = log.created_at
+        timeline.append({
+            "id": f"work_order:{log.id}",
+            "source": "work_order",
+            "source_label": "工单",
+            "action": log.action,
+            "from_status": log.from_status,
+            "to_status": log.to_status,
+            "operator_id": log.operator_id,
+            "operator_name": (operator.full_name if operator else None) or (operator.username if operator else None) or "未知",
+            "operator_username": operator.username if operator else "unknown",
+            "comments": log.comments,
+            "details": log.details,
+            "created_at": to_utc_iso(dt) if dt else None,
+            "_sort_dt": dt,
+        })
+
+    for log in insp_logs:
+        operator = user_map.get(log.operator_id)
+        dt = log.created_at
+        timeline.append({
+            "id": f"inspection:{log.id}",
+            "source": "inspection",
+            "source_label": "检查",
+            "action": log.action,
+            "from_status": log.from_status,
+            "to_status": log.to_status,
+            "operator_id": log.operator_id,
+            "operator_name": (operator.full_name if operator else None) or (operator.username if operator else None) or "未知",
+            "operator_username": operator.username if operator else "unknown",
+            "comments": log.comments,
+            "details": log.details,
+            "created_at": to_utc_iso(dt) if dt else None,
+            "_sort_dt": dt,
+        })
+
+    for log in binding_logs:
+        operator = user_map.get(log.operator_id)
+        dt = getattr(log, "operated_at", None) or getattr(log, "created_at", None)
+        action_value = getattr(log.action, "value", log.action)
+        timeline.append({
+            "id": f"binding:{log.id}",
+            "source": "binding",
+            "source_label": "绑定",
+            "action": str(action_value),
+            "from_status": None,
+            "to_status": None,
+            "operator_id": log.operator_id,
+            "operator_name": (operator.full_name if operator else None) or (operator.username if operator else None) or "未知",
+            "operator_username": operator.username if operator else "unknown",
+            "comments": log.notes,
+            "details": {
+                "inspection_id": log.inspection_id,
+                "check_item_id": log.check_item_id,
+                "equipment_sn": log.equipment_sn,
+                "previous_equipment_sn": log.previous_equipment_sn,
+                "sector_id": log.sector_id,
+                "band": log.band,
+                "cell_id": log.cell_id,
+            },
+            "created_at": to_utc_iso(dt) if dt else None,
+            "_sort_dt": dt,
+        })
+
+    # 默认：按时间倒序（最新在前）
+    timeline.sort(key=lambda x: x.get("_sort_dt") or datetime.min, reverse=True)
+    for x in timeline:
+        x.pop("_sort_dt", None)
+
     return {
         "work_order_id": work_order_id,
         "work_order_logs": logs_data,
         "inspection_logs": inspection_logs,
-        "total_count": len(logs_data) + len(inspection_logs)
+        "binding_logs": [t for t in timeline if t.get("source") == "binding"],
+        "timeline": timeline,
+        "total_count": len(timeline)
     }
