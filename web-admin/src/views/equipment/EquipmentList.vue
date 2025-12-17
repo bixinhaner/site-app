@@ -360,7 +360,7 @@ const loadEquipmentList = async () => {
     
   } catch (error) {
     console.error('加载设备列表失败:', error)
-    ElMessage.error('加载设备列表失败: ' + error.message)
+    ElMessage.error('加载设备列表失败: ' + (error.response?.data?.detail || error.message))
   } finally {
     loading.value = false
   }
@@ -433,7 +433,7 @@ const handleSubmit = async () => {
     loadEquipmentList()
   } catch (error) {
     console.error('保存设备失败:', error)
-    ElMessage.error('操作失败: ' + error.message)
+    ElMessage.error('操作失败: ' + (error.response?.data?.detail || error.message))
   } finally {
     submitting.value = false
   }
@@ -458,7 +458,7 @@ const handleDelete = async (equipment) => {
   } catch (error) {
     if (error !== 'cancel') {
       console.error('删除设备失败:', error)
-      ElMessage.error('删除失败: ' + error.message)
+      ElMessage.error('删除失败: ' + (error.response?.data?.detail || error.message))
     }
   }
 }
@@ -486,7 +486,7 @@ const handleBatchDelete = async () => {
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量删除失败:', error)
-      ElMessage.error('批量删除失败: ' + error.message)
+      ElMessage.error('批量删除失败: ' + (error.response?.data?.detail || error.message))
     }
   }
 }
@@ -513,7 +513,7 @@ const toggleStatus = async (equipment) => {
   } catch (error) {
     if (error !== 'cancel') {
       console.error('状态切换失败:', error)
-      ElMessage.error('操作失败: ' + error.message)
+      ElMessage.error('操作失败: ' + (error.response?.data?.detail || error.message))
     }
   }
 }

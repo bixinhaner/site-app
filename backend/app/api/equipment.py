@@ -14,6 +14,9 @@ from app.models.equipment import (
     EquipmentPackageItem,
     EquipmentCategoryEnum,
     EquipmentStatusEnum,
+    Inventory,
+    SNImportRecord,
+    StockTransactionItem,
 )
 from app.models.equipment import EquipmentInstance  # noqa: E402
 from app.utils.timezone import to_utc_iso
@@ -129,10 +132,32 @@ async def delete_equipment(
     if not equipment:
         raise HTTPException(status_code=404, detail="设备型号不存在")
     
-    # 检查是否有关联的套装或库存
-    package_items = db.query(EquipmentPackageItem).filter(EquipmentPackageItem.equipment_id == equipment_id).first()
-    if package_items:
-        raise HTTPException(status_code=400, detail="设备已在套装中使用，无法删除")
+    # 仅无任何引用才允许删除
+    reference_reasons = []
+
+    if db.query(EquipmentPackage).filter(EquipmentPackage.main_equipment_id == equipment_id).first():
+        reference_reasons.append("被套装作为主设备使用")
+
+    if db.query(EquipmentPackageItem).filter(EquipmentPackageItem.equipment_id == equipment_id).first():
+        reference_reasons.append("被套装明细引用")
+
+    if db.query(Inventory).filter(Inventory.equipment_id == equipment_id).first():
+        reference_reasons.append("存在库存记录")
+
+    if db.query(EquipmentInstance).filter(EquipmentInstance.equipment_id == equipment_id).first():
+        reference_reasons.append("存在设备实例/SN数据")
+
+    if db.query(StockTransactionItem).filter(StockTransactionItem.equipment_id == equipment_id).first():
+        reference_reasons.append("存在出入库明细记录")
+
+    if db.query(SNImportRecord).filter(SNImportRecord.equipment_type_id == equipment_id).first():
+        reference_reasons.append("存在SN导入记录")
+
+    if reference_reasons:
+        raise HTTPException(
+            status_code=400,
+            detail=f"设备存在引用，无法删除：{'；'.join(reference_reasons)}",
+        )
     
     db.delete(equipment)
     db.commit()
