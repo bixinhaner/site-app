@@ -52,11 +52,12 @@ class WorkOrderCreate(BaseModel):
 
 
 class WorkOrderUpdate(BaseModel):
-    title: Optional[str]
-    description: Optional[str]
-    priority: Optional[WorkOrderPriorityEnum]
-    due_date: Optional[datetime]
-    auto_approve_if_all_pass: Optional[bool]
+    title: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[WorkOrderPriorityEnum] = None
+    due_date: Optional[datetime] = None
+    assigned_to: Optional[int] = None
+    auto_approve_if_all_pass: Optional[bool] = None
 
 
 class WorkOrderItemAnswer(BaseModel):

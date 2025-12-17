@@ -374,6 +374,16 @@
                   <el-icon><Right /></el-icon>
                   <el-tag v-if="log.to_status" size="small" :type="getStatusTagType(log.to_status)">{{ statusText(log.to_status) }}</el-tag>
                 </div>
+                <div v-if="isAssigneeChange(log)" style="margin-top: 8px;">
+                  指派变更：
+                  <el-tag size="small">
+                    {{ log.details?.old_assignee_name || log.details?.old_assignee_id || '-' }}
+                  </el-tag>
+                  <el-icon><Right /></el-icon>
+                  <el-tag size="small" type="success">
+                    {{ log.details?.new_assignee_name || log.details?.new_assignee_id || log.details?.new_assignee || '-' }}
+                  </el-tag>
+                </div>
                 <div v-if="log.comments" style="margin-top: 8px;">
                   <strong>意见：</strong>{{ log.comments }}
                 </div>
@@ -896,6 +906,8 @@ const getActionText = (action) => {
   const actionMap = {
     'create': '创建',
     'assign': '分配',
+    'change_assignee': '重新分配',
+    'batch_assignee_change': '重新分配(批量)',
     'accept': '接受',
     'submit': '提交',
     'resubmit': '重新提交',
@@ -910,6 +922,12 @@ const getActionText = (action) => {
     'activate': '激活'
   }
   return actionMap[action] || action
+}
+
+const isAssigneeChange = (log) => {
+  const action = log?.action
+  if (!action) return false
+  return ['change_assignee', 'batch_assignee_change'].includes(action)
 }
 
 const getActionTagType = (action) => {

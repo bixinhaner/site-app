@@ -574,6 +574,57 @@ async def update_work_order(
         raise HTTPException(status_code=403, detail="无权限修改工单")
 
     update = data.dict(exclude_unset=True)
+
+    if "assigned_to" in update:
+        if current_user.role not in ["admin", "manager"]:
+            raise HTTPException(status_code=403, detail="仅管理员/项目经理可重新分配工单")
+
+        if wo.status not in [WorkOrderStatusEnum.PENDING, WorkOrderStatusEnum.ACTIVE]:
+            raise HTTPException(status_code=400, detail=f"工单状态 {wo.status} 下不允许重新分配")
+
+        new_assignee_id = update.pop("assigned_to")
+        if new_assignee_id is None:
+            raise HTTPException(status_code=400, detail="分配人不能为空")
+
+        try:
+            new_assignee_id = int(new_assignee_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="无效的分配人ID")
+
+        assignee = db.query(User).filter(User.id == new_assignee_id).first()
+        if not assignee:
+            raise HTTPException(status_code=400, detail="分配人不存在")
+
+        old_assignee_id = wo.assigned_to
+        if new_assignee_id != old_assignee_id:
+            old_assignee = db.query(User).filter(User.id == old_assignee_id).first()
+
+            wo.assigned_to = new_assignee_id
+            wo.assigned_by = current_user.id
+            wo.assigned_at = datetime.utcnow()
+
+            if wo.inspection_id:
+                inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+                if inspection:
+                    inspection.inspector_id = new_assignee_id
+
+            db.add(
+                AuditEvent(
+                    id=str(uuid.uuid4()),
+                    resource_type="work_order",
+                    resource_id=wo.id,
+                    action="change_assignee",
+                    operator_id=current_user.id,
+                    comments=None,
+                    details={
+                        "old_assignee_id": old_assignee_id,
+                        "old_assignee_name": (old_assignee.full_name or old_assignee.username) if old_assignee else None,
+                        "new_assignee_id": new_assignee_id,
+                        "new_assignee_name": (assignee.full_name or assignee.username) if assignee else None,
+                    },
+                )
+            )
+
     for k, v in update.items():
         setattr(wo, k, v)
     db.commit()
@@ -2444,9 +2495,25 @@ async def batch_work_order_operation(
                         error_count += 1
                         continue
                     
+                    old_assignee_id = wo.assigned_to
+                    old_assignee = db.query(User).filter(User.id == old_assignee_id).first()
+
                     wo.assigned_to = new_assignee_id
+                    wo.assigned_by = current_user.id
+                    wo.assigned_at = datetime.utcnow()
+
+                    if wo.inspection_id:
+                        inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+                        if inspection:
+                            inspection.inspector_id = new_assignee_id
+
                     _audit(db, "work_order", wo.id, "batch_assignee_change", current_user.id,
-                           details={"new_assignee": new_assignee_id})
+                           details={
+                               "old_assignee_id": old_assignee_id,
+                               "old_assignee_name": (old_assignee.full_name or old_assignee.username) if old_assignee else None,
+                               "new_assignee_id": new_assignee_id,
+                               "new_assignee_name": (assignee.full_name or assignee.username) if assignee else None,
+                           })
                     updated_count += 1
                 except ValueError:
                     errors.append(f"工单 {wo.id} 无效分配人ID: {operation.value}")
