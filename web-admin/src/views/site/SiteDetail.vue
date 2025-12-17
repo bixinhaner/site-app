@@ -6,7 +6,16 @@
         <el-button @click="$router.back()"><el-icon><Back /></el-icon>返回</el-button>
         <el-button @click="openSurveys"><el-icon><PictureFilled /></el-icon>勘察档案</el-button>
         <el-button @click="openOpeningArchives"><el-icon><DocumentAdd /></el-icon>开站档案</el-button>
-        <el-button type="success" @click="createSurvey"><el-icon><Plus /></el-icon>新建勘察</el-button>
+        <el-tooltip
+          v-if="site && site.survey_required === false"
+          content="该站点无需勘察（已跳过勘察阶段）"
+          placement="top"
+        >
+          <span>
+            <el-button type="success" disabled><el-icon><Plus /></el-icon>新建勘察</el-button>
+          </span>
+        </el-tooltip>
+        <el-button v-else type="success" @click="createSurvey"><el-icon><Plus /></el-icon>新建勘察</el-button>
       </div>
     </div>
     <el-card v-loading="loading">
@@ -14,6 +23,31 @@
         <div class="card-header">
           <span>站点基本信息</span>
           <div v-if="canManageSite" class="card-actions">
+            <el-button
+              v-if="canSkipSurvey"
+              size="small"
+              type="warning"
+              @click="skipSurveyStage"
+            >
+              跳过勘察
+            </el-button>
+            <el-tooltip
+              v-if="showRequireSurvey && !canRequireSurvey"
+              :content="requireSurveyDisableTip"
+              placement="top"
+            >
+              <span>
+                <el-button size="small" type="warning" disabled>恢复需要勘察</el-button>
+              </span>
+            </el-tooltip>
+            <el-button
+              v-else-if="showRequireSurvey"
+              size="small"
+              type="warning"
+              @click="requireSurveyStage"
+            >
+              恢复需要勘察
+            </el-button>
             <el-button size="small" type="primary" @click="openEdit">编辑</el-button>
             <el-tooltip
               v-if="deleteCheckLoaded && !deleteCheck.can_delete"
@@ -42,6 +76,14 @@
         <div class="item"><span class="label">站点编码</span><span class="value">{{ site.site_code }}</span></div>
         <div class="item"><span class="label">类型</span><span class="value">{{ site.site_type || '-' }}</span></div>
         <div class="item"><span class="label">状态</span><span class="value">{{ siteStatusText(site.status) }}</span></div>
+        <div class="item">
+          <span class="label">勘察要求</span>
+          <span class="value">
+            <el-tag :type="site.survey_required === false ? 'info' : 'warning'">
+              {{ site.survey_required === false ? '无需勘察' : '需要勘察' }}
+            </el-tag>
+          </span>
+        </div>
         <div class="item"><span class="label">SSV</span><span class="value"><el-tag :type="site.ssv_passed ? 'success' : 'info'">{{ site.ssv_passed ? '已通过' : '未通过' }}</el-tag></span></div>
         <div class="item"><span class="label">地址</span><span class="value">{{ site.address || '-' }}</span></div>
       </div>
@@ -318,7 +360,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../../stores/user'
 import { surveyArchivesApi } from '@/api/surveyArchives'
 import { openingArchivesApi } from '@/api/openingArchives'
@@ -330,6 +372,29 @@ const site = ref(null)
 const userStore = useUserStore()
 const userOptions = ref([])
 const canManageSite = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
+const canSkipSurvey = computed(() =>
+  canManageSite.value &&
+  !!site.value &&
+  site.value.status === 'survey_pending' &&
+  site.value.survey_required !== false
+)
+
+const showRequireSurvey = computed(() =>
+  canManageSite.value &&
+  !!site.value &&
+  site.value.survey_required === false
+)
+
+const canRequireSurvey = computed(() =>
+  showRequireSurvey.value &&
+  site.value?.status === 'planning'
+)
+
+const requireSurveyDisableTip = computed(() => {
+  if (!showRequireSurvey.value) return ''
+  if (site.value?.status !== 'planning') return '仅在规划阶段（planning）可恢复需要勘察'
+  return '仅在未形成规划版本时可恢复需要勘察'
+})
 
 const deleteCheckLoading = ref(false)
 const deleteCheckLoaded = ref(false)
@@ -384,6 +449,58 @@ const load = async () => {
     ElMessage.error('加载站点详情失败')
   } finally {
     loading.value = false
+  }
+}
+
+const extractErrorDetail = (error) => {
+  return error?.response?.data?.detail || error?.message || '网络错误'
+}
+
+const skipSurveyStage = async () => {
+  if (!site.value) return
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '将站点标记为无需勘察，并进入规划阶段。原因（可选）：',
+      '跳过勘察',
+      {
+        confirmButtonText: '确认跳过',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '可不填',
+        inputValue: ''
+      }
+    )
+    await request.post(`/api/sites/${route.params.id}/survey/skip`, { reason: value })
+    ElMessage.success('已跳过勘察阶段')
+    await load()
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return
+    console.error(e)
+    ElMessage.error('操作失败：' + extractErrorDetail(e))
+  }
+}
+
+const requireSurveyStage = async () => {
+  if (!site.value) return
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '将站点恢复为需要勘察，并回退到勘察阶段（survey_pending）。原因（可选）：',
+      '恢复需要勘察',
+      {
+        confirmButtonText: '确认恢复',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '可不填',
+        inputValue: ''
+      }
+    )
+    await request.post(`/api/sites/${route.params.id}/survey/require`, { reason: value })
+    ElMessage.success('已恢复为需要勘察')
+    await load()
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return
+    console.error(e)
+    ElMessage.error('操作失败：' + extractErrorDetail(e))
   }
 }
 

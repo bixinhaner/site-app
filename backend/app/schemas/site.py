@@ -40,6 +40,10 @@ class SiteResponse(SiteBase):
     id: int
     status: str
     ssv_passed: Optional[bool] = False
+    survey_required: Optional[bool] = True
+    survey_skip_reason: Optional[str] = None
+    survey_skipped_at: Optional[datetime] = None
+    survey_skipped_by: Optional[int] = None
     assigned_to: Optional[int] = None
     created_by: Optional[int] = None
     created_at: datetime

@@ -11,6 +11,41 @@
           <el-option label="已开通" value="operational" />
           <el-option label="维护中" value="maintenance" />
         </el-select>
+        <el-button v-if="canManageSurveyStage" @click="openSurveyStageBatch">
+          <el-icon><Operation /></el-icon>
+          勘察批量
+        </el-button>
+        <el-popover placement="bottom" :width="280" trigger="click">
+          <template #reference>
+            <el-button>
+              <el-icon><Sort /></el-icon>
+              排序
+            </el-button>
+          </template>
+          <div class="sort-panel">
+            <el-form label-width="72px" size="small">
+              <el-form-item label="字段">
+                <el-select v-model="sortBy" style="width: 100%">
+                  <el-option label="创建时间" value="created_at" />
+                  <el-option label="更新时间" value="updated_at" />
+                  <el-option label="站点编码" value="site_code" />
+                  <el-option label="站点名称" value="site_name" />
+                  <el-option label="城市" value="city" />
+                  <el-option label="状态" value="status" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="方向">
+                <el-radio-group v-model="sortOrder">
+                  <el-radio-button label="desc">降序</el-radio-button>
+                  <el-radio-button label="asc">升序</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item label=" ">
+                <el-button size="small" @click="resetSort">恢复默认</el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-popover>
         <el-button :loading="exporting" @click="exportSites">
           <el-icon><Download /></el-icon>
           导出Excel
@@ -109,6 +144,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const canManagePlanning = computed(() => ['admin', 'manager', 'planner'].includes(userStore.user?.role))
 const canCreateSite = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
+const canManageSurveyStage = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
 const loading = ref(false)
 const sites = ref([])
 const total = ref(0)
@@ -118,6 +154,8 @@ const keyword = ref('')
 const statusFilter = ref('')
 const assigneeFilter = ref(null)
 const exporting = ref(false)
+const sortBy = ref('created_at')
+const sortOrder = ref('desc')
 
 const userOptions = ref([])
 const usersLoaded = ref(false)
@@ -137,6 +175,8 @@ const reload = async () => {
     if (keyword.value) params.keyword = keyword.value
     if (statusFilter.value) params.status = statusFilter.value
     if (assigneeFilter.value) params.assigned_to = assigneeFilter.value
+    if (sortBy.value) params.sort_by = sortBy.value
+    if (sortOrder.value) params.sort_order = sortOrder.value
     const res = await request.get('/api/sites/search', { params })
     const list = Array.isArray(res?.sites) ? res.sites : []
     sites.value = list
@@ -167,6 +207,10 @@ const openBatchPlanning = () => {
   router.push({ name: 'SitePlanningBatchLld' })
 }
 
+const openSurveyStageBatch = () => {
+  router.push({ name: 'SiteSurveyStageBatch' })
+}
+
 const formatExportDate = () => {
   const now = new Date()
   const year = now.getFullYear()
@@ -175,6 +219,11 @@ const formatExportDate = () => {
   const hours = String(now.getHours()).padStart(2, '0')
   const minutes = String(now.getMinutes()).padStart(2, '0')
   return `${year}${month}${day}_${hours}${minutes}`
+}
+
+const resetSort = () => {
+  sortBy.value = 'created_at'
+  sortOrder.value = 'desc'
 }
 
 const extractErrorDetail = async (error) => {
@@ -282,6 +331,11 @@ watch(keyword, () => {
   currentPage.value = 1
   reload()
 })
+
+watch([sortBy, sortOrder], () => {
+  currentPage.value = 1
+  reload()
+})
 </script>
 
 <style scoped>
@@ -289,4 +343,7 @@ watch(keyword, () => {
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .header-actions { display:flex; gap: 12px; }
 .pagination { margin-top: 12px; display:flex; justify-content: flex-end; }
+.sort-panel :deep(.el-radio-group) { width: 100%; }
+.sort-panel :deep(.el-radio-button) { width: 50%; }
+.sort-panel :deep(.el-radio-button__inner) { width: 100%; text-align: center; }
 </style>

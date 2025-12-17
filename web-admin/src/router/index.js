@@ -87,6 +87,7 @@ const routes = [
         children: [
           { path: 'list', name: 'SiteList', component: () => import('../views/site/SiteList.vue'), meta: { title: '站点列表', icon: 'Location' } },
           { path: 'detail/:id', name: 'SiteDetail', component: () => import('../views/site/SiteDetail.vue'), meta: { title: '站点详情', hidden: true } },
+          { path: 'survey-stage-batch', name: 'SiteSurveyStageBatch', component: () => import('../views/site/SiteSurveyStageBatch.vue'), meta: { title: '勘察阶段批量设置', hidden: true, roles: ['admin', 'manager'] } },
           // 新版 LLD 站点规划页面
           { path: 'planning-lld/:id', name: 'SitePlanningLld', component: () => import('../views/site/SitePlanningLld.vue'), meta: { title: '站点规划（LLD）', hidden: true } },
           { path: 'basic-import', name: 'SiteBasicBatch', component: () => import('../views/site/SiteBasicBatch.vue'), meta: { title: '站点信息导入', icon: 'Plus' } },

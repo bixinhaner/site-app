@@ -27,6 +27,11 @@ class Site(Base):
     status = Column(String(20), default="survey_pending")
     # SSV 是否通过
     ssv_passed = Column(Boolean, default=False)
+    # 勘察要求控制：部分项目可跳过勘察阶段
+    survey_required = Column(Boolean, default=True)
+    survey_skip_reason = Column(Text)
+    survey_skipped_at = Column(DateTime)
+    survey_skipped_by = Column(Integer, ForeignKey("users.id"))
     priority = Column(String(20), default="normal")  # high, normal, low
     description = Column(Text)
     contact_person = Column(String(50))

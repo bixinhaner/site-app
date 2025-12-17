@@ -23,7 +23,7 @@ from app.schemas.site import (
 from app.api.auth import get_current_user
 from sqlalchemy import func, or_
 from pydantic import BaseModel
-from app.models.work_order import AuditEvent, WorkOrder, WorkOrderTypeEnum
+from app.models.work_order import AuditEvent, WorkOrder, WorkOrderTypeEnum, WorkOrderStatusEnum
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
 from app.models.planning import SitePlanning, SitePlanningCell
 from app.models.inspection import SiteInspection, Inspection as LegacyInspection, BaseStationDevice, TemplateBinding
@@ -48,6 +48,35 @@ class SiteDeleteCheckResponse(BaseModel):
     can_delete: bool
     total_related: int
     counts: Dict[str, int]
+
+
+class SiteSurveySkipRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class SiteSurveyRequireRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class SurveyStageRowResult(BaseModel):
+    row_index: int
+    site_code: Optional[str] = None
+    site_name: Optional[str] = None
+    success: bool
+    action: Optional[str] = None  # noop|skipped|required|would_skip|would_require
+    site_id: Optional[int] = None
+    warnings: Optional[List[str]] = []
+    errors: Optional[List[str]] = []
+
+
+class SurveyStageBatchReport(BaseModel):
+    batch_id: str
+    dry_run: bool
+    action: str  # skip|require
+    total_rows: int
+    success_count: int
+    failed_count: int
+    results: List[SurveyStageRowResult]
 
 
 def _get_site_related_counts(db: Session, site_id: int) -> Dict[str, int]:
@@ -131,6 +160,8 @@ async def search_sites(
     status: Optional[str] = Query(None),
     site_type: Optional[str] = Query(None),
     assigned_to: Optional[int] = Query(None),
+    sort_by: Optional[str] = Query(None, description="排序字段: site_code|site_name|city|status|created_at|updated_at"),
+    sort_order: str = Query("desc", description="排序方向: asc|desc"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(50, ge=1, le=100, description="每页记录数"),
     db: Session = Depends(get_db),
@@ -162,7 +193,28 @@ async def search_sites(
         query = query.filter(Site.assigned_to == assigned_to)
 
     total = query.count()
-    sites = query.offset(skip).limit(limit).all()
+
+    allowed_sort_fields = {
+        "site_code": Site.site_code,
+        "site_name": Site.site_name,
+        "city": Site.city,
+        "status": Site.status,
+        "created_at": Site.created_at,
+        "updated_at": Site.updated_at,
+    }
+
+    sort_key = (sort_by or "created_at").strip()
+    sort_col = allowed_sort_fields.get(sort_key)
+    if not sort_col:
+        raise HTTPException(status_code=400, detail="不支持的排序字段")
+
+    order = (sort_order or "desc").strip().lower()
+    if order not in ["asc", "desc"]:
+        raise HTTPException(status_code=400, detail="不支持的排序方向")
+
+    primary = sort_col.asc() if order == "asc" else sort_col.desc()
+    secondary = Site.id.asc() if order == "asc" else Site.id.desc()
+    sites = query.order_by(primary, secondary).offset(skip).limit(limit).all()
 
     page = (skip // limit) + 1
     pages = math.ceil(total / limit) if limit else 1
@@ -290,6 +342,361 @@ async def export_sites(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers=headers,
+    )
+
+
+@router.get("/survey-stage/batch-template")
+async def download_survey_stage_template(
+    action: str = Query("skip", description="skip|require"),
+):
+    """下载勘察阶段批量设置模板（SurveyStage 工作表）。"""
+    action_norm = (action or "").strip().lower()
+    if action_norm not in ["skip", "require"]:
+        raise HTTPException(status_code=400, detail="不支持的action（仅支持 skip|require）")
+
+    if action_norm == "skip":
+        sample_reason = "项目无需勘察"
+    else:
+        sample_reason = "恢复需要勘察"
+
+    df = pd.DataFrame(
+        [
+            {
+                "site_code": "SITE001",
+                "site_name": "样例站点A",
+                "reason": sample_reason,
+            }
+        ]
+    )
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="SurveyStage", index=False)
+    output.seek(0)
+    filename = f"site_survey_stage_{action_norm}_template.xlsx"
+    headers = {"Content-Disposition": f"attachment; filename={filename}"}
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
+
+
+@router.post("/survey-stage/batch-upload", response_model=SurveyStageBatchReport)
+async def upload_survey_stage_batch(
+    file: UploadFile = File(...),
+    action: str = Query("skip", description="skip|require"),
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量跳过勘察/恢复需要勘察（支持 dry_run）。"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
+    action_norm = (action or "").strip().lower()
+    if action_norm not in ["skip", "require"]:
+        raise HTTPException(status_code=400, detail="不支持的action（仅支持 skip|require）")
+
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 Excel(.xlsx/.xls)")
+
+    content = await file.read()
+    try:
+        excel = pd.ExcelFile(io.BytesIO(content))
+    except Exception:
+        raise HTTPException(status_code=400, detail="解析Excel失败，请确认文件格式正确")
+
+    if "SurveyStage" not in excel.sheet_names:
+        raise HTTPException(status_code=400, detail="缺少工作表: SurveyStage")
+
+    df = excel.parse("SurveyStage")
+    total_rows = int(len(df.index))
+    batch_id = uuid.uuid4().hex
+
+    def _to_str(v) -> Optional[str]:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        s = str(v).strip()
+        return s or None
+
+    results: List[SurveyStageRowResult] = []
+    success_count = 0
+    failed_count = 0
+
+    # 进行中的勘察工单状态集合
+    in_progress_survey_statuses = [
+        WorkOrderStatusEnum.PENDING,
+        WorkOrderStatusEnum.ACTIVE,
+        WorkOrderStatusEnum.SUBMITTED,
+        WorkOrderStatusEnum.UNDER_REVIEW,
+        WorkOrderStatusEnum.APPROVED,
+        WorkOrderStatusEnum.ACTIVATED,
+    ]
+
+    for i, row in enumerate(df.itertuples(index=False), start=2):  # 表头占第1行
+        row_dict = row._asdict() if hasattr(row, "_asdict") else dict(zip(df.columns.tolist(), list(row)))
+        site_code = _to_str(row_dict.get("site_code"))
+        site_name = _to_str(row_dict.get("site_name"))
+        reason = _to_str(row_dict.get("reason"))
+
+        warnings: List[str] = []
+        errors: List[str] = []
+        site: Optional[Site] = None
+
+        try:
+            if not site_code and not site_name:
+                errors.append("site_code/site_name 至少填写一项")
+            else:
+                if site_code:
+                    site = db.query(Site).filter(Site.site_code == site_code).first()
+                    if not site:
+                        errors.append(f"站点编码不存在: {site_code}")
+                else:
+                    matches = db.query(Site).filter(Site.site_name == site_name).all()
+                    if not matches:
+                        errors.append(f"站点名称不存在: {site_name}")
+                    elif len(matches) > 1:
+                        errors.append(f"站点名称重名: {site_name}，请填写 site_code")
+                    else:
+                        site = matches[0]
+
+            if errors or not site:
+                failed_count += 1
+                results.append(
+                    SurveyStageRowResult(
+                        row_index=i,
+                        site_code=site_code,
+                        site_name=site_name,
+                        success=False,
+                        action=None,
+                        site_id=None,
+                        warnings=warnings,
+                        errors=errors or ["未知错误"],
+                    )
+                )
+                continue
+
+            # 统一回填输出字段
+            site_code_out = site.site_code
+            site_name_out = site.site_name
+
+            if action_norm == "skip":
+                if getattr(site, "survey_required", True) is False:
+                    warnings.append("已是无需勘察，无需重复跳过")
+                    success_count += 1
+                    results.append(
+                        SurveyStageRowResult(
+                            row_index=i,
+                            site_code=site_code_out,
+                            site_name=site_name_out,
+                            success=True,
+                            action="noop",
+                            site_id=site.id,
+                            warnings=warnings,
+                            errors=[],
+                        )
+                    )
+                    continue
+
+                if getattr(site, "status", None) != "survey_pending":
+                    errors.append(f"站点当前状态为 {getattr(site, 'status', None)}，不能跳过勘察")
+                else:
+                    existing_wo = (
+                        db.query(WorkOrder.id)
+                        .filter(
+                            WorkOrder.site_id == site.id,
+                            WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY,
+                            WorkOrder.status.in_(in_progress_survey_statuses),
+                        )
+                        .first()
+                    )
+                    if existing_wo:
+                        errors.append("存在进行中的勘察工单，禁止跳过勘察")
+
+                if errors:
+                    failed_count += 1
+                    results.append(
+                        SurveyStageRowResult(
+                            row_index=i,
+                            site_code=site_code_out,
+                            site_name=site_name_out,
+                            success=False,
+                            action=None,
+                            site_id=site.id,
+                            warnings=warnings,
+                            errors=errors,
+                        )
+                    )
+                    continue
+
+                if dry_run:
+                    success_count += 1
+                    results.append(
+                        SurveyStageRowResult(
+                            row_index=i,
+                            site_code=site_code_out,
+                            site_name=site_name_out,
+                            success=True,
+                            action="would_skip",
+                            site_id=site.id,
+                            warnings=warnings,
+                            errors=[],
+                        )
+                    )
+                    continue
+
+                # 执行跳过勘察：survey_pending -> planning
+                old_status = site.status
+                site.survey_required = False
+                site.survey_skip_reason = (reason or "").strip() or None
+                site.survey_skipped_at = datetime.utcnow()
+                site.survey_skipped_by = current_user.id
+                site.status = "planning"
+                db.add(
+                    AuditEvent(
+                        id=uuid.uuid4().hex,
+                        resource_type="site",
+                        resource_id=str(site.id),
+                        action="survey_skip",
+                        operator_id=current_user.id,
+                        from_status=old_status,
+                        to_status=site.status,
+                        comments="批量跳过勘察阶段",
+                        details={"reason": site.survey_skip_reason, "batch_id": batch_id, "row_index": i},
+                    )
+                )
+                db.commit()
+                success_count += 1
+                results.append(
+                    SurveyStageRowResult(
+                        row_index=i,
+                        site_code=site_code_out,
+                        site_name=site_name_out,
+                        success=True,
+                        action="skipped",
+                        site_id=site.id,
+                        warnings=warnings,
+                        errors=[],
+                    )
+                )
+                continue
+
+            # action_norm == "require"
+            if getattr(site, "survey_required", True) is not False:
+                warnings.append("已是需要勘察，无需恢复")
+                success_count += 1
+                results.append(
+                    SurveyStageRowResult(
+                        row_index=i,
+                        site_code=site_code_out,
+                        site_name=site_name_out,
+                        success=True,
+                        action="noop",
+                        site_id=site.id,
+                        warnings=warnings,
+                        errors=[],
+                    )
+                )
+                continue
+
+            if getattr(site, "status", None) != "planning":
+                errors.append("仅允许在规划阶段（planning）恢复需要勘察")
+            else:
+                planning_exists = db.query(SitePlanning.id).filter(SitePlanning.site_id == site.id).first()
+                if planning_exists:
+                    errors.append("站点已存在规划版本，禁止恢复需要勘察")
+
+            if errors:
+                failed_count += 1
+                results.append(
+                    SurveyStageRowResult(
+                        row_index=i,
+                        site_code=site_code_out,
+                        site_name=site_name_out,
+                        success=False,
+                        action=None,
+                        site_id=site.id,
+                        warnings=warnings,
+                        errors=errors,
+                    )
+                )
+                continue
+
+            if dry_run:
+                success_count += 1
+                results.append(
+                    SurveyStageRowResult(
+                        row_index=i,
+                        site_code=site_code_out,
+                        site_name=site_name_out,
+                        success=True,
+                        action="would_require",
+                        site_id=site.id,
+                        warnings=warnings,
+                        errors=[],
+                    )
+                )
+                continue
+
+            old_status = site.status
+            site.survey_required = True
+            site.survey_skip_reason = None
+            site.survey_skipped_at = None
+            site.survey_skipped_by = None
+            site.status = "survey_pending"
+            reason_clean = (reason or "").strip() or None
+            db.add(
+                AuditEvent(
+                    id=uuid.uuid4().hex,
+                    resource_type="site",
+                    resource_id=str(site.id),
+                    action="survey_require",
+                    operator_id=current_user.id,
+                    from_status=old_status,
+                    to_status=site.status,
+                    comments="批量恢复需要勘察",
+                    details={"reason": reason_clean, "batch_id": batch_id, "row_index": i},
+                )
+            )
+            db.commit()
+            success_count += 1
+            results.append(
+                SurveyStageRowResult(
+                    row_index=i,
+                    site_code=site_code_out,
+                    site_name=site_name_out,
+                    success=True,
+                    action="required",
+                    site_id=site.id,
+                    warnings=warnings,
+                    errors=[],
+                )
+            )
+        except Exception as e:
+            db.rollback()
+            failed_count += 1
+            results.append(
+                SurveyStageRowResult(
+                    row_index=i,
+                    site_code=site_code or getattr(site, "site_code", None),
+                    site_name=site_name or getattr(site, "site_name", None),
+                    success=False,
+                    action=None,
+                    site_id=getattr(site, "id", None),
+                    warnings=warnings,
+                    errors=[f"执行异常: {str(e)}"],
+                )
+            )
+
+    return SurveyStageBatchReport(
+        batch_id=batch_id,
+        dry_run=bool(dry_run),
+        action=action_norm,
+        total_rows=total_rows,
+        success_count=success_count,
+        failed_count=failed_count,
+        results=results,
     )
 
 
@@ -544,6 +951,123 @@ async def get_site(
             detail="Not enough permissions"
         )
 
+    return SiteResponse.from_orm(site)
+
+
+@router.post("/{site_id}/survey/skip", response_model=SiteResponse)
+async def skip_site_survey(
+    site_id: int,
+    payload: SiteSurveySkipRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """跳过勘察阶段：将站点标记为无需勘察，并从 survey_pending 推进到 planning。"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if site is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+
+    if getattr(site, "status", None) != "survey_pending":
+        raise HTTPException(status_code=400, detail="仅允许在勘察阶段（survey_pending）跳过勘察")
+
+    # 不允许存在“进行中的”勘察工单
+    in_progress_statuses = [
+        WorkOrderStatusEnum.PENDING,
+        WorkOrderStatusEnum.ACTIVE,
+        WorkOrderStatusEnum.SUBMITTED,
+        WorkOrderStatusEnum.UNDER_REVIEW,
+        WorkOrderStatusEnum.APPROVED,
+        WorkOrderStatusEnum.ACTIVATED,
+    ]
+    existing_wo = (
+        db.query(WorkOrder.id)
+        .filter(
+            WorkOrder.site_id == site_id,
+            WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY,
+            WorkOrder.status.in_(in_progress_statuses),
+        )
+        .first()
+    )
+    if existing_wo:
+        raise HTTPException(status_code=409, detail="该站点存在进行中的勘察工单，禁止跳过勘察")
+
+    old_status = site.status
+    site.survey_required = False
+    site.survey_skip_reason = (payload.reason or "").strip() or None
+    site.survey_skipped_at = datetime.utcnow()
+    site.survey_skipped_by = current_user.id
+    site.status = "planning"
+
+    # 审计
+    db.add(
+        AuditEvent(
+            id=uuid.uuid4().hex,
+            resource_type="site",
+            resource_id=str(site_id),
+            action="survey_skip",
+            operator_id=current_user.id,
+            from_status=old_status,
+            to_status=site.status,
+            comments="跳过勘察阶段",
+            details={"reason": site.survey_skip_reason, "survey_required": False},
+        )
+    )
+
+    db.commit()
+    db.refresh(site)
+    return SiteResponse.from_orm(site)
+
+
+@router.post("/{site_id}/survey/require", response_model=SiteResponse)
+async def require_site_survey(
+    site_id: int,
+    payload: SiteSurveyRequireRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """恢复需要勘察：仅允许在 planning 且未形成规划版本时，将站点回退到 survey_pending。"""
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if site is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+
+    if getattr(site, "status", None) != "planning":
+        raise HTTPException(status_code=400, detail="仅允许在规划阶段（planning）恢复需要勘察")
+
+    # 仅当尚未形成规划基线（无任何规划版本）时允许回退
+    planning_exists = db.query(SitePlanning.id).filter(SitePlanning.site_id == site_id).first()
+    if planning_exists:
+        raise HTTPException(status_code=409, detail="站点已存在规划版本，禁止恢复需要勘察")
+
+    old_status = site.status
+    site.survey_required = True
+    site.survey_skip_reason = None
+    site.survey_skipped_at = None
+    site.survey_skipped_by = None
+    site.status = "survey_pending"
+
+    reason = (payload.reason or "").strip() or None
+
+    db.add(
+        AuditEvent(
+            id=uuid.uuid4().hex,
+            resource_type="site",
+            resource_id=str(site_id),
+            action="survey_require",
+            operator_id=current_user.id,
+            from_status=old_status,
+            to_status=site.status,
+            comments="恢复需要勘察",
+            details={"reason": reason, "survey_required": True},
+        )
+    )
+
+    db.commit()
+    db.refresh(site)
     return SiteResponse.from_orm(site)
 
 

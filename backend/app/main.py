@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.database import engine, Base
 from app.utils.stock_schema import ensure_stock_schema
 from app.utils.geocode_schema import ensure_geocode_schema
+from app.utils.site_schema import ensure_site_schema
 # Ensure new models are imported before creating tables
 from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
@@ -29,6 +30,8 @@ Base.metadata.create_all(bind=engine)
 ensure_stock_schema(engine)
 # 轻量迁移：为 geocode_cache 旧表补列（SQLite 友好）
 ensure_geocode_schema(engine)
+# 轻量迁移：为 sites 旧表补列（SQLite 友好）
+ensure_site_schema(engine)
 
 app = FastAPI(
     title="站点信息管理系统 API",

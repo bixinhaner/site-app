@@ -351,6 +351,10 @@ async def create_work_order(
 
     # 勘察工单创建规则校验
     if data.type == WorkOrderTypeEnum.SITE_SURVEY:
+        # 0) 站点无需勘察：禁止创建勘察工单
+        if getattr(site, "survey_required", True) is False:
+            raise HTTPException(status_code=409, detail="该站点已设置为无需勘察，不能创建勘察工单")
+
         # 1) 站点状态限制：construction/operational 阶段不允许新建勘察工单
         if site.status in ("construction", "operational"):
             raise HTTPException(
