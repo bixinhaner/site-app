@@ -11,6 +11,10 @@
           <el-option label="已开通" value="operational" />
           <el-option label="维护中" value="maintenance" />
         </el-select>
+        <el-button :loading="exporting" @click="exportSites">
+          <el-icon><Download /></el-icon>
+          导出Excel
+        </el-button>
         <!-- <el-select v-model="assigneeFilter" placeholder="指派给" clearable style="width: 200px" filterable @visible-change="v=> v && loadUsers()" @change="reload">
           <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
         </el-select> -->
@@ -113,6 +117,7 @@ const pageSize = ref(20)
 const keyword = ref('')
 const statusFilter = ref('')
 const assigneeFilter = ref(null)
+const exporting = ref(false)
 
 const userOptions = ref([])
 const usersLoaded = ref(false)
@@ -160,6 +165,65 @@ const createSite = () => {
 const openBatchPlanning = () => {
   // 默认跳转到 LLD 新版规划导入页面
   router.push({ name: 'SitePlanningBatchLld' })
+}
+
+const formatExportDate = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hours = String(now.getHours()).padStart(2, '0')
+  const minutes = String(now.getMinutes()).padStart(2, '0')
+  return `${year}${month}${day}_${hours}${minutes}`
+}
+
+const extractErrorDetail = async (error) => {
+  const data = error?.response?.data
+  if (!data) return error?.message || '网络错误'
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      try {
+        const json = JSON.parse(text)
+        return json?.detail || text || error?.message || '网络错误'
+      } catch {
+        return text || error?.message || '网络错误'
+      }
+    } catch {
+      return error?.message || '网络错误'
+    }
+  }
+  return data?.detail || error?.message || '网络错误'
+}
+
+const exportSites = async () => {
+  try {
+    exporting.value = true
+    const params = {}
+    if (keyword.value) params.keyword = keyword.value
+    if (statusFilter.value) params.status = statusFilter.value
+    if (assigneeFilter.value) params.assigned_to = assigneeFilter.value
+
+    const blob = await request.get('/api/sites/export', { params, responseType: 'blob' })
+    const fileName = `站点列表_${formatExportDate()}.xlsx`
+
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+
+    ElMessage.success('导出成功')
+  } catch (e) {
+    console.error(e)
+    const msg = await extractErrorDetail(e)
+    ElMessage.error('导出失败: ' + msg)
+  } finally {
+    exporting.value = false
+  }
 }
 
 const openAssign = (row) => {

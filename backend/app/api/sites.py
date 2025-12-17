@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, aliased
 from typing import List, Optional, Dict
 import uuid
 import io
@@ -173,6 +173,123 @@ async def search_sites(
         page=page,
         size=limit,
         pages=pages,
+    )
+
+
+@router.get("/export")
+async def export_sites(
+    keyword: Optional[str] = Query(None, description="搜索站点名称/编码/城市"),
+    status: Optional[str] = Query(None),
+    site_type: Optional[str] = Query(None),
+    assigned_to: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """导出站点列表 Excel（按筛选条件，不受分页影响）"""
+    assigned_user = aliased(User)
+    creator_user = aliased(User)
+
+    query = (
+        db.query(Site, assigned_user, creator_user)
+        .outerjoin(assigned_user, Site.assigned_to == assigned_user.id)
+        .outerjoin(creator_user, Site.created_by == creator_user.id)
+    )
+
+    # 权限控制：普通 user 只能导出分配给自己的站点
+    if current_user.role == "user":
+        query = query.filter(Site.assigned_to == current_user.id)
+
+    # 关键词搜索
+    if keyword:
+        query = query.filter(
+            or_(
+                Site.site_name.contains(keyword),
+                Site.site_code.contains(keyword),
+                Site.city.contains(keyword),
+            )
+        )
+
+    # 过滤条件
+    if status:
+        query = query.filter(Site.status == status)
+    if site_type:
+        query = query.filter(Site.site_type == site_type)
+    if assigned_to:
+        query = query.filter(Site.assigned_to == assigned_to)
+
+    records = query.order_by(Site.id.asc()).all()
+
+    def _display_name(user: Optional[User]) -> Optional[str]:
+        if not user:
+            return None
+        return user.full_name or user.username
+
+    rows = []
+    for site, assigned, creator in records:
+        rows.append(
+            {
+                "site_id": site.id,
+                "site_code": site.site_code,
+                "site_name": site.site_name,
+                "site_type": site.site_type,
+                "province": site.province,
+                "city": site.city,
+                "district": site.district,
+                "address": site.address,
+                "latitude": site.latitude,
+                "longitude": site.longitude,
+                "status": site.status,
+                "ssv_passed": bool(site.ssv_passed) if site.ssv_passed is not None else False,
+                "priority": site.priority,
+                "contact_person": site.contact_person,
+                "contact_phone": site.contact_phone,
+                "description": site.description,
+                "assigned_to": site.assigned_to,
+                "assigned_to_name": _display_name(assigned),
+                "created_by": site.created_by,
+                "created_by_name": _display_name(creator),
+                "created_at": to_utc_iso(site.created_at) if site.created_at else None,
+                "updated_at": to_utc_iso(site.updated_at) if site.updated_at else None,
+            }
+        )
+
+    columns = [
+        "site_id",
+        "site_code",
+        "site_name",
+        "site_type",
+        "province",
+        "city",
+        "district",
+        "address",
+        "latitude",
+        "longitude",
+        "status",
+        "ssv_passed",
+        "priority",
+        "contact_person",
+        "contact_phone",
+        "description",
+        "assigned_to",
+        "assigned_to_name",
+        "created_by",
+        "created_by_name",
+        "created_at",
+        "updated_at",
+    ]
+
+    df = pd.DataFrame(rows, columns=columns)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Sites", index=False)
+
+    output.seek(0)
+    headers = {"Content-Disposition": "attachment; filename=site_list.xlsx"}
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
     )
 
 
