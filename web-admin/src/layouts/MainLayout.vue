@@ -103,13 +103,20 @@ const userStore = useUserStore()
 
 const sidebarCollapsed = ref(false)
 
+const hasRoleAccess = (r) => {
+  const roles = r?.meta?.roles
+  if (!roles || !Array.isArray(roles) || roles.length === 0) return true
+  const role = userStore.user?.role
+  return !!role && roles.includes(role)
+}
+
 // 菜单路由配置
 const menuRoutes = computed(() => {
   return router.options.routes
     .find(route => route.path === '/')
     ?.children
     // 仅展示带有标题的菜单项
-    .filter(r => r.meta && r.meta.title && !r.meta.hidden) || []
+    .filter(r => r.meta && r.meta.title && !r.meta.hidden && hasRoleAccess(r)) || []
 })
 
 const currentRoute = computed(() => route)
@@ -117,7 +124,7 @@ const currentRoute = computed(() => route)
 // 过滤可见子菜单
 const visibleChildren = (route) => {
   if (!route.children) return []
-  return route.children.filter(c => !c.meta?.hidden && c.meta?.title)
+  return route.children.filter(c => !c.meta?.hidden && c.meta?.title && hasRoleAccess(c))
 }
 
 // 切换侧边栏折叠状态

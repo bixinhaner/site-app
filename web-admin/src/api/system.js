@@ -55,4 +55,15 @@ export const mobileSettingsApi = {
   },
 }
 
+// 逆地理缓存观测相关 API
+export const geocodeCacheApi = {
+  getStats() {
+    return request.get('/api/system/geocode-cache/stats')
+  },
+
+  getEntries(params = {}) {
+    return request.get('/api/system/geocode-cache/entries', { params })
+  },
+}
+
 export default systemBackupApi

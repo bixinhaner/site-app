@@ -7,6 +7,7 @@ except Exception:  # pragma: no cover
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 import requests
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -34,6 +35,46 @@ NEGATIVE_TTL_SECONDS = 60  # 1 分钟
 
 _l1_cache: TtlLruCache[dict] = TtlLruCache(max_size=10000, default_ttl_seconds=SUCCESS_TTL_SECONDS)
 _negative_cache: TtlLruCache[str] = TtlLruCache(max_size=2000, default_ttl_seconds=NEGATIVE_TTL_SECONDS)
+
+_metrics = {
+    "requests": 0,
+    "hit_l1": 0,
+    "hit_l2": 0,
+    "negative_hit": 0,
+    "breaker_hit": 0,
+    "baidu_call": 0,
+    "l2_write": 0,
+    "breaker_set": 0,
+}
+
+
+def get_geocode_metrics() -> dict:
+    return dict(_metrics)
+
+
+def _metric_inc(key: str) -> None:
+    try:
+        _metrics[key] = int(_metrics.get(key, 0)) + 1
+    except Exception:
+        _metrics[key] = 1
+
+
+def _touch_hit(db: Session, coord_key: str) -> None:
+    now = datetime.utcnow()
+    try:
+        db.query(GeocodeCache).filter(
+            GeocodeCache.provider == BAIDU_PROVIDER,
+            GeocodeCache.coord_key == coord_key,
+        ).update(
+            {
+                GeocodeCache.hit_count: func.coalesce(GeocodeCache.hit_count, 0) + 1,
+                GeocodeCache.last_hit_at: now,
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 def _normalize_coord_key(lat: float, lng: float, precision: int = 4) -> tuple[str, float, float]:
@@ -108,6 +149,7 @@ def _check_circuit_breaker(db: Session) -> tuple[bool, datetime | None, str | No
 
 
 def _set_quota_circuit_breaker(db: Session, reason: str) -> datetime:
+    _metric_inc("breaker_set")
     disabled_until = _next_day_0010_beijing()
     state = {
         "disabled_until": disabled_until.isoformat(),
@@ -141,6 +183,13 @@ def _load_l2_cache(db: Session, coord_key: str) -> tuple[dict | None, int | None
         return None, None
 
     if row.expires_at and row.expires_at > now:
+        # 命中 L2：记录命中次数
+        row.hit_count = int(row.hit_count or 0) + 1
+        row.last_hit_at = now
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         ttl = int((row.expires_at - now).total_seconds())
         return row.payload, max(1, ttl)
 
@@ -167,6 +216,8 @@ def _save_l2_cache(db: Session, coord_key: str, lat_norm: float, lng_norm: float
             coordtype=BAIDU_COORDTYPE,
             latitude=lat_norm,
             longitude=lng_norm,
+            address=str(payload.get("address") or ""),
+            sematic_description=str(payload.get("sematic_description") or ""),
             payload=payload,
             expires_at=expires_at,
         )
@@ -175,11 +226,14 @@ def _save_l2_cache(db: Session, coord_key: str, lat_norm: float, lng_norm: float
         row.coordtype = BAIDU_COORDTYPE
         row.latitude = lat_norm
         row.longitude = lng_norm
+        row.address = str(payload.get("address") or "")
+        row.sematic_description = str(payload.get("sematic_description") or "")
         row.payload = payload
         row.expires_at = expires_at
         flag_modified(row, "payload")
 
     db.commit()
+    _metric_inc("l2_write")
 
 
 @router.get("/geo/baidu-reverse")
@@ -195,6 +249,7 @@ def baidu_reverse_geocode(
     - 缓存：命中则直接返回（不消耗百度配额）
     - 熔断：识别到“配额/并发超限”后，暂停调用至次日 00:10（北京时间）
     """
+    _metric_inc("requests")
     ak = settings.BAIDU_MAP_AK
     if not ak:
         raise HTTPException(
@@ -207,17 +262,21 @@ def baidu_reverse_geocode(
     # L1 内存缓存
     cached = _l1_cache.get(coord_key)
     if cached:
+        _metric_inc("hit_l1")
+        _touch_hit(db, coord_key)
         return cached
 
     # L2 SQLite 缓存
     cached_l2, ttl_l2 = _load_l2_cache(db, coord_key)
     if cached_l2:
+        _metric_inc("hit_l2")
         _l1_cache.set(coord_key, cached_l2, ttl_seconds=ttl_l2)
         return cached_l2
 
     # 熔断：仅在缓存未命中时生效
     disabled, disabled_until, reason = _check_circuit_breaker(db)
     if disabled and disabled_until:
+        _metric_inc("breaker_hit")
         until_text = disabled_until.strftime("%Y-%m-%d %H:%M")
         detail = f"百度逆地理服务已暂停至 {until_text}（北京时间）"
         if reason:
@@ -227,6 +286,7 @@ def baidu_reverse_geocode(
     # 负缓存：避免短时间重试风暴
     cached_error = _negative_cache.get(coord_key)
     if cached_error:
+        _metric_inc("negative_hit")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Baidu API 暂不可用（已缓存失败）：{cached_error}",
@@ -240,6 +300,7 @@ def baidu_reverse_geocode(
     }
 
     try:
+        _metric_inc("baidu_call")
         resp = requests.get(
             "https://api.map.baidu.com/reverse_geocoding/v3/",
             params=params,

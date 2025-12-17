@@ -150,6 +150,12 @@ const routes = [
             meta: { title: '移动端配置', icon: 'Iphone' }
           },
           {
+            path: 'geocode-cache',
+            name: 'GeocodeCache',
+            component: () => import('../views/system/GeocodeCache.vue'),
+            meta: { title: '逆地理缓存', icon: 'Location', roles: ['admin', 'manager'] }
+          },
+          {
             path: 'omc',
             name: 'OmcConfig',
             component: () => import('../views/system/OmcConfig.vue'),
@@ -205,6 +211,14 @@ router.beforeEach((to, from, next) => {
   } else if (to.path === '/login' && userStore.isLoggedIn) {
     next('/dashboard')
   } else {
+    const roles = to.meta?.roles
+    if (Array.isArray(roles) && roles.length > 0) {
+      const role = userStore.user?.role
+      if (!role || !roles.includes(role)) {
+        next('/dashboard')
+        return
+      }
+    }
     next()
   }
 })

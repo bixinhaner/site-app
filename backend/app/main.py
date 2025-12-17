@@ -6,6 +6,7 @@ import os
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.utils.stock_schema import ensure_stock_schema
+from app.utils.geocode_schema import ensure_geocode_schema
 # Ensure new models are imported before creating tables
 from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
@@ -18,7 +19,7 @@ from app.models import system_config as _system_config_models  # noqa: F401
 from app.models import geocode_cache as _geocode_cache_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode
-from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings
+from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
 
@@ -26,6 +27,8 @@ from app.services.backup_scheduler import start_backup_scheduler
 Base.metadata.create_all(bind=engine)
 # 轻量迁移：为库存相关旧表补列（SQLite 友好）
 ensure_stock_schema(engine)
+# 轻量迁移：为 geocode_cache 旧表补列（SQLite 友好）
+ensure_geocode_schema(engine)
 
 app = FastAPI(
     title="站点信息管理系统 API",
@@ -75,6 +78,7 @@ app.include_router(site_planning.router, prefix="/api/sites", tags=["站点规�
 app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单管理"])
 app.include_router(logs.router, prefix="/api", tags=["用户日志"])
 app.include_router(mobile_settings.router, prefix="/api/system", tags=["系统配置"])
+app.include_router(geocode_cache.router, prefix="/api/system", tags=["地理编码缓存"])
 app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])
 app.include_router(survey_archives.router, prefix="/api/survey-archives", tags=["勘察档案"])
 app.include_router(opening_archives.router, prefix="/api/opening-archives", tags=["开站档案"])
