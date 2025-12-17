@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
@@ -178,14 +178,19 @@ def _get_template_id_from_extra_data(extra_data):
 
 @router.get("/search", response_model=WorkOrderListResponse)
 async def search_work_orders(
-    keyword: Optional[str] = None,
-    status: Optional[WorkOrderStatusEnum] = None,
-    type: Optional[WorkOrderTypeEnum] = None,
-    assigned_to: Optional[int] = None,
-    priority: Optional[WorkOrderPriorityEnum] = None,
-    site_id: Optional[int] = None,
-    skip: int = 0,
-    limit: int = 50,
+    keyword: Optional[str] = Query(None, description="搜索工单标题/描述/站点名称/编码"),
+    status: Optional[WorkOrderStatusEnum] = Query(None),
+    type: Optional[WorkOrderTypeEnum] = Query(None),
+    assigned_to: Optional[int] = Query(None),
+    priority: Optional[WorkOrderPriorityEnum] = Query(None),
+    site_id: Optional[int] = Query(None),
+    sort_by: Optional[str] = Query(
+        None,
+        description="排序字段: created_at|updated_at|assigned_at|due_date|priority|status|type|site_code|site_name",
+    ),
+    sort_order: str = Query("desc", description="排序方向: asc|desc"),
+    skip: int = Query(0, ge=0, description="跳过记录数"),
+    limit: int = Query(50, ge=1, le=100, description="每页记录数"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -193,22 +198,17 @@ async def search_work_orders(
     from sqlalchemy import or_, and_
     import math
 
-    # 权限检查：允许admin、manager和普通用户搜索
-    # 普通用户只能搜索自己的工单
+    # 权限说明：
+    # - 现场人员（inspector/surveyor）仅能查看自己的工单；surveyor 仅能查看勘察工单
+    # - 其他角色默认可查看全部（与 /api/work-orders 列表接口保持一致）
     is_admin_or_manager = current_user.role in ["admin", "manager"]
     is_field_worker = current_user.role in ["inspector", "surveyor"]
 
-    if not (is_admin_or_manager or is_field_worker):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-
-    query = db.query(WorkOrder)
+    query = db.query(WorkOrder).join(Site, WorkOrder.site_id == Site.id, isouter=True)
 
     # 关键词搜索
     if keyword:
-        query = query.join(Site, WorkOrder.site_id == Site.id, isouter=True).filter(
+        query = query.filter(
             or_(
                 WorkOrder.title.contains(keyword),
                 WorkOrder.description.contains(keyword),
@@ -225,17 +225,13 @@ async def search_work_orders(
     if type:
         query = query.filter(WorkOrder.type == type)
 
-    # 分配人筛选
-    if is_admin_or_manager:
-        # 管理员可以查看所有分配人
-        if assigned_to:
-            query = query.filter(WorkOrder.assigned_to == assigned_to)
-    else:
-        # 普通用户只能查看自己的工单
+    # 分配人筛选与角色可见范围
+    if is_field_worker:
         query = query.filter(WorkOrder.assigned_to == current_user.id)
-        # 勘察人员仅能搜索勘察工单
-        if is_field_worker and current_user.role == 'surveyor':
+        if current_user.role == "surveyor":
             query = query.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
+    elif is_admin_or_manager and assigned_to:
+        query = query.filter(WorkOrder.assigned_to == assigned_to)
 
     # 优先级筛选
     if priority and is_admin_or_manager:
@@ -249,11 +245,35 @@ async def search_work_orders(
     total = query.count()
 
     # 分页查询
-    work_orders = query.order_by(WorkOrder.assigned_at.desc()).offset(skip).limit(limit).all()
+    allowed_sort_fields = {
+        "created_at": WorkOrder.created_at,
+        "updated_at": WorkOrder.updated_at,
+        "assigned_at": WorkOrder.assigned_at,
+        "due_date": WorkOrder.due_date,
+        "priority": WorkOrder.priority,
+        "status": WorkOrder.status,
+        "type": WorkOrder.type,
+        "site_code": Site.site_code,
+        "site_name": Site.site_name,
+    }
+
+    sort_key = (sort_by or "created_at").strip()
+    sort_col = allowed_sort_fields.get(sort_key)
+    if not sort_col:
+        raise HTTPException(status_code=400, detail="不支持的排序字段")
+
+    order = (sort_order or "desc").strip().lower()
+    if order not in ["asc", "desc"]:
+        raise HTTPException(status_code=400, detail="不支持的排序方向")
+
+    primary = sort_col.asc() if order == "asc" else sort_col.desc()
+    secondary = WorkOrder.id.asc() if order == "asc" else WorkOrder.id.desc()
+
+    work_orders = query.order_by(primary, secondary).offset(skip).limit(limit).all()
 
     # 计算分页信息
     page = (skip // limit) + 1
-    pages = math.ceil(total / limit)
+    pages = math.ceil(total / limit) if limit else 1
 
     return WorkOrderListResponse(
         work_orders=[_enrich_work_order_response(db, wo) for wo in work_orders],

@@ -5,11 +5,9 @@
       <div class="header-actions">
         <el-input
           v-model="searchKeyword"
-          placeholder="搜索工单标题、站点名称..."
+          placeholder="搜索工单标题/描述/站点名称/编码（动态生效）"
           style="width: 240px"
           clearable
-          @clear="load"
-          @keyup.enter="load"
         >
           <template #prefix>
             <el-icon><Search /></el-icon>
@@ -21,6 +19,40 @@
         <el-select v-model="typeFilter" clearable placeholder="类型" style="width: 180px">
           <el-option v-for="t in filterTypes" :key="t.value" :label="t.label" :value="t.value" />
         </el-select>
+        <el-popover placement="bottom" :width="280" trigger="click">
+          <template #reference>
+            <el-button>
+              <el-icon><Sort /></el-icon>
+              排序
+            </el-button>
+          </template>
+          <div class="sort-panel">
+            <el-form label-width="72px" size="small">
+              <el-form-item label="字段">
+                <el-select v-model="sortBy" style="width: 100%">
+                  <el-option label="创建时间" value="created_at" />
+                  <el-option label="更新时间" value="updated_at" />
+                  <el-option label="分配时间" value="assigned_at" />
+                  <el-option label="截止时间" value="due_date" />
+                  <el-option label="优先级" value="priority" />
+                  <el-option label="状态" value="status" />
+                  <el-option label="类型" value="type" />
+                  <el-option label="站点编码" value="site_code" />
+                  <el-option label="站点名称" value="site_name" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="方向">
+                <el-radio-group v-model="sortOrder">
+                  <el-radio-button label="desc">降序</el-radio-button>
+                  <el-radio-button label="asc">升序</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item label=" ">
+                <el-button size="small" @click="resetSort">恢复默认</el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-popover>
         <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新建工单</el-button>
       </div>
@@ -87,6 +119,18 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="load"
+          @current-change="load"
+        />
+      </div>
     </el-card>
   </div>
 
@@ -285,19 +329,24 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Search, Refresh, Plus } from '@element-plus/icons-vue'
+import { Edit, Delete, Search, Refresh, Plus, Sort } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const loading = ref(false)
 const items = ref([])
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(20)
 const statusFilter = ref('')
 const typeFilter = ref('')
 const searchKeyword = ref('')
+const sortBy = ref('created_at')
+const sortOrder = ref('desc')
 
 // 批量操作相关
 const selectedWorkOrders = ref([])
@@ -346,22 +395,28 @@ const filterTypes = [
   { label: 'SSV 验收', value: 'ssv' },
 ]
 
+const resetSort = () => {
+  sortBy.value = 'created_at'
+  sortOrder.value = 'desc'
+}
 
 const load = async () => {
   try {
     loading.value = true
-    const params = {}
+    const params = {
+      skip: (currentPage.value - 1) * pageSize.value,
+      limit: pageSize.value,
+    }
     if (searchKeyword.value) params.keyword = searchKeyword.value
     if (statusFilter.value) params.status = statusFilter.value
     if (typeFilter.value) params.type = typeFilter.value
-    
-    // 使用搜索API如果有搜索条件，否则使用普通列表API
-    if (searchKeyword.value || statusFilter.value || typeFilter.value) {
-      const response = await workOrderAPI.searchWorkOrders(params)
-      items.value = response.work_orders || []
-    } else {
-      items.value = await request.get('/api/work-orders', { params })
-    }
+    if (sortBy.value) params.sort_by = sortBy.value
+    if (sortOrder.value) params.sort_order = sortOrder.value
+
+    const response = await workOrderAPI.searchWorkOrders(params)
+    const list = Array.isArray(response?.work_orders) ? response.work_orders : []
+    items.value = list
+    total.value = typeof response?.total === 'number' ? response.total : list.length
   } catch (e) {
     console.error(e)
     ElMessage.error('加载工单失败')
@@ -799,12 +854,27 @@ const executeBatchPriority = async () => {
 }
 
 onMounted(load)
+
+// 动态筛选/排序：变化时回到第 1 页并刷新
+watch([searchKeyword, statusFilter, typeFilter], () => {
+  currentPage.value = 1
+  load()
+})
+
+watch([sortBy, sortOrder], () => {
+  currentPage.value = 1
+  load()
+})
 </script>
 
 <style scoped>
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .header-actions { display:flex; gap: 8px; align-items:center; }
+.pagination { margin-top: 12px; display:flex; justify-content: flex-end; }
+.sort-panel :deep(.el-radio-group) { width: 100%; }
+.sort-panel :deep(.el-radio-button) { width: 50%; }
+.sort-panel :deep(.el-radio-button__inner) { width: 100%; text-align: center; }
 .work-order-id { 
   font-size: 12px; 
   color: #909399; 
