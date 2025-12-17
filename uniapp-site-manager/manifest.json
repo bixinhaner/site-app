@@ -71,12 +71,7 @@
                         "appkey_android" : "89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ"
                     }
                 },
-                "maps" : {
-                    "baidu" : {
-                        "appkey_ios" : "89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ",
-                        "appkey_android" : "89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ"
-                    }
-                },
+                "maps" : {},
                 "speech" : {},
                 "push" : {}
             },
