@@ -60,6 +60,8 @@
         <el-tag class="mr8" type="success">L2 命中 {{ metrics.hit_l2 ?? 0 }}</el-tag>
         <el-tag class="mr8" type="warning">百度调用 {{ metrics.baidu_call ?? 0 }}</el-tag>
         <el-tag class="mr8" type="warning">Google 调用 {{ metrics.google_call ?? 0 }}</el-tag>
+        <el-tag class="mr8" type="warning">Google 直连 {{ metrics.google_direct_call ?? 0 }}</el-tag>
+        <el-tag class="mr8" type="warning">Google Relay {{ metrics.google_relay_call ?? 0 }}</el-tag>
         <el-tag class="mr8" type="primary">写入 SQLite {{ metrics.l2_write ?? 0 }}</el-tag>
         <el-tag class="mr8" type="warning">负缓存命中 {{ metrics.negative_hit ?? 0 }}</el-tag>
         <el-tag class="mr8" type="danger">熔断拦截 {{ metrics.breaker_hit ?? 0 }}</el-tag>
@@ -304,6 +306,8 @@ const calcMetricsDiff = (after, before) => {
     'hit_l2',
     'baidu_call',
     'google_call',
+    'google_direct_call',
+    'google_relay_call',
     'l2_write',
     'negative_hit',
     'breaker_hit',
@@ -321,8 +325,12 @@ const inferSourceFromDiff = (diff, hasError) => {
   if ((diff?.hit_l2 || 0) > 0) return 'l2'
   if ((diff?.breaker_hit || 0) > 0) return 'breaker'
   if ((diff?.negative_hit || 0) > 0) return 'negative'
-  if ((diff?.baidu_call || 0) > 0 && (diff?.google_call || 0) > 0) return 'baidu_fallback_google'
+  if ((diff?.baidu_call || 0) > 0 && ((diff?.google_relay_call || 0) > 0 || (diff?.google_direct_call || 0) > 0 || (diff?.google_call || 0) > 0)) {
+    return 'baidu_fallback_google'
+  }
   if ((diff?.baidu_call || 0) > 0) return hasError ? 'baidu_error' : 'baidu'
+  if ((diff?.google_relay_call || 0) > 0) return hasError ? 'google_relay_error' : 'google_relay'
+  if ((diff?.google_direct_call || 0) > 0) return hasError ? 'google_error' : 'google'
   if ((diff?.google_call || 0) > 0) return hasError ? 'google_error' : 'google'
   if (hasError) return 'error'
   return 'unknown'
@@ -336,6 +344,8 @@ const testSourceText = computed(() => {
   if (source === 'baidu') return '调用 Baidu API（并写入缓存）'
   if (source === 'baidu_error') return '调用 Baidu API 失败（未写入缓存）'
   if (source === 'baidu_fallback_google') return 'Baidu 调用失败/不支持，已回退到 Google'
+  if (source === 'google_relay') return '通过境外 Relay 调用 Google（并写入缓存）'
+  if (source === 'google_relay_error') return '通过境外 Relay 调用 Google 失败（未写入缓存）'
   if (source === 'google') return '调用 Google API（并写入缓存）'
   if (source === 'google_error') return '调用 Google API 失败（未写入缓存）'
   if (source === 'breaker') return '熔断拦截（未调用 Baidu）'
@@ -350,6 +360,8 @@ const testSourceTagType = computed(() => {
   if (source === 'baidu') return 'warning'
   if (source === 'baidu_error') return 'danger'
   if (source === 'baidu_fallback_google') return 'warning'
+  if (source === 'google_relay') return 'warning'
+  if (source === 'google_relay_error') return 'danger'
   if (source === 'google') return 'warning'
   if (source === 'google_error') return 'danger'
   if (source === 'breaker') return 'danger'
@@ -364,7 +376,9 @@ const metricDeltas = computed(() => {
     { key: 'hit_l1', label: 'L1', type: 'success' },
     { key: 'hit_l2', label: 'L2', type: 'success' },
     { key: 'baidu_call', label: '百度调用', type: 'warning' },
-    { key: 'google_call', label: 'Google 调用', type: 'warning' },
+    { key: 'google_direct_call', label: 'Google 直连', type: 'warning' },
+    { key: 'google_relay_call', label: 'Google Relay', type: 'warning' },
+    { key: 'google_call', label: 'Google(总)', type: 'warning' },
     { key: 'l2_write', label: '写入 SQLite', type: 'primary' },
     { key: 'negative_hit', label: '负缓存', type: 'warning' },
     { key: 'breaker_hit', label: '熔断拦截', type: 'danger' },

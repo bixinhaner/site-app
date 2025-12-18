@@ -24,6 +24,7 @@ BAIDU_PROVIDER = "baidu_reverse_v3"
 GOOGLE_PROVIDER = "google_geocode_v1"
 GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 GOOGLE_DEFAULT_LANGUAGE = "en"
+GOOGLE_RELAY_TOKEN_HEADER = "X-Geo-Relay-Token"
 
 
 def _compose_cache_key(provider: str, coord_key: str) -> str:
@@ -62,6 +63,8 @@ _metrics = {
     "breaker_hit": 0,
     "baidu_call": 0,
     "google_call": 0,
+    "google_direct_call": 0,
+    "google_relay_call": 0,
     "l2_write": 0,
     "breaker_set": 0,
 }
@@ -401,24 +404,60 @@ def _fetch_google_payload(
     lng_raw: float,
     negative_cache_key: str,
 ) -> dict:
-    params = {
-        "key": api_key,
-        "latlng": f"{lat_norm},{lng_norm}",
-        "language": GOOGLE_DEFAULT_LANGUAGE,
-    }
+    relay_url = str(getattr(settings, "GOOGLE_GEOCODE_RELAY_URL", "") or "").strip()
+    relay_token = str(getattr(settings, "GOOGLE_GEOCODE_RELAY_TOKEN", "") or "").strip()
 
-    try:
-        _metric_inc("google_call")
-        resp = requests.get(GOOGLE_GEOCODE_URL, params=params, timeout=5.0)
-    except requests.RequestException as exc:
-        _negative_cache.set(negative_cache_key, f"请求异常: {exc}", ttl_seconds=NEGATIVE_TTL_SECONDS)
-        raise HTTPException(status_code=502, detail=f"Google API 请求失败: {exc}") from exc
+    # 优先走 Relay：用于部署在中国境内的后端无法直连 Google 的场景
+    if relay_url:
+        params = {
+            "lat": f"{lat_norm}",
+            "lng": f"{lng_norm}",
+            "language": GOOGLE_DEFAULT_LANGUAGE,
+        }
+        headers = {GOOGLE_RELAY_TOKEN_HEADER: relay_token} if relay_token else {}
 
-    if resp.status_code != 200:
-        _negative_cache.set(negative_cache_key, f"HTTP错误: {resp.status_code}", ttl_seconds=NEGATIVE_TTL_SECONDS)
-        raise HTTPException(status_code=resp.status_code, detail=f"Google API HTTP错误: {resp.text[:200]}")
+        try:
+            _metric_inc("google_call")
+            _metric_inc("google_relay_call")
+            resp = requests.get(relay_url, params=params, headers=headers, timeout=5.0)
+        except requests.RequestException as exc:
+            _negative_cache.set(negative_cache_key, f"Relay请求异常: {exc}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+            raise HTTPException(status_code=502, detail=f"Google Relay 请求失败: {exc}") from exc
 
-    data = resp.json() or {}
+        if resp.status_code in (401, 403):
+            _negative_cache.set(negative_cache_key, f"Relay鉴权失败: {resp.status_code}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+            raise HTTPException(status_code=502, detail=f"Google Relay 鉴权失败（{resp.status_code}），请检查 Token 与防火墙白名单")
+
+        if resp.status_code != 200:
+            _negative_cache.set(negative_cache_key, f"RelayHTTP错误: {resp.status_code}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+            raise HTTPException(status_code=resp.status_code, detail=f"Google Relay HTTP错误: {resp.text[:200]}")
+
+        data = resp.json() or {}
+    else:
+        if not api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="GOOGLE_MAPS_API_KEY 未配置（或配置 GOOGLE_GEOCODE_RELAY_URL 走境外 Relay）",
+            )
+
+        params = {
+            "key": api_key,
+            "latlng": f"{lat_norm},{lng_norm}",
+            "language": GOOGLE_DEFAULT_LANGUAGE,
+        }
+
+        try:
+            _metric_inc("google_call")
+            _metric_inc("google_direct_call")
+            resp = requests.get(GOOGLE_GEOCODE_URL, params=params, timeout=5.0)
+        except requests.RequestException as exc:
+            _negative_cache.set(negative_cache_key, f"请求异常: {exc}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+            raise HTTPException(status_code=502, detail=f"Google API 请求失败: {exc}") from exc
+
+        if resp.status_code != 200:
+            _negative_cache.set(negative_cache_key, f"HTTP错误: {resp.status_code}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+            raise HTTPException(status_code=resp.status_code, detail=f"Google API HTTP错误: {resp.text[:200]}")
+
     status_text = str(data.get("status") or "")
 
     if status_text == "ZERO_RESULTS":
@@ -511,11 +550,8 @@ def _reverse_geocode_with_provider(
             negative_cache_key=cache_key,
         )
     elif provider == GOOGLE_PROVIDER:
-        api_key = settings.GOOGLE_MAPS_API_KEY
-        if not api_key:
-            raise HTTPException(status_code=500, detail="GOOGLE_MAPS_API_KEY 未配置，请在后端环境变量或 .env 中设置")
         payload = _fetch_google_payload(
-            api_key=api_key,
+            api_key=settings.GOOGLE_MAPS_API_KEY,
             lat_norm=lat_norm,
             lng_norm=lng_norm,
             lat_raw=lat_raw,

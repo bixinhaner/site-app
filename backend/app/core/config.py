@@ -26,6 +26,12 @@ class Settings(BaseSettings):
 
     # Google Maps Platform API（Geocoding / Reverse Geocoding）
     GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+    # Google 逆地理 Relay（用于部署在中国境内的后端无法直连 Google 的场景）
+    # - 配置 GOOGLE_GEOCODE_RELAY_URL 后，Google 逆地理将优先通过 Relay 转发（后端无需配置 GOOGLE_MAPS_API_KEY）
+    # - Relay 侧需配置 GOOGLE_MAPS_API_KEY，并通过 Token + 防火墙白名单限制访问
+    GOOGLE_GEOCODE_RELAY_URL: str = os.getenv("GOOGLE_GEOCODE_RELAY_URL", "")
+    GOOGLE_GEOCODE_RELAY_TOKEN: str = os.getenv("GOOGLE_GEOCODE_RELAY_TOKEN", "")
     
     # 文件上传配置
     UPLOAD_DIR: str = "./uploads"
