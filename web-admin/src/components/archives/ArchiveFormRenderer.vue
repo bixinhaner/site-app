@@ -1,14 +1,44 @@
 <template>
-  <div class="renderer">
+  <div class="renderer" :class="{ 'renderer--template': variant === 'template' }">
     <div v-for="cat in content.check_categories || []" :key="cat.category_id" class="cat">
-      <h3>{{ cat.category_name || cat.category_id }}</h3>
+      <h3 class="cat-title">
+        <span class="cat-name">{{ cat.category_name || cat.category_id }}</span>
+        <el-tag
+          v-if="variant === 'template'"
+          size="small"
+          effect="light"
+          :type="levelTagType(cat)"
+        >
+          {{ levelLabel(cat) }}
+        </el-tag>
+      </h3>
+      <div v-if="variant === 'template' && cat.description" class="cat-desc">
+        {{ cat.description }}
+      </div>
       <el-card v-for="it in cat.items || []" :key="`${cat.category_id}-${it.item_id}`" class="item">
         <div class="item-header">
           <div class="item-title">
             <strong>{{ displayItemName(it) }}</strong>
-            <el-tag v-if="it.required_type" size="small" effect="plain">{{ it.required_type }}</el-tag>
+            <el-tag v-if="it.required_type" size="small" effect="plain">{{ requiredTypeLabel(it.required_type) }}</el-tag>
+            <el-tag
+              v-if="variant === 'template'"
+              size="small"
+              effect="plain"
+              :type="levelTagType(cat)"
+            >
+              {{ levelLabel(cat) }}
+            </el-tag>
           </div>
-          <div v-if="it.description" class="item-desc">{{ it.description }}</div>
+          <template v-if="it.description">
+            <div v-if="variant === 'template'" class="desc-block" role="note" aria-label="检查说明">
+              <div class="desc-block__title">
+                <el-icon><InfoFilled /></el-icon>
+                <span>检查说明</span>
+              </div>
+              <div class="desc-block__content">{{ it.description }}</div>
+            </div>
+            <div v-else class="item-desc">{{ it.description }}</div>
+          </template>
         </div>
 
         <!-- 站点级字段 -->
@@ -145,13 +175,66 @@ import config from '@/config/env.js'
 const props = defineProps({
   content: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
+  variant: { type: String, default: 'archive' },
 })
 const emit = defineEmits(['change', 'upload-photo', 'delete-photo'])
+
+const normalizeLevelType = (category) => {
+  const lt = category?.level_type
+  if (lt === 'cell') return 'device'
+  if (!lt) {
+    if (category?.cell_specific) return 'device'
+    if (category?.sector_specific) return 'sector'
+    return 'site'
+  }
+  return lt
+}
+
+const levelLabel = (category) => {
+  const lt = normalizeLevelType(category)
+  switch (lt) {
+    case 'site':
+      return '站点级'
+    case 'sector':
+      return '扇区级'
+    case 'device':
+      return '设备级'
+    case 'cell_earfcn':
+      return '小区级'
+    default:
+      return '站点级'
+  }
+}
+
+const levelTagType = (category) => {
+  const lt = normalizeLevelType(category)
+  switch (lt) {
+    case 'site':
+      return 'success'
+    case 'sector':
+      return 'warning'
+    case 'device':
+      return 'info'
+    case 'cell_earfcn':
+      return 'danger'
+    default:
+      return 'success'
+  }
+}
 
 const needsPhoto = (it) => {
   const t = (it?.required_type || '').toLowerCase()
   // 需要拍照：包含 photo 或 both 关键字（兼容 photo, photo_and_data, photo+data, both 等写法）
   return t.includes('photo') || t.includes('both')
+}
+
+const requiredTypeLabel = (value) => {
+  const t = String(value || '').trim().toLowerCase()
+  if (!t) return ''
+  if (t === 'both' || t.includes('photo') && t.includes('data')) return '照片+数据'
+  if (t === 'photo' || t.includes('photo')) return '照片'
+  if (t === 'data' || t.includes('data')) return '数据'
+  return String(value)
 }
 
 const state = reactive({ values: {} })
@@ -291,4 +374,67 @@ function dateDisplayFormat(type) {
 .meta { display:flex; justify-content: flex-end; align-items:center; padding:6px 8px; font-size:12px; background:#fafafa; }
 .meta.compact { gap: 8px; }
 .muted { color: #999; font-weight: normal; }
+
+.cat-title {
+  margin: 0 0 8px 0;
+}
+
+.renderer--template .cat-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.renderer--template .cat-desc {
+  margin: -6px 0 10px 0;
+  font-size: 12px;
+  color: #909399;
+}
+
+.renderer--template .item {
+  box-shadow: none;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+}
+
+.renderer--template .item-header {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.renderer--template .fields {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.renderer--template .field label {
+  color: #606266;
+}
+
+.renderer--template .desc-block {
+  width: 100%;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f5f7fa;
+  border: 1px solid #ebeef5;
+}
+
+.renderer--template .desc-block__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #606266;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.renderer--template .desc-block__content {
+  font-size: 13px;
+  color: #303133;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
 </style>

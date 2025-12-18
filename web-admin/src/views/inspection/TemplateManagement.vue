@@ -51,14 +51,14 @@
         </template>
       </el-table-column>
       
-      <el-table-column label="绑定统计" width="120">
+      <el-table-column label="工单统计" width="120">
         <template #default="{ row }">
-          <div class="binding-stats">
+          <div class="workorder-stats">
             <el-tag size="small" type="success">
-              {{ row.active_bindings_count }} 活跃
+              {{ row.active_work_orders_count }} 进行中
             </el-tag>
-            <el-tag size="small" type="info" style="margin-top: 4px;">
-              {{ row.bindings_count }} 总计
+            <el-tag size="small" type="info">
+              {{ row.work_orders_count }} 总计
             </el-tag>
           </div>
         </template>
@@ -604,7 +604,7 @@ onMounted(() => {
   margin-top: 2px;
 }
 
-.binding-stats {
+.workorder-stats {
   display: flex;
   flex-direction: column;
   gap: 4px;

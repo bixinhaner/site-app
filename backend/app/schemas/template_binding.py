@@ -238,6 +238,8 @@ class InspectionTemplateResponse(BaseModel):
     creator_name: Optional[str] = None
     bindings_count: int = 0
     active_bindings_count: int = 0
+    work_orders_count: int = 0
+    active_work_orders_count: int = 0
 
     class Config:
         from_attributes = True

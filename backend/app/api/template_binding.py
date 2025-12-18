@@ -16,6 +16,7 @@ from app.models.site import Site
 from app.models.inspection import (
     InspectionTemplate, TemplateBinding, SiteInspection
 )
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum
 from app.models.user_log import UserLog
 from app.schemas.template_binding import (
     TemplateBindingCreate, TemplateBindingUpdate, TemplateBindingResponse,
@@ -77,6 +78,27 @@ async def get_templates(
             TemplateBinding.template_id == template.id,
             TemplateBinding.active == True
         ).count()
+
+        work_orders_count = db.query(func.count(func.distinct(WorkOrder.id))).join(
+            SiteInspection,
+            or_(
+                SiteInspection.work_order_id == WorkOrder.id,
+                SiteInspection.id == WorkOrder.inspection_id,
+            ),
+        ).filter(
+            SiteInspection.template_id == template.id,
+        ).scalar() or 0
+
+        active_work_orders_count = db.query(func.count(func.distinct(WorkOrder.id))).join(
+            SiteInspection,
+            or_(
+                SiteInspection.work_order_id == WorkOrder.id,
+                SiteInspection.id == WorkOrder.inspection_id,
+            ),
+        ).filter(
+            SiteInspection.template_id == template.id,
+            WorkOrder.status != WorkOrderStatusEnum.COMPLETED,
+        ).scalar() or 0
         
         template_response = InspectionTemplateResponse(
             id=template.id,
@@ -87,7 +109,9 @@ async def get_templates(
             updated_at=template.updated_at,
             creator_name=template.creator.full_name if template.creator else None,
             bindings_count=bindings_count,
-            active_bindings_count=active_bindings_count
+            active_bindings_count=active_bindings_count,
+            work_orders_count=work_orders_count,
+            active_work_orders_count=active_work_orders_count,
         )
         result.append(template_response)
     
@@ -129,7 +153,9 @@ async def create_template(
         updated_at=template.updated_at,
         creator_name=current_user.full_name,
         bindings_count=0,
-        active_bindings_count=0
+        active_bindings_count=0,
+        work_orders_count=0,
+        active_work_orders_count=0,
     )
 
 
@@ -166,6 +192,27 @@ async def get_template(
         TemplateBinding.template_id == template.id,
         TemplateBinding.active == True
     ).count()
+
+    work_orders_count = db.query(func.count(func.distinct(WorkOrder.id))).join(
+        SiteInspection,
+        or_(
+            SiteInspection.work_order_id == WorkOrder.id,
+            SiteInspection.id == WorkOrder.inspection_id,
+        ),
+    ).filter(
+        SiteInspection.template_id == template.id,
+    ).scalar() or 0
+
+    active_work_orders_count = db.query(func.count(func.distinct(WorkOrder.id))).join(
+        SiteInspection,
+        or_(
+            SiteInspection.work_order_id == WorkOrder.id,
+            SiteInspection.id == WorkOrder.inspection_id,
+        ),
+    ).filter(
+        SiteInspection.template_id == template.id,
+        WorkOrder.status != WorkOrderStatusEnum.COMPLETED,
+    ).scalar() or 0
     
     return InspectionTemplateResponse(
         id=template.id,
@@ -176,7 +223,9 @@ async def get_template(
         updated_at=template.updated_at,
         creator_name=template.creator.full_name if template.creator else None,
         bindings_count=bindings_count,
-        active_bindings_count=active_bindings_count
+        active_bindings_count=active_bindings_count,
+        work_orders_count=work_orders_count,
+        active_work_orders_count=active_work_orders_count,
     )
 
 
@@ -416,6 +465,8 @@ async def import_template(
         creator_name=current_user.full_name,
         bindings_count=0,
         active_bindings_count=0,
+        work_orders_count=0,
+        active_work_orders_count=0,
     )
 
 
