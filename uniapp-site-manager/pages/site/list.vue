@@ -101,6 +101,9 @@
 					<uni-load-more status="loading"></uni-load-more>
 				</view>
 			</view>
+
+			<!-- 预留底部空间，避免内容被自定义 tabbar 遮挡 -->
+			<view class="tabbar-spacer" />
 		</scroll-view>
 		
 		<!-- 浮动添加按钮 -->
@@ -346,11 +349,11 @@
 
 <style lang="scss" scoped>
 	.site-list-container {
-		min-height: 100vh;
+		height: 100vh;
 		background-color: var(--bg-page);
-		padding-bottom: 80px;
 		display: flex;
 		flex-direction: column;
+		overflow: hidden;
 	}
 	
 	// 自定义导航栏
@@ -474,7 +477,13 @@
 	
 	// 滚动容器
 	.sites-scroll {
-		height: calc(100vh - 180rpx);
+		flex: 1;
+		height: 0;
+		min-height: 0;
+	}
+
+	.tabbar-spacer {
+		height: calc(64px + env(safe-area-inset-bottom));
 	}
 
 	// 站点列表

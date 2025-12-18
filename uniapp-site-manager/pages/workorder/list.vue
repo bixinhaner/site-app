@@ -85,6 +85,9 @@
           </view>
         </view>
       </view>
+
+      <!-- 预留底部空间，避免内容被自定义 tabbar 遮挡 -->
+      <view class="tabbar-spacer" />
     </scroll-view>
 
     <!-- 自定义底部导航栏 -->
@@ -349,8 +352,11 @@ onShow(() => {
 
 <style lang="scss" scoped>
 	.list-container {
-		min-height: 100vh;
+		height: 100vh;
 		background-color: var(--bg-page);
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
 	}
 	
 	// 自定义导航栏 - 统一风格
@@ -474,7 +480,13 @@ onShow(() => {
 	
 	// 滚动容器
 	.orders-scroll {
-		height: calc(100vh - 180rpx);
+		flex: 1;
+		height: 0;
+		min-height: 0;
+	}
+
+	.tabbar-spacer {
+		height: calc(64px + env(safe-area-inset-bottom));
 	}
 	
 	.order-list {

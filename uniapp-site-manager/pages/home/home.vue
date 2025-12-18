@@ -137,6 +137,9 @@
 				</view>
 			</view>
 		</view>
+
+		<!-- 预留底部空间，避免内容被自定义 tabbar 遮挡 -->
+		<view class="tabbar-spacer" />
 		
 		</scroll-view>
 		<!-- 自定义底部导航栏（替代原生 tabBar 图标） -->
@@ -401,14 +404,20 @@
 		flex-direction: column;
 		height: 100vh;
 		background-color: var(--bg-page);
+		overflow: hidden;
 	}
 	
 	// 滚动容器
 	.home-scroll {
 		flex: 1;
-		height: 100%;
+		height: 0;
+		min-height: 0;
 	}
-	
+
+	.tabbar-spacer {
+		height: calc(64px + env(safe-area-inset-bottom));
+	}
+
 	// 自定义导航栏
 	.custom-navbar {
 		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
