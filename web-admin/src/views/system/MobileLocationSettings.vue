@@ -38,7 +38,7 @@
         <!-- 全局默认：定位模式 -->
         <el-form-item label="全局默认模式">
           <el-radio-group v-model="form.location_mode.default">
-            <el-radio label="baidu">Baidu 模式（uni + 百度逆地理，默认）</el-radio>
+            <el-radio label="baidu">在线逆地理（国内Baidu/海外Google，默认）</el-radio>
             <el-radio label="native">原生插件模式（仅使用原生定位插件）</el-radio>
           </el-radio-group>
         </el-form-item>
@@ -46,9 +46,9 @@
         <el-form-item label="当前生效说明">
           <ul class="hint-list">
             <li>
-              <strong>Baidu 模式：</strong>
+              <strong>在线逆地理：</strong>
               手机 App 使用 <code>uni.getLocation(wgs84)</code> 获取坐标，
-              再通过后端代理调用百度逆地理接口获取地址信息。
+              再通过后端代理调用逆地理接口获取地址信息（国内优先 Baidu，海外走 Google；后端按约 30m 网格缓存，提高命中率并减少第三方调用）。
             </li>
             <li>
               <strong>原生插件模式：</strong>
@@ -84,7 +84,7 @@
                   clearable
                 >
                   <el-option label="跟随全局" :value="''" />
-                  <el-option label="Baidu 模式" value="baidu" />
+                  <el-option label="在线逆地理" value="baidu" />
                   <el-option label="原生插件模式" value="native" />
                 </el-select>
               </template>
@@ -125,7 +125,7 @@
                 style="width: 160px; margin-left: 8px"
                 :disabled="!canEdit"
               >
-                <el-option label="Baidu 模式" value="baidu" />
+                <el-option label="在线逆地理" value="baidu" />
                 <el-option label="原生插件模式" value="native" />
               </el-select>
               <el-button
@@ -149,7 +149,7 @@
               <el-table-column prop="user_id" label="用户ID" width="120" />
               <el-table-column prop="mode" label="定位模式" width="140">
                 <template #default="{ row }">
-                  <span v-if="row.mode === 'baidu'">Baidu 模式</span>
+                  <span v-if="row.mode === 'baidu'">在线逆地理</span>
                   <span v-else-if="row.mode === 'native'">原生插件模式</span>
                   <span v-else>（无效）</span>
                 </template>

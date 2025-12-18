@@ -59,6 +59,7 @@
         <el-tag class="mr8" type="success">L1 命中 {{ metrics.hit_l1 ?? 0 }}</el-tag>
         <el-tag class="mr8" type="success">L2 命中 {{ metrics.hit_l2 ?? 0 }}</el-tag>
         <el-tag class="mr8" type="warning">百度调用 {{ metrics.baidu_call ?? 0 }}</el-tag>
+        <el-tag class="mr8" type="warning">Google 调用 {{ metrics.google_call ?? 0 }}</el-tag>
         <el-tag class="mr8" type="primary">写入 SQLite {{ metrics.l2_write ?? 0 }}</el-tag>
         <el-tag class="mr8" type="warning">负缓存命中 {{ metrics.negative_hit ?? 0 }}</el-tag>
         <el-tag class="mr8" type="danger">熔断拦截 {{ metrics.breaker_hit ?? 0 }}</el-tag>
@@ -75,7 +76,7 @@
 
       <el-alert
         type="info"
-        title="输入一组经纬度，系统会调用与 App（Baidu 模式）一致的后端接口 /api/geo/baidu-reverse，用于模拟不同位置并提前写入缓存。"
+        title="输入一组经纬度，系统会调用与 App（在线逆地理）一致的后端接口 /api/geo/baidu-reverse，用于模拟不同位置并提前写入缓存。后端会自动选择 Provider：境内优先 Baidu，境外走 Google（language=en）；若 Baidu 返回 240（APP 服务被禁用），也会自动回退到 Google。"
         :closable="false"
         show-icon
         class="mb12"
@@ -85,14 +86,14 @@
         <el-form-item label="纬度">
           <el-input
             v-model="testLat"
-            placeholder="例如：0.34494"
+            placeholder="例如：22.542359"
             style="width: 200px"
           />
         </el-form-item>
         <el-form-item label="经度">
           <el-input
             v-model="testLng"
-            placeholder="例如：32.63619"
+            placeholder="例如：113.947312"
             style="width: 200px"
           />
         </el-form-item>
@@ -111,7 +112,7 @@
       </el-form>
 
       <div v-if="testCoordKey" class="test-hint">
-        标准化 Key（后端按 4 位小数归一化）：<code>{{ testCoordKey }}</code>
+        标准化 Key（后端按约 30m 网格归一化）：<code>{{ testCoordKey }}</code>
       </div>
 
       <div v-if="testMeta || testResult || testError" class="test-result">
@@ -181,6 +182,13 @@
       </template>
 
       <el-table :data="items" size="small" stripe border style="width: 100%">
+        <el-table-column prop="provider" label="来源" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="String(row.provider || '').startsWith('baidu')" type="success">Baidu</el-tag>
+            <el-tag v-else-if="String(row.provider || '').startsWith('google')" type="warning">Google</el-tag>
+            <span v-else>{{ row.provider || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="coord_key" label="坐标Key" min-width="220" show-overflow-tooltip />
         <el-table-column label="坐标" width="200">
           <template #default="{ row }">
@@ -270,23 +278,23 @@ const parseCoord = (val) => {
   return Number.isFinite(n) ? n : null
 }
 
-const buildCoordKey = (lat, lng, precision = 4) => {
-  const roundFixed = (n) => {
-    const factor = 10 ** precision
-    const rounded = Math.round(Number(n) * factor) / factor
-    const epsilon = 10 ** (-precision)
-    const normalized = Math.abs(rounded) < epsilon ? 0 : rounded
-    const fixed = normalized.toFixed(precision)
+const buildCoordKey = (lat, lng, gridStepUnits = 3) => {
+  const scale = 10000 // 1e-4 度
+  const step = Math.max(1, Number(gridStepUnits) || 1)
+  const normalize = (n) => {
+    const units = Math.round(Number(n) * scale / step) * step
+    const normalized = Math.abs(units) < 1 ? 0 : units / scale
+    const fixed = normalized.toFixed(4)
     return fixed === '-0.0000' ? '0.0000' : fixed
   }
-  return `wgs84ll:${roundFixed(lat)},${roundFixed(lng)}`
+  return `wgs84ll:${normalize(lat)},${normalize(lng)}`
 }
 
 const testCoordKey = computed(() => {
   const lat = parseCoord(testLat.value)
   const lng = parseCoord(testLng.value)
   if (lat === null || lng === null) return ''
-  return buildCoordKey(lat, lng, 4)
+  return buildCoordKey(lat, lng, 3)
 })
 
 const calcMetricsDiff = (after, before) => {
@@ -295,6 +303,7 @@ const calcMetricsDiff = (after, before) => {
     'hit_l1',
     'hit_l2',
     'baidu_call',
+    'google_call',
     'l2_write',
     'negative_hit',
     'breaker_hit',
@@ -310,9 +319,11 @@ const calcMetricsDiff = (after, before) => {
 const inferSourceFromDiff = (diff, hasError) => {
   if ((diff?.hit_l1 || 0) > 0) return 'l1'
   if ((diff?.hit_l2 || 0) > 0) return 'l2'
-  if ((diff?.baidu_call || 0) > 0) return 'baidu'
   if ((diff?.breaker_hit || 0) > 0) return 'breaker'
   if ((diff?.negative_hit || 0) > 0) return 'negative'
+  if ((diff?.baidu_call || 0) > 0 && (diff?.google_call || 0) > 0) return 'baidu_fallback_google'
+  if ((diff?.baidu_call || 0) > 0) return hasError ? 'baidu_error' : 'baidu'
+  if ((diff?.google_call || 0) > 0) return hasError ? 'google_error' : 'google'
   if (hasError) return 'error'
   return 'unknown'
 }
@@ -323,6 +334,10 @@ const testSourceText = computed(() => {
   if (source === 'l1') return 'L1 内存缓存命中'
   if (source === 'l2') return 'L2 SQLite 缓存命中'
   if (source === 'baidu') return '调用 Baidu API（并写入缓存）'
+  if (source === 'baidu_error') return '调用 Baidu API 失败（未写入缓存）'
+  if (source === 'baidu_fallback_google') return 'Baidu 调用失败/不支持，已回退到 Google'
+  if (source === 'google') return '调用 Google API（并写入缓存）'
+  if (source === 'google_error') return '调用 Google API 失败（未写入缓存）'
   if (source === 'breaker') return '熔断拦截（未调用 Baidu）'
   if (source === 'negative') return '负缓存命中（短期失败拦截）'
   if (source === 'error') return '请求失败（未识别来源）'
@@ -333,6 +348,10 @@ const testSourceTagType = computed(() => {
   const source = testMeta.value?.source
   if (source === 'l1' || source === 'l2') return 'success'
   if (source === 'baidu') return 'warning'
+  if (source === 'baidu_error') return 'danger'
+  if (source === 'baidu_fallback_google') return 'warning'
+  if (source === 'google') return 'warning'
+  if (source === 'google_error') return 'danger'
   if (source === 'breaker') return 'danger'
   if (source === 'negative') return 'warning'
   if (source === 'error') return 'danger'
@@ -345,6 +364,7 @@ const metricDeltas = computed(() => {
     { key: 'hit_l1', label: 'L1', type: 'success' },
     { key: 'hit_l2', label: 'L2', type: 'success' },
     { key: 'baidu_call', label: '百度调用', type: 'warning' },
+    { key: 'google_call', label: 'Google 调用', type: 'warning' },
     { key: 'l2_write', label: '写入 SQLite', type: 'primary' },
     { key: 'negative_hit', label: '负缓存', type: 'warning' },
     { key: 'breaker_hit', label: '熔断拦截', type: 'danger' },
@@ -482,8 +502,9 @@ const runTest = async () => {
 }
 
 const fillExample = () => {
-  testLat.value = '0.34494'
-  testLng.value = '32.63619'
+  // 使用中国境内坐标作为默认示例（百度逆地理对部分境外坐标可能返回 240）
+  testLat.value = '22.542359'
+  testLng.value = '113.947312'
 }
 
 const clearTest = () => {

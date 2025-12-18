@@ -9,7 +9,7 @@ class GeocodeCache(Base):
 
     # 组合主键，便于支持未来扩展不同 provider
     provider = Column(String(32), primary_key=True)
-    coord_key = Column(String(64), primary_key=True)  # 归一化后的坐标 key（如 round4）
+    coord_key = Column(String(64), primary_key=True)  # 归一化后的坐标 key（按固定网格分桶）
 
     coordtype = Column(String(20), nullable=False, default="wgs84ll")
     latitude = Column(Float, nullable=False)

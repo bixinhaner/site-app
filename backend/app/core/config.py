@@ -23,6 +23,9 @@ class Settings(BaseSettings):
 
     # Baidu Map API
     BAIDU_MAP_AK: str = os.getenv("BAIDU_MAP_AK", "")
+
+    # Google Maps Platform API（Geocoding / Reverse Geocoding）
+    GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
     
     # 文件上传配置
     UPLOAD_DIR: str = "./uploads"

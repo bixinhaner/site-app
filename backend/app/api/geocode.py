@@ -21,6 +21,24 @@ router = APIRouter()
 
 BAIDU_COORDTYPE = "wgs84ll"
 BAIDU_PROVIDER = "baidu_reverse_v3"
+GOOGLE_PROVIDER = "google_geocode_v1"
+GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+GOOGLE_DEFAULT_LANGUAGE = "en"
+
+
+def _compose_cache_key(provider: str, coord_key: str) -> str:
+    return f"{provider}:{coord_key}"
+
+
+def _is_within_china(lat: float, lng: float) -> bool:
+    """
+    粗略判断坐标是否在中国境内（常见的 out_of_china 边界判断）。
+
+    注意：该判断是“近似”的，不能覆盖所有边界情况。
+    - 境内：优先走 Baidu（更贴合国内地址）
+    - 境外：走 Google（Baidu 对部分境外坐标会返回 240）
+    """
+    return not (lng < 72.004 or lng > 137.8347 or lat < 0.8293 or lat > 55.8271)
 
 if ZoneInfo is not None:
     try:
@@ -43,6 +61,7 @@ _metrics = {
     "negative_hit": 0,
     "breaker_hit": 0,
     "baidu_call": 0,
+    "google_call": 0,
     "l2_write": 0,
     "breaker_set": 0,
 }
@@ -59,11 +78,11 @@ def _metric_inc(key: str) -> None:
         _metrics[key] = 1
 
 
-def _touch_hit(db: Session, coord_key: str) -> None:
+def _touch_hit(db: Session, provider: str, coord_key: str) -> None:
     now = datetime.utcnow()
     try:
         db.query(GeocodeCache).filter(
-            GeocodeCache.provider == BAIDU_PROVIDER,
+            GeocodeCache.provider == provider,
             GeocodeCache.coord_key == coord_key,
         ).update(
             {
@@ -77,18 +96,31 @@ def _touch_hit(db: Session, coord_key: str) -> None:
         db.rollback()
 
 
-def _normalize_coord_key(lat: float, lng: float, precision: int = 4) -> tuple[str, float, float]:
-    lat_norm = round(float(lat), precision)
-    lng_norm = round(float(lng), precision)
+def _normalize_coord_key(lat: float, lng: float, *, grid_step_units: int = 3) -> tuple[str, float, float]:
+    """
+    将经纬度归一化为缓存 Key（提升缓存命中率）。
+
+    说明：
+    - 这里采用“固定经纬度网格”的方式做近似：先把经纬度按 1e-4 度量化，再按 grid_step_units 进行分桶。
+    - 默认 grid_step_units=3，即 0.0003° 网格，约等于 30m 量级（随纬度会有少量偏差）。
+    """
+    scale = 10000  # 1e-4 度
+    step = max(1, int(grid_step_units))
+
+    lat_units = int(round(float(lat) * scale / step)) * step
+    lng_units = int(round(float(lng) * scale / step)) * step
+
+    lat_norm = lat_units / scale
+    lng_norm = lng_units / scale
 
     # 避免 -0.0000
-    if abs(lat_norm) < 10 ** (-precision):
+    if abs(lat_norm) < 1 / scale:
         lat_norm = 0.0
-    if abs(lng_norm) < 10 ** (-precision):
+    if abs(lng_norm) < 1 / scale:
         lng_norm = 0.0
 
-    lat_str = f"{lat_norm:.{precision}f}"
-    lng_str = f"{lng_norm:.{precision}f}"
+    lat_str = f"{lat_norm:.4f}"
+    lng_str = f"{lng_norm:.4f}"
     return f"{BAIDU_COORDTYPE}:{lat_str},{lng_str}", lat_norm, lng_norm
 
 
@@ -173,10 +205,10 @@ def _is_quota_exceeded(resp_status_code: int | None, payload: dict | None) -> bo
     return any(k in msg for k in keywords)
 
 
-def _load_l2_cache(db: Session, coord_key: str) -> tuple[dict | None, int | None]:
+def _load_l2_cache(db: Session, provider: str, coord_key: str) -> tuple[dict | None, int | None]:
     now = datetime.utcnow()
     row = db.query(GeocodeCache).filter(
-        GeocodeCache.provider == BAIDU_PROVIDER,
+        GeocodeCache.provider == provider,
         GeocodeCache.coord_key == coord_key,
     ).first()
     if not row:
@@ -202,16 +234,16 @@ def _load_l2_cache(db: Session, coord_key: str) -> tuple[dict | None, int | None
     return None, None
 
 
-def _save_l2_cache(db: Session, coord_key: str, lat_norm: float, lng_norm: float, payload: dict) -> None:
+def _save_l2_cache(db: Session, provider: str, coord_key: str, lat_norm: float, lng_norm: float, payload: dict) -> None:
     expires_at = datetime.utcnow() + timedelta(seconds=SUCCESS_TTL_SECONDS)
     row = db.query(GeocodeCache).filter(
-        GeocodeCache.provider == BAIDU_PROVIDER,
+        GeocodeCache.provider == provider,
         GeocodeCache.coord_key == coord_key,
     ).first()
 
     if not row:
         row = GeocodeCache(
-            provider=BAIDU_PROVIDER,
+            provider=provider,
             coord_key=coord_key,
             coordtype=BAIDU_COORDTYPE,
             latitude=lat_norm,
@@ -236,62 +268,68 @@ def _save_l2_cache(db: Session, coord_key: str, lat_norm: float, lng_norm: float
     _metric_inc("l2_write")
 
 
-@router.get("/geo/baidu-reverse")
-def baidu_reverse_geocode(
-    lat: float = Query(..., description="纬度"),
-    lng: float = Query(..., description="经度"),
-    db: Session = Depends(get_db),
-):
-    """
-    使用百度地图 Web 服务进行逆地理解析（供移动端 Baidu 模式调用）。
+def _provider_label(provider: str) -> str:
+    if provider == BAIDU_PROVIDER:
+        return "Baidu"
+    if provider == GOOGLE_PROVIDER:
+        return "Google"
+    return provider
 
-    - 坐标系：当前按 wgs84ll 处理（与 uni.getLocation type='wgs84' 一致）
-    - 缓存：命中则直接返回（不消耗百度配额）
-    - 熔断：识别到“配额/并发超限”后，暂停调用至次日 00:10（北京时间）
-    """
-    _metric_inc("requests")
-    ak = settings.BAIDU_MAP_AK
-    if not ak:
-        raise HTTPException(
-            status_code=500,
-            detail="BAIDU_MAP_AK 未配置，请在后端环境变量或 .env 中设置",
-        )
 
-    coord_key, lat_norm, lng_norm = _normalize_coord_key(lat, lng, precision=4)
+def _is_baidu_app_disabled(detail: str | None) -> bool:
+    text = str(detail or "")
+    return "APP 服务被禁用" in text
 
-    # L1 内存缓存
-    cached = _l1_cache.get(coord_key)
-    if cached:
-        _metric_inc("hit_l1")
-        _touch_hit(db, coord_key)
-        return cached
 
-    # L2 SQLite 缓存
-    cached_l2, ttl_l2 = _load_l2_cache(db, coord_key)
-    if cached_l2:
-        _metric_inc("hit_l2")
-        _l1_cache.set(coord_key, cached_l2, ttl_seconds=ttl_l2)
-        return cached_l2
+def _google_component_value(components: list[dict], type_name: str) -> str:
+    for comp in components:
+        types = comp.get("types") or []
+        if type_name in types:
+            return str(comp.get("long_name") or comp.get("short_name") or "")
+    return ""
 
-    # 熔断：仅在缓存未命中时生效
-    disabled, disabled_until, reason = _check_circuit_breaker(db)
-    if disabled and disabled_until:
-        _metric_inc("breaker_hit")
-        until_text = disabled_until.strftime("%Y-%m-%d %H:%M")
-        detail = f"百度逆地理服务已暂停至 {until_text}（北京时间）"
-        if reason:
-            detail = f"{detail}，原因：{reason}"
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
 
-    # 负缓存：避免短时间重试风暴
-    cached_error = _negative_cache.get(coord_key)
-    if cached_error:
-        _metric_inc("negative_hit")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Baidu API 暂不可用（已缓存失败）：{cached_error}",
-        )
+def _build_google_address_component(components: list[dict]) -> dict:
+    country = _google_component_value(components, "country")
+    province = _google_component_value(components, "administrative_area_level_1")
 
+    city = _google_component_value(components, "locality")
+    if not city:
+        city = _google_component_value(components, "postal_town")
+    if not city:
+        city = _google_component_value(components, "administrative_area_level_2")
+
+    district = _google_component_value(components, "sublocality_level_1")
+    if not district:
+        district = _google_component_value(components, "sublocality")
+    if not district:
+        district = _google_component_value(components, "administrative_area_level_3")
+    if not district:
+        district = _google_component_value(components, "neighborhood")
+
+    street = _google_component_value(components, "route")
+    street_number = _google_component_value(components, "street_number")
+
+    return {
+        "country": country,
+        "province": province,
+        "city": city,
+        "district": district,
+        "street": street,
+        "street_number": street_number,
+    }
+
+
+def _fetch_baidu_payload(
+    *,
+    db: Session,
+    ak: str,
+    lat_norm: float,
+    lng_norm: float,
+    lat_raw: float,
+    lng_raw: float,
+    negative_cache_key: str,
+) -> dict:
     params = {
         "ak": ak,
         "output": "json",
@@ -307,7 +345,7 @@ def baidu_reverse_geocode(
             timeout=5.0,
         )
     except requests.RequestException as exc:
-        _negative_cache.set(coord_key, f"请求异常: {exc}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+        _negative_cache.set(negative_cache_key, f"请求异常: {exc}", ttl_seconds=NEGATIVE_TTL_SECONDS)
         raise HTTPException(
             status_code=502,
             detail=f"Baidu API 请求失败: {exc}",
@@ -315,7 +353,7 @@ def baidu_reverse_geocode(
 
     if resp.status_code != 200:
         _negative_cache.set(
-            coord_key,
+            negative_cache_key,
             f"HTTP错误: {resp.status_code}",
             ttl_seconds=NEGATIVE_TTL_SECONDS,
         )
@@ -326,7 +364,6 @@ def baidu_reverse_geocode(
 
     data = resp.json()
     if data.get("status") != 0:
-        # 百度错误信息通常在 msg 或 message 中
         msg = data.get("msg") or data.get("message") or "Unknown error"
         if _is_quota_exceeded(resp.status_code, data):
             disabled_until = _set_quota_circuit_breaker(db, str(msg))
@@ -335,7 +372,7 @@ def baidu_reverse_geocode(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Baidu API 配额/并发超限，已暂停至 {until_text}（北京时间）",
             )
-        _negative_cache.set(coord_key, f"业务错误: {msg}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+        _negative_cache.set(negative_cache_key, f"业务错误: {msg}", ttl_seconds=NEGATIVE_TTL_SECONDS)
         raise HTTPException(
             status_code=502,
             detail=f"Baidu API 业务错误: {msg}",
@@ -346,16 +383,193 @@ def baidu_reverse_geocode(
     sematic_desc = result.get("sematic_description") or ""
     address_component = result.get("addressComponent") or {}
 
-    payload = {
+    return {
         "address": address,
         "sematic_description": sematic_desc,
         "address_component": address_component,
-        "location": result.get("location") or {"lat": lat, "lng": lng},
+        "location": result.get("location") or {"lat": lat_raw, "lng": lng_raw},
         "raw": data,
     }
 
-    # 写穿：仅在真实调用百度成功时写入 SQLite 缓存（命中缓存不会写表）
-    _save_l2_cache(db, coord_key, lat_norm, lng_norm, payload)
-    _l1_cache.set(coord_key, payload)
 
+def _fetch_google_payload(
+    *,
+    api_key: str,
+    lat_norm: float,
+    lng_norm: float,
+    lat_raw: float,
+    lng_raw: float,
+    negative_cache_key: str,
+) -> dict:
+    params = {
+        "key": api_key,
+        "latlng": f"{lat_norm},{lng_norm}",
+        "language": GOOGLE_DEFAULT_LANGUAGE,
+    }
+
+    try:
+        _metric_inc("google_call")
+        resp = requests.get(GOOGLE_GEOCODE_URL, params=params, timeout=5.0)
+    except requests.RequestException as exc:
+        _negative_cache.set(negative_cache_key, f"请求异常: {exc}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+        raise HTTPException(status_code=502, detail=f"Google API 请求失败: {exc}") from exc
+
+    if resp.status_code != 200:
+        _negative_cache.set(negative_cache_key, f"HTTP错误: {resp.status_code}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+        raise HTTPException(status_code=resp.status_code, detail=f"Google API HTTP错误: {resp.text[:200]}")
+
+    data = resp.json() or {}
+    status_text = str(data.get("status") or "")
+
+    if status_text == "ZERO_RESULTS":
+        # 无结果：也返回 200，并写入缓存，避免重复打第三方
+        return {
+            "address": "",
+            "sematic_description": "",
+            "address_component": {},
+            "location": {"lat": lat_raw, "lng": lng_raw},
+            "raw": data,
+        }
+
+    if status_text != "OK":
+        msg = data.get("error_message") or status_text or "Unknown error"
+        _negative_cache.set(negative_cache_key, f"业务错误: {msg}", ttl_seconds=NEGATIVE_TTL_SECONDS)
+        raise HTTPException(status_code=502, detail=f"Google API 业务错误: {msg}")
+
+    results = data.get("results") or []
+    best = results[0] if results else {}
+    address = best.get("formatted_address") or ""
+    components = best.get("address_components") or []
+    address_component = _build_google_address_component(components) if components else {}
+    geometry = best.get("geometry") or {}
+    location = geometry.get("location") or {"lat": lat_raw, "lng": lng_raw}
+
+    return {
+        "address": address,
+        "sematic_description": "",
+        "address_component": address_component,
+        "location": location,
+        "raw": data,
+    }
+
+
+def _reverse_geocode_with_provider(
+    *,
+    provider: str,
+    coord_key: str,
+    lat_norm: float,
+    lng_norm: float,
+    lat_raw: float,
+    lng_raw: float,
+    db: Session,
+) -> dict:
+    cache_key = _compose_cache_key(provider, coord_key)
+
+    cached = _l1_cache.get(cache_key)
+    if cached:
+        _metric_inc("hit_l1")
+        _touch_hit(db, provider, coord_key)
+        return cached
+
+    cached_l2, ttl_l2 = _load_l2_cache(db, provider, coord_key)
+    if cached_l2:
+        _metric_inc("hit_l2")
+        _l1_cache.set(cache_key, cached_l2, ttl_seconds=ttl_l2)
+        return cached_l2
+
+    # Baidu 熔断：仅在缓存未命中时生效
+    if provider == BAIDU_PROVIDER:
+        disabled, disabled_until, reason = _check_circuit_breaker(db)
+        if disabled and disabled_until:
+            _metric_inc("breaker_hit")
+            until_text = disabled_until.strftime("%Y-%m-%d %H:%M")
+            detail = f"百度逆地理服务已暂停至 {until_text}（北京时间）"
+            if reason:
+                detail = f"{detail}，原因：{reason}"
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+
+    # 负缓存：避免短时间重试风暴（不落库）
+    cached_error = _negative_cache.get(cache_key)
+    if cached_error:
+        _metric_inc("negative_hit")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"{_provider_label(provider)} API 暂不可用（已缓存失败）：{cached_error}",
+        )
+
+    if provider == BAIDU_PROVIDER:
+        ak = settings.BAIDU_MAP_AK
+        if not ak:
+            raise HTTPException(status_code=500, detail="BAIDU_MAP_AK 未配置，请在后端环境变量或 .env 中设置")
+        payload = _fetch_baidu_payload(
+            db=db,
+            ak=ak,
+            lat_norm=lat_norm,
+            lng_norm=lng_norm,
+            lat_raw=lat_raw,
+            lng_raw=lng_raw,
+            negative_cache_key=cache_key,
+        )
+    elif provider == GOOGLE_PROVIDER:
+        api_key = settings.GOOGLE_MAPS_API_KEY
+        if not api_key:
+            raise HTTPException(status_code=500, detail="GOOGLE_MAPS_API_KEY 未配置，请在后端环境变量或 .env 中设置")
+        payload = _fetch_google_payload(
+            api_key=api_key,
+            lat_norm=lat_norm,
+            lng_norm=lng_norm,
+            lat_raw=lat_raw,
+            lng_raw=lng_raw,
+            negative_cache_key=cache_key,
+        )
+    else:
+        raise HTTPException(status_code=500, detail=f"不支持的逆地理 Provider: {provider}")
+
+    # 写穿：仅在真实调用第三方成功时写入 SQLite 缓存（命中缓存不会写表）
+    _save_l2_cache(db, provider, coord_key, lat_norm, lng_norm, payload)
+    _l1_cache.set(cache_key, payload)
     return payload
+
+
+@router.get("/geo/baidu-reverse")
+def baidu_reverse_geocode(
+    lat: float = Query(..., description="纬度"),
+    lng: float = Query(..., description="经度"),
+    db: Session = Depends(get_db),
+):
+    """
+    逆地理解析（移动端 Baidu 模式调用的后端代理接口）。
+
+    - 坐标系：当前按 wgs84ll 处理（与 uni.getLocation type='wgs84' 一致）
+    - 国内坐标：优先走 Baidu（更贴合国内地址）
+    - 境外坐标：走 Google（Baidu 对部分境外坐标会返回 240）
+    - 缓存：L1 内存 + L2 SQLite（按约 30m 网格归一化；命中则直接返回，不消耗第三方配额）
+    - 熔断：仅对 Baidu 生效（识别到“配额/并发超限”后暂停至次日 00:10 北京时间）
+    """
+    _metric_inc("requests")
+    coord_key, lat_norm, lng_norm = _normalize_coord_key(lat, lng)
+    preferred = BAIDU_PROVIDER if _is_within_china(lat_norm, lng_norm) else GOOGLE_PROVIDER
+
+    try:
+        return _reverse_geocode_with_provider(
+            provider=preferred,
+            coord_key=coord_key,
+            lat_norm=lat_norm,
+            lng_norm=lng_norm,
+            lat_raw=lat,
+            lng_raw=lng,
+            db=db,
+        )
+    except HTTPException as exc:
+        # 兜底：若因 Baidu 区域限制返回 “APP 服务被禁用”，则回退到 Google
+        if preferred == BAIDU_PROVIDER and _is_baidu_app_disabled(str(exc.detail)):
+            return _reverse_geocode_with_provider(
+                provider=GOOGLE_PROVIDER,
+                coord_key=coord_key,
+                lat_norm=lat_norm,
+                lng_norm=lng_norm,
+                lat_raw=lat,
+                lng_raw=lng,
+                db=db,
+            )
+        raise
