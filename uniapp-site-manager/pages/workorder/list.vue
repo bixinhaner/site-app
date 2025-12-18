@@ -5,7 +5,7 @@
         <text class="navbar-title">{{ $t('workorder.title') }}</text>
         <view class="navbar-actions">
           <view class="action-btn" @click="toggleSearch">
-            <text class="action-icon">{{ showSearch ? '✕' : '🔍' }}</text>
+            <uni-icons class="action-icon" :type="showSearch ? 'closeempty' : 'search'" size="40rpx" color="#fff" />
           </view>
         </view>
       </view>
@@ -14,7 +14,7 @@
     <!-- 可折叠搜索框 -->
     <view class="search-container" :class="{ 'search-container-open': showSearch }">
       <view class="search-box">
-        <text class="search-icon">🔍</text>
+        <uni-icons class="search-icon" type="search" size="32rpx" color="#6b7280" />
         <input
           class="search-input"
           v-model="searchKeyword"
@@ -25,7 +25,7 @@
           confirm-type="search"
           :focus="showSearch"
         />
-        <text v-if="searchKeyword" class="clear-icon" @click="clearSearch">✕</text>
+        <uni-icons v-if="searchKeyword" class="clear-icon" type="clear" size="32rpx" color="#6b7280" @click="clearSearch" />
       </view>
     </view>
 

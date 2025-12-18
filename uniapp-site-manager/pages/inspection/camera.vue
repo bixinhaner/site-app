@@ -15,7 +15,7 @@
 			<cover-view class="top-toolbar">
 				<cover-view class="toolbar-left">
 					<cover-view class="tool-btn back-btn" @tap="goBack">
-						<cover-text class="btn-icon">←</cover-text>
+						<cover-text class="btn-icon uniicon-font">&#xe6b9;</cover-text>
 					</cover-view>
 				</cover-view>
 				
@@ -115,7 +115,9 @@
 			<view class="preview-container" @click.stop>
 				<view class="preview-header">
 					<text class="preview-title">照片预览</text>
-					<button class="preview-close" @click="hidePreview">✕</button>
+					<button class="preview-close" @click="hidePreview">
+						<uni-icons type="closeempty" size="20" color="#6b7280" />
+					</button>
 				</view>
 				
 				<view class="preview-content">
@@ -1199,6 +1201,10 @@ export default {
 		color: white;
 		font-size: 36rpx;
 	}
+
+	.uniicon-font {
+		font-family: uniicons;
+	}
 	
 	/* GPS信息覆盖层 */
 	.gps-overlay {
@@ -1463,7 +1469,21 @@ export default {
 		color: #333;
 	}
 	
-	.preview-close { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: var(--bg-page); border: none; font-size: 28rpx; color: #6b7280; }
+	.preview-close {
+		width: 88rpx;
+		height: 88rpx;
+		border-radius: 44rpx;
+		background: var(--bg-page);
+		border: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+	}
+
+	.preview-close::after { border: none; }
+
+	.preview-close:active { opacity: 0.9; }
 	
 	.preview-content {
 		padding: 30rpx;

@@ -3,7 +3,7 @@
 		<!-- 顶部信息栏 -->
 		<view class="map-header">
 			<view class="back-btn" @click="goBack">
-				<text class="back-icon">←</text>
+				<uni-icons class="back-icon" type="back" size="32rpx" color="#fff" />
 			</view>
 			<view class="location-info">
 				<text class="location-name">站点分布地图</text>
@@ -380,7 +380,6 @@
 	.back-icon {
 		font-size: 32rpx;
 		color: white;
-		font-weight: bold;
 	}
 	
 	.location-info {

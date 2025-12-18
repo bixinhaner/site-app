@@ -4,7 +4,7 @@
 		<view class="custom-navbar">
 			<view class="navbar-content">
 				<view class="back-button" @click="goBack">
-					<text class="back-icon">←</text>
+					<uni-icons class="back-icon" type="back" size="36rpx" color="#fff" />
 				</view>
 				<text class="navbar-title">{{ $t('inspection.detail') }}</text>
 				<view class="navbar-actions">
@@ -326,7 +326,9 @@
 			<view class="modal-content unbound-modal" @click.stop>
 				<view class="modal-header">
 					<text class="modal-title">{{ $t('inspection.unboundDevicesList') }}</text>
-					<text class="modal-close" @click="showUnboundModal = false">✕</text>
+					<view class="modal-close" @click="showUnboundModal = false">
+						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
+					</view>
 				</view>
 				<scroll-view class="unbound-list" scroll-y>
 					<view class="unbound-item" 
@@ -348,7 +350,9 @@
 			<view class="modal-content history-modal" @click.stop>
 				<view class="modal-header">
 					<text class="modal-title">📜 {{ $t('inspection.bindingHistory') }}</text>
-					<text class="modal-close" @click="showHistoryModal = false">✕</text>
+					<view class="modal-close" @click="showHistoryModal = false">
+						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
+					</view>
 				</view>
 				
 				<view v-if="loadingHistory" class="loading-container">
@@ -448,7 +452,7 @@
 				<view class="modal-header">
 					<text class="modal-title">{{ currentItem.item_name }}</text>
 					<view class="modal-close" @click="closeItemDetail">
-						<text class="close-icon">×</text>
+						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
 					</view>
 				</view>
 				
@@ -1304,7 +1308,6 @@
 .back-icon {
 		font-size: 36rpx;
 		color: white;
-		font-weight: bold;
 	}
 	
 	.navbar-title {

@@ -8,7 +8,7 @@
 					class="nav-button back-button" 
 					@click="handleBack"
 				>
-					<text class="nav-icon">←</text>
+					<uni-icons class="nav-icon" type="back" size="36rpx" color="#fff" />
 				</view>
 			</view>
 			
@@ -117,7 +117,6 @@ const handleBack = () => {
 	.nav-icon {
 		font-size: 36rpx;
 		color: white;
-		font-weight: bold;
 	}
 	
 	.navbar-center {

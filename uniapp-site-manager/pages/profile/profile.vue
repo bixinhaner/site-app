@@ -26,10 +26,12 @@
 		
 		<!-- 用户信息编辑弹窗 -->
 		<view class="user-modal-mask" v-if="showUserInfoModal" @click="closeUserInfoModal">
-			<view class="user-modal" @click.stop>
+				<view class="user-modal" @click.stop>
 				<view class="user-modal-header">
 					<text class="user-modal-title">{{ t('profile.userInfo') }}</text>
-					<text class="user-modal-close" @click="closeUserInfoModal">✕</text>
+					<view class="user-modal-close" @click="closeUserInfoModal">
+						<uni-icons type="closeempty" size="20" color="#9ca3af" />
+					</view>
 				</view>
 				
 				<view class="user-modal-body" v-if="userInfo">
@@ -81,7 +83,9 @@
 			<view class="user-modal" @click.stop>
 				<view class="user-modal-header">
 					<text class="user-modal-title">{{ t('profile.changePassword') }}</text>
-					<text class="user-modal-close" @click="closePasswordModal">✕</text>
+					<view class="user-modal-close" @click="closePasswordModal">
+						<uni-icons type="closeempty" size="20" color="#9ca3af" />
+					</view>
 				</view>
 
 				<view class="user-modal-body">
@@ -264,7 +268,9 @@
 			<view class="language-popup" @click.stop>
 				<view class="popup-header">
 					<view class="popup-title">{{ $t('profile.languageSettings') }}</view>
-					<view class="popup-close" @click="closeLanguagePopup">✕</view>
+					<view class="popup-close" @click="closeLanguagePopup">
+						<uni-icons type="closeempty" size="20" color="#6b7280" />
+					</view>
 				</view>
 				<view class="language-options">
 					<view 
@@ -947,8 +953,16 @@ const isAdmin = computed(() => userStore.isAdmin)
 	}
 
 	.user-modal-close {
-		font-size: 20px;
-		color: #9ca3af;
+		width: 44px;
+		height: 44px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #f9fafb;
+		border-radius: 50%;
+		cursor: pointer;
+		
+		&:active { background: #f3f4f6; }
 	}
 
 	.user-modal-body {

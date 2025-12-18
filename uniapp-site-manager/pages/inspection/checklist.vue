@@ -4,12 +4,12 @@
 		<view class="custom-navbar">
 			<view class="navbar-content">
 				<view class="back-button" @click="goBack">
-					<text class="back-icon">←</text>
+					<uni-icons class="back-icon" type="back" size="36rpx" color="#fff" />
 				</view>
 				<text class="navbar-title">{{ inspectionData?.site_name || $t('inspection.checklist') }}</text>
 				<view class="navbar-actions">
 					<view class="save-button" @click="saveInspection">
-						<text class="save-icon">💾</text>
+						<uni-icons class="save-icon" type="checkmarkempty" size="36rpx" color="#fff" />
 					</view>
 				</view>
 			</view>
@@ -185,7 +185,7 @@
 				<view class="modal-header">
 					<text class="modal-title">{{ currentItem.item_name }}</text>
 					<view class="modal-close" @click="closeItemModal">
-						<text class="close-icon">×</text>
+						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
 					</view>
 				</view>
 				
@@ -512,7 +512,9 @@
 			<view class="modal-content pre-submit-modal" @click.stop>
 				<view class="modal-header">
 					<text class="modal-title">⚠️ {{ $t('inspection.preSubmitCheck') }}</text>
-					<text class="modal-close" @click="showPreSubmitCheckModal = false">×</text>
+					<view class="modal-close" @click="showPreSubmitCheckModal = false">
+						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
+					</view>
 				</view>
 				
 				<view class="warning-section">
@@ -2635,7 +2637,6 @@
 	.back-icon {
 		font-size: 36rpx;
 		color: white;
-		font-weight: bold;
 	}
 	
 	.navbar-title {

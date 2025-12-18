@@ -4,7 +4,7 @@
 		<view class="custom-navbar">
 			<view class="navbar-content">
 				<view class="back-button" @click="goBack">
-					<text class="back-icon">←</text>
+					<uni-icons class="back-icon" type="back" size="36rpx" color="#fff" />
 				</view>
 				<text class="navbar-title">{{ $t('inspection.siteSelect') }}</text>
 				<view class="navbar-right">
@@ -16,7 +16,7 @@
 		<!-- 搜索和筛选 -->
 		<view class="search-container">
 			<view class="search-box">
-				<text class="search-icon">🔍</text>
+				<uni-icons class="search-icon" type="search" size="28rpx" color="#999" />
 				<input 
 					class="search-input" 
 					:placeholder="$t('site.searchPlaceholder')" 
@@ -24,7 +24,7 @@
 					@input="onSearch"
 				/>
 				<view class="clear-button" v-if="searchKeyword" @click="clearSearch">
-					<text class="clear-icon">×</text>
+					<uni-icons class="clear-icon" type="clear" size="32rpx" color="#999" />
 				</view>
 			</view>
 			
@@ -104,7 +104,7 @@
 				<view class="filter-header">
 					<text class="filter-title">筛选条件</text>
 					<view class="filter-close" @click="hideFilterModal">
-						<text class="close-icon">×</text>
+						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
 					</view>
 				</view>
 				
@@ -580,7 +580,6 @@
 	.back-icon {
 		font-size: 36rpx;
 		color: white;
-		font-weight: bold;
 	}
 	
 	.navbar-title {

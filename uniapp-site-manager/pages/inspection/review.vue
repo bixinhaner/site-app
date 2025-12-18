@@ -5,7 +5,7 @@
 			<view class="navbar-content">
 				<view class="navbar-left">
 					<view class="nav-button back-button" @click="goBack">
-						<text class="nav-icon">←</text>
+						<uni-icons class="nav-icon" type="back" size="36rpx" color="#fff" />
 					</view>
 				</view>
 				<view class="navbar-center">
@@ -93,7 +93,6 @@
 	.nav-icon {
 		font-size: 36rpx;
 		color: white;
-		font-weight: bold;
 	}
 	
 	.navbar-center {
