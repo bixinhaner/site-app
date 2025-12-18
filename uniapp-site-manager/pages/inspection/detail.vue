@@ -205,28 +205,36 @@
 				</view>
 				<view class="card-content">
 					<view class="check-items-list">
-						<view 
-							class="check-item"
-							v-for="item in filteredCheckItems"
-							:key="item.id"
-							:class="getCheckItemClass(item.status)"
-						>
-							<view class="item-header">
-								<view class="item-status">
-									<text class="status-icon">{{ getStatusIcon(item.status) }}</text>
-								</view>
-								<view class="item-info">
-									<text class="item-name">{{ item.item_name }}</text>
-									<view class="item-meta">
-										<text class="item-category">{{ item.category_name }}</text>
-										<text class="item-sector" v-if="item.sector_id">{{ $t('inspection.sector') }}{{ item.sector_id }}</text>
-										<text class="item-cell" v-if="item.cell_id">{{ item.cell_id }}</text>
+							<view 
+								class="check-item"
+								v-for="item in filteredCheckItems"
+								:key="item.id"
+								:class="[getCheckItemClass(item.status), getIssueHighlightClass(item)]"
+							>
+								<view class="item-header">
+									<view class="item-status">
+										<text class="status-icon">{{ getStatusIcon(item.status) }}</text>
 									</view>
-									
-									<!-- 设备绑定信息块：仅设备级检查项显示（小区级不需要绑定） -->
-									<view class="equipment-info" v-if="isDeviceLevelItem(item)">
-										<view v-if="item.equipment_sn" class="equipment-bound">
-											<text class="equipment-icon">📱</text>
+									<view class="item-info">
+										<text class="item-name">{{ item.item_name }}</text>
+										<view class="item-meta">
+											<text class="item-category">{{ item.category_name }}</text>
+											<text class="item-sector" v-if="item.sector_id">{{ $t('inspection.sector') }}{{ item.sector_id }}</text>
+											<text class="item-cell" v-if="item.cell_id">{{ item.cell_id }}</text>
+										</view>
+
+										<!-- 问题项提示（审核不通过/警告/现场不合格） -->
+										<view v-if="isIssueItem(item)" class="issue-hint">
+											<text class="issue-badge" :class="'issue-badge-' + (item.review_status || item.status)">
+												{{ item.review_status === 'fail' ? $t('inspection.fail') : (item.review_status === 'warning' ? $t('inspection.warning') : $t('inspection.failed')) }}
+											</text>
+											<text v-if="item.review_comments" class="issue-comment">{{ item.review_comments }}</text>
+										</view>
+										
+										<!-- 设备绑定信息块：仅设备级检查项显示（小区级不需要绑定） -->
+										<view class="equipment-info" v-if="isDeviceLevelItem(item)">
+											<view v-if="item.equipment_sn" class="equipment-bound">
+												<text class="equipment-icon">📱</text>
 											<view class="equipment-detail">
 												<text class="equipment-label">{{ $t('inspection.boundDevice') }}:</text>
 												<text class="equipment-sn">{{ item.equipment_sn }}</text>
@@ -612,11 +620,17 @@
 	const isPageVisible = ref(false)
 	const showMapSelector = ref(false)
 	
+	const isIssueItem = (item) => {
+		const status = item?.status
+		const reviewStatus = item?.review_status
+		return status === 'failed' || reviewStatus === 'fail' || reviewStatus === 'warning'
+	}
+
 	// 筛选选项
 	const statusFilters = [
 		{ label: $t('inspection.allChecks'), value: 'all' },
 		{ label: $t('inspection.completedChecks'), value: 'completed' },
-		{ label: $t('inspection.failedChecks'), value: 'failed' },
+		{ label: $t('inspection.issueChecks'), value: 'issue' },
 		{ label: $t('inspection.inProgress'), value: 'in_progress' },
 		{ label: $t('inspection.pendingChecks'), value: 'pending' }
 	]
@@ -625,6 +639,9 @@
 	const filteredCheckItems = computed(() => {
 		if (currentFilter.value === 'all') {
 			return checkItems.value
+		}
+		if (currentFilter.value === 'issue') {
+			return checkItems.value.filter(isIssueItem)
 		}
 		return checkItems.value.filter(item => item.status === currentFilter.value)
 	})
@@ -726,6 +743,15 @@
 		}
 		isPageVisible.value = true
 	})
+
+	const pickDefaultFilter = () => {
+		if (inspectionData.value?.status === 'rejected') {
+			currentFilter.value = 'issue'
+			return
+		}
+		if (currentFilter.value !== 'issue') return
+		currentFilter.value = 'all'
+	}
 	
 	// 监听语言变化，更新页面标题
 	watch(() => languageStore.currentLocale, () => {
@@ -970,16 +996,19 @@
 				}
 			}
 			
-			// 加载检查项
-			const itemsResult = await inspectionStore.getInspectionItems(inspectionId.value)
-			if (itemsResult.success) {
-				checkItems.value = itemsResult.data
-			}
-			
-			// 加载工单进度信息（如果检查关联了工单）
-			if (inspectionData.value && inspectionData.value.work_order_id) {
-				await loadWorkOrderProgress(inspectionData.value.work_order_id)
-			}
+				// 加载检查项
+				const itemsResult = await inspectionStore.getInspectionItems(inspectionId.value)
+				if (itemsResult.success) {
+					checkItems.value = itemsResult.data
+				}
+
+				// 设置默认筛选（驳回优先展示“问题项”）
+				pickDefaultFilter()
+				
+				// 加载工单进度信息（如果检查关联了工单）
+				if (inspectionData.value && inspectionData.value.work_order_id) {
+					await loadWorkOrderProgress(inspectionData.value.work_order_id)
+				}
 			
 			// 加载检查员信息
 			if (inspectionData.value && inspectionData.value.inspector_id) {
@@ -1201,6 +1230,13 @@
 			warning: `⚠️ ${$t('inspection.warning')}`
 		}
 		return statusMap[status] || status
+	}
+
+	const getIssueHighlightClass = (item) => {
+		if (item?.review_status === 'fail') return 'issue-fail'
+		if (item?.review_status === 'warning') return 'issue-warning'
+		if (item?.status === 'failed') return 'issue-failed'
+		return ''
 	}
 	
 	const getWorkOrderStatusText = (status) => {
@@ -1633,6 +1669,17 @@
 	.check-item-failed {
 		border-left-color: #dc3545;
 	}
+
+	.check-item.issue-fail,
+	.check-item.issue-failed {
+		background: #fef2f2;
+		border-left-color: #dc2626;
+	}
+
+	.check-item.issue-warning {
+		background: #fffbeb;
+		border-left-color: #d97706;
+	}
 	
 	.check-item-in_progress {
 		border-left-color: #007bff;
@@ -1676,6 +1723,47 @@
 		line-height: 1.4;
 		max-width: 100%;
 		display: block;
+	}
+
+	.issue-hint {
+		margin-top: 8rpx;
+		display: flex;
+		gap: 10rpx;
+		align-items: flex-start;
+		flex-wrap: wrap;
+	}
+
+	.issue-badge {
+		font-size: 22rpx;
+		padding: 4rpx 10rpx;
+		border-radius: 10rpx;
+		font-weight: 600;
+		flex-shrink: 0;
+	}
+
+	.issue-badge-fail {
+		background: #fee2e2;
+		color: #dc2626;
+	}
+
+	.issue-badge-warning {
+		background: #fef3c7;
+		color: #b45309;
+	}
+
+	.issue-badge-failed {
+		background: #fee2e2;
+		color: #dc2626;
+	}
+
+	.issue-comment {
+		font-size: 24rpx;
+		color: #6b7280;
+		line-height: 1.4;
+		flex: 1;
+		min-width: 0;
+		word-break: break-word;
+		overflow-wrap: break-word;
 	}
 	
 	.item-meta {

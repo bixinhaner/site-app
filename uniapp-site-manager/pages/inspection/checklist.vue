@@ -47,6 +47,14 @@
 				>
 					<text class="tab-text">{{ $t('inspection.allChecks') }} ({{ checkItems.length }})</text>
 				</view>
+				<view
+					v-if="issueCount > 0"
+					class="tab-item issue-tab"
+					:class="{ active: currentCategory === 'issue' }"
+					@click="switchCategory('issue')"
+				>
+					<text class="tab-text">{{ $t('inspection.issueChecks') }} ({{ issueCount }})</text>
+				</view>
 				<view 
 					class="tab-item"
 					:class="{ active: currentCategory === category.id }"
@@ -67,13 +75,13 @@
 					<text class="section-count">{{ section.items.length }}{{ $t('inspection.itemsUnit') }}</text>
 				</view>
 				
-				<view 
-					class="check-item"
-					v-for="item in section.items"
-					:key="item.id"
-					:class="getCheckItemClass(item.status)"
-					@click="openCheckItem(item)"
-				>
+					<view 
+						class="check-item"
+						v-for="item in section.items"
+						:key="item.id"
+						:class="[getCheckItemClass(item.status), getIssueHighlightClass(item)]"
+						@click="openCheckItem(item)"
+					>
 					<view class="item-header">
 						<view class="item-status">
 							<text class="status-icon">{{ getStatusIcon(item.status) }}</text>
@@ -81,6 +89,14 @@
 						<view class="item-info">
 							<text class="item-name">{{ item.item_name }}</text>
 							<text class="item-id" v-if="item.sector_id">{{ $t('inspection.sector') }} {{ item.sector_id }}</text>
+
+							<!-- 问题项提示（审核不通过/警告/现场不合格） -->
+							<view v-if="isIssueItem(item)" class="issue-hint">
+								<text class="issue-badge" :class="'issue-badge-' + (item.review_status || item.status)">
+									{{ item.review_status === 'fail' ? $t('inspection.fail') : (item.review_status === 'warning' ? $t('inspection.warning') : $t('inspection.failed')) }}
+								</text>
+								<text v-if="item.review_comments" class="issue-comment">{{ item.review_comments }}</text>
+							</view>
 							
 							<!-- 设备级检查项：显示绑定状态（小区级不需要绑定） -->
 							<view class="equipment-binding-badge" v-if="isDeviceLevelItem(item)">
@@ -568,6 +584,14 @@
 	const saving = ref(false)
 	const submitting = ref(false)
 	const savingItem = ref(false)
+
+	const isIssueItem = (item) => {
+		const status = item?.status
+		const reviewStatus = item?.review_status
+		return status === 'failed' || reviewStatus === 'fail' || reviewStatus === 'warning'
+	}
+
+	const issueCount = computed(() => checkItems.value.filter(isIssueItem).length)
 	
 	// 提交前核查弹窗控制
 	const showPreSubmitCheckModal = ref(false)
@@ -581,6 +605,9 @@
 	const filteredCheckItems = computed(() => {
 		if (currentCategory.value === 'all') {
 			return checkItems.value
+		}
+		if (currentCategory.value === 'issue') {
+			return checkItems.value.filter(isIssueItem)
 		}
 		return checkItems.value.filter(item => item.category_id === currentCategory.value)
 	})
@@ -620,6 +647,12 @@
 			console.log('⚠️ 缺少inspectionId参数')
 		}
 	})
+
+	const pickDefaultCategory = () => {
+		if (inspectionData.value?.status === 'rejected' && issueCount.value > 0) {
+			currentCategory.value = 'issue'
+		}
+	}
 	
 	// 方法
 	const loadInspectionData = async () => {
@@ -673,23 +706,25 @@
 				})
 			}
 			
-			// 加载检查项
-			const itemsResult = await inspectionStore.getInspectionItems(inspectionId.value)
-			if (itemsResult.success) {
-				checkItems.value = itemsResult.data.map(item => ({
-					...item,
-					photos: item.photos || [],
-					dataFields: generateDataFieldsFromBackend(item),
-					notes: item.notes || ''
-				}))
+				// 加载检查项
+				const itemsResult = await inspectionStore.getInspectionItems(inspectionId.value)
+				if (itemsResult.success) {
+					checkItems.value = itemsResult.data.map(item => ({
+						...item,
+						photos: item.photos || [],
+						dataFields: generateDataFieldsFromBackend(item),
+						notes: item.notes || ''
+					}))
+					
+					// 提取分类信息
+					extractCategories()
+				}
+
+				pickDefaultCategory()
 				
-				// 提取分类信息
-				extractCategories()
-			}
-			
-		} catch (error) {
-			console.error('加载检查数据失败:', error)
-			uni.showToast({
+			} catch (error) {
+				console.error('加载检查数据失败:', error)
+				uni.showToast({
 				title: $t('messages.dataLoadFailed'),
 				icon: 'error'
 			})
@@ -2145,7 +2180,14 @@
 	const getStatusClass = (status) => {
 		return `status-${status}`
 	}
-	
+
+	const getIssueHighlightClass = (item) => {
+		if (item?.review_status === 'fail') return 'issue-fail'
+		if (item?.review_status === 'warning') return 'issue-warning'
+		if (item?.status === 'failed') return 'issue-failed'
+		return ''
+	}
+
 	const getStatusText = (status) => {
 		const statusMap = {
 			pending: $t('inspection.pending'),
@@ -2698,6 +2740,16 @@
 		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		color: #fff;
 	}
+
+	.tab-item.issue-tab {
+		background: #fef2f2;
+		color: #dc2626;
+	}
+
+	.tab-item.issue-tab.active {
+		background: linear-gradient(135deg, #dc2626, #ef4444);
+		color: #fff;
+	}
 	
 	.tab-text {
 		font-size: 26rpx;
@@ -2772,6 +2824,17 @@
 	.check-item.status-failed {
 		border-left: 6rpx solid #dc3545;
 	}
+
+	.check-item.issue-fail,
+	.check-item.issue-failed {
+		background: #fef2f2;
+		border-left-color: #dc2626;
+	}
+
+	.check-item.issue-warning {
+		background: #fffbeb;
+		border-left-color: #d97706;
+	}
 	
 	.item-header {
 		display: flex;
@@ -2824,6 +2887,47 @@
 		display: flex;
 		align-items: center;
 		min-height: 32rpx;
+	}
+
+	.issue-hint {
+		margin-top: 10rpx;
+		display: flex;
+		gap: 10rpx;
+		align-items: flex-start;
+		flex-wrap: wrap;
+	}
+
+	.issue-badge {
+		font-size: 22rpx;
+		padding: 6rpx 10rpx;
+		border-radius: 10rpx;
+		font-weight: 600;
+		flex-shrink: 0;
+	}
+
+	.issue-badge-fail {
+		background: #fee2e2;
+		color: #dc2626;
+	}
+
+	.issue-badge-warning {
+		background: #fef3c7;
+		color: #b45309;
+	}
+
+	.issue-badge-failed {
+		background: #fee2e2;
+		color: #dc2626;
+	}
+
+	.issue-comment {
+		font-size: 24rpx;
+		color: #6b7280;
+		line-height: 1.4;
+		flex: 1;
+		min-width: 0;
+		word-break: break-word;
+		overflow-wrap: break-word;
 	}
 	
 	.item-actions {
