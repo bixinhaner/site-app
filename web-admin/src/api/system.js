@@ -64,6 +64,11 @@ export const geocodeCacheApi = {
   getEntries(params = {}) {
     return request.get('/api/system/geocode-cache/entries', { params })
   },
+
+  // 与移动端 Baidu 模式一致：调用后端 /api/geo/baidu-reverse
+  reverseGeocode(params) {
+    return request.get('/api/geo/baidu-reverse', { params })
+  },
 }
 
 export default systemBackupApi

@@ -82,13 +82,13 @@
 							<text class="item-name">{{ item.item_name }}</text>
 							<text class="item-id" v-if="item.sector_id">{{ $t('inspection.sector') }} {{ item.sector_id }}</text>
 							
-							<!-- 增强的设备绑定信息展示 -->
-							<view class="equipment-binding-badge" v-if="item.sector_id && item.band">
-								<view v-if="isCellBound(item)" class="binding-status bound">
+							<!-- 设备级检查项：显示绑定状态（小区级不需要绑定） -->
+							<view class="equipment-binding-badge" v-if="isDeviceLevelItem(item)">
+								<view v-if="isDeviceBound(item)" class="binding-status bound">
 									<text class="binding-icon">✅</text>
 									<view class="binding-info">
 										<text class="binding-label">{{ $t('inspection.boundDevice') }}</text>
-										<text class="binding-sn">{{ getCellEquipmentSn(item) }}</text>
+										<text class="binding-sn">{{ getDeviceEquipmentSn(item) }}</text>
 									</view>
 								</view>
 								<view v-else class="binding-status unbound">
@@ -174,8 +174,8 @@
 				</view>
 				
 				<scroll-view class="modal-content" scroll-y>
-					<!-- 设备绑定部分 (仅小区级检查项显示) -->
-					<view class="modal-section" v-if="currentItem.sector_id && currentItem.band">
+					<!-- 设备绑定部分（仅设备级检查项显示，小区级不需要绑定） -->
+					<view class="modal-section" v-if="currentItem && isDeviceLevelItem(currentItem)">
 						<text class="section-label">{{ $t('inspection.equipmentBinding') }}</text>
 						<view class="equipment-binding-section">
 							<view v-if="currentItem.equipment_sn" class="bound-equipment">
@@ -957,41 +957,57 @@
 		return checkItems.value.filter(item => item.category_id === categoryId).length
 	}
 	
-	// 判断是否是小区级检查项（需要绑定设备）
-	const isCellLevelItem = (item) => {
-		return item.sector_id && item.band  // 同时有扇区和频段才是小区级
+	const getDeviceKey = (item) => {
+		if (!item?.sector_id || !item?.band) return null
+		return `${item.sector_id}_${item.band}`
 	}
 	
-	// 检查小区是否已绑定设备
-	const isCellBound = (item) => {
-		if (!isCellLevelItem(item)) return true  // 非小区级（站点级、扇区级）不需要绑定
+	// 设备级：cell_id === 扇区_频段（需要扫码绑定）
+	const isDeviceLevelItem = (item) => {
+		if (!item?.sector_id || !item?.band) return false
+		const key = getDeviceKey(item)
+		if (!key) return false
+		// 防御：若 cell_id 缺失，按“设备级”处理（避免误放开绑定要求）
+		if (!item.cell_id) return true
+		return item.cell_id === key
+	}
+	
+	// 小区级：cell_id === 扇区_频段_EARFCN（不需要绑定）
+	const isCellEarfcnLevelItem = (item) => {
+		if (!item?.sector_id || !item?.band) return false
+		const key = getDeviceKey(item)
+		if (!key || !item?.cell_id) return false
+		return String(item.cell_id).startsWith(`${key}_`)
+	}
+	
+	// 检查设备是否已绑定
+	const isDeviceBound = (item) => {
+		if (!isDeviceLevelItem(item)) return true
 		
-		// 检查同一小区的任意检查项是否已绑定设备
-		const cellItems = checkItems.value.filter(checkItem => 
+		const deviceItems = checkItems.value.filter(checkItem => 
 			checkItem.sector_id === item.sector_id && 
 			checkItem.band === item.band
 		)
 		
-		return cellItems.some(cellItem => cellItem.equipment_sn)
+		return deviceItems.some(deviceItem => deviceItem.equipment_sn)
 	}
 	
-	// 获取小区绑定的设备序列号
-	const getCellEquipmentSn = (item) => {
-		if (!item.sector_id) return null
+	// 获取设备绑定的序列号
+	const getDeviceEquipmentSn = (item) => {
+		if (!isDeviceLevelItem(item)) return null
 		
-		const cellItems = checkItems.value.filter(checkItem => 
+		const deviceItems = checkItems.value.filter(checkItem => 
 			checkItem.sector_id === item.sector_id && 
 			checkItem.band === item.band
 		)
 		
-		const boundItem = cellItems.find(cellItem => cellItem.equipment_sn)
+		const boundItem = deviceItems.find(deviceItem => deviceItem.equipment_sn)
 		return boundItem?.equipment_sn || null
 	}
 
 	const openCheckItem = async (item) => {
-		// 如果是小区级检查项且该小区未绑定设备，先要求绑定设备
-		if (isCellLevelItem(item) && !isCellBound(item)) {
-			const cellId = `${item.sector_id}_${item.band}`
+		// 仅设备级检查项要求绑定设备
+		if (isDeviceLevelItem(item) && !isDeviceBound(item)) {
 			// 显示绑定设备提示
 			uni.showModal({
 				title: $t('inspection.needBindTitle'),
@@ -1006,16 +1022,16 @@
 						// 仍然打开检查项，但用户需要手动绑定
 						currentItem.value = { ...item }
 						// 确保显示绑定状态
-						currentItem.value.equipment_sn = getCellEquipmentSn(item)
+						currentItem.value.equipment_sn = getDeviceEquipmentSn(item)
 					}
 				}
 			})
 		} else {
 			// 正常打开检查项
 			currentItem.value = { ...item }
-			// 如果是小区级检查项，确保显示正确的绑定状态
-			if (isCellLevelItem(item)) {
-				currentItem.value.equipment_sn = getCellEquipmentSn(item)
+			// 如果是设备级检查项，确保显示正确的绑定状态
+			if (isDeviceLevelItem(item)) {
+				currentItem.value.equipment_sn = getDeviceEquipmentSn(item)
 			}
 			
 			// 初始化字段依赖（保存原始状态）
@@ -1773,8 +1789,8 @@
 	}
 	
 	const saveCurrentItem = async () => {
-		// 小区级检查项必须先绑定设备，防止误保存（只检查同时有sector_id和band的小区级）
-		if (isCellLevelItem(currentItem.value) && !currentItem.value?.equipment_sn) {
+		// 设备级检查项必须先绑定设备，防止误保存
+		if (isDeviceLevelItem(currentItem.value) && !currentItem.value?.equipment_sn) {
 			uni.showModal({
 				title: $t('inspection.needBindTitle') || '需要绑定设备',
 				content: $t('inspection.needBindContent') || '需要先绑定设备才能进行检查，是否现在扫码绑定？',
@@ -1997,15 +2013,27 @@
 			return
 		}
 		
-		// 检查是否有未绑定的小区级检查项
-		const unboundCells = checkItems.value.filter(item => 
-			item.sector_id && item.band && !item.equipment_sn
-		)
+		// 检查是否有未绑定的“设备级”检查项（按 扇区×频段 去重）
+		const deviceMap = new Map()
+		checkItems.value.forEach(it => {
+			if (!isDeviceLevelItem(it)) return
+			const key = getDeviceKey(it)
+			if (!key) return
+			if (!deviceMap.has(key)) deviceMap.set(key, [])
+			deviceMap.get(key).push(it)
+		})
 		
-		if (unboundCells.length > 0) {
-			// 显示核查清单弹窗
+		const unboundDevices = []
+		deviceMap.forEach(items => {
+			const bound = items.some(x => x.equipment_sn)
+			if (!bound && items.length) {
+				unboundDevices.push(items[0])
+			}
+		})
+		
+		if (unboundDevices.length > 0) {
 			showPreSubmitCheckModal.value = true
-			preSubmitUnboundList.value = unboundCells
+			preSubmitUnboundList.value = unboundDevices
 			return
 		}
 		
@@ -2058,12 +2086,11 @@
 	const quickBindDevice = async (item) => {
 		// 关闭核查弹窗，打开该检查项的绑定界面
 		showPreSubmitCheckModal.value = false
-		currentItem.value = item
-		showModal.value = true
+		currentItem.value = { ...item }
 		
 		// 自动触发扫码
 		await uni.nextTick()
-		scanEquipmentForBinding()
+		scanEquipmentForBinding(item)
 	}
 	
 	// 强制提交（忽略未绑定警告）
@@ -2299,10 +2326,10 @@
 	// 扫码绑定设备功能
 	const scanEquipmentForBinding = async (item = null) => {
 		const targetItem = item || currentItem.value
-		// 只有小区级检查项才能绑定设备
-		if (!targetItem || !isCellLevelItem(targetItem)) {
+		// 只有设备级检查项才需要绑定设备
+		if (!targetItem || !isDeviceLevelItem(targetItem)) {
 			uni.showToast({
-				title: $t('inspection.invalidCheckItem') || '无效的检查项，只有小区级检查项才需要绑定设备',
+				title: $t('inspection.invalidCheckItem') || '无效的检查项，只有设备级检查项才需要绑定设备',
 				icon: 'none',
 				duration: 3000
 			})
@@ -2381,7 +2408,7 @@
 					uni.hideLoading()
 					return uni.showModal({
 						title: '绑定冲突',
-						content: bindResponse.data?.detail || `设备 ${parsedBarcode.sn} 已绑定至其他小区，请先解绑后再操作`,
+						content: bindResponse.data?.detail || `设备 ${parsedBarcode.sn} 已绑定至其他设备，请先解绑后再操作`,
 						showCancel: false
 					})
 				}
@@ -2420,7 +2447,7 @@
 					uni.hideLoading()
 					uni.showModal({
 						title: $t('inspection.bindSuccessTitle'),
-						content: $t('inspection.bindSuccessContent') || `设备 ${parsedBarcode.sn} 已成功绑定到小区 ${targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id}`,
+						content: $t('inspection.bindSuccessContent') || `设备 ${parsedBarcode.sn} 已成功绑定到设备 ${targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id}`,
 						showCancel: false,
 						confirmText: $t('common.confirm'),
 						success: () => {
@@ -2455,7 +2482,7 @@
 	
 	// 解绑设备
 	const unbindEquipment = async () => {
-		if (!currentItem.value || !currentItem.value.equipment_sn) {
+		if (!currentItem.value || !isDeviceLevelItem(currentItem.value) || !currentItem.value.equipment_sn) {
 			return
 		}
 		

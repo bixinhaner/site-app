@@ -170,16 +170,16 @@
 				</view>
 			</view>
 			
-			<!-- 未绑定设备提醒卡片 -->
-			<view class="unbound-reminder" v-if="unboundCellsCount > 0 && inspectionData.status === 'in_progress'">
+			<!-- 未绑定设备提醒卡片（仅设备级检查项需要绑定） -->
+			<view class="unbound-reminder" v-if="unboundDevicesCount > 0 && inspectionData.status === 'in_progress'">
 				<view class="reminder-header">
 					<text class="reminder-icon">⚠️</text>
 					<text class="reminder-title">{{ $t('inspection.pendingTasks') }}</text>
-					<view class="reminder-badge">{{ unboundCellsCount }}</view>
+					<view class="reminder-badge">{{ unboundDevicesCount }}</view>
 				</view>
 				<view class="reminder-content">
 					<text class="reminder-text">
-						{{ $t('inspection.unboundCellsHint').replace('{count}', unboundCellsCount) }}
+						{{ $t('inspection.unboundCellsHint').replace('{count}', unboundDevicesCount) }}
 					</text>
 					<button class="reminder-action" @click="showUnboundList">
 						{{ $t('inspection.viewDetails') }}
@@ -223,8 +223,8 @@
 										<text class="item-cell" v-if="item.cell_id">{{ item.cell_id }}</text>
 									</view>
 									
-									<!-- 新增：设备绑定信息块 -->
-									<view class="equipment-info" v-if="item.sector_id && item.band">
+									<!-- 设备绑定信息块：仅设备级检查项显示（小区级不需要绑定） -->
+									<view class="equipment-info" v-if="isDeviceLevelItem(item)">
 										<view v-if="item.equipment_sn" class="equipment-bound">
 											<text class="equipment-icon">📱</text>
 											<view class="equipment-detail">
@@ -322,7 +322,7 @@
 				</view>
 				<scroll-view class="unbound-list" scroll-y>
 					<view class="unbound-item" 
-						  v-for="item in unboundCellsList" 
+						  v-for="item in unboundDevicesList" 
 						  :key="item.id"
 						  @click="goToCheckItem(item.id)">
 						<view class="unbound-item-info">
@@ -641,33 +641,55 @@
 			   (['admin', 'manager', 'reviewer'].includes(userStore.userInfo?.role))
 	})
 	
-	// 计算未绑定小区数量
-	const unboundCellsCount = computed(() => {
-		if (!inspectionData.value || !inspectionData.value.check_items) {
-			return 0
-		}
+	const getDeviceKey = (item) => {
+		if (!item?.sector_id || !item?.band) return null
+		return `${item.sector_id}_${item.band}`
+	}
+	
+	// 设备级：cell_id === 扇区_频段（需要扫码绑定）
+	const isDeviceLevelItem = (item) => {
+		if (!item?.sector_id || !item?.band) return false
+		const key = getDeviceKey(item)
+		if (!key) return false
+		// 防御：若 cell_id 缺失，按“设备级”处理（避免误放开绑定要求）
+		if (!item.cell_id) return true
+		return item.cell_id === key
+	}
+	
+	// 未绑定设备（设备级）代表项列表（按 扇区×频段 去重）
+	const unboundDeviceRepresentatives = computed(() => {
+		const items = inspectionData.value?.check_items || []
+		const deviceMap = new Map()
 		
-		// 统计小区级且未绑定设备的检查项
-		return inspectionData.value.check_items.filter(item => {
-			return item.sector_id && item.band && !item.equipment_sn
-		}).length
+		items.forEach(it => {
+			if (!isDeviceLevelItem(it)) return
+			const key = getDeviceKey(it)
+			if (!key) return
+			if (!deviceMap.has(key)) deviceMap.set(key, [])
+			deviceMap.get(key).push(it)
+		})
+		
+		const unbound = []
+		deviceMap.forEach(list => {
+			const bound = list.some(x => x.equipment_sn)
+			if (!bound && list.length) {
+				unbound.push(list[0])
+			}
+		})
+		
+		return unbound
 	})
 	
-	// 未绑定小区列表
-	const unboundCellsList = computed(() => {
-		if (!inspectionData.value || !inspectionData.value.check_items) {
-			return []
-		}
-		
-		return inspectionData.value.check_items
-			.filter(item => item.sector_id && item.band && !item.equipment_sn)
-			.map(item => ({
-				id: item.id,
-				name: item.item_name,
-				cell_id: item.cell_id,
-				sector_id: item.sector_id,
-				band: item.band
-			}))
+	const unboundDevicesCount = computed(() => unboundDeviceRepresentatives.value.length)
+	
+	const unboundDevicesList = computed(() => {
+		return unboundDeviceRepresentatives.value.map(item => ({
+			id: item.id,
+			name: item.item_name,
+			cell_id: item.cell_id || getDeviceKey(item),
+			sector_id: item.sector_id,
+			band: item.band
+		}))
 	})
 	
 	// 未绑定弹窗控制

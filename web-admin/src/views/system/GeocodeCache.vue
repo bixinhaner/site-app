@@ -66,6 +66,97 @@
       </div>
     </el-card>
 
+    <el-card class="mb16" v-loading="testLoading">
+      <template #header>
+        <div class="card-header">
+          <span>测试 / 预热</span>
+        </div>
+      </template>
+
+      <el-alert
+        type="info"
+        title="输入一组经纬度，系统会调用与 App（Baidu 模式）一致的后端接口 /api/geo/baidu-reverse，用于模拟不同位置并提前写入缓存。"
+        :closable="false"
+        show-icon
+        class="mb12"
+      />
+
+      <el-form :inline="true" class="test-form">
+        <el-form-item label="纬度">
+          <el-input
+            v-model="testLat"
+            placeholder="例如：0.34494"
+            style="width: 200px"
+          />
+        </el-form-item>
+        <el-form-item label="经度">
+          <el-input
+            v-model="testLng"
+            placeholder="例如：32.63619"
+            style="width: 200px"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button
+            type="primary"
+            :loading="testLoading"
+            :disabled="!canView"
+            @click="runTest"
+          >
+            测试并预热缓存
+          </el-button>
+          <el-button :disabled="testLoading" @click="fillExample">填入示例</el-button>
+          <el-button :disabled="testLoading" @click="clearTest">清空</el-button>
+        </el-form-item>
+      </el-form>
+
+      <div v-if="testCoordKey" class="test-hint">
+        标准化 Key（后端按 4 位小数归一化）：<code>{{ testCoordKey }}</code>
+      </div>
+
+      <div v-if="testMeta || testResult || testError" class="test-result">
+        <div class="test-row" v-if="testSourceText">
+          <div class="test-label">本次来源</div>
+          <div class="test-value">
+            <el-tag :type="testSourceTagType">{{ testSourceText }}</el-tag>
+          </div>
+        </div>
+
+        <div class="test-row" v-if="metricDeltas.length">
+          <div class="test-label">指标变化</div>
+          <div class="test-value">
+            <el-tag
+              v-for="d in metricDeltas"
+              :key="d.key"
+              class="mr8"
+              :type="d.type"
+            >
+              {{ d.label }} +{{ d.delta }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="test-row" v-if="testResult">
+          <div class="test-label">地址</div>
+          <div class="test-value">{{ testResult.address || '（空）' }}</div>
+        </div>
+        <div class="test-row" v-if="testResult">
+          <div class="test-label">语义描述</div>
+          <div class="test-value">{{ testResult.sematic_description || '（空）' }}</div>
+        </div>
+        <div class="test-row" v-if="testError">
+          <div class="test-label">错误</div>
+          <div class="test-value error">{{ testError }}</div>
+        </div>
+
+        <el-collapse v-if="testResult" class="mt8">
+          <el-collapse-item title="查看原始返回（JSON）" name="raw">
+            <pre class="json-view">{{ prettyJson(testResult) }}</pre>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+    </el-card>
+
     <el-card v-loading="listLoading">
       <template #header>
         <div class="card-header">
@@ -143,6 +234,7 @@ const canView = computed(() => userStore.isAdmin)
 const loading = ref(false)
 const statsLoading = ref(false)
 const listLoading = ref(false)
+const testLoading = ref(false)
 
 const stats = ref({
   total_entries: 0,
@@ -164,6 +256,111 @@ const items = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
+
+const testLat = ref('')
+const testLng = ref('')
+const testResult = ref(null)
+const testError = ref('')
+const testMeta = ref(null)
+
+const parseCoord = (val) => {
+  const s = String(val ?? '').trim()
+  if (!s) return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
+const buildCoordKey = (lat, lng, precision = 4) => {
+  const roundFixed = (n) => {
+    const factor = 10 ** precision
+    const rounded = Math.round(Number(n) * factor) / factor
+    const epsilon = 10 ** (-precision)
+    const normalized = Math.abs(rounded) < epsilon ? 0 : rounded
+    const fixed = normalized.toFixed(precision)
+    return fixed === '-0.0000' ? '0.0000' : fixed
+  }
+  return `wgs84ll:${roundFixed(lat)},${roundFixed(lng)}`
+}
+
+const testCoordKey = computed(() => {
+  const lat = parseCoord(testLat.value)
+  const lng = parseCoord(testLng.value)
+  if (lat === null || lng === null) return ''
+  return buildCoordKey(lat, lng, 4)
+})
+
+const calcMetricsDiff = (after, before) => {
+  const keys = [
+    'requests',
+    'hit_l1',
+    'hit_l2',
+    'baidu_call',
+    'l2_write',
+    'negative_hit',
+    'breaker_hit',
+    'breaker_set',
+  ]
+  const diff = {}
+  keys.forEach((k) => {
+    diff[k] = (Number(after?.[k] || 0) - Number(before?.[k] || 0))
+  })
+  return diff
+}
+
+const inferSourceFromDiff = (diff, hasError) => {
+  if ((diff?.hit_l1 || 0) > 0) return 'l1'
+  if ((diff?.hit_l2 || 0) > 0) return 'l2'
+  if ((diff?.baidu_call || 0) > 0) return 'baidu'
+  if ((diff?.breaker_hit || 0) > 0) return 'breaker'
+  if ((diff?.negative_hit || 0) > 0) return 'negative'
+  if (hasError) return 'error'
+  return 'unknown'
+}
+
+const testSourceText = computed(() => {
+  const source = testMeta.value?.source
+  if (!source) return ''
+  if (source === 'l1') return 'L1 内存缓存命中'
+  if (source === 'l2') return 'L2 SQLite 缓存命中'
+  if (source === 'baidu') return '调用 Baidu API（并写入缓存）'
+  if (source === 'breaker') return '熔断拦截（未调用 Baidu）'
+  if (source === 'negative') return '负缓存命中（短期失败拦截）'
+  if (source === 'error') return '请求失败（未识别来源）'
+  return '未知来源'
+})
+
+const testSourceTagType = computed(() => {
+  const source = testMeta.value?.source
+  if (source === 'l1' || source === 'l2') return 'success'
+  if (source === 'baidu') return 'warning'
+  if (source === 'breaker') return 'danger'
+  if (source === 'negative') return 'warning'
+  if (source === 'error') return 'danger'
+  return 'info'
+})
+
+const metricDeltas = computed(() => {
+  const diff = testMeta.value?.diff || {}
+  const mapping = [
+    { key: 'hit_l1', label: 'L1', type: 'success' },
+    { key: 'hit_l2', label: 'L2', type: 'success' },
+    { key: 'baidu_call', label: '百度调用', type: 'warning' },
+    { key: 'l2_write', label: '写入 SQLite', type: 'primary' },
+    { key: 'negative_hit', label: '负缓存', type: 'warning' },
+    { key: 'breaker_hit', label: '熔断拦截', type: 'danger' },
+  ]
+  return mapping
+    .map((m) => ({ ...m, delta: Number(diff[m.key] || 0) }))
+    .filter((x) => x.delta > 0)
+})
+
+const prettyJson = (obj) => {
+  try {
+    return JSON.stringify(obj, null, 2)
+  } catch (e) {
+    return String(obj)
+  }
+}
 
 const formatDateTime = (val) => {
   if (!val) return ''
@@ -215,6 +412,86 @@ const loadEntries = async () => {
   } finally {
     listLoading.value = false
   }
+}
+
+const runTest = async () => {
+  if (!canView.value) return
+
+  testError.value = ''
+  testResult.value = null
+  testMeta.value = null
+
+  const lat = parseCoord(testLat.value)
+  const lng = parseCoord(testLng.value)
+  if (lat === null || lng === null) {
+    ElMessage.error('请输入合法的经纬度（数字）')
+    return
+  }
+  if (lat < -90 || lat > 90) {
+    ElMessage.error('纬度范围应为 -90 ~ 90')
+    return
+  }
+  if (lng < -180 || lng > 180) {
+    ElMessage.error('经度范围应为 -180 ~ 180')
+    return
+  }
+
+  testLoading.value = true
+  let beforeMetrics = {}
+  let hasError = false
+
+  try {
+    const before = await geocodeCacheApi.getStats()
+    beforeMetrics = before?.metrics || {}
+
+    const payload = await geocodeCacheApi.reverseGeocode({ lat, lng })
+    testResult.value = payload
+    ElMessage.success('测试完成（已刷新缓存列表）')
+  } catch (e) {
+    console.error(e)
+    hasError = true
+    const detail = e?.response?.data?.detail
+    testError.value = detail || e.message || '请求失败'
+    ElMessage.error(testError.value)
+  } finally {
+    try {
+      const after = await geocodeCacheApi.getStats()
+      stats.value = after || stats.value
+      const afterMetrics = after?.metrics || {}
+      const diff = calcMetricsDiff(afterMetrics, beforeMetrics)
+      testMeta.value = {
+        before: beforeMetrics,
+        after: afterMetrics,
+        diff,
+        source: inferSourceFromDiff(diff, hasError),
+      }
+    } catch (e) {
+      console.warn('刷新统计失败:', e)
+    }
+
+    try {
+      // 列表排序按“最近命中/更新时间”，执行测试后刷新可快速看到最新条目
+      page.value = 1
+      await loadEntries()
+    } catch (e) {
+      console.warn('刷新列表失败:', e)
+    }
+
+    testLoading.value = false
+  }
+}
+
+const fillExample = () => {
+  testLat.value = '0.34494'
+  testLng.value = '32.63619'
+}
+
+const clearTest = () => {
+  testLat.value = ''
+  testLng.value = ''
+  testResult.value = null
+  testError.value = ''
+  testMeta.value = null
 }
 
 const refresh = async () => {
@@ -271,6 +548,12 @@ onMounted(async () => {
 .mr8 {
   margin-right: 8px;
 }
+.mb12 {
+  margin-bottom: 12px;
+}
+.mt8 {
+  margin-top: 8px;
+}
 .stat-item {
   padding: 6px 0;
 }
@@ -299,5 +582,53 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
 }
-</style>
 
+.test-form {
+  margin-bottom: 8px;
+}
+
+.test-hint {
+  color: #909399;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.test-result {
+  border-top: 1px solid #ebeef5;
+  padding-top: 12px;
+}
+
+.test-row {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.test-label {
+  width: 110px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 20px;
+  flex: 0 0 auto;
+}
+
+.test-value {
+  flex: 1;
+  line-height: 20px;
+  word-break: break-word;
+}
+
+.test-value.error {
+  color: #f56c6c;
+}
+
+.json-view {
+  font-size: 12px;
+  line-height: 18px;
+  background: #0b1020;
+  color: #d1d5db;
+  padding: 12px;
+  border-radius: 6px;
+  overflow: auto;
+}
+</style>

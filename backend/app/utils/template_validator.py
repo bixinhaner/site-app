@@ -6,6 +6,25 @@
 from typing import Dict, List, Optional
 
 
+def _normalize_level_type(cat: Dict) -> str:
+    """归一化分类的检查维度，用于结构性变更判断（向后兼容）。"""
+    if not isinstance(cat, dict):
+        return "site"
+
+    lt = cat.get("level_type")
+    # 历史兼容：旧模板用 'cell' 表示“扇区×Band”（本次统一归为 device）
+    if lt == "cell":
+        return "device"
+    if lt in ("site", "sector", "device", "cell_earfcn"):
+        return lt
+
+    if cat.get("cell_specific"):
+        return "device"
+    if cat.get("sector_specific"):
+        return "sector"
+    return "site"
+
+
 def validate_template_changes(old_data: Dict, new_data: Dict) -> Dict:
     """
     后端验证：确保没有禁止的结构性变更
@@ -46,6 +65,13 @@ def validate_template_changes(old_data: Dict, new_data: Dict) -> Dict:
             # cell_specific 变更是结构性的
             if old_cat.get('cell_specific') != new_cat.get('cell_specific'):
                 violations.append(f"禁止修改分类的 cell_specific 属性: {cat_id}")
+
+            # level_type 变更是结构性的（需要归一化以兼容旧模板）
+            if _normalize_level_type(old_cat) != _normalize_level_type(new_cat):
+                violations.append(
+                    f"禁止修改分类的 level_type 属性: {cat_id} "
+                    f"({_normalize_level_type(old_cat)} -> {_normalize_level_type(new_cat)})"
+                )
             
             # 3. 检查检查项结构
             old_items = {item['item_id']: item for item in old_cat.get('items', [])}

@@ -8,6 +8,7 @@ export const TemplateFieldRules = {
   category: {
     structural: [
       'category_id',          // 分类ID
+      'level_type',           // 检查级别（站点/扇区/设备/小区）
       'sector_specific',      // 是否扇区级别
       'cell_specific',        // 是否小区级别
     ],

@@ -71,6 +71,40 @@ def _touch_check_item_and_clear_review(check_item: InspectionCheckItem, now: dat
     check_item.updated_at = now
     return had_review
 
+
+def _normalize_category_level(category: dict) -> str:
+    """归一化模板分类的检查维度。
+
+    约定：
+    - site：站点级
+    - sector：扇区级
+    - device：设备级（扇区×Band）
+    - cell_earfcn：小区级（扇区×Band×EARFCN）
+
+    向后兼容：
+    - 旧模板可能只有 sector_specific / cell_specific；
+    - 部分旧模板的 level_type 可能为 'cell'，历史上表示“扇区×Band”（本次统一归为 device）。
+    """
+    lt = (category or {}).get("level_type")
+    if lt == "cell":
+        return "device"
+    if lt in ("site", "sector", "device", "cell_earfcn"):
+        return lt
+
+    if (category or {}).get("cell_specific"):
+        return "device"
+    if (category or {}).get("sector_specific"):
+        return "sector"
+    return "site"
+
+
+def _template_requires_lld_cells(template_data: dict) -> bool:
+    """判断模板是否包含“按 EARFCN 的小区级”检查。"""
+    for cat in (template_data or {}).get("check_categories", []) or []:
+        if _normalize_category_level(cat) == "cell_earfcn":
+            return True
+    return False
+
 # 新增工具函数
 async def create_default_template(db: Session, site_id: int, inspection_type: str) -> InspectionTemplate:
     """创建默认检查模板"""
@@ -241,8 +275,18 @@ async def create_inspection(
             template = match_result.template
         else:
             # 兜底：自动创建默认模板
-            template = await create_default_template(db, inspection_data.site_id, inspection_data.inspection_type)
-    
+             template = await create_default_template(db, inspection_data.site_id, inspection_data.inspection_type)
+
+    template_data = template.template_data or {}
+    carrier_cells = None
+    if _template_requires_lld_cells(template_data):
+        carrier_cells = CellGenerator.generate_cells_from_lld(db, inspection_data.site_id)
+        if not carrier_cells:
+            raise HTTPException(
+                status_code=400,
+                detail="该检查模板包含“小区级（按EARFCN）”检查项，请先在站点规划（LLD）中导入规划数据",
+            )
+
     # 创建检查记录
     inspection = SiteInspection(
         id=str(uuid.uuid4()),
@@ -271,144 +315,118 @@ async def create_inspection(
     db.flush()
     
     # 根据模板和站点规划创建检查项
-    template_data = template.template_data
     total_items = 0
     
-    # 基于站点规划数据生成小区配置
-    print(f"DEBUG: 开始为站点 {inspection_data.site_id} 生成小区配置")
-    cells = CellGenerator.generate_cells_from_planning(db, inspection_data.site_id)
-    cells_summary = CellGenerator.get_cells_summary(cells)
-    print(f"DEBUG: 生成了 {len(cells)} 个小区: {[cell.to_dict() for cell in cells]}")
-    print(f"DEBUG: 小区摘要: {cells_summary}")
-    
-    print(f"DEBUG: 模板数据类型: {type(template_data)}")
-    print(f"DEBUG: 检查分类数量: {len(template_data.get('check_categories', []))}")
-    
+    # 设备维度（扇区×Band）列表：兼容旧模板“cell_specific”
+    devices = CellGenerator.generate_devices_from_planning(db, inspection_data.site_id)
+    sectors = sorted({d.sector_id for d in devices})
+
+    print(f"DEBUG: 开始为站点 {inspection_data.site_id} 生成检查项（设备数={len(devices)}，扇区数={len(sectors)}）")
+    if carrier_cells is not None:
+        print(f"DEBUG: 小区级（按EARFCN）数量={len(carrier_cells)}")
+
     for i, category in enumerate(template_data.get("check_categories", [])):
         category_name = category.get("category_name", "未知分类")
         category_id = category.get("category_id", "unknown")
+        level_type = _normalize_category_level(category)
         print(f"DEBUG: === 处理分类 {i+1}: {category_name} (ID: {category_id}) ===")
-        print(f"DEBUG:   cell_specific: {category.get('cell_specific')}")
-        print(f"DEBUG:   sector_specific: {category.get('sector_specific')}")
-        print(f"DEBUG:   level_type: {category.get('level_type')}")
+        print(f"DEBUG:   level_type(raw)={category.get('level_type')}, level_type(norm)={level_type}")
         
         items = category.get("items", [])
         print(f"DEBUG:   该分类有 {len(items)} 个检查项")
         
         for j, item in enumerate(items):
-            item_name = item.get("item_name", "未知检查项")
-            item_id = item.get("item_id", "unknown")
+            base_item_name = item.get("item_name", "未知检查项")
+            base_item_id = item.get("item_id", "unknown")
             item_description = item.get("description", "")  # 获取检查项描述
             item_fields = item.get("fields", [])  # 获取字段配置
             required_type = item.get("required_type", "unknown")
-            print(f"DEBUG:   --- 处理检查项 {j+1}: {item_name} (ID: {item_id}) ---")
+            print(f"DEBUG:   --- 处理检查项 {j+1}: {base_item_name} (ID: {base_item_id}) ---")
             print(f"DEBUG:     required_type: {required_type}")
             
-            # 检查是否是小区级检查
-            is_cell_specific = category.get("cell_specific", False)
-            is_sector_specific = category.get("sector_specific", False)
-            
-            print(f"DEBUG:     判断检查级别:")
-            print(f"DEBUG:       is_cell_specific: {is_cell_specific} (type: {type(is_cell_specific)})")
-            print(f"DEBUG:       is_sector_specific: {is_sector_specific} (type: {type(is_sector_specific)})")
-            print(f"DEBUG:       cells数量: {len(cells)}")
-            
-            # 如果是小区级检查，为每个小区创建检查项
-            if is_cell_specific:
-                print(f"DEBUG:     ✅ 进入小区级检查分支，准备为 {len(cells)} 个小区创建检查项")
-                cell_items_created = 0
-                for k, cell in enumerate(cells):
-                    cell_item_id = f"{item_id}_cell_{cell.cell_id}"
-                    cell_item_name = f"{item_name} - 小区 {cell.cell_id}"
-                    print(f"DEBUG:       创建小区检查项 {k+1}: {cell_item_name} (ID: {cell_item_id})")
-                    print(f"DEBUG:         扇区: {cell.sector_id}, 频段: {cell.band}, 小区: {cell.cell_id}")
-                    
-                    try:
-                        check_item = InspectionCheckItem(
-                            id=str(uuid.uuid4()),
-                            inspection_id=inspection.id,
-                            item_id=cell_item_id,
-                            item_name=cell_item_name,
-                            description=item_description,
-                            category_id=category_id,
-                            category_name=category_name,
-                            sector_id=cell.sector_id,
-                            band=cell.band,
-                            cell_id=cell.cell_id,
-                            required_type=required_type,
-                            fields=item_fields,
-                            status=CheckItemStatusEnum.PENDING
-                        )
-                        db.add(check_item)
-                        cell_items_created += 1
-                        total_items += 1
-                        print(f"DEBUG:         ✅ 成功创建小区检查项: {cell_item_id}")
-                    except Exception as e:
-                        print(f"DEBUG:         ❌ 创建小区检查项失败: {e}")
-                        
-                print(f"DEBUG:     小区级检查项创建完成，共创建 {cell_items_created} 个")
-                
-            # 如果是扇区级检查（向后兼容）
-            elif is_sector_specific:
-                print(f"DEBUG:     ✅ 进入扇区级检查分支")
-                sectors = set(cell.sector_id for cell in cells)
-                print(f"DEBUG:       发现 {len(sectors)} 个扇区: {list(sectors)}")
-                sector_items_created = 0
-                for sector_id in sectors:
-                    sector_item_id = f"{item_id}_sector_{sector_id}"
-                    sector_item_name = f"{item_name} - 扇区 {sector_id}"
-                    print(f"DEBUG:       创建扇区检查项: {sector_item_name} (ID: {sector_item_id})")
-                    
-                    try:
-                        check_item = InspectionCheckItem(
-                            id=str(uuid.uuid4()),
-                            inspection_id=inspection.id,
-                            item_id=sector_item_id,
-                            item_name=sector_item_name,
-                            description=item_description,
-                            category_id=category_id,
-                            category_name=category_name,
-                            sector_id=sector_id,
-                            required_type=required_type,
-                            fields=item_fields,
-                            status=CheckItemStatusEnum.PENDING
-                        )
-                        db.add(check_item)
-                        sector_items_created += 1
-                        total_items += 1
-                        print(f"DEBUG:         ✅ 成功创建扇区检查项: {sector_item_id}")
-                    except Exception as e:
-                        print(f"DEBUG:         ❌ 创建扇区检查项失败: {e}")
-                        
-                print(f"DEBUG:     扇区级检查项创建完成，共创建 {sector_items_created} 个")
-                
-            else:
-                # 站点级检查项
-                print(f"DEBUG:     ✅ 进入站点级检查分支")
-                site_item_id = item_id
-                site_item_name = item_name
-                print(f"DEBUG:       创建站点检查项: {site_item_name} (ID: {site_item_id})")
-                
-                try:
+            if level_type == "cell_earfcn":
+                cells = carrier_cells or []
+                print(f"DEBUG:     ✅ 小区级（按EARFCN），为 {len(cells)} 个小区创建检查项")
+                for cell in cells:
+                    cell_item_id = f"{base_item_id}_cell_{cell.cell_id}"
+                    cell_item_name = f"{base_item_name} - 小区 {cell.cell_id}"
                     check_item = InspectionCheckItem(
                         id=str(uuid.uuid4()),
                         inspection_id=inspection.id,
-                        item_id=site_item_id,
-                        item_name=site_item_name,
+                        item_id=cell_item_id,
+                        item_name=cell_item_name,
                         description=item_description,
                         category_id=category_id,
                         category_name=category_name,
+                        sector_id=cell.sector_id,
+                        band=cell.band,
+                        cell_id=cell.cell_id,
                         required_type=required_type,
                         fields=item_fields,
-                        status=CheckItemStatusEnum.PENDING
+                        status=CheckItemStatusEnum.PENDING,
                     )
                     db.add(check_item)
                     total_items += 1
-                    print(f"DEBUG:         ✅ 成功创建站点检查项: {site_item_id}")
-                except Exception as e:
-                    print(f"DEBUG:         ❌ 创建站点检查项失败: {e}")
+            elif level_type == "device":
+                print(f"DEBUG:     ✅ 设备级（扇区×Band），为 {len(devices)} 个设备创建检查项")
+                for dev in devices:
+                    dev_item_id = f"{base_item_id}_cell_{dev.cell_id}"
+                    dev_item_name = f"{base_item_name} - 设备 {dev.cell_id}"
+                    check_item = InspectionCheckItem(
+                        id=str(uuid.uuid4()),
+                        inspection_id=inspection.id,
+                        item_id=dev_item_id,
+                        item_name=dev_item_name,
+                        description=item_description,
+                        category_id=category_id,
+                        category_name=category_name,
+                        sector_id=dev.sector_id,
+                        band=dev.band,
+                        cell_id=dev.cell_id,
+                        required_type=required_type,
+                        fields=item_fields,
+                        status=CheckItemStatusEnum.PENDING,
+                    )
+                    db.add(check_item)
+                    total_items += 1
+            elif level_type == "sector":
+                print(f"DEBUG:     ✅ 扇区级，为 {len(sectors)} 个扇区创建检查项")
+                for sector_id in sectors:
+                    sector_item_id = f"{base_item_id}_sector_{sector_id}"
+                    sector_item_name = f"{base_item_name} - 扇区 {sector_id}"
+                    check_item = InspectionCheckItem(
+                        id=str(uuid.uuid4()),
+                        inspection_id=inspection.id,
+                        item_id=sector_item_id,
+                        item_name=sector_item_name,
+                        description=item_description,
+                        category_id=category_id,
+                        category_name=category_name,
+                        sector_id=sector_id,
+                        required_type=required_type,
+                        fields=item_fields,
+                        status=CheckItemStatusEnum.PENDING,
+                    )
+                    db.add(check_item)
+                    total_items += 1
+            else:
+                print(f"DEBUG:     ✅ 站点级，创建 1 个检查项")
+                check_item = InspectionCheckItem(
+                    id=str(uuid.uuid4()),
+                    inspection_id=inspection.id,
+                    item_id=base_item_id,
+                    item_name=base_item_name,
+                    description=item_description,
+                    category_id=category_id,
+                    category_name=category_name,
+                    required_type=required_type,
+                    fields=item_fields,
+                    status=CheckItemStatusEnum.PENDING,
+                )
+                db.add(check_item)
+                total_items += 1
                     
-            print(f"DEBUG:     检查项 {item_name} 处理完成，当前总数: {total_items}")
+            print(f"DEBUG:     检查项 {base_item_name} 处理完成，当前总数: {total_items}")
             
     print(f"DEBUG: === 检查项创建汇总 ===")
     print(f"DEBUG: 总共创建了 {total_items} 个检查项")
@@ -2196,6 +2214,7 @@ async def bind_equipment_to_sector(
         existing_binding = db.query(InspectionCheckItem).filter(
             InspectionCheckItem.inspection_id == inspection_id,
             InspectionCheckItem.sector_id == sector_id,
+            func.coalesce(InspectionCheckItem.band, "") == func.coalesce(band, ""),
             InspectionCheckItem.equipment_sn.isnot(None),
             InspectionCheckItem.equipment_sn != equipment_sn
         ).first()
@@ -2203,7 +2222,10 @@ async def bind_equipment_to_sector(
         if existing_binding:
             raise HTTPException(
                 status_code=409,
-                detail=f"扇区 {sector_id} 已绑定其他设备: {existing_binding.equipment_sn}"
+                detail=(
+                    f"设备（扇区 {sector_id}"
+                    f"{'，频段 ' + str(band) if band else ''}）已绑定其他设备: {existing_binding.equipment_sn}"
+                )
             )
 
         # 新增：阻止同一设备SN绑定到其他小区（跨检查记录全局唯一小区）
@@ -2273,7 +2295,7 @@ async def bind_equipment_to_sector(
                     site_id=inspection.site_id,
                     sector_id=sector_id,
                     band=band or "",
-                    cell_id=cell_id,
+                    cell_id=item.cell_id or cell_id,
                     equipment_sn=equipment_sn if not is_unbind else previous_sn,
                     action=BindingActionEnum.UNBIND if is_unbind else (
                         BindingActionEnum.REBIND if previous_sn else BindingActionEnum.BIND

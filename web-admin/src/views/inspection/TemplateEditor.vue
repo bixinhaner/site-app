@@ -111,20 +111,21 @@
                         size="small"
                         style="margin-left: 12px; width: 120px;"
                         @change="onLevelTypeChange(category)"
-                        :disabled="isFieldDisabled('category', 'sector_specific')"
-                        :title="getFieldTooltip('category', 'sector_specific')"
+                        :disabled="isFieldDisabled('category', 'level_type')"
+                        :title="getFieldTooltip('category', 'level_type')"
                       >
                         <el-option label="站点级" value="site" />
                         <el-option label="扇区级" value="sector" />
-                        <el-option label="小区级" value="cell" />
+                        <el-option label="设备级" value="device" />
+                        <el-option label="小区级" value="cell_earfcn" />
                       </el-select>
                       
                       <el-tag 
-                        :type="category.cell_specific ? 'danger' : (category.sector_specific ? 'warning' : 'success')"
+                        :type="getLevelTagType(category)"
                         size="small"
                         style="margin-left: 8px;"
                       >
-                        {{ category.cell_specific ? '小区级' : (category.sector_specific ? '扇区级' : '站点级') }}
+                        {{ getLevelLabel(category) }}
                       </el-tag>
                     </div>
                     
@@ -378,6 +379,11 @@
               </div>
               
               <div class="stat-item">
+                <div class="stat-label">设备级检查项</div>
+                <div class="stat-value">{{ getDeviceLevelItems() }}</div>
+              </div>
+
+              <div class="stat-item">
                 <div class="stat-label">小区级检查项</div>
                 <div class="stat-value">{{ getCellLevelItems() }}</div>
               </div>
@@ -401,8 +407,13 @@
               </div>
               
               <div class="help-item">
+                <el-tag type="info" size="small">设备级</el-tag>
+                <span>每个设备（扇区×频段）独立检查（如：功率测试）</span>
+              </div>
+
+              <div class="help-item">
                 <el-tag type="danger" size="small">小区级</el-tag>
-                <span>每个小区（扇区×频段）独立检查（如：功率测试）</span>
+                <span>每个小区（扇区×频段×EARFCN）独立检查（如：频点相关参数）</span>
               </div>
             </div>
           </el-card>
@@ -518,15 +529,23 @@ const loadTemplate = async () => {
     
     // 为现有类别设置 level_type 和确保 fields 数组存在
     templateData.check_categories.forEach(category => {
+      // 历史兼容：旧模板可能用 level_type='cell' 表示“扇区×频段”（本次统一显示为 device）
+      if (category.level_type === 'cell') {
+        category.level_type = 'device'
+      }
+
       if (!category.level_type) {
         if (category.cell_specific) {
-          category.level_type = 'cell'
+          category.level_type = 'device'
         } else if (category.sector_specific) {
           category.level_type = 'sector'
         } else {
           category.level_type = 'site'
         }
       }
+
+      // 同步 booleans（用于兼容老数据与后端）
+      onLevelTypeChange(category)
       
       // 确保每个检查项都有fields数组，避免旧模板没有fields字段
       if (category.items && Array.isArray(category.items)) {
@@ -733,10 +752,55 @@ const onLevelTypeChange = (category) => {
       category.sector_specific = true
       category.cell_specific = false
       break
-    case 'cell':
+    case 'device':
+    case 'cell': // 历史兼容
+    case 'cell_earfcn':
       category.sector_specific = false
       category.cell_specific = true
       break
+  }
+}
+
+const normalizeLevelType = (category) => {
+  const lt = category?.level_type
+  if (lt === 'cell') return 'device'
+  if (!lt) {
+    if (category?.cell_specific) return 'device'
+    if (category?.sector_specific) return 'sector'
+    return 'site'
+  }
+  return lt
+}
+
+const getLevelLabel = (category) => {
+  const lt = normalizeLevelType(category)
+  switch (lt) {
+    case 'site':
+      return '站点级'
+    case 'sector':
+      return '扇区级'
+    case 'device':
+      return '设备级'
+    case 'cell_earfcn':
+      return '小区级'
+    default:
+      return '站点级'
+  }
+}
+
+const getLevelTagType = (category) => {
+  const lt = normalizeLevelType(category)
+  switch (lt) {
+    case 'site':
+      return 'success'
+    case 'sector':
+      return 'warning'
+    case 'device':
+      return 'info'
+    case 'cell_earfcn':
+      return 'danger'
+    default:
+      return 'success'
   }
 }
 
@@ -847,19 +911,25 @@ const getTotalItems = () => {
 
 const getSiteLevelItems = () => {
   return templateData.check_categories.reduce((total, category) => {
-    return total + (!category.sector_specific && !category.cell_specific ? category.items.length : 0)
+    return total + (normalizeLevelType(category) === 'site' ? category.items.length : 0)
   }, 0)
 }
 
 const getSectorLevelItems = () => {
   return templateData.check_categories.reduce((total, category) => {
-    return total + (category.sector_specific ? category.items.length : 0)
+    return total + (normalizeLevelType(category) === 'sector' ? category.items.length : 0)
+  }, 0)
+}
+
+const getDeviceLevelItems = () => {
+  return templateData.check_categories.reduce((total, category) => {
+    return total + (normalizeLevelType(category) === 'device' ? category.items.length : 0)
   }, 0)
 }
 
 const getCellLevelItems = () => {
   return templateData.check_categories.reduce((total, category) => {
-    return total + (category.cell_specific ? category.items.length : 0)
+    return total + (normalizeLevelType(category) === 'cell_earfcn' ? category.items.length : 0)
   }, 0)
 }
 

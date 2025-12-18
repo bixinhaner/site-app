@@ -150,7 +150,7 @@
                       <div class="field-item"><span class="field-label">PA</span><span class="field-value">{{ row.pa || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">PB</span><span class="field-value">{{ row.pb || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">BAND(原始)</span><span class="field-value">{{ row.band_in_file || '-' }}</span></div>
-                      <div class="field-item"><span class="field-label">Frequency</span><span class="field-value">{{ row.frequency ?? '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">EARFCN</span><span class="field-value">{{ row.frequency ?? '-' }}</span></div>
                       <div class="field-item"><span class="field-label">Bandwidth</span><span class="field-value">{{ row.bandwidth || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">机械下倾</span><span class="field-value">{{ row.mechanical_downtilt_deg ?? '-' }}</span></div>
                       <div class="field-item"><span class="field-label">电子下倾</span><span class="field-value">{{ row.electrical_downtilt_deg ?? '-' }}</span></div>
@@ -294,7 +294,7 @@
             <el-table-column prop="enb_id" label="ENB ID" width="100" />
             <el-table-column prop="eci" label="ECI" width="140" />
             <el-table-column prop="pci" label="PCI" width="80" />
-            <el-table-column prop="frequency" label="Freq" width="100" />
+            <el-table-column prop="frequency" label="EARFCN" width="100" />
             <el-table-column prop="bandwidth" label="Bandwidth" width="110" />
             <el-table-column prop="mechanical_downtilt_deg" label="机械下倾(°)" width="110" />
             <el-table-column prop="electrical_downtilt_deg" label="电子下倾(°)" width="110" />
@@ -371,7 +371,7 @@
                           <div class="field-item"><span class="field-label">PA</span><span class="field-value">{{ row.pa || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">PB</span><span class="field-value">{{ row.pb || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">BAND(原始)</span><span class="field-value">{{ row.band_in_file || '-' }}</span></div>
-                          <div class="field-item"><span class="field-label">Frequency</span><span class="field-value">{{ row.frequency ?? '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">EARFCN</span><span class="field-value">{{ row.frequency ?? '-' }}</span></div>
                           <div class="field-item"><span class="field-label">Bandwidth</span><span class="field-value">{{ row.bandwidth || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">机械下倾</span><span class="field-value">{{ row.mechanical_downtilt_deg ?? '-' }}</span></div>
                           <div class="field-item"><span class="field-label">电子下倾</span><span class="field-value">{{ row.electrical_downtilt_deg ?? '-' }}</span></div>
@@ -506,7 +506,7 @@
                 <el-table-column prop="gnb_id" label="gNB ID" width="100" />
                 <el-table-column prop="nci" label="NCI" width="160" />
                 <el-table-column prop="pci" label="PCI" width="80" />
-                <el-table-column prop="frequency" label="Freq" width="100" />
+                <el-table-column prop="frequency" label="EARFCN" width="100" />
                 <el-table-column prop="bandwidth" label="Bandwidth" width="110" />
                 <el-table-column prop="slot_config" label="Slot config" width="120" />
                 <el-table-column prop="slot_config_dl_ul" label="Slot DL/UL" width="120" />
@@ -755,7 +755,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="频率">
+            <el-form-item label="EARFCN">
               <el-input-number v-model="cellEditForm.frequency" />
             </el-form-item>
           </el-col>
