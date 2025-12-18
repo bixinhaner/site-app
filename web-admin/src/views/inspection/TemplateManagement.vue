@@ -92,34 +92,27 @@
         </template>
       </el-table-column>
       
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="240" fixed="right">
         <template #default="{ row }">
-          <el-button 
-            size="small" 
-            @click="handleEditTemplate(row)"
-          >
-            编辑
-          </el-button>
-          <el-button 
-            size="small" 
-            type="warning"
-            @click="handleManageBindings(row)"
-          >
-            绑定管理
-          </el-button>
-          <el-button 
-            size="small" 
-            type="danger"
-            @click="handleDeleteTemplate(row)"
-          >
-            删除
-          </el-button>
-          <el-button 
-            size="small" 
-            @click="handleExportTemplate(row)"
-          >
-            导出
-          </el-button>
+          <div class="op-actions">
+            <el-button link type="primary" size="small" @click="handlePreviewTemplate(row)">
+              <el-icon><View /></el-icon>预览
+            </el-button>
+            <el-button link type="primary" size="small" @click="handleEditTemplate(row)">
+              <el-icon><Edit /></el-icon>编辑
+            </el-button>
+            <el-tooltip content="绑定管理" placement="top">
+              <el-button link type="warning" size="small" @click="handleManageBindings(row)">
+                <el-icon><Link /></el-icon>绑定
+              </el-button>
+            </el-tooltip>
+            <el-button link type="info" size="small" @click="handleExportTemplate(row)">
+              <el-icon><Download /></el-icon>导出
+            </el-button>
+            <el-button link type="danger" size="small" @click="handleDeleteTemplate(row)">
+              <el-icon><Delete /></el-icon>删除
+            </el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -234,16 +227,26 @@
         </span>
       </template>
     </el-dialog>
+
+    <TemplatePreviewDrawer
+      v-model="previewVisible"
+      :content="previewContent"
+      :loading="previewLoading"
+      :error="previewError"
+      :disabled="false"
+      :title="previewTitle"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Plus, Upload } from '@element-plus/icons-vue'
+import { Search, Plus, Upload, View, Edit, Link, Download, Delete } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { templateAPI } from '../../api/templates'
 import BindingManagement from './components/BindingManagement.vue'
+import TemplatePreviewDrawer from './components/TemplatePreviewDrawer.vue'
 
 const router = useRouter()
 
@@ -269,6 +272,12 @@ const importForm = reactive({
 })
 const importFileName = ref('')
 const importTemplateObject = ref(null)
+
+const previewVisible = ref(false)
+const previewLoading = ref(false)
+const previewError = ref('')
+const previewTitle = ref('模板预览')
+const previewContent = ref(null)
 
 // 表单数据
 const templateFormRef = ref()
@@ -338,6 +347,38 @@ const handleCreateTemplate = () => {
 
 const handleEditTemplate = (template) => {
   router.push({ name: 'TemplateEditor', params: { id: template.id } })
+}
+
+const handlePreviewTemplate = async (templateRow) => {
+  previewVisible.value = true
+  previewLoading.value = true
+  previewError.value = ''
+  previewContent.value = null
+  previewTitle.value = `模板预览 - ${templateRow?.template_name || ''}`
+
+  try {
+    const tpl = await templateAPI.getTemplate(templateRow.id)
+    const categories = tpl?.template_data?.check_categories || []
+    if (!categories.length) {
+      ElMessage.warning('模板为空，暂无可预览内容')
+    }
+
+    previewContent.value = {
+      meta: {
+        template: {
+          name: tpl?.template_name || templateRow?.template_name || '',
+          version: tpl?.template_data?.template_version,
+        },
+      },
+      check_categories: categories,
+    }
+  } catch (error) {
+    console.error('加载模板预览失败:', error)
+    previewError.value = '加载预览失败，请稍后重试'
+    ElMessage.error(previewError.value)
+  } finally {
+    previewLoading.value = false
+  }
 }
 
 const handleManageBindings = (template) => {
@@ -604,5 +645,15 @@ onMounted(() => {
   margin-top: 4px;
   font-size: 13px;
   color: #606266;
+}
+
+.op-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.op-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 </style>

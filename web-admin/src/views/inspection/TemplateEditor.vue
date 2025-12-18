@@ -435,13 +435,12 @@
     </div>
   </div>
 
-  <el-drawer v-model="previewVisible" title="模板预览" size="80%">
-    <archive-form-renderer
-      v-if="previewVisible"
-      :content="previewContent"
-      :disabled="false"
-    />
-  </el-drawer>
+  <TemplatePreviewDrawer
+    v-model="previewVisible"
+    :content="previewContent"
+    :disabled="false"
+    title="模板预览"
+  />
 </template>
 
 <script setup>
@@ -452,13 +451,13 @@ import {
   ArrowLeft, Check, View, Plus, Delete, DocumentCopy, QuestionFilled 
 } from '@element-plus/icons-vue'
 import { templateAPI } from '../../api/templates'
-import { 
+import {
   isStructuralField,
   getFieldDisabledReason,
   getOperationDisabledReason,
   canChangeRequired
 } from '../../config/template-field-rules'
-import ArchiveFormRenderer from '@/components/archives/ArchiveFormRenderer.vue'
+import TemplatePreviewDrawer from './components/TemplatePreviewDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
