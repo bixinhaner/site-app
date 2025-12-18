@@ -2563,7 +2563,7 @@
         background: var(--bg-page);
         display: flex;
         flex-direction: column;
-        overflow-x: hidden;
+        overflow: hidden;
         box-sizing: border-box;
     }
 	
@@ -2707,8 +2707,9 @@
 	/* 检查内容 */
 	.checklist-content {
 		flex: 1;
-		padding: 0 20rpx;
-		margin-bottom: 120rpx;
+		height: 0;
+		min-height: 0;
+		padding: 0 20rpx calc(140rpx + env(safe-area-inset-bottom));
 		width: 100%;
 		max-width: 100vw;
 		box-sizing: border-box;

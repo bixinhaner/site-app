@@ -1239,6 +1239,7 @@
         background: var(--bg-page);
         display: flex;
         flex-direction: column;
+        overflow: hidden;
     }
 	
 	/* 导航栏 */
@@ -1430,6 +1431,8 @@
 	/* 详情内容 */
 	.detail-content {
 		flex: 1;
+		height: 0;
+		min-height: 0;
 		padding: 0 20rpx 120rpx;
 	}
 	
