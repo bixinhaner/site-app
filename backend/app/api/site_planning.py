@@ -18,6 +18,7 @@ from app.models.planning import (
     PlanningChangeLog,
     SitePlanningCell,
 )
+from app.utils.planning_schema import LLD_CELL_EXTRA_FIELD_CANDIDATES
 from app.schemas.planning import (
     SitePlanningResponse,
     SitePlanningUpdate,
@@ -90,6 +91,16 @@ def _snapshot(planning: Optional[SitePlanning]) -> Optional[dict]:
             }
             for sp in (planning.switch_ports or [])
         ],
+    }
+
+
+def _cell_kwargs_from_model(cell: SitePlanningCell) -> dict:
+    """将 SitePlanningCell ORM 对象转换为可用于新建行的 kwargs（自动涵盖新增列）。"""
+    exclude = {"id", "planning_id", "created_at"}
+    return {
+        c.name: getattr(cell, c.name)
+        for c in SitePlanningCell.__table__.columns
+        if c.name not in exclude
     }
 
 
@@ -276,6 +287,36 @@ def _normalize_tower_id(value) -> Optional[str]:
     return s or None
 
 
+def _normalize_lld_column_name(col: object) -> str:
+    """规范化 LLD 模板列名。
+
+    新版模板会在列名中用换行标注“新增/改/填写值变化”等说明，这里将其去除，
+    并把多行标题合并为一行，方便后续字段匹配与兼容旧模板。
+    """
+    raw = "" if col is None else str(col)
+    raw = raw.replace("\r", "\n").strip()
+    if not raw:
+        return ""
+
+    # 只移除纯“标注行”，保留真实字段名（如 Province/Region 这种改名提示会保留两段）
+    annotation_tokens = {
+        "新增",
+        "改",
+        "修改",
+        "修改名字",
+        "改名",
+        "同",
+        "同现存",
+        "填写值变化",
+    }
+    parts = [p.strip() for p in raw.split("\n") if p and str(p).strip()]
+    cleaned = [p for p in parts if p not in annotation_tokens]
+    name = " ".join(cleaned) if cleaned else raw
+    # 统一多空格
+    name = " ".join(name.split())
+    return name
+
+
 def _first_not_null(row: dict, candidates) -> Optional[object]:
     """从多列候选中取第一个非空值（排除 NaN 和空字符串）。"""
     for name in candidates:
@@ -296,6 +337,30 @@ def _to_str(v) -> Optional[str]:
     return s if s else None
 
 
+def _to_clean_str(v) -> Optional[str]:
+    """将 Excel 单元格值转换为“干净”的字符串（用于模板扩展字段：统一按字符串保存）。"""
+    sv = _sanitize_excel_value(v)
+    if sv is None:
+        return None
+    if isinstance(sv, bool):
+        return "true" if sv else "false"
+    if isinstance(sv, int):
+        return str(sv)
+    if isinstance(sv, float):
+        if sv.is_integer():
+            return str(int(sv))
+        return str(sv)
+    if isinstance(sv, (dict, list)):
+        try:
+            import json
+
+            return json.dumps(sv, ensure_ascii=False)
+        except Exception:
+            return str(sv)
+    s = str(sv).strip()
+    return s if s else None
+
+
 def _to_int(v) -> Optional[int]:
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return None
@@ -312,6 +377,30 @@ def _to_float(v) -> Optional[float]:
         return float(v)
     except Exception:
         return None
+
+
+def _sanitize_excel_value(v):
+    """将 Excel 单元格值转换为可 JSON 存储的基础类型。"""
+    if v is None:
+        return None
+    if isinstance(v, float) and pd.isna(v):
+        return None
+    # pandas Timestamp / datetime
+    try:
+        import pandas as _pd
+        if isinstance(v, _pd.Timestamp):
+            return v.to_pydatetime().isoformat()
+    except Exception:
+        pass
+    if isinstance(v, datetime):
+        return v.isoformat()
+    # numpy scalar
+    if hasattr(v, "item") and callable(getattr(v, "item")):
+        try:
+            return v.item()
+        except Exception:
+            pass
+    return v
 
 
 def _create_new_version(
@@ -423,40 +512,70 @@ def _collect_lld_rows_by_tower(excel: pd.ExcelFile) -> dict:
           ...
         }
     """
-    rows_by_tower = {}
+    rows_by_tower: Dict[str, List[dict]] = {}
+
+    # 支持两种格式：
+    # 1) 旧模板：按 Sheet 名 B*/N* 区分频段
+    # 2) 新模板：固定 Sheet：4G/5G，由行内 BAND/Band 指定频段；列名可能带换行标注“新增/改”等
     for sheet_name in excel.sheet_names:
         if not sheet_name:
             continue
         sname = str(sheet_name).strip()
-        upper = sname.upper()
-        if not (upper.startswith("B") or upper.startswith("N")):
-            # 仅处理 B*/N* 这些 4G/5G 规划 sheet
+        if not sname:
             continue
-        rat = "LTE" if upper.startswith("B") else "NR"
-        band_code = sname
+        upper = sname.upper()
 
         df = excel.parse(sheet_name)
         if df.empty:
             continue
-        # 去除列名空格，便于字段匹配
-        df.rename(columns=lambda c: str(c).strip(), inplace=True)
+        df.rename(columns=_normalize_lld_column_name, inplace=True)
 
-        for _, r in df.iterrows():
-            row_dict = r.to_dict()
-            tower_raw = row_dict.get("TOWER ID")
-            tower_id = _normalize_tower_id(tower_raw)
-            local_cell_val = _first_not_null(row_dict, ["LOCAL CELL ID"])
+        def add_row(row_dict: dict, rat: str, band_code: Optional[str], sheet_label: str):
+            tower_id = _normalize_tower_id(_first_not_null(row_dict, ["TOWER ID"]))
+            local_cell_val = _first_not_null(row_dict, ["LOCAL CELL ID", "Sector ID Local ID", "Sector ID", "Local ID"])
             if not tower_id or local_cell_val is None:
-                # 没有 SITE ID 或 LOCAL CELL ID 的行视为无效
-                continue
+                return
+            b = _to_str(band_code)
+            b = b.upper() if b else None
             rows_by_tower.setdefault(tower_id, []).append(
                 {
                     "rat": rat,
-                    "band_code": band_code,
-                    "sheet_name": sname,
+                    "band_code": b or sheet_label,
+                    "sheet_name": sheet_label,
                     "row": row_dict,
                 }
             )
+
+        if upper in ("4G", "4G CELL", "LTE"):
+            for _, r in df.iterrows():
+                row_dict = r.to_dict()
+                band = _to_str(_first_not_null(row_dict, ["BAND", "Band", "Band Code"]))
+                # 新模板 4G/5G Sheet 不含频段信息的情况下无法推断 band_code，直接跳过
+                if not band:
+                    continue
+                add_row(row_dict, rat="LTE", band_code=band, sheet_label=sname)
+            continue
+
+        if upper in ("5G", "5G CELL", "NR"):
+            for _, r in df.iterrows():
+                row_dict = r.to_dict()
+                band = _to_str(_first_not_null(row_dict, ["Band", "BAND", "Band Code"]))
+                if not band:
+                    continue
+                add_row(row_dict, rat="NR", band_code=band, sheet_label=sname)
+            continue
+
+        if upper.startswith("B") or upper.startswith("N"):
+            rat = "LTE" if upper.startswith("B") else "NR"
+            band_code = sname
+            for _, r in df.iterrows():
+                row_dict = r.to_dict()
+                add_row(row_dict, rat=rat, band_code=band_code, sheet_label=sname)
+            continue
+
+        # 其他 sheet 忽略
+        continue
+
     return rows_by_tower
 
 
@@ -471,6 +590,104 @@ def _build_cell_dict_from_row(
     sheet_name = meta["sheet_name"]
     row = meta["row"]
 
+    # 兼容旧模板与新版模板列名
+    local_cell_candidates = ["LOCAL CELL ID", "Sector ID Local ID", "Sector ID", "Local ID"]
+    band_candidates = ["BAND", "Band", "Band Code"]
+
+    known_cols = set(
+        [
+            "TOWER ID",
+            "SITE INFORMATION",
+            "SITE NAME",
+            "CELL NAME",
+            "ENB ID",
+            "ECI",
+            "PLMN",
+            "TAC",
+            "PCI",
+            "ZC Root Index",
+            "Longitude",
+            "Latitude",
+            "功率（dbm）",
+            "功率",
+            "Power",
+            "Power（dbm）",
+            "PA",
+            "PB",
+            "Cover Type",
+            "Coverage type",
+            "Frequency",
+            "EARFCN",
+            "带宽",
+            "Bandwidth",
+            "DL Bandwidth",
+            "机械下倾",
+            "M-Tilt",
+            "电子下倾",
+            "E-Tilt",
+            "Azimuth",
+            "Tower Height",
+            "Antenna Height",
+            "Tower Merchants",
+            "Band Combination",
+            "天线端口",
+            "Antenna port",
+            "Cell Allocation",
+            "TOWER NAME",
+            "Town",
+            "Region",
+            "Province Region",
+            "覆盖区域",
+            "区域权重",
+            "覆盖场景",
+            "场景权重",
+            "综合权重",
+            "Coverage scenarios",
+            "Area priority value",
+            "scenarios priority value",
+            "Priority Value",
+            "priority value",
+            "备注列：调整日期",
+            "Remark",
+            # 5G
+            "gNB ID",
+            "Gnb length",
+            "NCI",
+            "gNB WAN IP",
+            "MASTER 5GC IP1",
+            "MASTER 5GC IP2",
+            "MASTER 5GC IP3",
+            "BACKUP 5GC IP1",
+            "BACKUP 5GC IP2",
+            "BACKUP 5GC IP3",
+            "MASTER OMC IP",
+            "BACKUP OMC IP",
+            "NTP IP1",
+            "NTP IP2",
+            "Kssb",
+            "Offset to PointA",
+            "Slot config",
+            "Slot config DL/UL",
+            "Symbol config DL/UL",
+        ]
+        + local_cell_candidates
+        + band_candidates
+    )
+    # 新版模板扩展字段：不再放入 extra_params
+    for candidates in LLD_CELL_EXTRA_FIELD_CANDIDATES.values():
+        known_cols.update(candidates)
+
+    extra_params = {}
+    for k, v in (row or {}).items():
+        if k in known_cols:
+            continue
+        sv = _sanitize_excel_value(v)
+        if sv is None:
+            continue
+        if isinstance(sv, str) and not sv.strip():
+            continue
+        extra_params[k] = sv
+
     cell = {
         "site_id": site_id,
         "rat": rat,
@@ -479,7 +696,7 @@ def _build_cell_dict_from_row(
         "tower_id": tower_id,
         "site_information": _to_str(_first_not_null(row, ["SITE INFORMATION"])),
         "site_name": _to_str(_first_not_null(row, ["SITE NAME"])),
-        "local_cell_id": _to_int(_first_not_null(row, ["LOCAL CELL ID"])),
+        "local_cell_id": _to_int(_first_not_null(row, local_cell_candidates)),
         "cell_name": _to_str(_first_not_null(row, ["CELL NAME"])),
         "enb_id": _to_int(_first_not_null(row, ["ENB ID"])),
         "eci": _to_int(_first_not_null(row, ["ECI"])),
@@ -489,31 +706,32 @@ def _build_cell_dict_from_row(
         "zc_root_index": _to_int(_first_not_null(row, ["ZC Root Index"])),
         "longitude": _to_float(_first_not_null(row, ["Longitude"])),
         "latitude": _to_float(_first_not_null(row, ["Latitude"])),
-        "power_dbm": _to_float(_first_not_null(row, ["功率（dbm）", "功率"])),
+        "power_dbm": _to_float(_first_not_null(row, ["功率（dbm）", "功率", "Power（dbm）", "Power"])),
         "pa": _to_str(_first_not_null(row, ["PA"])),
         "pb": _to_str(_first_not_null(row, ["PB"])),
-        "cover_type": _to_str(_first_not_null(row, ["Cover Type"])),
-        "band_in_file": _to_str(_first_not_null(row, ["BAND"])),
-        "frequency": _to_int(_first_not_null(row, ["Frequency"])),
-        "bandwidth": _to_str(_first_not_null(row, ["带宽", "Bandwidth"])),
-        "mechanical_downtilt_deg": _to_float(_first_not_null(row, ["机械下倾"])),
-        "electrical_downtilt_deg": _to_float(_first_not_null(row, ["电子下倾"])),
+        "cover_type": _to_str(_first_not_null(row, ["Cover Type", "Coverage type"])),
+        "band_in_file": _to_str(_first_not_null(row, band_candidates)),
+        "frequency": _to_int(_first_not_null(row, ["Frequency", "EARFCN"])),
+        # 对 5G 新模板，优先使用 DL Bandwidth；否则回退 Bandwidth
+        "bandwidth": _to_str(_first_not_null(row, ["带宽", "DL Bandwidth", "Bandwidth"])),
+        "mechanical_downtilt_deg": _to_float(_first_not_null(row, ["机械下倾", "M-Tilt"])),
+        "electrical_downtilt_deg": _to_float(_first_not_null(row, ["电子下倾", "E-Tilt"])),
         "azimuth_deg": _to_float(_first_not_null(row, ["Azimuth"])),
         "tower_height": _to_float(_first_not_null(row, ["Tower Height"])),
         "antenna_height": _to_float(_first_not_null(row, ["Antenna Height"])),
         "tower_merchants": _to_str(_first_not_null(row, ["Tower Merchants"])),
         "band_combination": _to_str(_first_not_null(row, ["Band Combination"])),
-        "antenna_ports": _to_int(_first_not_null(row, ["天线端口"])),
+        "antenna_ports": _to_int(_first_not_null(row, ["天线端口", "Antenna port"])),
         "cell_allocation": _to_str(_first_not_null(row, ["Cell Allocation"])),
         "tower_name": _to_str(_first_not_null(row, ["TOWER NAME"])),
         "town": _to_str(_first_not_null(row, ["Town"])),
-        "region": _to_str(_first_not_null(row, ["Region"])),
+        "region": _to_str(_first_not_null(row, ["Region", "Province Region", "Province"])),
         "coverage_area": _to_str(_first_not_null(row, ["覆盖区域"])),
-        "coverage_weight": _to_str(_first_not_null(row, ["区域权重"])),
-        "scenario": _to_str(_first_not_null(row, ["覆盖场景"])),
-        "scenario_weight": _to_str(_first_not_null(row, ["场景权重"])),
-        "weight": _to_str(_first_not_null(row, ["综合权重"])),
-        "remark": _to_str(_first_not_null(row, ["备注列：调整日期"])),
+        "coverage_weight": _to_str(_first_not_null(row, ["区域权重", "Area priority value"])),
+        "scenario": _to_str(_first_not_null(row, ["覆盖场景", "Coverage scenarios"])),
+        "scenario_weight": _to_str(_first_not_null(row, ["场景权重", "scenarios priority value"])),
+        "weight": _to_str(_first_not_null(row, ["综合权重", "Priority Value", "priority value"])),
+        "remark": _to_str(_first_not_null(row, ["备注列：调整日期", "Remark"])),
         # 5G 字段（如果列不存在或为 NaN，会自动为 None）
         "gnb_id": _to_int(_first_not_null(row, ["gNB ID"])),
         "gnb_length": _to_int(_first_not_null(row, ["Gnb length"])),
@@ -534,7 +752,12 @@ def _build_cell_dict_from_row(
         "slot_config": _to_str(_first_not_null(row, ["Slot config"])),
         "slot_config_dl_ul": _to_str(_first_not_null(row, ["Slot config DL/UL"])),
         "symbol_config_dl_ul": _to_str(_first_not_null(row, ["Symbol config DL/UL"])),
-        "extra_params": None,
+        # 新版模板扩展字段（统一字符串）
+        **{
+            field_name: _to_clean_str(_first_not_null(row, candidates))
+            for field_name, candidates in LLD_CELL_EXTRA_FIELD_CANDIDATES.items()
+        },
+        "extra_params": extra_params or None,
     }
     return cell
 
@@ -957,71 +1180,7 @@ async def restore_version(site_id: int, version: int, db: Session = Depends(get_
     )
     if old_cells:
         for oc in old_cells:
-            cell_kwargs = {
-                "site_id": oc.site_id,
-                "rat": oc.rat,
-                "band_code": oc.band_code,
-                "sheet_name": oc.sheet_name,
-                "tower_id": oc.tower_id,
-                "site_information": oc.site_information,
-                "site_name": oc.site_name,
-                "local_cell_id": oc.local_cell_id,
-                "cell_name": oc.cell_name,
-                "enb_id": oc.enb_id,
-                "eci": oc.eci,
-                "plmn": oc.plmn,
-                "tac": oc.tac,
-                "pci": oc.pci,
-                "zc_root_index": oc.zc_root_index,
-                "longitude": oc.longitude,
-                "latitude": oc.latitude,
-                "power_dbm": oc.power_dbm,
-                "pa": oc.pa,
-                "pb": oc.pb,
-                "cover_type": oc.cover_type,
-                "band_in_file": oc.band_in_file,
-                "frequency": oc.frequency,
-                "bandwidth": oc.bandwidth,
-                "mechanical_downtilt_deg": oc.mechanical_downtilt_deg,
-                "electrical_downtilt_deg": oc.electrical_downtilt_deg,
-                "azimuth_deg": oc.azimuth_deg,
-                "tower_height": oc.tower_height,
-                "antenna_height": oc.antenna_height,
-                "tower_merchants": oc.tower_merchants,
-                "band_combination": oc.band_combination,
-                "antenna_ports": oc.antenna_ports,
-                "cell_allocation": oc.cell_allocation,
-                "tower_name": oc.tower_name,
-                "town": oc.town,
-                "region": oc.region,
-                "coverage_area": oc.coverage_area,
-                "coverage_weight": oc.coverage_weight,
-                "scenario": oc.scenario,
-                "scenario_weight": oc.scenario_weight,
-                "weight": oc.weight,
-                "remark": oc.remark,
-                "gnb_id": oc.gnb_id,
-                "gnb_length": oc.gnb_length,
-                "nci": oc.nci,
-                "gnb_wan_ip": oc.gnb_wan_ip,
-                "master_5gc_ip1": oc.master_5gc_ip1,
-                "master_5gc_ip2": oc.master_5gc_ip2,
-                "master_5gc_ip3": oc.master_5gc_ip3,
-                "backup_5gc_ip1": oc.backup_5gc_ip1,
-                "backup_5gc_ip2": oc.backup_5gc_ip2,
-                "backup_5gc_ip3": oc.backup_5gc_ip3,
-                "master_omc_ip": oc.master_omc_ip,
-                "backup_omc_ip": oc.backup_omc_ip,
-                "ntp_ip1": oc.ntp_ip1,
-                "ntp_ip2": oc.ntp_ip2,
-                "kssb": oc.kssb,
-                "offset_to_point_a": oc.offset_to_point_a,
-                "slot_config": oc.slot_config,
-                "slot_config_dl_ul": oc.slot_config_dl_ul,
-                "symbol_config_dl_ul": oc.symbol_config_dl_ul,
-                "extra_params": oc.extra_params,
-            }
-            db.add(SitePlanningCell(planning_id=new_planning.id, **cell_kwargs))
+            db.add(SitePlanningCell(planning_id=new_planning.id, **_cell_kwargs_from_model(oc)))
         db.commit()
 
     return await get_current_planning(site_id, db, current_user)
@@ -1448,19 +1607,22 @@ async def download_lld_batch_template():
     """
     下载 LLD 规划导入模板。
 
-    当前实现直接返回仓库根目录下的
-    `Summary of pre planned site LLD_newplan251113V1.xlsx` 文件，
-    以保证与规划团队现有模板格式完全一致。
+    优先返回仓库根目录下的新版模板 `LLD templateV1.0.xlsx`（Sheet: 4G/5G）。
+    若未找到，则回退到旧模板 `Summary of pre planned site LLD_newplan251113V1.xlsx`（Sheet: B*/N*）。
     """
     from fastapi.responses import StreamingResponse
     from pathlib import Path
 
     base_dir = Path(__file__).resolve().parents[3]
-    xlsx_path = base_dir / "Summary of pre planned site LLD_newplan251113V1.xlsx"
+    # 新模板优先
+    xlsx_path = base_dir / "LLD templateV1.0.xlsx"
+    if not xlsx_path.exists():
+        # 兼容旧模板
+        xlsx_path = base_dir / "Summary of pre planned site LLD_newplan251113V1.xlsx"
     if not xlsx_path.exists():
         raise HTTPException(
             status_code=500,
-            detail="LLD 模板文件缺失：请在系统部署目录中放置 Summary of pre planned site LLD_newplan251113V1.xlsx",
+            detail="LLD 模板文件缺失：请在系统部署目录中放置 LLD templateV1.0.xlsx（或旧版 Summary of pre planned site LLD_newplan251113V1.xlsx）",
         )
 
     data = xlsx_path.read_bytes()
@@ -1484,7 +1646,11 @@ async def lld_batch_upload_planning(
     current_user: User = Depends(get_current_user),
 ):
     """
-    基于 LLD Excel（B28/B40/B3/N41 等 Sheet）批量导入站点规划。
+    基于 LLD Excel 批量导入站点规划。
+
+    - 兼容旧模板：Sheet 名以 B*/N* 开头（如 B28/B40/B3/N41）
+    - 支持新模板：Sheet 为 4G/5G（频段从行内 BAND/Band 列读取）
+
     使用 TOWER ID 作为 SITE ID，匹配 sites.site_code。
     """
     if current_user.role not in ["admin", "manager", "planner"]:
@@ -1501,7 +1667,10 @@ async def lld_batch_upload_planning(
 
     rows_by_tower = _collect_lld_rows_by_tower(excel)
     if not rows_by_tower:
-        raise HTTPException(status_code=400, detail="未在 LLD 文件中找到有效的 B*/N* 规划数据（检查 TOWER ID 与 LOCAL CELL ID 列是否存在且非空）")
+        raise HTTPException(
+            status_code=400,
+            detail="未在 LLD 文件中找到有效的规划数据（请检查是否包含 4G/5G 或 B*/N* Sheet，且 TOWER ID 与 Sector ID/LOCAL CELL ID 列存在且非空）",
+        )
 
     results: List[BatchPlanningResult] = []
     success_count = 0
@@ -1537,7 +1706,7 @@ async def lld_batch_upload_planning(
                 cell_dicts.append(cell)
 
             if not cell_dicts:
-                errors.append("该站点在 LLD 中没有有效的小区行（LOCAL CELL ID 为空）")
+                errors.append("该站点在 LLD 中没有有效的小区行（Sector ID/LOCAL CELL ID 为空）")
                 results.append(BatchPlanningResult(site_code=tower_id, site_id=site.id, success=False, errors=errors))
                 failed_count += 1
                 continue
@@ -1674,7 +1843,7 @@ async def lld_upload_planning_for_site(
         cell_dicts.append(cell)
 
     if not cell_dicts:
-        errors.append("该站点在 LLD 中没有有效的小区行（LOCAL CELL ID 为空）")
+        errors.append("该站点在 LLD 中没有有效的小区行（Sector ID/LOCAL CELL ID 为空）")
         return BatchPlanningResult(site_code=site.site_code, site_id=site.id, success=False, errors=errors)
 
     lte_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "LTE")
@@ -2111,71 +2280,7 @@ async def update_lld_cell(
             db.add(old_cell)
         else:
             # 复制其他 Cell
-            cell_kwargs = {
-                "site_id": old_cell.site_id,
-                "rat": old_cell.rat,
-                "band_code": old_cell.band_code,
-                "sheet_name": old_cell.sheet_name,
-                "tower_id": old_cell.tower_id,
-                "site_information": old_cell.site_information,
-                "site_name": old_cell.site_name,
-                "local_cell_id": old_cell.local_cell_id,
-                "cell_name": old_cell.cell_name,
-                "enb_id": old_cell.enb_id,
-                "eci": old_cell.eci,
-                "plmn": old_cell.plmn,
-                "tac": old_cell.tac,
-                "pci": old_cell.pci,
-                "zc_root_index": old_cell.zc_root_index,
-                "longitude": old_cell.longitude,
-                "latitude": old_cell.latitude,
-                "power_dbm": old_cell.power_dbm,
-                "pa": old_cell.pa,
-                "pb": old_cell.pb,
-                "cover_type": old_cell.cover_type,
-                "band_in_file": old_cell.band_in_file,
-                "frequency": old_cell.frequency,
-                "bandwidth": old_cell.bandwidth,
-                "mechanical_downtilt_deg": old_cell.mechanical_downtilt_deg,
-                "electrical_downtilt_deg": old_cell.electrical_downtilt_deg,
-                "azimuth_deg": old_cell.azimuth_deg,
-                "tower_height": old_cell.tower_height,
-                "antenna_height": old_cell.antenna_height,
-                "tower_merchants": old_cell.tower_merchants,
-                "band_combination": old_cell.band_combination,
-                "antenna_ports": old_cell.antenna_ports,
-                "cell_allocation": old_cell.cell_allocation,
-                "tower_name": old_cell.tower_name,
-                "town": old_cell.town,
-                "region": old_cell.region,
-                "coverage_area": old_cell.coverage_area,
-                "coverage_weight": old_cell.coverage_weight,
-                "scenario": old_cell.scenario,
-                "scenario_weight": old_cell.scenario_weight,
-                "weight": old_cell.weight,
-                "remark": old_cell.remark,
-                "gnb_id": old_cell.gnb_id,
-                "gnb_length": old_cell.gnb_length,
-                "nci": old_cell.nci,
-                "gnb_wan_ip": old_cell.gnb_wan_ip,
-                "master_5gc_ip1": old_cell.master_5gc_ip1,
-                "master_5gc_ip2": old_cell.master_5gc_ip2,
-                "master_5gc_ip3": old_cell.master_5gc_ip3,
-                "backup_5gc_ip1": old_cell.backup_5gc_ip1,
-                "backup_5gc_ip2": old_cell.backup_5gc_ip2,
-                "backup_5gc_ip3": old_cell.backup_5gc_ip3,
-                "master_omc_ip": old_cell.master_omc_ip,
-                "backup_omc_ip": old_cell.backup_omc_ip,
-                "ntp_ip1": old_cell.ntp_ip1,
-                "ntp_ip2": old_cell.ntp_ip2,
-                "kssb": old_cell.kssb,
-                "offset_to_point_a": old_cell.offset_to_point_a,
-                "slot_config": old_cell.slot_config,
-                "slot_config_dl_ul": old_cell.slot_config_dl_ul,
-                "symbol_config_dl_ul": old_cell.symbol_config_dl_ul,
-                "extra_params": old_cell.extra_params,
-            }
-            db.add(SitePlanningCell(planning_id=new_planning.id, **cell_kwargs))
+            db.add(SitePlanningCell(planning_id=new_planning.id, **_cell_kwargs_from_model(old_cell)))
 
     db.commit()
 
@@ -2330,71 +2435,7 @@ async def delete_lld_cell(
     )
     for old_cell in old_cells:
         if old_cell.id != cell_id:
-            cell_kwargs = {
-                "site_id": old_cell.site_id,
-                "rat": old_cell.rat,
-                "band_code": old_cell.band_code,
-                "sheet_name": old_cell.sheet_name,
-                "tower_id": old_cell.tower_id,
-                "site_information": old_cell.site_information,
-                "site_name": old_cell.site_name,
-                "local_cell_id": old_cell.local_cell_id,
-                "cell_name": old_cell.cell_name,
-                "enb_id": old_cell.enb_id,
-                "eci": old_cell.eci,
-                "plmn": old_cell.plmn,
-                "tac": old_cell.tac,
-                "pci": old_cell.pci,
-                "zc_root_index": old_cell.zc_root_index,
-                "longitude": old_cell.longitude,
-                "latitude": old_cell.latitude,
-                "power_dbm": old_cell.power_dbm,
-                "pa": old_cell.pa,
-                "pb": old_cell.pb,
-                "cover_type": old_cell.cover_type,
-                "band_in_file": old_cell.band_in_file,
-                "frequency": old_cell.frequency,
-                "bandwidth": old_cell.bandwidth,
-                "mechanical_downtilt_deg": old_cell.mechanical_downtilt_deg,
-                "electrical_downtilt_deg": old_cell.electrical_downtilt_deg,
-                "azimuth_deg": old_cell.azimuth_deg,
-                "tower_height": old_cell.tower_height,
-                "antenna_height": old_cell.antenna_height,
-                "tower_merchants": old_cell.tower_merchants,
-                "band_combination": old_cell.band_combination,
-                "antenna_ports": old_cell.antenna_ports,
-                "cell_allocation": old_cell.cell_allocation,
-                "tower_name": old_cell.tower_name,
-                "town": old_cell.town,
-                "region": old_cell.region,
-                "coverage_area": old_cell.coverage_area,
-                "coverage_weight": old_cell.coverage_weight,
-                "scenario": old_cell.scenario,
-                "scenario_weight": old_cell.scenario_weight,
-                "weight": old_cell.weight,
-                "remark": old_cell.remark,
-                "gnb_id": old_cell.gnb_id,
-                "gnb_length": old_cell.gnb_length,
-                "nci": old_cell.nci,
-                "gnb_wan_ip": old_cell.gnb_wan_ip,
-                "master_5gc_ip1": old_cell.master_5gc_ip1,
-                "master_5gc_ip2": old_cell.master_5gc_ip2,
-                "master_5gc_ip3": old_cell.master_5gc_ip3,
-                "backup_5gc_ip1": old_cell.backup_5gc_ip1,
-                "backup_5gc_ip2": old_cell.backup_5gc_ip2,
-                "backup_5gc_ip3": old_cell.backup_5gc_ip3,
-                "master_omc_ip": old_cell.master_omc_ip,
-                "backup_omc_ip": old_cell.backup_omc_ip,
-                "ntp_ip1": old_cell.ntp_ip1,
-                "ntp_ip2": old_cell.ntp_ip2,
-                "kssb": old_cell.kssb,
-                "offset_to_point_a": old_cell.offset_to_point_a,
-                "slot_config": old_cell.slot_config,
-                "slot_config_dl_ul": old_cell.slot_config_dl_ul,
-                "symbol_config_dl_ul": old_cell.symbol_config_dl_ul,
-                "extra_params": old_cell.extra_params,
-            }
-            db.add(SitePlanningCell(planning_id=new_planning.id, **cell_kwargs))
+            db.add(SitePlanningCell(planning_id=new_planning.id, **_cell_kwargs_from_model(old_cell)))
 
     db.commit()
 

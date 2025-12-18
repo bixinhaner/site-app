@@ -176,9 +176,9 @@
                       <div class="field-item"><span class="field-label">综合权重</span><span class="field-value">{{ row.weight || '-' }}</span></div>
                     </div>
                   </div>
-                  <div class="expand-group">
-                    <div class="group-title">5G 核心网（NR 时有意义）</div>
-                    <div class="group-grid">
+                      <div class="expand-group">
+                        <div class="group-title">5G 核心网（NR 时有意义）</div>
+                        <div class="group-grid">
                       <div class="field-item"><span class="field-label">gNB ID</span><span class="field-value">{{ row.gnb_id ?? '-' }}</span></div>
                       <div class="field-item"><span class="field-label">Gnb length</span><span class="field-value">{{ row.gnb_length ?? '-' }}</span></div>
                       <div class="field-item"><span class="field-label">NCI</span><span class="field-value">{{ row.nci ?? '-' }}</span></div>
@@ -198,6 +198,84 @@
                       <div class="field-item"><span class="field-label">Slot config</span><span class="field-value">{{ row.slot_config || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">Slot DL/UL</span><span class="field-value">{{ row.slot_config_dl_ul || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">Symbol DL/UL</span><span class="field-value">{{ row.symbol_config_dl_ul || '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="expand-group">
+                    <div class="group-title">LLD 模板扩展字段</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">Index</span><span class="field-value">{{ row.excel_index || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Province Region</span><span class="field-value">{{ row.province_region || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Province</span><span class="field-value">{{ row.province || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">City</span><span class="field-value">{{ row.city || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">County</span><span class="field-value">{{ row.county || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Address</span><span class="field-value">{{ row.address || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Cluster</span><span class="field-value">{{ row.cluster || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">SN</span><span class="field-value">{{ row.sn || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Work Mode</span><span class="field-value">{{ row.work_mode || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Duplex Mode</span><span class="field-value">{{ row.duplex_mode || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MIMO</span><span class="field-value">{{ row.mimo || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Cell ID</span><span class="field-value">{{ row.cell_id_in_file || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">SA</span><span class="field-value">{{ row.sa || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">SSP</span><span class="field-value">{{ row.ssp || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Total Tilt</span><span class="field-value">{{ row.total_tilt || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Antenna Model</span><span class="field-value">{{ row.antenna_model || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Antenna Gain</span><span class="field-value">{{ row.antenna_gain || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">RET</span><span class="field-value">{{ row.ret || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Transmission Port</span><span class="field-value">{{ row.transmission_port || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Type</span><span class="field-value">{{ row.lld_type || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">DL Bandwidth</span><span class="field-value">{{ row.dl_bandwidth || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">UL Bandwidth</span><span class="field-value">{{ row.ul_bandwidth || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">SSB Absolute Freq</span><span class="field-value">{{ row.ssb_absolute_freq || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">DL SubCarrierSpacing</span><span class="field-value">{{ row.dl_subcarrier_spacing || '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="expand-group">
+                    <div class="group-title">OAM / Control / User Plane</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">OAM IP Type</span><span class="field-value">{{ row.oam_ip_type || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">OAM IP Address</span><span class="field-value">{{ row.oam_ip_address || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">OAM IP Submask</span><span class="field-value">{{ row.oam_ip_submask || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">OAM IP Gateway</span><span class="field-value">{{ row.oam_ip_gateway || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">OAM IP VLAN</span><span class="field-value">{{ row.oam_ip_vlan || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">OAM IP DNS</span><span class="field-value">{{ row.oam_ip_dns || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">OAM Binding Port</span><span class="field-value">{{ row.oam_binding_port || '-' }}</span></div>
+
+                      <div class="field-item"><span class="field-label">Control Plane IP Type</span><span class="field-value">{{ row.control_plane_ip_type || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Control Plane Address</span><span class="field-value">{{ row.control_plane_address || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Control Plane Submask</span><span class="field-value">{{ row.control_plane_submask || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Control Plane Gateway</span><span class="field-value">{{ row.control_plane_gateway || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Control Plane VLAN</span><span class="field-value">{{ row.control_plane_vlan || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Control Plane DNS</span><span class="field-value">{{ row.control_plane_dns || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">Control Plane Binding Port</span><span class="field-value">{{ row.control_plane_binding_port || '-' }}</span></div>
+
+                      <div class="field-item"><span class="field-label">User Plane IP Type</span><span class="field-value">{{ row.user_plane_ip_type || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">User Plane Address</span><span class="field-value">{{ row.user_plane_address || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">User Plane Submask</span><span class="field-value">{{ row.user_plane_submask || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">User Plane Gateway</span><span class="field-value">{{ row.user_plane_gateway || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">User Plane VLAN</span><span class="field-value">{{ row.user_plane_vlan || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">User Plane DNS</span><span class="field-value">{{ row.user_plane_dns || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">User Plane Binding Port</span><span class="field-value">{{ row.user_plane_binding_port || '-' }}</span></div>
+                    </div>
+                  </div>
+                  <div class="expand-group">
+                    <div class="group-title">X2 / MME（LTE 时有意义）</div>
+                    <div class="group-grid">
+                      <div class="field-item"><span class="field-label">X2 IP Type</span><span class="field-value">{{ row.x2_ip_type || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">X2 Address</span><span class="field-value">{{ row.x2_address || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">X2 Submask</span><span class="field-value">{{ row.x2_submask || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">X2 Gateway</span><span class="field-value">{{ row.x2_gateway || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">X2 VLAN</span><span class="field-value">{{ row.x2_vlan || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">X2 DNS</span><span class="field-value">{{ row.x2_dns || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">X2 Binding Port</span><span class="field-value">{{ row.x2_binding_port || '-' }}</span></div>
+
+                      <div class="field-item"><span class="field-label">MME IP 1</span><span class="field-value">{{ row.mme_ip_1 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MME IP 2</span><span class="field-value">{{ row.mme_ip_2 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MME IP 3</span><span class="field-value">{{ row.mme_ip_3 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MME IP 4</span><span class="field-value">{{ row.mme_ip_4 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MME IP 5</span><span class="field-value">{{ row.mme_ip_5 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MME IP 6</span><span class="field-value">{{ row.mme_ip_6 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MME IP 7</span><span class="field-value">{{ row.mme_ip_7 || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">MME IP 8</span><span class="field-value">{{ row.mme_ip_8 || '-' }}</span></div>
                     </div>
                   </div>
                   <div class="expand-group">
@@ -341,6 +419,75 @@
                           <div class="field-item"><span class="field-label">Slot config</span><span class="field-value">{{ row.slot_config || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">Slot DL/UL</span><span class="field-value">{{ row.slot_config_dl_ul || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">Symbol DL/UL</span><span class="field-value">{{ row.symbol_config_dl_ul || '-' }}</span></div>
+                        </div>
+                      </div>
+                      <div class="expand-group">
+                        <div class="group-title">LLD 模板扩展字段</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">Index</span><span class="field-value">{{ row.excel_index || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Province Region</span><span class="field-value">{{ row.province_region || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Province</span><span class="field-value">{{ row.province || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">City</span><span class="field-value">{{ row.city || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">County</span><span class="field-value">{{ row.county || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Address</span><span class="field-value">{{ row.address || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Cluster</span><span class="field-value">{{ row.cluster || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">SN</span><span class="field-value">{{ row.sn || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Work Mode</span><span class="field-value">{{ row.work_mode || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Duplex Mode</span><span class="field-value">{{ row.duplex_mode || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">MIMO</span><span class="field-value">{{ row.mimo || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Cell ID</span><span class="field-value">{{ row.cell_id_in_file || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">SA</span><span class="field-value">{{ row.sa || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">SSP</span><span class="field-value">{{ row.ssp || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Total Tilt</span><span class="field-value">{{ row.total_tilt || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Antenna Model</span><span class="field-value">{{ row.antenna_model || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Antenna Gain</span><span class="field-value">{{ row.antenna_gain || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">RET</span><span class="field-value">{{ row.ret || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Transmission Port</span><span class="field-value">{{ row.transmission_port || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Type</span><span class="field-value">{{ row.lld_type || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">DL Bandwidth</span><span class="field-value">{{ row.dl_bandwidth || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">UL Bandwidth</span><span class="field-value">{{ row.ul_bandwidth || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">SSB Absolute Freq</span><span class="field-value">{{ row.ssb_absolute_freq || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">DL SubCarrierSpacing</span><span class="field-value">{{ row.dl_subcarrier_spacing || '-' }}</span></div>
+                        </div>
+                      </div>
+                      <div class="expand-group">
+                        <div class="group-title">OAM / Control / User Plane</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">OAM IP Type</span><span class="field-value">{{ row.oam_ip_type || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">OAM IP Address</span><span class="field-value">{{ row.oam_ip_address || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">OAM IP Submask</span><span class="field-value">{{ row.oam_ip_submask || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">OAM IP Gateway</span><span class="field-value">{{ row.oam_ip_gateway || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">OAM IP VLAN</span><span class="field-value">{{ row.oam_ip_vlan || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">OAM IP DNS</span><span class="field-value">{{ row.oam_ip_dns || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">OAM Binding Port</span><span class="field-value">{{ row.oam_binding_port || '-' }}</span></div>
+
+                          <div class="field-item"><span class="field-label">Control Plane IP Type</span><span class="field-value">{{ row.control_plane_ip_type || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Control Plane Address</span><span class="field-value">{{ row.control_plane_address || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Control Plane Submask</span><span class="field-value">{{ row.control_plane_submask || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Control Plane Gateway</span><span class="field-value">{{ row.control_plane_gateway || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Control Plane VLAN</span><span class="field-value">{{ row.control_plane_vlan || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Control Plane DNS</span><span class="field-value">{{ row.control_plane_dns || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">Control Plane Binding Port</span><span class="field-value">{{ row.control_plane_binding_port || '-' }}</span></div>
+
+                          <div class="field-item"><span class="field-label">User Plane IP Type</span><span class="field-value">{{ row.user_plane_ip_type || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">User Plane Address</span><span class="field-value">{{ row.user_plane_address || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">User Plane Submask</span><span class="field-value">{{ row.user_plane_submask || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">User Plane Gateway</span><span class="field-value">{{ row.user_plane_gateway || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">User Plane VLAN</span><span class="field-value">{{ row.user_plane_vlan || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">User Plane DNS</span><span class="field-value">{{ row.user_plane_dns || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">User Plane Binding Port</span><span class="field-value">{{ row.user_plane_binding_port || '-' }}</span></div>
+                        </div>
+                      </div>
+                      <div class="expand-group">
+                        <div class="group-title">XN（NR 时有意义）</div>
+                        <div class="group-grid">
+                          <div class="field-item"><span class="field-label">XN IP Type</span><span class="field-value">{{ row.xn_ip_type || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">XN Address</span><span class="field-value">{{ row.xn_address || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">XN Submask</span><span class="field-value">{{ row.xn_submask || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">XN Gateway</span><span class="field-value">{{ row.xn_gateway || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">XN VLAN</span><span class="field-value">{{ row.xn_vlan || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">XN DNS</span><span class="field-value">{{ row.xn_dns || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">XN Binding Port</span><span class="field-value">{{ row.xn_binding_port || '-' }}</span></div>
                         </div>
                       </div>
                       <div class="expand-group">

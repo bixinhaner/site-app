@@ -226,6 +226,84 @@ class PlanningCell(BaseModel):
     slot_config_dl_ul: Optional[str] = None
     symbol_config_dl_ul: Optional[str] = None
 
+    # 新版 LLD 模板扩展字段（统一字符串）
+    excel_index: Optional[str] = None
+    province_region: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
+    county: Optional[str] = None
+    address: Optional[str] = None
+    cluster: Optional[str] = None
+    sn: Optional[str] = None
+
+    work_mode: Optional[str] = None
+    duplex_mode: Optional[str] = None
+    mimo: Optional[str] = None
+    cell_id_in_file: Optional[str] = None
+    sa: Optional[str] = None
+    ssp: Optional[str] = None
+
+    total_tilt: Optional[str] = None
+    antenna_model: Optional[str] = None
+    antenna_gain: Optional[str] = None
+    ret: Optional[str] = None
+    transmission_port: Optional[str] = None
+    lld_type: Optional[str] = None
+
+    dl_bandwidth: Optional[str] = None
+    ul_bandwidth: Optional[str] = None
+    ssb_absolute_freq: Optional[str] = None
+    dl_subcarrier_spacing: Optional[str] = None
+
+    oam_ip_type: Optional[str] = None
+    oam_ip_address: Optional[str] = None
+    oam_ip_submask: Optional[str] = None
+    oam_ip_gateway: Optional[str] = None
+    oam_ip_vlan: Optional[str] = None
+    oam_ip_dns: Optional[str] = None
+    oam_binding_port: Optional[str] = None
+
+    control_plane_ip_type: Optional[str] = None
+    control_plane_address: Optional[str] = None
+    control_plane_submask: Optional[str] = None
+    control_plane_gateway: Optional[str] = None
+    control_plane_vlan: Optional[str] = None
+    control_plane_dns: Optional[str] = None
+    control_plane_binding_port: Optional[str] = None
+
+    user_plane_ip_type: Optional[str] = None
+    user_plane_address: Optional[str] = None
+    user_plane_submask: Optional[str] = None
+    user_plane_gateway: Optional[str] = None
+    user_plane_vlan: Optional[str] = None
+    user_plane_dns: Optional[str] = None
+    user_plane_binding_port: Optional[str] = None
+
+    x2_ip_type: Optional[str] = None
+    x2_address: Optional[str] = None
+    x2_submask: Optional[str] = None
+    x2_gateway: Optional[str] = None
+    x2_vlan: Optional[str] = None
+    x2_dns: Optional[str] = None
+    x2_binding_port: Optional[str] = None
+
+    xn_ip_type: Optional[str] = None
+    xn_address: Optional[str] = None
+    xn_submask: Optional[str] = None
+    xn_gateway: Optional[str] = None
+    xn_vlan: Optional[str] = None
+    xn_dns: Optional[str] = None
+    xn_binding_port: Optional[str] = None
+
+    mme_ip_1: Optional[str] = None
+    mme_ip_2: Optional[str] = None
+    mme_ip_3: Optional[str] = None
+    mme_ip_4: Optional[str] = None
+    mme_ip_5: Optional[str] = None
+    mme_ip_6: Optional[str] = None
+    mme_ip_7: Optional[str] = None
+    mme_ip_8: Optional[str] = None
+
     class Config:
         from_attributes = True
 
