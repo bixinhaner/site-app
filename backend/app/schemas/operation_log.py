@@ -13,6 +13,7 @@ class OperationLogItem(BaseModel):
     user_role: Optional[str] = None
 
     client: Optional[str] = None
+    ip: Optional[str] = None
 
     module: Optional[str] = None
     action: Optional[str] = None
@@ -30,7 +31,6 @@ class OperationLogItem(BaseModel):
 
 
 class OperationLogDetail(OperationLogItem):
-    ip: Optional[str] = None
     user_agent: Optional[str] = None
     request_method: Optional[str] = None
     request_path: Optional[str] = None
@@ -71,3 +71,23 @@ class OperationLogCleanupPayload(BaseModel):
     object_id: Optional[str] = None
     keyword: Optional[str] = None
 
+
+class OperationLogTrackPayload(BaseModel):
+    """前端/客户端上报的“功能动作/轨迹”日志（方案A：不记录普通GET）。"""
+
+    module: Optional[str] = Field(None, max_length=100)
+    action: str = Field(..., min_length=1, max_length=100)
+
+    object_type: Optional[str] = Field(None, max_length=100)
+    object_id: Optional[str] = Field(None, max_length=100)
+    object_name: Optional[str] = Field(None, max_length=255)
+
+    # 可选：完全自定义可读描述
+    operation_desc: Optional[str] = None
+
+    # 记录筛选条件/提交变更值等
+    data: Optional[Any] = None
+
+    # 可选：由客户端传入动作结果（例如导出失败）
+    is_success: Optional[bool] = True
+    error_message: Optional[str] = Field(None, max_length=2000)

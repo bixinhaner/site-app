@@ -355,6 +355,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { stockApi } from '../../api/stock'
 import * as XLSX from 'xlsx'
+import { trackOperation } from '@/utils/operationTrack'
 
 const router = useRouter()
 
@@ -450,6 +451,16 @@ const loadInventoryList = async () => {
 
 // 搜索处理
 const handleSearch = () => {
+  trackOperation({
+    module: '库存管理',
+    action: '查询',
+    object_type: '库存',
+    data: {
+      keyword: searchKeyword.value || undefined,
+      category: filterCategory.value || undefined,
+      stock_status: filterStockStatus.value || undefined,
+    },
+  })
   loadInventoryList()
 }
 
@@ -458,6 +469,11 @@ const resetSearch = () => {
   searchKeyword.value = ''
   filterCategory.value = ''
   filterStockStatus.value = ''
+  trackOperation({
+    module: '库存管理',
+    action: '重置筛选',
+    object_type: '库存',
+  })
   loadInventoryList()
 }
 

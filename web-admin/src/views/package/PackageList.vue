@@ -333,6 +333,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { equipmentApi } from '../../api/equipment'
+import { trackOperation } from '@/utils/operationTrack'
 
 // 响应式数据
 const loading = ref(false)
@@ -449,6 +450,16 @@ const loadEquipmentOptions = async () => {
 // 搜索处理
 const handleSearch = () => {
   currentPage.value = 1
+  trackOperation({
+    module: '库存管理',
+    action: '查询',
+    object_type: '套装',
+    data: {
+      keyword: searchKeyword.value || undefined,
+      site_type: filterSiteType.value || undefined,
+      status: filterStatus.value || undefined,
+    },
+  })
   loadPackageList()
 }
 
@@ -458,6 +469,11 @@ const resetSearch = () => {
   filterSiteType.value = ''
   filterStatus.value = ''
   currentPage.value = 1
+  trackOperation({
+    module: '库存管理',
+    action: '重置筛选',
+    object_type: '套装',
+  })
   loadPackageList()
 }
 

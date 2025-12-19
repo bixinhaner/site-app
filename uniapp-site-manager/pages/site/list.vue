@@ -122,6 +122,7 @@
 	import { useSiteStore } from '@/stores/site'
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLanguageStore } from '@/stores/language'
+	import { createDebouncedTracker } from '@/utils/operationTrack.js'
 
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
@@ -132,6 +133,19 @@
 	const currentFilter = ref('all')
 	const showSearch = ref(false)
 	const refreshing = ref(false)
+
+	const trackSearchDebounced = createDebouncedTracker(800)
+	const trackSearch = () => {
+		trackSearchDebounced({
+			module: '站点管理',
+			action: '查询',
+			object_type: '站点',
+			data: {
+				keyword: searchText.value || undefined,
+				status: currentFilter.value !== 'all' ? currentFilter.value : undefined,
+			}
+		})
+	}
 
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 
@@ -336,6 +350,11 @@
 		uni.setNavigationBarTitle({
 			title: $t('site.list')
 		})
+	})
+
+	// 记录搜索/筛选条件（防抖，避免输入过程产生大量日志）
+	watch([searchText, currentFilter], () => {
+		trackSearch()
 	})
 	
 	onMounted(() => {

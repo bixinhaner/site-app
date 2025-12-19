@@ -2,14 +2,6 @@
   <div class="page">
     <div class="page-header">
       <h1>操作日志</h1>
-      <div class="header-actions">
-        <el-button @click="refresh" :loading="loading">
-          <el-icon><Refresh /></el-icon>刷新
-        </el-button>
-        <el-button type="primary" @click="exportExcel" :loading="exporting">
-          <el-icon><Download /></el-icon>导出Excel
-        </el-button>
-      </div>
     </div>
 
     <el-alert
@@ -24,7 +16,15 @@
     <el-card class="mb16" v-loading="settingsLoading">
       <template #header>
         <div class="card-header">
-          <span>日志设置 / 清理</span>
+          <span>操作 / 筛选</span>
+          <div class="header-actions">
+            <el-button @click="refresh" :loading="loading || settingsLoading">
+              <el-icon><Refresh /></el-icon>刷新
+            </el-button>
+            <el-button type="primary" @click="exportExcel" :loading="exporting">
+              <el-icon><Download /></el-icon>导出Excel
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -48,21 +48,7 @@
         </el-form-item>
       </el-form>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="说明：日志会记录“功能动作级”描述与提交的变更值（请求体/参数），密码与令牌字段会自动排除。"
-      />
-    </el-card>
-
-    <el-card class="mb16">
-      <template #header>
-        <div class="card-header">
-          <span>筛选</span>
-        </div>
-      </template>
-
+      <el-divider content-position="left">筛选</el-divider>
       <el-form :inline="true" class="filter-form">
         <el-form-item label="时间范围">
           <el-date-picker
@@ -127,6 +113,13 @@
           </el-button>
         </el-form-item>
       </el-form>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="说明：日志记录“功能动作级”描述与提交的变更值（请求体/参数）；密码与令牌字段会自动排除。"
+      />
     </el-card>
 
     <el-card v-loading="loading">
@@ -143,19 +136,20 @@
             {{ formatDateTime(row.occurred_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="username" label="用户" width="140" show-overflow-tooltip />
-        <el-table-column prop="user_role" label="角色" width="120" />
-        <el-table-column prop="client" label="来源端" width="120" />
-        <el-table-column prop="module" label="模块" width="120" />
-        <el-table-column prop="action" label="动作" width="120" />
-        <el-table-column label="结果" width="90">
+        <el-table-column prop="username" label="用户" width="120" show-overflow-tooltip />
+        <el-table-column prop="user_role" label="角色" width="90" show-overflow-tooltip />
+        <el-table-column prop="ip" label="IP" width="130" show-overflow-tooltip />
+        <el-table-column prop="client" label="来源端" width="100" show-overflow-tooltip />
+        <el-table-column prop="module" label="模块" width="110" show-overflow-tooltip />
+        <el-table-column prop="action" label="动作" width="110" show-overflow-tooltip />
+        <el-table-column label="结果" width="80">
           <template #default="{ row }">
             <el-tag v-if="row.is_success" type="success">成功</el-tag>
             <el-tag v-else type="danger">失败</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="operation_desc" label="可读描述" min-width="320" show-overflow-tooltip />
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column prop="operation_desc" label="可读描述" min-width="280" show-overflow-tooltip />
+        <el-table-column label="操作" width="80" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row.id)">详情</el-button>
           </template>
@@ -442,15 +436,22 @@ onMounted(refresh)
 </script>
 
 <style scoped>
+.page {
+  padding: 24px;
+}
 .page-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
 }
 .card-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
   align-items: center;
 }
 .filter-form :deep(.el-form-item) {
@@ -486,4 +487,3 @@ onMounted(refresh)
   margin-top: 12px;
 }
 </style>
-

@@ -237,6 +237,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import { geocodeCacheApi } from '@/api/system'
 import { useUserStore } from '@/stores/user'
+import { trackOperation } from '@/utils/operationTrack'
 
 const userStore = useUserStore()
 const canView = computed(() => userStore.isAdmin)
@@ -541,6 +542,15 @@ const refresh = async () => {
 
 const handleSearch = async () => {
   page.value = 1
+  trackOperation({
+    module: '系统配置',
+    action: '查询',
+    object_type: '逆地理缓存',
+    data: {
+      q: q.value || undefined,
+      include_expired: includeExpired.value ? true : undefined,
+    },
+  })
   await loadEntries()
 }
 

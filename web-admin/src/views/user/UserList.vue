@@ -260,6 +260,7 @@ import {
 } from '@element-plus/icons-vue'
 import { userAPI } from '@/api/user'
 import { useUserStore } from '@/stores/user'
+import { trackOperation } from '@/utils/operationTrack'
 import UserDetail from './components/UserDetail.vue'
 import UserForm from './components/UserForm.vue'
 
@@ -390,6 +391,17 @@ const loadUserList = async () => {
 // 搜索处理
 const handleSearch = () => {
   pagination.page = 1
+  trackOperation({
+    module: '用户管理',
+    action: '查询',
+    object_type: '用户',
+    data: {
+      keyword: searchKeyword.value || undefined,
+      role: filterRole.value || undefined,
+      department: filterDepartment.value || undefined,
+      is_active: filterStatus.value === null ? undefined : filterStatus.value,
+    },
+  })
   loadUserList()
 }
 
@@ -399,6 +411,11 @@ const resetSearch = () => {
   filterStatus.value = null
   filterDepartment.value = ''
   pagination.page = 1
+  trackOperation({
+    module: '用户管理',
+    action: '重置筛选',
+    object_type: '用户',
+  })
   loadUserList()
 }
 

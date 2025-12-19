@@ -335,6 +335,7 @@ import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Edit, Delete, Search, Refresh, Plus, Sort } from '@element-plus/icons-vue'
+import { createDebouncedTracker } from '@/utils/operationTrack'
 
 const router = useRouter()
 const loading = ref(false)
@@ -347,6 +348,22 @@ const typeFilter = ref('')
 const searchKeyword = ref('')
 const sortBy = ref('created_at')
 const sortOrder = ref('desc')
+
+const trackSearchDebounced = createDebouncedTracker(800)
+const trackSearch = () => {
+  trackSearchDebounced({
+    module: '工单管理',
+    action: '查询',
+    object_type: '工单',
+    data: {
+      keyword: searchKeyword.value || undefined,
+      status: statusFilter.value || undefined,
+      type: typeFilter.value || undefined,
+      sort_by: sortBy.value || undefined,
+      sort_order: sortOrder.value || undefined,
+    },
+  })
+}
 
 // 批量操作相关
 const selectedWorkOrders = ref([])
@@ -858,11 +875,13 @@ onMounted(load)
 // 动态筛选/排序：变化时回到第 1 页并刷新
 watch([searchKeyword, statusFilter, typeFilter], () => {
   currentPage.value = 1
+  trackSearch()
   load()
 })
 
 watch([sortBy, sortOrder], () => {
   currentPage.value = 1
+  trackSearch()
   load()
 })
 </script>

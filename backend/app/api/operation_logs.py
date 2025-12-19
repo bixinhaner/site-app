@@ -1,9 +1,10 @@
 import io
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy import and_, desc, func, or_
@@ -21,6 +22,7 @@ from app.schemas.operation_log import (
     OperationLogOptionsResponse,
     OperationLogPageResponse,
     OperationLogSettings,
+    OperationLogTrackPayload,
 )
 
 
@@ -28,6 +30,75 @@ router = APIRouter()
 
 _SETTINGS_KEY = "operation_log_settings"
 _DEFAULT_SETTINGS = {"retention_days": 90}
+
+_SENSITIVE_KEYS = {
+    "password",
+    "current_password",
+    "new_password",
+    "old_password",
+    "access_token",
+    "refresh_token",
+    "token",
+    "authorization",
+}
+
+
+def _redact(value):
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [_redact(v) for v in value]
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            key = str(k or "")
+            lk = key.lower()
+            if lk in _SENSITIVE_KEYS or "password" in lk or lk.endswith("_token"):
+                out[key] = "[REDACTED]"
+            else:
+                out[key] = _redact(v)
+        return out
+    return value
+
+
+def _infer_client_from_request(request: Request) -> str:
+    raw = (request.headers.get("x-client") or "").strip()
+    if raw:
+        return raw
+    ua = (request.headers.get("user-agent") or "").lower()
+    if "uni-app" in ua or "hbuilder" in ua:
+        return "uniapp"
+    if "mozilla" in ua:
+        return "web-admin"
+    return "unknown"
+
+
+def _build_desc(
+    username: Optional[str],
+    module: Optional[str],
+    action: Optional[str],
+    object_type: Optional[str],
+    object_id: Optional[str],
+    object_name: Optional[str],
+    is_success: bool,
+) -> str:
+    actor = username or "匿名用户"
+    mod = module or "系统"
+    act = action or "操作"
+
+    target = ""
+    if object_type or object_id or object_name:
+        parts = []
+        if object_type:
+            parts.append(str(object_type))
+        if object_name:
+            parts.append(f"名称:{object_name}")
+        if object_id:
+            parts.append(f"ID:{object_id}")
+        target = "（" + "，".join(parts) + "）"
+
+    result = "成功" if is_success else "失败"
+    return f"{actor} 在【{mod}】{act}{target} - {result}"
 
 
 def _require_admin(current_user: User) -> None:
@@ -77,6 +148,77 @@ async def update_operation_log_settings(
     data["retention_days"] = int(payload.retention_days)
     _save_settings(db, data)
     return OperationLogSettings(**data)
+
+
+@router.post("/operation-logs/track", response_model=dict)
+async def track_operation(
+    payload: OperationLogTrackPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """客户端主动上报“功能动作/轨迹”日志（避免记录普通GET带来的噪音）。"""
+
+    raw_user = getattr(getattr(request, "state", None), "raw_user", None)
+    user_id = getattr(raw_user, "id", None) if raw_user else getattr(current_user, "id", None)
+    username = getattr(raw_user, "username", None) if raw_user else getattr(current_user, "username", None)
+    user_role = getattr(raw_user, "role", None) if raw_user else getattr(current_user, "role", None)
+
+    ip = getattr(getattr(request, "client", None), "host", None)
+    ua = request.headers.get("user-agent")
+    client = _infer_client_from_request(request)
+
+    is_success = bool(payload.is_success) if payload.is_success is not None else True
+    status_code = 200 if is_success else 400
+
+    module = payload.module or "系统"
+    action = payload.action
+    object_type = payload.object_type
+    object_id = payload.object_id
+    object_name = payload.object_name
+
+    request_body = _redact(payload.data)
+
+    operation_desc = payload.operation_desc
+    if not operation_desc:
+        operation_desc = _build_desc(
+            username=username,
+            module=module,
+            action=action,
+            object_type=object_type,
+            object_id=object_id,
+            object_name=object_name,
+            is_success=is_success,
+        )
+
+    row = OperationLog(
+        id=uuid.uuid4().hex,
+        occurred_at=datetime.now(timezone.utc),
+        user_id=user_id,
+        username=username,
+        user_role=user_role,
+        client=client,
+        ip=ip,
+        user_agent=ua,
+        request_method="TRACK",
+        request_path=str(getattr(getattr(request, "url", None), "path", "") or "/api/operation-logs/track"),
+        query_params=None,
+        path_params=None,
+        request_body=request_body,
+        module=module,
+        action=action,
+        object_type=object_type,
+        object_id=object_id,
+        object_name=object_name,
+        operation_desc=operation_desc,
+        status_code=status_code,
+        is_success=is_success,
+        error_message=payload.error_message,
+    )
+    db.add(row)
+    db.commit()
+
+    return {"success": True, "id": row.id}
 
 
 @router.get("/operation-logs/options", response_model=OperationLogOptionsResponse)

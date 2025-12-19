@@ -101,6 +101,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 import { useLanguageStore } from '@/stores/language'
 import { useUserStore } from '@/stores/user'
+import { trackOperation } from '@/utils/operationTrack.js'
 
 const store = useWorkOrderStore()
 const languageStore = useLanguageStore()
@@ -168,6 +169,15 @@ const handleRefresh = async () => {
 
 const setStatus = async (s) => {
   status.value = s
+  trackOperation({
+    module: '工单管理',
+    action: '查询',
+    object_type: '工单',
+    data: {
+      status: status.value || undefined,
+      keyword: searchKeyword.value || undefined,
+    }
+  })
   await reload()
 }
 
@@ -187,12 +197,26 @@ const handleSearch = async () => {
     clearTimeout(searchTimer)
     searchTimer = null
   }
+  trackOperation({
+    module: '工单管理',
+    action: '查询',
+    object_type: '工单',
+    data: {
+      status: status.value || undefined,
+      keyword: searchKeyword.value || undefined,
+    }
+  })
   await reload()
 }
 
 // 清除搜索
 const clearSearch = () => {
   searchKeyword.value = ''
+  trackOperation({
+    module: '工单管理',
+    action: '清除搜索',
+    object_type: '工单',
+  })
   reload()
   // 如果搜索框已清空，延迟收起以显示动画
   setTimeout(() => {

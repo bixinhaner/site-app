@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, RouterView } from 'vue-router'
 import { useUserStore } from '../stores/user'
+import { buildRouteSnapshot, trackOperation } from '../utils/operationTrack'
 
 const routes = [
   {
@@ -234,6 +235,26 @@ router.beforeEach((to, from, next) => {
     }
     next()
   }
+})
+
+router.afterEach((to, from) => {
+  const userStore = useUserStore()
+  if (!userStore.isLoggedIn) return
+  if (to?.path === '/login') return
+
+  const titles = (to.matched || []).map(r => r?.meta?.title).filter(Boolean)
+  const pageTitle = titles[titles.length - 1] || to?.meta?.title || String(to?.name || to?.path || '页面')
+  const moduleTitle = titles.length >= 2 ? titles[titles.length - 2] : (titles[0] || '系统')
+
+  trackOperation({
+    module: moduleTitle,
+    action: '打开页面',
+    object_type: '页面',
+    object_name: pageTitle,
+    data: {
+      route: buildRouteSnapshot(to, from),
+    },
+  })
 })
 
 export default router

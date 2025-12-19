@@ -202,6 +202,9 @@ def _infer_action(method: str, path: str) -> str:
     if last in special:
         return special[last]
 
+    if last.endswith("template"):
+        return "下载模板"
+
     if "export" in last:
         return "导出"
     if "import" in last:
@@ -389,8 +392,18 @@ def _should_skip(path: str, method: str) -> bool:
         return True
     if (method or "").upper() == "OPTIONS":
         return True
+    # 轨迹上报接口由业务接口本身写入日志，避免中间件重复写入
+    if p.rstrip("/") == "/api/operation-logs/track":
+        return True
     if p.startswith("/uploads"):
         return True
+    m = (method or "").upper()
+    # 方案A：不记录普通GET（避免 dashboard 等页面打开产生大量“查询”噪音）
+    if m == "GET":
+        last = p.rstrip("/").split("/")[-1]
+        # 仅保留少量关键 GET（文件导出/模板下载等），其余查询由前端按“功能动作”上报
+        if "export" not in last and not last.endswith("template"):
+            return True
     return False
 
 

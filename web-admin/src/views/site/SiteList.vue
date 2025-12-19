@@ -4,7 +4,7 @@
       <h1>站点列表</h1>
       <div class="header-actions">
         <el-input v-model="keyword" placeholder="搜索站点名称/编码/城市（动态生效）" clearable style="width: 260px" />
-        <el-select v-model="statusFilter" placeholder="状态" clearable style="width: 140px" @change="reload">
+        <el-select v-model="statusFilter" placeholder="状态" clearable style="width: 140px" @change="onStatusFilterChange">
           <el-option label="规划中" value="planning" />
           <el-option label="规划完成" value="planned" />
           <el-option label="施工中" value="construction" />
@@ -139,6 +139,7 @@ import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../../stores/user'
+import { createDebouncedTracker } from '@/utils/operationTrack'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -164,6 +165,26 @@ const assignVisible = ref(false)
 const assigning = ref(false)
 const selectedAssignee = ref(null)
 const siteToAssign = ref(null)
+
+const trackSearchDebounced = createDebouncedTracker(800)
+const trackSearch = () => {
+  trackSearchDebounced({
+    module: '站点管理',
+    action: '查询',
+    object_type: '站点',
+    data: {
+      keyword: keyword.value || undefined,
+      status: statusFilter.value || undefined,
+      sort_by: sortBy.value || undefined,
+      sort_order: sortOrder.value || undefined,
+    },
+  })
+}
+
+const onStatusFilterChange = () => {
+  trackSearch()
+  reload()
+}
 
 const reload = async () => {
   try {
@@ -329,11 +350,13 @@ onMounted(() => {
 // 关键字动态生效：重置到第1页并走后端搜索
 watch(keyword, () => {
   currentPage.value = 1
+  trackSearch()
   reload()
 })
 
 watch([sortBy, sortOrder], () => {
   currentPage.value = 1
+  trackSearch()
   reload()
 })
 </script>

@@ -247,6 +247,7 @@ import { useRouter } from 'vue-router'
 import { templateAPI } from '../../api/templates'
 import BindingManagement from './components/BindingManagement.vue'
 import TemplatePreviewDrawer from './components/TemplatePreviewDrawer.vue'
+import { trackOperation } from '@/utils/operationTrack'
 
 const router = useRouter()
 
@@ -325,6 +326,14 @@ const loadTemplates = async () => {
 
 const handleSearch = () => {
   currentPage.value = 1
+  trackOperation({
+    module: '检查管理',
+    action: '查询',
+    object_type: '检查模板',
+    data: {
+      q: searchQuery.value?.trim() || undefined,
+    },
+  })
   loadTemplates()
 }
 

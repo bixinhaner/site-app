@@ -138,6 +138,7 @@ import { onMounted, ref } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
+import { trackOperation } from '@/utils/operationTrack'
 
 const loading = ref(false)
 const items = ref([])
@@ -171,12 +172,25 @@ const loadData = async () => {
 
 const handleSearch = () => {
   page.value = 1
+  trackOperation({
+    module: 'OMC配置',
+    action: '查询',
+    object_type: 'OMC设备状态',
+    data: {
+      sn: searchSn.value || undefined,
+    },
+  })
   loadData()
 }
 
 const handleReset = () => {
   searchSn.value = ''
   page.value = 1
+  trackOperation({
+    module: 'OMC配置',
+    action: '重置筛选',
+    object_type: 'OMC设备状态',
+  })
   loadData()
 }
 
@@ -195,6 +209,12 @@ const refreshSn = async (row) => {
   }
   refreshingSn.value = sn
   try {
+    trackOperation({
+      module: 'OMC配置',
+      action: '实时检测',
+      object_type: 'OMC设备',
+      object_id: sn,
+    })
     await request.get(`/api/omc/devices/${sn}/status`)
     ElMessage.success('已触发实时检测，状态已更新')
     // 启动该 SN 的10秒冷却
