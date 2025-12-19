@@ -1,19 +1,12 @@
 <template>
 	<view class="checklist-container">
-		<!-- 导航栏 -->
-		<view class="custom-navbar">
-			<view class="navbar-content">
-				<view class="back-button" @click="goBack">
-					<uni-icons class="back-icon" type="back" size="36rpx" color="#fff" />
+		<CustomNavbar :title="inspectionData?.site_name || $t('inspection.checklist')" :showBack="true" variant="brand">
+			<template #right>
+				<view class="u-nav-btn u-nav-btn--brand" @click="saveInspection">
+					<uni-icons type="checkmarkempty" size="36rpx" color="#fff" />
 				</view>
-				<text class="navbar-title">{{ inspectionData?.site_name || $t('inspection.checklist') }}</text>
-				<view class="navbar-actions">
-					<view class="save-button" @click="saveInspection">
-						<uni-icons class="save-icon" type="checkmarkempty" size="36rpx" color="#fff" />
-					</view>
-				</view>
-			</view>
-		</view>
+			</template>
+		</CustomNavbar>
 		
 		<!-- 检查信息卡片 -->
 		<view class="inspection-info">
@@ -333,7 +326,7 @@
 											<checkbox 
 												:value="option.value" 
 												:checked="isChecked(dataField.value, option.value)"
-												color="#f97316"
+												color="var(--color-primary)"
 											/>
 											<text class="checkbox-label">{{ option.label }}</text>
 										</label>
@@ -344,7 +337,7 @@
 										<switch 
 											:checked="dataField.value === true || dataField.value === 'true'"
 											@change="(e) => { onSwitchChange(e, dataField); validateSingleField(dataField); }"
-											color="#f97316"
+											color="var(--color-primary)"
 											class="form-switch-field"
 										/>
 										<text class="switch-label">
@@ -560,6 +553,7 @@
 	import { buildImageUrl, buildApiUrl, getAuthHeaders } from '@/config/api.js'
 	import { parseBarcode, formatMacAddress, isValidParseResult } from '@/utils/barcode-parser.js'
 	import { validateField, validateAllFields } from '@/utils/field-validator.js'
+	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import { 
 		processFieldDependencies, 
 		initializeFieldDependencies,
@@ -2151,10 +2145,6 @@
 		await saveDraft()
 	}
 	
-	const goBack = () => {
-		uni.navigateBack()
-	}
-	
 	// 工具函数
 	const getInspectionTypeText = (type) => {
 		const typeMap = {
@@ -2613,59 +2603,6 @@
         box-sizing: border-box;
     }
 	
-	/* 导航栏 */
-    .custom-navbar {
-        background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-        padding: 44rpx 30rpx 20rpx;
-        color: #fff;
-    }
-	
-	.navbar-content {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-	
-	.back-button {
-		width: 88rpx;
-		height: 88rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 44rpx;
-		background: rgba(255, 255, 255, 0.2);
-	}
-	
-	.back-icon {
-		font-size: 36rpx;
-		color: white;
-	}
-	
-	.navbar-title {
-		font-size: 36rpx;
-		font-weight: bold;
-		flex: 1;
-		text-align: center;
-		color: white;
-	}
-	
-	.navbar-actions { width: 88rpx; display: flex; justify-content: flex-end; }
-	
-	.save-button {
-		width: 88rpx;
-		height: 88rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 44rpx;
-		background: rgba(255, 255, 255, 0.2);
-	}
-	
-	.save-icon {
-		font-size: 36rpx;
-		color: white;
-	}
-	
 	/* 检查信息 */
 	.inspection-info {
 		background: var(--bg-elevated);
@@ -2709,7 +2646,7 @@
 	
 	.progress-fill {
 		height: 100%;
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		border-radius: 6rpx;
 		transition: width 0.3s ease;
 	}
@@ -3075,7 +3012,7 @@
 	}
 	
 	.submit-btn {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		color: white;
 	}
 	
@@ -3240,7 +3177,7 @@
 		margin-top: 25rpx;
 		padding: 20rpx;
 		background: linear-gradient(135deg, #fff9e6, #fff5d9);
-		border-left: 4rpx solid #f97316;
+		border-left: 4rpx solid var(--color-primary);
 		border-radius: 12rpx;
 	}
 	
@@ -3258,7 +3195,7 @@
 	.description-title {
 		font-size: 28rpx;
 		font-weight: bold;
-		color: #f97316;
+		color: var(--color-primary);
 	}
 	
 	.description-content {
@@ -3390,7 +3327,7 @@
 		border-color: var(--color-primary);
 		background: white;
 		outline: none;
-		box-shadow: 0 0 0 3rpx rgba(249, 115, 22, 0.1);
+		box-shadow: 0 0 0 3rpx rgba(var(--color-primary-rgb), 0.1);
 	}
 	
 	.input-with-unit {
@@ -3544,7 +3481,7 @@
 	}
 	
 	.form-textarea-field:focus {
-		border-color: #f97316;
+		border-color: var(--color-primary);
 	}
 	
 	/* 字段错误提示 */
@@ -3658,7 +3595,7 @@
 	}
 	
 	.save-btn {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		color: white;
 	}
 	
@@ -3788,7 +3725,7 @@
 		display: block;
 	}
 	
-	.bind-btn { background: linear-gradient(135deg, #f97316, #ea580c); color: #fff; border: none; display: inline-flex; align-items: center; justify-content: center; gap: 10rpx; min-height: 88rpx; padding: 0 24rpx; border-radius: 16rpx; font-size: 26rpx; }
+	.bind-btn { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark)); color: #fff; border: none; display: inline-flex; align-items: center; justify-content: center; gap: 10rpx; min-height: 88rpx; padding: 0 24rpx; border-radius: 16rpx; font-size: 26rpx; }
 	
 	.btn-icon {
 		font-size: 24rpx;
@@ -3889,7 +3826,7 @@
 			
 			.bind-quick-btn {
 				padding: 12rpx 24rpx;
-				background: linear-gradient(135deg, #f97316, #fb923c);
+				background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 				color: white;
 				border-radius: 8rpx;
 				font-size: 24rpx;
@@ -3917,7 +3854,7 @@
 			}
 			
 			.force-submit-btn {
-				background: linear-gradient(135deg, #f97316, #fb923c);
+				background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 				color: white;
 			}
 		}

@@ -432,7 +432,26 @@ def _fetch_google_payload(
             _negative_cache.set(negative_cache_key, f"RelayHTTP错误: {resp.status_code}", ttl_seconds=NEGATIVE_TTL_SECONDS)
             raise HTTPException(status_code=resp.status_code, detail=f"Google Relay HTTP错误: {resp.text[:200]}")
 
-        data = resp.json() or {}
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            body_snippet = (resp.text or "")[:200]
+            _negative_cache.set(
+                negative_cache_key,
+                f"Relay JSON解析失败: {exc}; body={body_snippet}",
+                ttl_seconds=NEGATIVE_TTL_SECONDS,
+            )
+            raise HTTPException(status_code=502, detail="Google Relay 返回非 JSON 响应") from exc
+
+        if not isinstance(data, dict):
+            _negative_cache.set(
+                negative_cache_key,
+                f"Relay 返回格式错误: {type(data)}",
+                ttl_seconds=NEGATIVE_TTL_SECONDS,
+            )
+            raise HTTPException(status_code=502, detail="Google Relay 返回格式错误")
+
+        data = data or {}
     else:
         if not api_key:
             raise HTTPException(
@@ -457,6 +476,27 @@ def _fetch_google_payload(
         if resp.status_code != 200:
             _negative_cache.set(negative_cache_key, f"HTTP错误: {resp.status_code}", ttl_seconds=NEGATIVE_TTL_SECONDS)
             raise HTTPException(status_code=resp.status_code, detail=f"Google API HTTP错误: {resp.text[:200]}")
+
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            body_snippet = (resp.text or "")[:200]
+            _negative_cache.set(
+                negative_cache_key,
+                f"JSON解析失败: {exc}; body={body_snippet}",
+                ttl_seconds=NEGATIVE_TTL_SECONDS,
+            )
+            raise HTTPException(status_code=502, detail="Google API 返回非 JSON 响应") from exc
+
+        if not isinstance(data, dict):
+            _negative_cache.set(
+                negative_cache_key,
+                f"返回格式错误: {type(data)}",
+                ttl_seconds=NEGATIVE_TTL_SECONDS,
+            )
+            raise HTTPException(status_code=502, detail="Google API 返回格式错误")
+
+        data = data or {}
 
     status_text = str(data.get("status") or "")
 

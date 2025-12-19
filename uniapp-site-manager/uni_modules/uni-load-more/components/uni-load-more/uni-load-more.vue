@@ -67,7 +67,7 @@ export default {
 .uni-load-more__dot {
 	width: 6px;
 	height: 6px;
-	background: #f97316;
+	background: var(--color-primary);
 	border-radius: 50%;
 	animation: loading 1.4s infinite ease-in-out;
 	

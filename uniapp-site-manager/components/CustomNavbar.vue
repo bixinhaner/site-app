@@ -1,14 +1,19 @@
 <template>
-	<view class="custom-navbar" :style="{ paddingTop: statusBarHeight + 'px' }">
+	<view
+		class="custom-navbar"
+		:class="{ 'custom-navbar--light': variant === 'light' }"
+		:style="navbarStyle"
+	>
 		<view class="navbar-content">
 			<!-- 左侧按钮区域 -->
 			<view class="navbar-left">
-				<view 
-					v-if="showBack" 
-					class="nav-button back-button" 
+				<view
+					v-if="showBack"
+					class="u-nav-btn"
+					:class="variant === 'light' ? 'u-nav-btn--light' : 'u-nav-btn--brand'"
 					@click="handleBack"
 				>
-					<uni-icons class="nav-icon" type="back" size="36rpx" color="#fff" />
+					<uni-icons class="nav-icon" type="back" size="36rpx" :color="iconColor" />
 				</view>
 			</view>
 			
@@ -26,7 +31,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, toRefs } from 'vue'
 
 // Props
 const props = defineProps({
@@ -38,11 +43,21 @@ const props = defineProps({
 		type: Boolean,
 		default: false
 	},
+	variant: {
+		type: String,
+		default: 'brand' // brand | light
+	},
 	backgroundColor: {
 		type: String,
 		default: ''
-	}
+	},
+	autoBack: {
+		type: Boolean,
+		default: true
+	},
 })
+
+const { variant } = toRefs(props)
 
 // Emits
 const emit = defineEmits(['back'])
@@ -56,10 +71,22 @@ onMounted(() => {
 	statusBarHeight.value = systemInfo.statusBarHeight || 0
 })
 
+const iconColor = computed(() => (props.variant === 'light' ? 'var(--color-primary)' : '#fff'))
+
+const navbarStyle = computed(() => {
+	const style = {
+		paddingTop: `${statusBarHeight.value}px`,
+	}
+	if (props.backgroundColor) {
+		style.background = props.backgroundColor
+	}
+	return style
+})
+
 // 返回操作
 const handleBack = () => {
 	emit('back')
-	if (!emit('back')) {
+	if (props.autoBack) {
 		uni.navigateBack()
 	}
 }
@@ -67,13 +94,19 @@ const handleBack = () => {
 
 <style scoped>
 	.custom-navbar {
-		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding-left: 30rpx;
 		padding-right: 30rpx;
 		padding-bottom: 20rpx;
 		color: #fff;
 		position: relative;
 		z-index: 999;
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+	}
+
+	.custom-navbar--light {
+		background: var(--bg-elevated);
+		color: var(--text-primary);
+		box-shadow: 0 1px 0 var(--border-soft);
 	}
 	
 	.navbar-content {
@@ -98,25 +131,8 @@ const handleBack = () => {
 		justify-content: flex-end;
 	}
 	
-	.nav-button {
-		width: 88rpx;
-		height: 88rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 44rpx;
-		background: rgba(255, 255, 255, 0.2);
-		transition: all 0.3s ease;
-	}
-	
-	.nav-button:active {
-		background: rgba(255, 255, 255, 0.3);
-		transform: scale(0.95);
-	}
-	
 	.nav-icon {
 		font-size: 36rpx;
-		color: white;
 	}
 	
 	.navbar-center {
@@ -132,7 +148,7 @@ const handleBack = () => {
 	.navbar-title {
 		font-size: 36rpx;
 		font-weight: bold;
-		color: white;
+		color: inherit;
 		text-align: center;
 		max-width: 100%;
 		overflow: hidden;

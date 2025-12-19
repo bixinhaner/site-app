@@ -131,9 +131,7 @@
 <style scoped>
     .custom-tabbar {
         display: flex;
-        background: rgba(255, 255, 255, 0.92);
-        -webkit-backdrop-filter: saturate(180%) blur(12px);
-        backdrop-filter: saturate(180%) blur(12px);
+        background: rgba(255, 255, 255, 0.98);
         border-top: 1px solid var(--border-soft);
         position: fixed;
         bottom: 0;
@@ -204,4 +202,3 @@
         font-size: 11px;
     }
 </style>
-

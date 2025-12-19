@@ -1,16 +1,12 @@
 <template>
 	<view class="site-list-container" :key="languageStore.currentLocale">
-		<!-- 自定义导航栏 -->
-		<view class="custom-navbar">
-			<view class="navbar-content">
-				<text class="navbar-title">{{ $t('site.list') }}</text>
-				<view class="navbar-actions">
-					<view class="action-btn" @click="toggleSearch">
-						<uni-icons class="action-icon" :type="showSearch ? 'closeempty' : 'search'" size="40rpx" color="#fff" />
-					</view>
+		<CustomNavbar :title="$t('site.list')" variant="brand">
+			<template #right>
+				<view class="u-nav-btn u-nav-btn--brand" @click="toggleSearch">
+					<uni-icons :type="showSearch ? 'closeempty' : 'search'" size="36rpx" color="#fff" />
 				</view>
-			</view>
-		</view>
+			</template>
+		</CustomNavbar>
 
 		<!-- 可折叠搜索框 -->
 		<view class="search-container" :class="{ 'search-container-open': showSearch }">
@@ -31,15 +27,19 @@
 		</view>
 
 		<view class="filter-tabs">
-			<view
-				class="tab"
-				:class="{ active: currentFilter === filter.value }"
-				v-for="filter in filters"
-				:key="filter.value"
-				@click="selectFilter(filter.value)"
-			>
-				{{ filter.label }}
-			</view>
+			<scroll-view class="filter-tabs-scroll" scroll-x :show-scrollbar="false">
+				<view class="filter-tabs-row">
+					<view
+						class="tab"
+						:class="{ active: currentFilter === filter.value }"
+						v-for="filter in filters"
+						:key="filter.value"
+						@click="selectFilter(filter.value)"
+					>
+						{{ filter.label }}
+					</view>
+				</view>
+			</scroll-view>
 		</view>
 
 		<scroll-view
@@ -89,17 +89,17 @@
 					
 					<view class="site-details">
 						<view class="detail-item" v-if="site.address">
-							<text class="detail-icon">📍</text>
+							<uni-icons class="detail-icon" type="location" size="28rpx" color="#6b7280" />
 							<text class="detail-text">{{ site.address }}</text>
 						</view>
 						
 						<view class="detail-item" v-if="site.site_type">
-							<text class="detail-icon">🏗️</text>
+							<uni-icons class="detail-icon" type="home" size="28rpx" color="#6b7280" />
 							<text class="detail-text">{{ getSiteTypeText(site.site_type) }}</text>
 						</view>
 						
 						<view class="detail-item" v-if="site.contact_person">
-							<text class="detail-icon">👤</text>
+							<uni-icons class="detail-icon" type="person" size="28rpx" color="#6b7280" />
 							<text class="detail-text">{{ site.contact_person }}</text>
 						</view>
 					</view>
@@ -133,6 +133,7 @@
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLanguageStore } from '@/stores/language'
 	import { createDebouncedTracker } from '@/utils/operationTrack.js'
+	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 	import EmptyState from '@/components/EmptyState.vue'
 
@@ -197,8 +198,8 @@
 		if (searchText.value) {
 			const text = searchText.value.toLowerCase()
 			sites = sites.filter(site =>
-				site.site_name.toLowerCase().includes(text) ||
-				site.site_code.toLowerCase().includes(text)
+				(site.site_name || '').toLowerCase().includes(text) ||
+				(site.site_code || '').toLowerCase().includes(text)
 			)
 		}
 
@@ -388,50 +389,6 @@
 		flex-direction: column;
 		overflow: hidden;
 	}
-	
-	// 自定义导航栏
-	.custom-navbar {
-		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-		padding: 44rpx 30rpx 20rpx;
-		color: #fff;
-	}
-	
-	.navbar-content {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		height: 88rpx;
-	}
-	
-	.navbar-title {
-		font-size: 36rpx;
-		font-weight: bold;
-	}
-
-	.navbar-actions {
-		display: flex;
-		gap: 20rpx;
-	}
-
-	.action-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 68rpx;
-		height: 68rpx;
-		border-radius: 50%;
-		background: rgba(255, 255, 255, 0.2);
-		transition: all 0.3s ease;
-	}
-
-	.action-btn:active {
-		background: rgba(255, 255, 255, 0.3);
-		transform: scale(0.95);
-	}
-
-	.action-icon {
-		font-size: 40rpx;
-	}
 
 	// 搜索框样式 - 可折叠
 	.search-container {
@@ -482,17 +439,25 @@
 
 	// 筛选标签 - 紧凑布局
 	.filter-tabs {
+		background: var(--bg-elevated);
+		box-shadow: var(--shadow-card);
+	}
+
+	.filter-tabs-scroll {
+		white-space: nowrap;
+	}
+
+	.filter-tabs-row {
 		display: flex;
 		gap: 12rpx;
 		padding: 16rpx 24rpx;
-		background: var(--bg-elevated);
-		box-shadow: var(--shadow-card);
 	}
 
 	.tab {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
+		flex-shrink: 0;
 		min-height: 68rpx;
 		padding: 0 20rpx;
 		border-radius: 20rpx;
@@ -504,7 +469,7 @@
 		&.active {
 			background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 			color: #fff;
-			box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.28);
+			box-shadow: 0 2rpx 8rpx rgba(var(--color-primary-rgb), 0.24);
 		}
 	}
 	
@@ -597,9 +562,11 @@
 	}
 
 	.detail-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		width: 32rpx;
 		margin-right: 12rpx;
-		font-size: 24rpx;
 	}
 
 	.detail-text {
@@ -665,7 +632,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		box-shadow: 0 4px 16px rgba(249, 115, 22, 0.28);
+		box-shadow: 0 4px 16px rgba(var(--color-primary-rgb), 0.24);
 		z-index: 100;
 	}
 

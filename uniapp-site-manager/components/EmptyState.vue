@@ -132,7 +132,7 @@ const handleAction = () => {
 	font-weight: 600;
 	border: none;
 	border-radius: var(--radius-sm);
-	box-shadow: 0 2px 10px rgba(249, 115, 22, 0.28);
+	box-shadow: 0 2px 10px rgba(var(--color-primary-rgb), 0.26);
 	margin-top: 8px;
 }
 </style>

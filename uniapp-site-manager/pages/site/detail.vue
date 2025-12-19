@@ -1,36 +1,30 @@
 <template>
 	<view class="site-detail-container">
-		<!-- 自定义导航栏 -->
-		<view class="custom-navbar">
-			<view class="navbar-content">
-				<view class="navbar-left">
-					<view class="nav-button back-button" @click="goBack">
-						<uni-icons class="nav-icon" type="back" size="36rpx" color="#fff" />
-					</view>
-				</view>
-				<view class="navbar-center">
-					<text class="navbar-title">{{ $t('site.detail') }}</text>
-				</view>
-				<view class="navbar-right"></view>
-			</view>
-		</view>
-		
-		<view class="site-header">
-			<view class="site-basic">
-				<text class="site-name">{{ site?.site_name }}</text>
-				<text class="site-code">{{ site?.site_code }}</text>
-				<view class="status-wrap" v-if="site">
-					<view class="site-status" :class="getStatusClass(site?.status)">
-						{{ getStatusText(site?.status) }}
-					</view>
-					<view class="ssv-tag" :class="site?.ssv_passed ? 'status-success' : 'status-default'">
-						{{ site?.ssv_passed ? $t('site.ssvPassed') : $t('site.ssvNotPassed') }}
+		<CustomNavbar :title="$t('site.detail')" :showBack="true" variant="brand" />
+		<scroll-view
+			class="site-scroll"
+			scroll-y
+			refresher-enabled
+			:refresher-triggered="refreshing"
+			@refresherrefresh="handleRefresh"
+			refresher-background="#f7f8fb"
+		>
+			<view class="site-header">
+				<view class="site-basic">
+					<text class="site-name">{{ site?.site_name }}</text>
+					<text class="site-code">{{ site?.site_code }}</text>
+					<view class="status-wrap" v-if="site">
+						<view class="site-status" :class="getStatusClass(site?.status)">
+							{{ getStatusText(site?.status) }}
+						</view>
+						<view class="ssv-tag" :class="site?.ssv_passed ? 'status-success' : 'status-default'">
+							{{ site?.ssv_passed ? $t('site.ssvPassed') : $t('site.ssvNotPassed') }}
+						</view>
 					</view>
 				</view>
 			</view>
-		</view>
-		
-		<view class="site-content">
+			
+			<view class="site-content">
 			<!-- 基本信息 -->
 			<view class="info-section">
 				<view class="section-title">{{ $t('site.basicInfo') }}</view>
@@ -248,9 +242,12 @@
 		</view>
 		
 		<!-- 加载状态 -->
-		<view class="loading-container" v-if="loading">
+		<view class="loading-container" v-if="loading && !refreshing">
 			<uni-load-more status="loading"></uni-load-more>
 		</view>
+		
+		<view class="scroll-spacer" />
+		</scroll-view>
 		
 		<!-- 地图选择器 -->
 		<view class="map-selector-overlay" v-if="showMapSelector" @click="showMapSelector = false">
@@ -293,6 +290,7 @@
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useLanguageStore } from '@/stores/language'
 	import { API_ENDPOINTS, buildApiUrl, getAuthHeaders, createRequestConfig } from '@/config/api.js'
+	import CustomNavbar from '@/components/CustomNavbar.vue'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
@@ -302,6 +300,7 @@
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
 	const loading = ref(false)
+	const refreshing = ref(false)
 	const siteId = ref(null)
 	const recentInspections = ref([])
 	const planning = ref(null)
@@ -410,11 +409,6 @@
 		})
 	}
 	
-	// 返回上一页
-	const goBack = () => {
-		uni.navigateBack()
-	}
-	
 	// 显示位置
 	const showLocation = () => {
 		showMapSelector.value = true
@@ -494,6 +488,16 @@
 		}
 	}
 
+	// 下拉刷新
+	const handleRefresh = async () => {
+		try {
+			refreshing.value = true
+			await loadSiteDetail()
+		} finally {
+			refreshing.value = false
+		}
+	}
+
 	// 加载站点规划信息
 	const loadPlanning = async () => {
 		try {
@@ -551,88 +555,31 @@
 
 <style lang="scss" scoped>
 	.site-detail-container {
-		min-height: 100vh;
+		height: 100vh;
 		background-color: var(--bg-page);
 		display: flex;
 		flex-direction: column;
-	}
-	
-	// 自定义导航栏
-	.custom-navbar {
-		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-		padding: 44rpx 30rpx 20rpx;
-		color: #fff;
-	}
-	
-	.navbar-content {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		height: 88rpx;
-		position: relative;
-	}
-	
-	.navbar-left,
-	.navbar-right {
-		width: 88rpx;
-		height: 88rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-	}
-	
-	.navbar-right {
-		justify-content: flex-end;
-	}
-	
-	.nav-button {
-		width: 88rpx;
-		height: 88rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 44rpx;
-		background: rgba(255, 255, 255, 0.2);
-		transition: all 0.3s ease;
-	}
-	
-	.nav-button:active {
-		background: rgba(255, 255, 255, 0.3);
-		transform: scale(0.95);
-	}
-	
-	.nav-icon {
-		font-size: 36rpx;
-		color: white;
-	}
-	
-	.navbar-center {
-		position: absolute;
-		left: 88rpx;
-		right: 88rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		pointer-events: none;
-	}
-	
-	.navbar-title {
-		font-size: 36rpx;
-		font-weight: bold;
-		color: white;
-		text-align: center;
-		max-width: 100%;
 		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+	}
+
+	.site-scroll {
+		flex: 1;
+		height: 0;
+		min-height: 0;
+	}
+
+	.scroll-spacer {
+		height: 20rpx;
 	}
 	
 	// 站点头部
 	.site-header {
-		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+		background: var(--bg-elevated);
+		margin: 20rpx;
 		padding: 20px;
-		color: #fff;
+		color: var(--text-primary);
+		border-radius: var(--radius-md);
+		box-shadow: var(--shadow-card);
 	}
 	
 	.site-basic {
@@ -659,7 +606,7 @@
 	
 	.site-code {
 		font-size: 14px;
-		opacity: 0.9;
+		color: var(--text-secondary);
 		display: block;
 		margin-bottom: 12px;
 	}
@@ -721,7 +668,7 @@
 	
 	// 内容区域
 	.site-content {
-		padding: 0;
+		padding: 0 20rpx 20rpx;
 	}
 	
 	.info-section {

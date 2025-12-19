@@ -1,17 +1,6 @@
 <template>
 	<view class="detail-container">
-		<!-- 导航栏 -->
-		<view class="custom-navbar">
-			<view class="navbar-content">
-				<view class="back-button" @click="goBack">
-					<uni-icons class="back-icon" type="back" size="36rpx" color="#fff" />
-				</view>
-				<text class="navbar-title">{{ $t('inspection.detail') }}</text>
-				<view class="navbar-actions">
-					<!-- 右上角分享按钮已移除 -->
-				</view>
-			</view>
-		</view>
+		<CustomNavbar :title="$t('inspection.detail')" :showBack="true" variant="brand" />
 		
 		<!-- 检查基础信息 -->
 		<view class="inspection-header" v-if="inspectionData">
@@ -600,6 +589,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl } from '@/config/api.js'
+	import CustomNavbar from '@/components/CustomNavbar.vue'
 	
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
@@ -1098,10 +1088,6 @@
 		})
 	}
 	
-	const goBack = () => {
-		uni.navigateBack()
-	}
-	
 	// 工具函数
 	const getInspectionTypeText = (type) => {
 		const typeMap = {
@@ -1284,48 +1270,6 @@
         flex-direction: column;
         overflow: hidden;
     }
-	
-	/* 导航栏 */
-    .custom-navbar {
-        background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-        padding: 44rpx 30rpx 20rpx;
-        color: #fff;
-    }
-	
-	.navbar-content {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-	
-.back-button {
-		width: 88rpx;
-		height: 88rpx;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 44rpx;
-		background: rgba(255, 255, 255, 0.2);
-	}
-	
-.back-icon {
-		font-size: 36rpx;
-		color: white;
-	}
-	
-	.navbar-title {
-		font-size: 36rpx;
-		font-weight: bold;
-		flex: 1;
-		text-align: center;
-		color: white;
-	}
-	
-	.navbar-actions { 
-		width: 88rpx; 
-		display: flex; 
-		justify-content: flex-end; 
-	}
 	
 	/* 检查头部 */
 	.inspection-header {
@@ -1977,11 +1921,11 @@
 	}
 	
 	.continue-btn {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 	}
 	
 	.review-btn {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 	}
 	
 /* .export-btn 已废弃 */
@@ -2427,7 +2371,7 @@
 		background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
 		border: 2rpx solid #fdba74;
 		border-radius: 16rpx;
-		box-shadow: 0 4rpx 12rpx rgba(249, 115, 22, 0.15);
+		box-shadow: 0 4rpx 12rpx rgba(var(--color-primary-rgb), 0.14);
 	}
 
 	.reminder-header {
@@ -2471,7 +2415,7 @@
 		
 		.reminder-action {
 			padding: 12rpx 24rpx;
-			background-color: #f97316;
+			background-color: var(--color-primary);
 			color: white;
 			border-radius: 8rpx;
 			font-size: 26rpx;
@@ -2560,7 +2504,7 @@
 			
 			.unbound-item-arrow {
 				font-size: 32rpx;
-				color: #f97316;
+				color: var(--color-primary);
 			}
 		}
 	}

@@ -20,8 +20,9 @@
 					class="input-field"
 					type="text" 
 					:placeholder="$t('login.username')"
-					v-model="loginForm.username"
+					v-model.trim="loginForm.username"
 					:disabled="loading"
+					confirm-type="next"
 				/>
 			</view>
 			
@@ -30,8 +31,10 @@
 					class="input-field"
 					type="password" 
 					:placeholder="$t('login.password')"
-					v-model="loginForm.password"
+					v-model.trim="loginForm.password"
 					:disabled="loading"
+					confirm-type="done"
+					@confirm="handleLogin"
 				/>
 			</view>
 			
@@ -51,7 +54,7 @@
 		
 		<!-- 版本信息 -->
 		<view class="version-info">
-			<text>{{ $t('login.version') }} 1.0.0</text>
+			<text>{{ $t('login.version') }} {{ appVersion }}</text>
 		</view>
 	</view>
 </template>
@@ -61,6 +64,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
+	import { env } from '@/config/env.js'
 	
 	const userStore = useUserStore()
 	const logger = useLoggerStore()
@@ -68,6 +72,7 @@
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
 	const loading = ref(false)
+	const appVersion = env.APP_VERSION
 	const loginForm = reactive({
 		username: '',
 		password: ''
@@ -214,12 +219,28 @@
 	
 	.language-switch {
 		position: absolute;
-		top: 50px;
+		top: calc(env(safe-area-inset-top) + 16px);
 		right: 30px;
 		z-index: 100;
 	}
 	
-	.language-btn { background: rgba(255, 255, 255, 0.2); color: #fff; padding: 0 16px; min-height: 44px; display: inline-flex; align-items: center; border-radius: 22px; font-size: 14px; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.3); cursor: pointer; transition: all 0.3s ease; &:hover { background: rgba(255, 255, 255, 0.3); transform: scale(1.05); } &:active { transform: scale(0.95); } }
+	.language-btn {
+		background: rgba(255, 255, 255, 0.22);
+		color: #fff;
+		padding: 0 16px;
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
+		border-radius: 22px;
+		font-size: 14px;
+		border: 1px solid rgba(255, 255, 255, 0.32);
+		transition: transform 0.15s ease, background-color 0.2s ease, opacity 0.2s ease;
+		
+		&:active {
+			transform: scale(0.96);
+			background: rgba(255, 255, 255, 0.28);
+		}
+	}
 	
 	.login-header {
 		text-align: center;
@@ -258,7 +279,7 @@
 		box-sizing: border-box;
 		background: #fafafa;
 		
-		&:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(249,115,22,0.12); background: #fff; }
+		&:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.12); background: #fff; }
 		&:disabled { background-color: #f9fafb; color: #6b7280; }
 	}
 	
@@ -274,7 +295,7 @@
 		margin-bottom: 20px;
 		transition: all 0.2s ease;
 		box-sizing: border-box;
-		box-shadow: 0 2px 10px rgba(249,115,22,0.28);
+		box-shadow: 0 2px 10px rgba(var(--color-primary-rgb), 0.26);
 		
 		&:not(:disabled):active { transform: translateY(1px); }
 		&:disabled { opacity: 0.6; cursor: not-allowed; }

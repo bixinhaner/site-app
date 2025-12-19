@@ -1,14 +1,10 @@
 <template>
   <view class="detail-container">
-    <view class="custom-navbar">
-      <view class="navbar-content">
-        <text class="navbar-title">{{ $t('workorder.detail') }}</text>
-      </view>
-    </view>
+    <CustomNavbar :title="$t('workorder.detail')" :showBack="true" variant="brand" />
 
-    <view v-if="order" class="content">
+    <scroll-view v-if="order" class="content" scroll-y>
       <view class="card">
-        <view class="row"><text class="label">{{ $t('workorder.title') }}</text><text class="value">{{ order.title }}</text></view>
+        <view class="row"><text class="label">{{ $t('workorder.workOrderTitle') }}</text><text class="value">{{ order.title }}</text></view>
         <view class="row"><text class="label">{{ $t('site.name') }}</text><text class="value">{{ order.site_name || order.site_id }}</text></view>
         <view class="row"><text class="label">{{ $t('workorder.status') }}</text><text class="value status" :class="'status-'+order.status">{{ statusText(order.status) }}</text></view>
         <view class="row"><text class="label">{{ $t('workorder.assignedAt') }}</text><text class="value">{{ formatDateTime(order.assigned_at) }}</text></view>
@@ -46,23 +42,24 @@
         </view>
       </view>
 
-      <view class="bottom-actions" v-if="order.status === 'ACTIVE' || order.status === 'REJECTED' || order.status === 'SUBMITTED' || order.status === 'UNDER_REVIEW'">
-        <button 
-          class="action-btn" 
-          @click="completeWorkOrder"
-          v-if="order.status === 'ACTIVE'"
-        >{{ $t('workorder.complete') }}</button>
-        <button 
-          class="action-btn rejected" 
-          @click="openEdit(null)"
-          v-if="order.status === 'REJECTED'"
-        >{{ $t('workorder.modify') }}</button>
-        <button 
-          class="action-btn" 
-          @click="handleRecall"
-          v-if="(order.status === 'SUBMITTED' || order.status === 'UNDER_REVIEW') && canRecall"
-        >{{ $t('workorder.recall') }}</button>
-      </view>
+    </scroll-view>
+
+    <view class="bottom-actions" v-if="order && (order.status === 'ACTIVE' || order.status === 'REJECTED' || order.status === 'SUBMITTED' || order.status === 'UNDER_REVIEW')">
+      <button 
+        class="action-btn" 
+        @click="completeWorkOrder"
+        v-if="order.status === 'ACTIVE'"
+      >{{ $t('workorder.complete') }}</button>
+      <button 
+        class="action-btn rejected" 
+        @click="openEdit(null)"
+        v-if="order.status === 'REJECTED'"
+      >{{ $t('workorder.modify') }}</button>
+      <button 
+        class="action-btn" 
+        @click="handleRecall"
+        v-if="(order.status === 'SUBMITTED' || order.status === 'UNDER_REVIEW') && canRecall"
+      >{{ $t('workorder.recall') }}</button>
     </view>
 
     <!-- 填报弹层 -->
@@ -128,6 +125,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 import { useUserStore } from '@/stores/user'
 import { getLocationWithAddressStrategy } from '@/utils/locationStrategy.js'
+import CustomNavbar from '@/components/CustomNavbar.vue'
 
 const { $t } = getCurrentInstance().appContext.config.globalProperties
 const store = useWorkOrderStore()
@@ -705,31 +703,18 @@ onShow(() => {
 
 <style lang="scss" scoped>
 	.detail-container {
-		min-height: 100vh;
+		height: 100vh;
 		background-color: var(--bg-page);
-	}
-	
-	// 自定义导航栏 - 统一风格
-	.custom-navbar {
-		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-		padding: 44rpx 30rpx 20rpx;
-		color: #fff;
-	}
-	
-	.navbar-content {
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		height: 88rpx;
-	}
-	
-	.navbar-title {
-		font-size: 36rpx;
-		font-weight: bold;
+		flex-direction: column;
+		overflow: hidden;
 	}
 	
 	// 内容区域
 	.content {
+		flex: 1;
+		height: 0;
+		min-height: 0;
 		padding: 20rpx;
 		padding-bottom: 140rpx;
 	}
@@ -879,11 +864,11 @@ onShow(() => {
 		padding: 12rpx;
 		background: #f8fafc;
 		border-radius: 8rpx;
-		border-left: 4rpx solid #f97316;
+		border-left: 4rpx solid var(--color-primary);
 		
 		.comments-label {
 			font-size: 24rpx;
-			color: #f97316;
+			color: var(--color-primary);
 			font-weight: 500;
 		}
 		
@@ -956,7 +941,7 @@ onShow(() => {
 		color: #fff;
 		font-size: 26rpx;
 		font-weight: 600;
-		box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.28);
+		box-shadow: 0 2rpx 8rpx rgba(var(--color-primary-rgb), 0.24);
 		
 		&:active { transform: translateY(1rpx); }
 	}
@@ -985,11 +970,11 @@ onShow(() => {
 		color: #fff;
 		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		font-weight: 600;
-		box-shadow: 0 4rpx 12rpx rgba(249, 115, 22, 0.36);
+		box-shadow: 0 4rpx 12rpx rgba(var(--color-primary-rgb), 0.28);
 		
 		&:active {
 			transform: translateY(2rpx);
-			box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.36);
+			box-shadow: 0 2rpx 8rpx rgba(var(--color-primary-rgb), 0.28);
 		}
 	}
 	
@@ -1042,7 +1027,7 @@ onShow(() => {
 		
 		&:focus {
 			border-color: var(--color-primary);
-			box-shadow: 0 0 0 6rpx rgba(249, 115, 22, 0.12);
+			box-shadow: 0 0 0 6rpx rgba(var(--color-primary-rgb), 0.12);
 			background: #fff;
 		}
 	}
@@ -1090,7 +1075,7 @@ onShow(() => {
 		font-weight: 600;
 		
 		&.cancel { background: #f3f4f6; color: #6b7280; }
-		&.save { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); color: #fff; box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.28); }
+		&.save { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); color: #fff; box-shadow: 0 2rpx 8rpx rgba(var(--color-primary-rgb), 0.24); }
 		&.rejected { background: linear-gradient(135deg, #dc2626, #ef4444); color: #fff; box-shadow: 0 4rpx 12rpx rgba(220, 38, 38, 0.4); }
 		&:active { transform: translateY(1rpx); }
 	}

@@ -163,7 +163,7 @@
 	}
 	
 	.back-btn {
-		background: linear-gradient(135deg, #f97316, #fb923c);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		color: white;
 		border: none;
 		border-radius: 25px;

@@ -1,15 +1,12 @@
 <template>
   <view class="list-container" :key="languageStore.currentLocale">
-    <view class="custom-navbar">
-      <view class="navbar-content">
-        <text class="navbar-title">{{ $t('workorder.title') }}</text>
-        <view class="navbar-actions">
-          <view class="action-btn" @click="toggleSearch">
-            <uni-icons class="action-icon" :type="showSearch ? 'closeempty' : 'search'" size="40rpx" color="#fff" />
-          </view>
+    <CustomNavbar :title="$t('workorder.title')" variant="brand">
+      <template #right>
+        <view class="u-nav-btn u-nav-btn--brand" @click="toggleSearch">
+          <uni-icons :type="showSearch ? 'closeempty' : 'search'" size="36rpx" color="#fff" />
         </view>
-      </view>
-    </view>
+      </template>
+    </CustomNavbar>
 
     <!-- 可折叠搜索框 -->
     <view class="search-container" :class="{ 'search-container-open': showSearch }">
@@ -30,11 +27,15 @@
     </view>
 
     <view class="filter-tabs">
-      <view class="tab" :class="{active: status===''}" @click="setStatus('')">{{ $t('common.all') }}</view>
-      <view class="tab" :class="{active: status==='PENDING'}" @click="setStatus('PENDING')">{{ $t('workorder.pending') }}</view>
-      <view class="tab" :class="{active: status==='ACTIVE'}" @click="setStatus('ACTIVE')">{{ $t('workorder.inProgress') }}</view>
-      <view class="tab" :class="{active: status==='SUBMITTED'}" @click="setStatus('SUBMITTED')">{{ $t('workorder.submitted') }}</view>
-      <view class="tab" :class="{active: status==='COMPLETED'}" @click="setStatus('COMPLETED')">{{ $t('workorder.completed') }}</view>
+      <scroll-view class="filter-tabs-scroll" scroll-x :show-scrollbar="false">
+        <view class="filter-tabs-row">
+          <view class="tab" :class="{active: status===''}" @click="setStatus('')">{{ $t('common.all') }}</view>
+          <view class="tab" :class="{active: status==='PENDING'}" @click="setStatus('PENDING')">{{ $t('workorder.pending') }}</view>
+          <view class="tab" :class="{active: status==='ACTIVE'}" @click="setStatus('ACTIVE')">{{ $t('workorder.inProgress') }}</view>
+          <view class="tab" :class="{active: status==='SUBMITTED'}" @click="setStatus('SUBMITTED')">{{ $t('workorder.submitted') }}</view>
+          <view class="tab" :class="{active: status==='COMPLETED'}" @click="setStatus('COMPLETED')">{{ $t('workorder.completed') }}</view>
+        </view>
+      </scroll-view>
     </view>
 
     <scroll-view 
@@ -78,9 +79,17 @@
               <text class="order-title">{{ wo.title }}</text>
               <text class="order-status" :class="'status-' + wo.status">{{ statusText(wo.status) }}</text>
             </view>
-            <view class="order-meta">
-              <text class="site">📍 {{ wo.site_name || wo.site_id }}</text>
-              <text class="time">⏱ {{ formatDateTime(wo.assigned_at) }}</text>
+            <view class="order-body">
+              <view class="order-row">
+                <uni-icons class="row-icon" type="location" size="28rpx" color="#9ca3af" />
+                <text class="row-text row-site">{{ wo.site_name || wo.site_id }}</text>
+              </view>
+              <view class="order-row">
+                <uni-icons class="row-icon" type="flag" size="28rpx" color="#9ca3af" />
+                <view class="order-type-tag">
+                  <text class="order-type-text">{{ typeText(wo.type) }}</text>
+                </view>
+              </view>
             </view>
             <view class="order-actions" v-if="wo.status === 'PENDING'">
               <button class="accept-btn u-pressable" size="mini" @click.stop="handleAccept(wo)">{{ $t('workorder.accept') }}</button>
@@ -96,6 +105,13 @@
             </view>
             <view class="order-actions" v-else-if="wo.status === 'REJECTED'">
               <button class="rejected-btn u-pressable" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.resubmit') }}</button>
+            </view>
+            <view class="order-footer">
+              <view class="footer-left">
+                <uni-icons type="calendar" size="26rpx" color="#9ca3af" />
+                <text class="footer-time">{{ formatCompactDateTime(wo.assigned_at) }}</text>
+              </view>
+              <text class="footer-arrow">›</text>
             </view>
           </view>
         </template>
@@ -117,6 +133,7 @@ import { useWorkOrderStore } from '@/stores/workorder'
 import { useLanguageStore } from '@/stores/language'
 import { useUserStore } from '@/stores/user'
 import { trackOperation } from '@/utils/operationTrack.js'
+import CustomNavbar from '@/components/CustomNavbar.vue'
 import SkeletonCard from '@/components/SkeletonCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
 
@@ -139,8 +156,9 @@ const { $t } = getCurrentInstance().appContext.config.globalProperties
 const reload = async () => {
   try {
     refreshing.value = true
-    console.log('🔄 工单列表刷新中...', { status: status.value, keyword: searchKeyword.value })
-    const res = await store.getMyWorkOrders(status.value || undefined, searchKeyword.value || undefined)
+    const keyword = (searchKeyword.value || '').trim()
+    console.log('🔄 工单列表刷新中...', { status: status.value, keyword })
+    const res = await store.getMyWorkOrders(status.value || undefined, keyword || undefined)
     if (res.success) {
       orders.value = res.data
       console.log('✅ 工单列表刷新成功', { count: res.data?.length })
@@ -188,13 +206,14 @@ const handleRefresh = async () => {
 
 const setStatus = async (s) => {
   status.value = s
+  const keyword = (searchKeyword.value || '').trim()
   trackOperation({
     module: '工单管理',
     action: '查询',
     object_type: '工单',
     data: {
       status: status.value || undefined,
-      keyword: searchKeyword.value || undefined,
+      keyword: keyword || undefined,
     }
   })
   await reload()
@@ -206,15 +225,20 @@ const onSearchInput = () => {
     clearTimeout(searchTimer)
   }
   searchTimer = setTimeout(() => {
-    handleSearch()
+    handleSearch({ auto: true })
   }, 500) // 500ms防抖
 }
 
 // 执行搜索
-const handleSearch = async () => {
+const handleSearch = async ({ auto = false } = {}) => {
   if (searchTimer) {
     clearTimeout(searchTimer)
     searchTimer = null
+  }
+  const keyword = (searchKeyword.value || '').trim()
+  // 自动触发时避免 1 个字符就打接口（对中低端安卓 + 弱网更友好）
+  if (auto && keyword && keyword.length < 2) {
+    return
   }
   trackOperation({
     module: '工单管理',
@@ -222,7 +246,7 @@ const handleSearch = async () => {
     object_type: '工单',
     data: {
       status: status.value || undefined,
-      keyword: searchKeyword.value || undefined,
+      keyword: keyword || undefined,
     }
   })
   await reload()
@@ -264,7 +288,8 @@ const openDetail = (wo) => {
       url: `/pages/inspection/detail?id=${wo.inspection_id}&fromWorkOrder=${wo.id}` 
     })
   } else {
-    uni.showToast({ title: $t('messages.noInspectionLinked'), icon: 'none' })
+    // 没有关联检查时仍允许查看工单详情
+    uni.navigateTo({ url: `/pages/workorder/detail?id=${wo.id}` })
   }
 }
 
@@ -281,10 +306,22 @@ const statusText = (s) => {
   })[s] || s
 }
 
-const formatDateTime = (val) => {
+const formatCompactDateTime = (val) => {
   if (!val) return '-'
-  const locale = getCurrentInstance().appContext.config.globalProperties.$language?.currentLocale || 'zh'
-  return new Date(val).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')
+  const date = new Date(val)
+  if (!isFinite(date.getTime())) return '-'
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  return `${y}-${m}-${d} ${hh}:${mm}`
+}
+
+const typeText = (type) => {
+  const key = `workorder.types.${type}`
+  const text = $t(key)
+  return text === key ? (type || '-') : text
 }
 
 const handleAccept = async (wo) => {
@@ -401,50 +438,6 @@ onShow(() => {
 		flex-direction: column;
 		overflow: hidden;
 	}
-	
-	// 自定义导航栏 - 统一风格
-	.custom-navbar {
-		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-		padding: 44rpx 30rpx 20rpx;
-		color: #fff;
-	}
-
-	.navbar-content {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		height: 88rpx;
-	}
-
-	.navbar-title {
-		font-size: 36rpx;
-		font-weight: bold;
-	}
-
-	.navbar-actions {
-		display: flex;
-		gap: 20rpx;
-	}
-
-	.action-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 68rpx;
-		height: 68rpx;
-		border-radius: 50%;
-		background: rgba(255, 255, 255, 0.2);
-		transition: all 0.3s ease;
-	}
-
-	.action-btn:active {
-		background: rgba(255, 255, 255, 0.3);
-		transform: scale(0.95);
-	}
-
-	.action-icon {
-		font-size: 40rpx;
-	}
 
 	// 搜索框样式 - 可折叠
 	.search-container {
@@ -495,17 +488,25 @@ onShow(() => {
 
 	// 筛选标签 - 紧凑布局
 	.filter-tabs {
+		background: var(--bg-elevated);
+		box-shadow: var(--shadow-card);
+	}
+
+	.filter-tabs-scroll {
+		white-space: nowrap;
+	}
+
+	.filter-tabs-row {
 		display: flex;
 		gap: 12rpx;
 		padding: 16rpx 24rpx;
-		background: var(--bg-elevated);
-		box-shadow: var(--shadow-card);
 	}
 	
 	.tab {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
+		flex-shrink: 0;
 		min-height: 68rpx;
 		padding: 0 20rpx;
 		border-radius: 20rpx;
@@ -517,7 +518,7 @@ onShow(() => {
 		&.active {
 			background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 			color: #fff;
-			box-shadow: 0 2rpx 8rpx rgba(249, 115, 22, 0.28);
+			box-shadow: 0 2rpx 8rpx rgba(var(--color-primary-rgb), 0.24);
 		}
 	}
 	
@@ -578,11 +579,23 @@ onShow(() => {
 	.order-header {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 16rpx;
+		align-items: flex-start;
+		gap: 16rpx;
 	}
 	
-	.order-title { font-weight: 600; color: var(--text-primary); font-size: 32rpx; flex: 1; margin-right: 16rpx; }
+	.order-title {
+		font-weight: 600;
+		color: var(--text-primary);
+		font-size: 32rpx;
+		flex: 1;
+		line-height: 1.32;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+	}
 	
 	// 状态标签 - 统一状态颜色
 	.order-status {
@@ -590,6 +603,7 @@ onShow(() => {
 		padding: 8rpx 16rpx;
 		border-radius: 16rpx;
 		font-weight: 500;
+		flex-shrink: 0;
 		
 		&.status-PENDING {
 			background: #f3f4f6;
@@ -627,22 +641,94 @@ onShow(() => {
 		}
 	}
 	
-	.order-meta {
+	.order-body {
+		margin-top: 12rpx;
 		display: flex;
-		justify-content: space-between;
-		color: var(--text-secondary);
-		font-size: 26rpx;
-		margin-bottom: 16rpx;
-		
-		.site { flex: 1; margin-right: 16rpx; }
-		.time { white-space: nowrap; }
+		flex-direction: column;
+		gap: 12rpx;
+	}
+
+	.order-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 10rpx;
+		min-width: 0;
+	}
+
+	.row-icon {
+		margin-top: 4rpx;
+		flex-shrink: 0;
+	}
+
+	.row-text {
+		flex: 1;
+		min-width: 0;
+		font-size: 28rpx;
+		line-height: 1.3;
+	}
+
+	.row-site {
+		color: var(--text-primary);
+		font-weight: 500;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+	}
+
+	.order-type-tag {
+		display: inline-flex;
+		align-items: center;
+		padding: 6rpx 14rpx;
+		border-radius: 999rpx;
+		background: #f3f4f6;
+		border: 1rpx solid var(--border-soft);
+		max-width: 100%;
+	}
+
+	.order-type-text {
+		font-size: 24rpx;
+		color: #374151;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	
 	// 操作按钮
 	.order-actions {
 		margin-top: 16rpx;
 		display: flex;
-		justify-content: flex-end;
+		justify-content: center;
+	}
+
+	.order-footer {
+		margin-top: 16rpx;
+		padding-top: 16rpx;
+		border-top: 1rpx solid var(--border-soft);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		color: var(--text-secondary);
+	}
+
+	.footer-left {
+		display: inline-flex;
+		align-items: center;
+		gap: 8rpx;
+		min-width: 0;
+	}
+
+	.footer-time {
+		font-size: 24rpx;
+		color: inherit;
+		white-space: nowrap;
+	}
+
+	.footer-arrow {
+		color: #9ca3af;
+		font-size: 36rpx;
+		line-height: 1;
 	}
 	
 .accept-btn, .continue-btn, .recalled-btn, .rejected-btn, .recall-btn {

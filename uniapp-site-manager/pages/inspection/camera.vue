@@ -1163,7 +1163,7 @@ export default {
 	
 	.status-bar {
 		height: 44rpx;
-		background: transparent;
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 	}
 	
 	.camera-view {
@@ -1181,7 +1181,7 @@ export default {
 		left: 0;
 		right: 0;
 		height: 120rpx;
-		background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		display: flex;
 		align-items: center;
 		padding: 0 30rpx;
@@ -1215,7 +1215,7 @@ export default {
 		display: block;
 	}
 	
-	.tool-btn { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10rpx); }
+	.tool-btn { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: rgba(255, 255, 255, 0.2); border: 2rpx solid rgba(255, 255, 255, 0.28); display: flex; align-items: center; justify-content: center; }
 	
 	.btn-icon {
 		color: white;
@@ -1235,7 +1235,6 @@ export default {
 		background: rgba(0, 0, 0, 0.8);
 		border-radius: 15rpx;
 		padding: 20rpx;
-		backdrop-filter: blur(10rpx);
 	}
 	
 	.gps-text,
@@ -1262,7 +1261,6 @@ export default {
 		background: rgba(0, 0, 0, 0.9);
 		border-radius: 20rpx;
 		padding: 30rpx;
-		backdrop-filter: blur(15rpx);
 	}
 	
 	.requirement-title {
@@ -1427,7 +1425,6 @@ export default {
 		padding: 30rpx 40rpx;
 		min-width: 300rpx;
 		text-align: center;
-		backdrop-filter: blur(15rpx);
 	}
 	
 	.progress-text {

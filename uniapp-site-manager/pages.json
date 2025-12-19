@@ -107,15 +107,14 @@
 			"path": "pages/stock/scan-pickup",
 			"style": {
 				"navigationBarTitleText": "我的设备",
-				"navigationBarBackgroundColor": "#f97316",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/test/logging-test",
 			"style": {
 				"navigationBarTitleText": "日志测试",
-				"navigationBarBackgroundColor": "#f97316",
+				"navigationBarBackgroundColor": "#FF4614",
 				"navigationBarTextStyle": "white"
 			}
 		},

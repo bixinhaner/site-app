@@ -7,7 +7,7 @@
 
 <script setup>
 	import { ref } from 'vue'
-import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
+	import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useOfflineStore } from '@/stores/offline'
 	import { useLoggerStore } from '@/stores/logger'
@@ -26,6 +26,57 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	const offlineStore = useOfflineStore()
 	const logger = useLoggerStore()
 	const languageStore = useLanguageStore()
+
+	const setAndroidNavigationBarWhite = () => {
+		// #ifdef APP-PLUS
+		try {
+			const systemInfo = uni.getSystemInfoSync()
+			if (systemInfo.platform !== 'android') return
+
+			const mainActivity = plus.android.runtimeMainActivity()
+			const window = mainActivity.getWindow()
+			// 某些机型/运行态需要先 importClass 才能访问 window 方法
+			try {
+				plus.android.importClass(window)
+			} catch (e) {
+				// ignore
+			}
+
+			const Color = plus.android.importClass('android.graphics.Color')
+			const navColor = Color.parseColor('#FFFFFF')
+			if (window && typeof window.setNavigationBarColor === 'function') {
+				window.setNavigationBarColor(navColor)
+			} else {
+				// 兜底：通过 invoke 反射调用，避免方法未挂载导致 TypeError
+				try {
+					plus.android.invoke(window, 'setNavigationBarColor', navColor)
+				} catch (e) {
+					console.warn('setNavigationBarColor 不支持或调用失败:', e)
+				}
+			}
+
+			// Android 8.0+ 可设置导航栏按钮为深色（白底更清爽）
+			try {
+				const Build = plus.android.importClass('android.os.Build')
+				if (Build.VERSION.SDK_INT >= 26) {
+					const View = plus.android.importClass('android.view.View')
+					const decorView = window.getDecorView()
+					try {
+						plus.android.importClass(decorView)
+					} catch (e) {
+						// ignore
+					}
+					const flags = decorView.getSystemUiVisibility()
+					decorView.setSystemUiVisibility(flags | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR)
+				}
+			} catch (e) {
+				// ignore
+			}
+		} catch (error) {
+			console.warn('设置Android导航栏颜色失败:', error)
+		}
+		// #endif
+	}
 	
 	onLaunch(async () => {
 		console.log('🚀 App Launch - Start')
@@ -74,11 +125,15 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 				logger.logAction('TOKEN_VALIDATION_SUCCESS')
 			}
 		}
+
+		// 设置 Android 底部导航栏为白色，修复底部黑边
+		setAndroidNavigationBarWhite()
 	})
 	
 	onShow(() => {
 		console.log('App Show')
 		console.log('⚠️ Logger calls temporarily disabled in onShow for debugging')
+		setAndroidNavigationBarWhite()
 		// logger.logAction('APP_SHOW', {
 		// 	timestamp: new Date().toISOString()
 		// })
@@ -117,12 +172,12 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 		border-radius: var(--radius-sm);
 		padding: 12px 24px;
 		font-weight: 600;
-		box-shadow: 0 2px 10px rgba(249, 115, 22, 0.28);
+		box-shadow: 0 2px 10px rgba(var(--color-primary-rgb), 0.26);
 	}
 	
 	.btn-primary:active {
 		transform: translateY(1px);
-		box-shadow: 0 1px 6px rgba(249, 115, 22, 0.24);
+		box-shadow: 0 1px 6px rgba(var(--color-primary-rgb), 0.22);
 	}
 	
 	/* 卡片样式 */
@@ -145,7 +200,7 @@ import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	
 	.input-field:focus {
 		border-color: var(--color-primary);
-		box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
+		box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.12);
 	}
 	
 	/* 状态颜色 */

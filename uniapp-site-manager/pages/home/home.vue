@@ -3,7 +3,7 @@
 		<!-- 自定义导航栏 -->
 		<view class="custom-navbar">
 			<view class="navbar-content">
-				<text class="navbar-title">{{ $t('login.title') }}</text>
+				<text class="navbar-title">{{ $t('home.title') }}</text>
 				<view class="user-info" @click="showUserMenu">
 					<text class="user-name">{{ userStore.userInfo?.full_name || userStore.userInfo?.username }}</text>
 					<view class="avatar">

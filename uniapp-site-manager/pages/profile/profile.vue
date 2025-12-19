@@ -13,7 +13,7 @@
 					<text v-else class="avatar-text">{{ getAvatarText() }}</text>
 				</view>
 				<button class="edit-avatar-btn" @click="changeAvatar">
-					<text class="btn-icon">📷</text>
+					<uni-icons type="camera" size="18" color="var(--color-primary)" />
 				</button>
 			</view>
 			
@@ -156,7 +156,7 @@
 			<view class="menu-group">
 				<view class="menu-item" @click="editProfile">
 					<view class="menu-left">
-						<text class="menu-icon">👤</text>
+						<uni-icons class="menu-icon" type="person" size="18" color="#6b7280" />
 						<text class="menu-text">{{ $t('profile.userInfo') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -164,7 +164,7 @@
 				
 				<view class="menu-item" @click="openPasswordModal">
 					<view class="menu-left">
-						<text class="menu-icon">🔒</text>
+						<uni-icons class="menu-icon" type="locked" size="18" color="#6b7280" />
 						<text class="menu-text">{{ $t('profile.changePassword') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -172,7 +172,7 @@
 				
 				<view class="menu-item" @click="viewMyInspections">
 					<view class="menu-left">
-						<text class="menu-icon">📋</text>
+						<uni-icons class="menu-icon" type="list" size="18" color="#6b7280" />
 						<text class="menu-text">{{ $t('inspection.list') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -180,7 +180,7 @@
 				
 				<view class="menu-item" @click="viewMySites" v-if="canViewSites">
 					<view class="menu-left">
-						<text class="menu-icon">📍</text>
+						<uni-icons class="menu-icon" type="location" size="18" color="#6b7280" />
 						<text class="menu-text">{{ userInfo?.role === 'inspector' ? $t('site.title') : $t('site.list') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -191,7 +191,7 @@
 				<!-- 语言设置菜单项 -->
 				<view class="menu-item" @click="showLanguageSettings">
 					<view class="menu-left">
-						<text class="menu-icon">🌐</text>
+						<uni-icons class="menu-icon" type="flag" size="18" color="#6b7280" />
 						<text class="menu-text">{{ $t('profile.languageSettings') }}</text>
 					</view>
 					<view class="menu-right">
@@ -202,7 +202,7 @@
 				
 				<view class="menu-item" @click="showSettings" v-if="isAdmin">
 					<view class="menu-left">
-						<text class="menu-icon">⚙️</text>
+						<uni-icons class="menu-icon" type="settings" size="18" color="#6b7280" />
 						<text class="menu-text">{{ $t('profile.settings') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -210,7 +210,7 @@
 				
 				<view class="menu-item" @click="showHelp">
 					<view class="menu-left">
-						<text class="menu-icon">❓</text>
+						<uni-icons class="menu-icon" type="help" size="18" color="#6b7280" />
 						<text class="menu-text">{{ $t('profile.preferences') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -218,7 +218,7 @@
 				
 				<view class="menu-item" @click="showAbout">
 					<view class="menu-left">
-						<text class="menu-icon">ℹ️</text>
+						<uni-icons class="menu-icon" type="info" size="18" color="#6b7280" />
 						<text class="menu-text">{{ t('profile.about') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -226,7 +226,7 @@
 				
 				<view class="menu-item" @click="goToLoggingTest" v-if="isAdmin">
 					<view class="menu-left">
-						<text class="menu-icon">🔍</text>
+						<uni-icons class="menu-icon" type="search" size="18" color="#6b7280" />
 						<text class="menu-text">{{ t('profile.loggingTest') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -234,7 +234,7 @@
 				
 				<view class="menu-item" @click="goToLocationPluginTest" v-if="isAdmin">
 					<view class="menu-left">
-						<text class="menu-icon">📍</text>
+						<uni-icons class="menu-icon" type="map-pin-ellipse" size="18" color="#6b7280" />
 						<text class="menu-text">{{ t('profile.locationPluginTest') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -242,7 +242,7 @@
 				
 				<view class="menu-item" @click="goToBuiltinLocationTest" v-if="isAdmin">
 					<view class="menu-left">
-						<text class="menu-icon">🌍</text>
+						<uni-icons class="menu-icon" type="map" size="18" color="#6b7280" />
 						<text class="menu-text">{{ t('profile.builtinLocationTest') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -252,7 +252,7 @@
 			<view class="menu-group">
 				<view class="menu-item logout" @click="handleLogout">
 					<view class="menu-left">
-						<text class="menu-icon">🚪</text>
+						<uni-icons class="menu-icon" type="undo" size="18" color="#dc2626" />
 						<text class="menu-text">{{ $t('profile.logout') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
@@ -295,8 +295,7 @@
 		
 		<!-- 版本信息 -->
 		<view class="version-info">
-			<text class="version-text">{{ t('profile.appName') }} v1.0.0</text>
-			<text class="build-text">Build 20240101</text>
+			<text class="version-text">{{ t('profile.appName') }} v{{ appVersion }}</text>
 		</view>
 	</view>
 </template>
@@ -308,6 +307,7 @@
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useLanguageStore } from '@/stores/language'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+	import { env } from '@/config/env.js'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
@@ -316,6 +316,7 @@
 	
 	const instance = getCurrentInstance()
 	const $t = instance.appContext.config.globalProperties.$t
+	const appVersion = env.APP_VERSION
 	
 	// 使用computed创建响应式的t函数
 	const t = (key) => {
@@ -760,13 +761,13 @@ const isAdmin = computed(() => userStore.isAdmin)
 	.profile-container {
 		min-height: 100vh;
 		background-color: var(--bg-page);
-		padding-bottom: 20px;
+		padding-bottom: calc(64px + env(safe-area-inset-bottom));
 	}
 	
 	// 用户信息头部
 	.profile-header {
 		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-		padding: 60px 20px 30px;
+		padding: calc(env(safe-area-inset-top) + 24px) 20px 30px;
 		color: #fff;
 		display: flex;
 		align-items: center;
@@ -887,9 +888,10 @@ const isAdmin = computed(() => userStore.isAdmin)
 	}
 	
 	.menu-icon {
-		font-size: 18px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		width: 24px;
-		text-align: center;
 	}
 	
 	.menu-text { font-size: 15px; color: var(--text-primary); }

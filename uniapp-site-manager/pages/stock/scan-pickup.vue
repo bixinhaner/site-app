@@ -1,17 +1,19 @@
 <template>
   <view class="container">
-    <view class="header">
-      <text class="title">{{ $t('stock.scanPickup') }}</text>
-      <view class="scan-info">
-        <text class="info-text">{{ $t('stock.myDevicesInfo') }}</text>
+    <CustomNavbar :title="$t('stock.scanPickup')" :showBack="true" variant="brand" />
+
+    <scroll-view class="page-content" scroll-y>
+      <view class="header">
+        <view class="scan-info">
+          <text class="info-text">{{ $t('stock.myDevicesInfo') }}</text>
+        </view>
       </view>
-    </view>
 
     <!-- 扫码领货（默认折叠） -->
     <view class="scan-fold">
       <view class="scan-fold-header" :class="{ expanded: !scanSectionCollapsed }" @click="toggleScanSection">
         <view class="scan-fold-left">
-          <uni-icons type="scan" size="18" color="#f97316" />
+          <uni-icons type="scan" size="18" color="var(--color-primary)" />
           <text class="scan-fold-title">{{ $t('stock.scanPickupAction') }}</text>
         </view>
         <view class="scan-fold-right">
@@ -148,9 +150,9 @@
           </view>
         </view>
       </view>
-    </view>
+	    </view>
 
-    <!-- 我的设备列表 -->
+	    <!-- 我的设备列表 -->
 	    <view class="history-section">
 	      <view class="section-title">
 	        <text>{{ $t('stock.myDevicesList') }}</text>
@@ -235,8 +237,9 @@
             {{ pickupLoadingMore ? $t('common.loading') : $t('stock.loadMore') }}
           </button>
         </view>
-      </view>
-    </view>
+	      </view>
+	    </view>
+    </scroll-view>
 
     <!-- Loading遮罩 -->
     <view v-if="loading" class="loading-mask">
@@ -1770,7 +1773,9 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.container { background-color: var(--bg-page); min-height: 100vh; padding: 20rpx; }
+.container { background-color: var(--bg-page); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+.page-content { flex: 1; height: 0; min-height: 0; padding: 20rpx; }
 
 .header {
   background: var(--bg-elevated);
@@ -1778,14 +1783,6 @@ export default {
   border-radius: 12rpx;
   margin-bottom: 20rpx;
   box-shadow: var(--shadow-card);
-  
-  .title {
-    font-size: 36rpx;
-    font-weight: 600;
-    color: var(--text-primary);
-    display: block;
-    margin-bottom: 16rpx;
-  }
   
   .scan-info {
     .info-text {

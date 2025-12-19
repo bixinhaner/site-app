@@ -169,8 +169,7 @@
 		left: 0;
 		right: 0;
 		z-index: 1000;
-		background: rgba(255, 255, 255, 0.95);
-		backdrop-filter: blur(10px);
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		padding: 44rpx 20rpx 20rpx;
 		display: flex;
 		align-items: center;
@@ -178,7 +177,7 @@
 		box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.06);
 	}
 	
-	.back-btn { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: var(--color-primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+	.back-btn { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 2rpx solid rgba(255, 255, 255, 0.28); }
 	
 	.back-icon {
 		font-size: 32rpx;
@@ -192,15 +191,15 @@
 		min-width: 0;
 	}
 	
-	.location-name { font-size: 28rpx; font-weight: 600; color: var(--text-primary); margin-bottom: 4rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.location-name { font-size: 28rpx; font-weight: 600; color: #fff; margin-bottom: 4rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	
 	.coordinates {
 		font-size: 22rpx;
-		color: #6b7280;
+		color: rgba(255, 255, 255, 0.9);
 		font-family: 'Courier New', monospace;
 	}
 	
-	.switch-map-btn { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: rgba(249, 115, 22, 0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 2rpx solid var(--color-primary); }
+	.switch-map-btn { width: 88rpx; height: 88rpx; border-radius: 44rpx; background: rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 2rpx solid rgba(255, 255, 255, 0.28); }
 	
 	.switch-icon {
 		font-size: 28rpx;

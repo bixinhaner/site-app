@@ -1,12 +1,13 @@
 // Global design tokens for UniApp (available project-wide)
 // Brand and palette
-$uni-color-primary: #f97316;
-$uni-color-primary-dark: #ea580c;
-$uni-color-primary-light: #fb923c;
+$uni-color-primary: #ff4614; // Baicells Orange (Pantone 172C)
+$uni-color-primary-dark: #e63f12;
+$uni-color-primary-light: #ff6a3d;
+$uni-color-brand-blue: #003087; // Baicells Blue (Pantone 287C)
 $uni-color-success: #10b981;
 $uni-color-warning: #f59e0b;
 $uni-color-error: #ef4444;
-$uni-text-color: #111827;
+$uni-text-color: #333333; // Baicells Gray (Pantone P 179-15C)
 $uni-text-color-secondary: #6b7280;
 $uni-border-color: #e5e7eb;
 $uni-border-color-soft: #f3f4f6;
@@ -36,6 +37,9 @@ $shadow-card: 0 1px 2px rgba(0,0,0,0.06), 0 6px 12px rgba(0,0,0,0.05);
   --color-primary: #{$uni-color-primary};
   --color-primary-dark: #{$uni-color-primary-dark};
   --color-primary-light: #{$uni-color-primary-light};
+  --color-primary-rgb: #{red($uni-color-primary)}, #{green($uni-color-primary)}, #{blue($uni-color-primary)};
+  --color-brand-blue: #{$uni-color-brand-blue};
+  --color-brand-blue-rgb: #{red($uni-color-brand-blue)}, #{green($uni-color-brand-blue)}, #{blue($uni-color-brand-blue)};
   --color-success: #{$uni-color-success};
   --color-warning: #{$uni-color-warning};
   --color-error: #{$uni-color-error};
@@ -79,7 +83,7 @@ $shadow-card: 0 1px 2px rgba(0,0,0,0.06), 0 6px 12px rgba(0,0,0,0.05);
 .u-btn-primary {
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
   color: #fff;
-  box-shadow: 0 2px 10px rgba(249, 115, 22, 0.28);
+  box-shadow: 0 2px 10px rgba(var(--color-primary-rgb), 0.26);
 }
 
 .u-btn-secondary { background: #f3f4f6; color: #374151; }
@@ -91,11 +95,11 @@ $shadow-card: 0 1px 2px rgba(0,0,0,0.06), 0 6px 12px rgba(0,0,0,0.05);
 
 /* Inputs */
 .u-input { height: 44px; padding: 0 $space-4; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: #fafafa; width: 100%; color: var(--text-primary); }
-.u-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12); background: #fff; }
+.u-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.12); background: #fff; }
 .u-input.error { border-color: var(--color-error); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12); }
 
 .u-textarea { min-height: 96px; padding: $space-4; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: #fafafa; width: 100%; color: var(--text-primary); }
-.u-textarea:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12); background: #fff; }
+.u-textarea:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.12); background: #fff; }
 
 /* Form */
 .u-form-item { margin-bottom: $space-5; }
@@ -133,7 +137,26 @@ $shadow-card: 0 1px 2px rgba(0,0,0,0.06), 0 6px 12px rgba(0,0,0,0.05);
 
 /* Accessibility helpers */
 .u-tappable { min-height: 44px; min-width: 44px; }
-.u-focusable:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18); border-radius: inherit; }
+.u-focusable:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.18); border-radius: inherit; }
+
+/* Navbar helpers */
+.u-nav-btn {
+  width: 88rpx;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 44rpx;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.u-nav-btn--brand { background: rgba(255, 255, 255, 0.2); }
+.u-nav-btn--light { background: #f3f4f6; }
+
+.u-nav-btn:active {
+  transform: scale(0.96);
+  opacity: 0.9;
+}
 
 /* Touch feedback helpers - 触控反馈 */
 .u-pressable {
