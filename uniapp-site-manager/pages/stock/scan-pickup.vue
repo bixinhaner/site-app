@@ -132,34 +132,73 @@
     </view>
 
     <!-- 领料记录 -->
-    <view class="history-section">
-      <view class="section-title">
-        <text>{{ $t('stock.myPickups') }}</text>
-        <text class="refresh-btn" @click="loadPickupHistory">{{ $t('common.refresh') }}</text>
+	    <view class="history-section">
+	      <view class="section-title">
+	        <text>{{ $t('stock.myPickups') }}</text>
+	        <view class="refresh-icon" @click="refreshPickupHistory">
+	          <uni-icons type="refreshempty" size="20" color="#2563eb" />
+	        </view>
+	      </view>
+
+      <view class="pickup-toolbar">
+        <input
+          class="pickup-search"
+          v-model="pickupSearch"
+          :placeholder="$t('stock.pickupSearchPlaceholder')"
+          confirm-type="search"
+          @confirm="onPickupSearch"
+        />
+        <view class="pickup-toolbar-actions">
+          <button class="pickup-search-btn" @click="onPickupSearch">{{ $t('common.search') }}</button>
+          <button v-if="pickupSearch" class="pickup-clear-btn" @click="clearPickupSearch">{{ $t('common.clear') }}</button>
+        </view>
+      </view>
+
+      <view class="pickup-tabs">
+        <view
+          v-for="t in pickupTabOptions"
+          :key="t.key"
+          class="pickup-tab"
+          :class="{ active: pickupTab === t.key }"
+          @click="switchPickupTab(t.key)"
+        >
+          <text class="pickup-tab-label">{{ t.label }}</text>
+          <text class="pickup-tab-count">{{ t.count }}</text>
+        </view>
       </view>
       
-      <view v-if="pickupHistory.length === 0" class="empty-state">
+      <view v-if="pickupLoading" class="empty-state">
+        <text>{{ $t('common.loading') }}</text>
+      </view>
+
+      <view v-else-if="pickupHistory.length === 0" class="empty-state">
         <text>{{ $t('stock.noPickupRecords') }}</text>
       </view>
       
       <view v-else class="history-list">
         <view v-for="record in pickupHistory" :key="record.id" class="history-item">
           <view class="history-header">
-            <text class="history-package">{{ record.package_name }}</text>
+            <text class="history-sn">{{ record.serial_number || record.main_device_barcode }}</text>
             <text class="history-time">{{ formatTime(record.pickup_time) }}</text>
           </view>
           <view class="history-detail">
-            <text class="history-barcode">{{ $t('stock.barcodeLabel') }}: {{ record.main_device_barcode }}</text>
+            <text class="history-barcode">{{ $t('stock.packageLabel') }}: {{ record.package_name }}</text>
             <text class="history-status" :class="historyStatusClass(record)">
               {{ getHistoryStatusText(record) }}
             </text>
           </view>
           
-          <!-- 显示解析后的设备信息 -->
-          <view v-if="record.serial_number || record.mac_address_1 || record.mac_address_2" class="history-parsed-info">
-            <view v-if="record.serial_number" class="parsed-info-item">
-              <text class="parsed-label">{{ $t('stock.serialNumber') }}:</text>
-              <text class="parsed-value">{{ record.serial_number }}</text>
+          <!-- 次要信息（可选）：条码与MAC -->
+          <view
+            v-if="(record.main_device_barcode && record.main_device_barcode !== record.serial_number) || record.mac_address_1 || record.mac_address_2"
+            class="history-parsed-info"
+          >
+            <view
+              v-if="record.main_device_barcode && record.main_device_barcode !== record.serial_number"
+              class="parsed-info-item"
+            >
+              <text class="parsed-label">{{ $t('stock.barcodeLabel') }}:</text>
+              <text class="parsed-value">{{ record.main_device_barcode }}</text>
             </view>
             <view v-if="record.mac_address_1" class="parsed-info-item">
               <text class="parsed-label">{{ $t('stock.macAddress1') }}:</text>
@@ -179,6 +218,12 @@
               {{ getReturnButtonLabel(record) }}
             </button>
           </view>
+        </view>
+
+        <view class="history-load-more" v-if="pickupHasMore">
+          <button class="load-more-btn" :disabled="pickupLoadingMore" @click="loadMorePickupHistory">
+            {{ pickupLoadingMore ? $t('common.loading') : $t('stock.loadMore') }}
+          </button>
         </view>
       </view>
     </view>
@@ -430,6 +475,21 @@ export default {
       userLocation: null,
       // 在 My Pickups 列表提供退库入口
       showReturnAction: true,
+      // My Pickups 分页/搜索/分组
+      pickupTab: 'picked',
+      pickupSearch: '',
+      pickupPage: 1,
+      pickupPageSize: 20,
+      pickupTotal: 0,
+      pickupHasMore: false,
+      pickupLoading: false,
+      pickupLoadingMore: false,
+      pickupTabCounts: {
+        picked: 0,
+        pending_receive: 0,
+        installed: 0,
+        returned: 0,
+      },
 
       // 退库弹窗状态
       returnModalVisible: false,
@@ -477,13 +537,23 @@ export default {
       return this.warehouses[this.returnSelectedWarehouseIndex] || null
     },
 
-	    canCancelReturn() {
-	      return (
-	        this.returnPreviewAction === 'already_requested' &&
-	        this.returnPreviewData?.return_status === 'pending_receive' &&
-	        !!this.returnPreviewData?.return_transaction_id
-	      )
-	    },
+    pickupTabOptions() {
+      const c = this.pickupTabCounts || {}
+      return [
+        { key: 'picked', label: this.$t('stock.pickupTabPicked'), count: Number(c.picked || 0) },
+        { key: 'installed', label: this.$t('stock.pickupTabInstalled'), count: Number(c.installed || 0) },
+        { key: 'pending_receive', label: this.$t('stock.pickupTabPendingReceive'), count: Number(c.pending_receive || 0) },
+        { key: 'returned', label: this.$t('stock.pickupTabReturned'), count: Number(c.returned || 0) },
+      ]
+    },
+
+    canCancelReturn() {
+      return (
+        this.returnPreviewAction === 'already_requested' &&
+        this.returnPreviewData?.return_status === 'pending_receive' &&
+        !!this.returnPreviewData?.return_transaction_id
+      )
+    },
 
 	    returnSummarySn() {
 	      return (this.returnRecord?.serial_number || this.returnRecord?.main_device_barcode || '').trim()
@@ -524,6 +594,12 @@ export default {
     this.loadWarehouses()
     this.loadPickupHistory()
     this.getCurrentLocation()
+  },
+
+  onReachBottom() {
+    if (this.pickupHasMore && !this.pickupLoading && !this.pickupLoadingMore) {
+      this.loadMorePickupHistory()
+    }
   },
   
   methods: {
@@ -862,21 +938,94 @@ export default {
       }
     },
     
-    async loadPickupHistory() {
+    async loadPickupHistory(reset = true, targetPage = 1) {
+      const wantReset = reset === true
+      if (wantReset) {
+        if (this.pickupLoading) return
+        this.pickupLoading = true
+      } else {
+        if (this.pickupLoadingMore || this.pickupLoading) return
+        if (!this.pickupHasMore) return
+        this.pickupLoadingMore = true
+      }
+
       try {
+        const page = wantReset ? 1 : Number(targetPage || 1)
+        const payload = {
+          page,
+          page_size: this.pickupPageSize,
+          pickup_group: this.pickupTab,
+        }
+        const q = (this.pickupSearch || '').trim()
+        if (q) payload.q = q
+
         const response = await new Promise((resolve, reject) => {
           uni.request({
             url: buildApiUrl('/api/stock/my-pickups'),
             method: 'GET',
             header: getAuthHeaders(this.userStore.token),
+            data: payload,
             success: resolve,
             fail: reject
           })
         })
-        this.pickupHistory = response.data?.pickup_records || []
+
+        if (response.statusCode !== 200) {
+          const msg = response.data?.detail || response.data?.message || this.$t('messages.operationFailed')
+          uni.showToast({ title: msg, icon: 'none' })
+          return
+        }
+
+        const data = response.data || {}
+        const records = data.pickup_records || []
+        if (data.group_counts) {
+          const c = data.group_counts || {}
+          this.pickupTabCounts = {
+            picked: Number(c.picked || 0),
+            pending_receive: Number(c.pending_receive || 0),
+            installed: Number(c.installed || 0),
+            returned: Number(c.returned || 0),
+          }
+        }
+        if (wantReset) {
+          this.pickupHistory = records
+        } else {
+          this.pickupHistory = [...(this.pickupHistory || []), ...records]
+        }
+
+        this.pickupPage = data.page || page
+        this.pickupTotal = data.total || 0
+        this.pickupHasMore = !!data.has_more
       } catch (error) {
         console.error('加载领料记录失败:', error)
+      } finally {
+        if (wantReset) this.pickupLoading = false
+        else this.pickupLoadingMore = false
       }
+    },
+
+    refreshPickupHistory() {
+      this.loadPickupHistory(true, 1)
+    },
+
+    onPickupSearch() {
+      this.loadPickupHistory(true, 1)
+    },
+
+    clearPickupSearch() {
+      this.pickupSearch = ''
+      this.loadPickupHistory(true, 1)
+    },
+
+    switchPickupTab(tabKey) {
+      if (!tabKey || tabKey === this.pickupTab) return
+      this.pickupTab = tabKey
+      this.loadPickupHistory(true, 1)
+    },
+
+    loadMorePickupHistory() {
+      const next = (this.pickupPage || 1) + 1
+      this.loadPickupHistory(false, next)
     },
 
     syncReturnRecordFromHistory() {
@@ -887,6 +1036,7 @@ export default {
 
     getHistoryStatusText(record) {
       if (!record) return ''
+      if (record.pickup_group === 'installed') return this.$t('stock.statusInstalled')
       if (record.is_returned) return this.$t('stock.statusReturned')
       if (record.return_status === 'pending_receive') return this.$t('stock.returnStatusPendingReceiveShort')
       if (record.return_status === 'rejected') return this.$t('stock.returnStatusRejectedShort')
@@ -897,6 +1047,7 @@ export default {
     historyStatusClass(record) {
       return {
         confirmed: record?.is_confirmed && !record?.return_status && !record?.is_returned,
+        installed: record?.pickup_group === 'installed',
         'return-pending': record?.return_status === 'pending_receive',
         'return-rejected': record?.return_status === 'rejected',
         'return-canceled': record?.return_status === 'canceled',
@@ -905,13 +1056,14 @@ export default {
     },
 
     shouldShowReturnButton(record) {
-      return !!record && !record.is_returned
+      return !!record && record.pickup_group !== 'returned' && !record.is_returned
     },
 
     getReturnButtonLabel(record) {
       if (!record) return ''
       if (record.return_status === 'pending_receive') return this.$t('stock.viewReturnRequest')
       if (record.return_status === 'rejected' || record.return_status === 'canceled') return this.$t('stock.reapplyReturn')
+      if (record.pickup_group === 'installed' || record.binding_state === 'installed_locked') return this.$t('stock.viewInstallReason')
       return this.$t('stock.return')
     },
 
@@ -1154,13 +1306,25 @@ export default {
           return
         }
 
-        const data = res.data || {}
-        uni.showToast({ title: this.$t('stock.returnRequestSuccessTitle'), icon: 'success' })
+	        const data = res.data || {}
+	        uni.showToast({ title: this.$t('stock.returnRequestSuccessTitle'), icon: 'success' })
 
-        // 申请后刷新列表与预览（变为 already_requested）
-        await this.loadPickupHistory()
-        this.syncReturnRecordFromHistory()
-        await this.refreshReturnPreview()
+	        // 回显到弹窗摘要（避免分页/分组导致列表中找不到该条记录）
+	        if (this.returnRecord) {
+	          this.returnRecord.return_status = data.return_status || 'pending_receive'
+	          this.returnRecord.return_document_number = data.return_document_number || this.returnRecord.return_document_number
+	          this.returnRecord.return_warehouse_id = data.return_warehouse_id || this.returnRecord.return_warehouse_id
+	          this.returnRecord.return_warehouse_name =
+	            data.return_warehouse_name ||
+	            this.selectedReturnWarehouse?.warehouse_name ||
+	            this.returnRecord.return_warehouse_name
+	          this.returnRecord.return_reject_reason = null
+	        }
+
+	        // 申请后刷新列表与预览（变为 already_requested）
+	        await this.loadPickupHistory()
+	        this.syncReturnRecordFromHistory()
+	        await this.refreshReturnPreview()
 
         // 提示单号
         if (data.return_document_number) {
@@ -1204,15 +1368,19 @@ export default {
                 fail: reject
               })
             })
-            if (res.statusCode === 200) {
-              uni.showToast({ title: this.$t('messages.operationSuccess'), icon: 'success' })
-              this.cancelReason = ''
-              await this.loadPickupHistory()
-              this.syncReturnRecordFromHistory()
-              await this.refreshReturnPreview()
-            } else {
-              uni.showToast({ title: this.$t('messages.operationFailed'), icon: 'none' })
-            }
+	            if (res.statusCode === 200) {
+	              uni.showToast({ title: this.$t('messages.operationSuccess'), icon: 'success' })
+	              this.cancelReason = ''
+	              if (this.returnRecord) {
+	                this.returnRecord.return_status = 'canceled'
+	                this.returnRecord.return_reject_reason = null
+	              }
+	              await this.loadPickupHistory()
+	              this.syncReturnRecordFromHistory()
+	              await this.refreshReturnPreview()
+	            } else {
+	              uni.showToast({ title: this.$t('messages.operationFailed'), icon: 'none' })
+	            }
           } catch (error) {
             const msg = error?.data?.detail || this.$t('messages.operationFailed')
             uni.showToast({ title: msg, icon: 'none' })
@@ -1599,13 +1767,126 @@ export default {
   border-radius: 12rpx;
   box-shadow: var(--shadow-card);
   
-  .section-title {
+	  .section-title {
+	    display: flex;
+	    justify-content: space-between;
+	    align-items: center;
+	    margin-bottom: 24rpx;
+	    
+	    .refresh-icon {
+	      width: 76rpx;
+	      height: 76rpx;
+	      display: flex;
+	      align-items: center;
+	      justify-content: center;
+	      border-radius: 12rpx;
+	      border: 1rpx solid #e5e7eb;
+	      background: #ffffff;
+	    }
+
+	    .refresh-icon:active { opacity: 0.85; }
+	  }
+
+  .pickup-toolbar {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 24rpx;
-    
-      .refresh-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 88rpx; padding: 0 24rpx; font-size: 26rpx; color: var(--color-primary); border: 1rpx solid var(--color-primary); border-radius: 12rpx; }
+    gap: 12rpx;
+    margin-bottom: 16rpx;
+
+    .pickup-search {
+      flex: 1;
+      min-height: 76rpx;
+      padding: 0 18rpx;
+      border-radius: 12rpx;
+      border: 1rpx solid #e5e7eb;
+      background: #f9fafb;
+      font-size: 26rpx;
+      color: var(--text-primary);
+    }
+
+    .pickup-toolbar-actions {
+      display: flex;
+      gap: 12rpx;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .pickup-search-btn,
+    .pickup-clear-btn {
+      min-height: 76rpx;
+      padding: 0 20rpx;
+      border-radius: 12rpx;
+      font-size: 26rpx;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .pickup-search-btn { background: var(--color-primary); color: #ffffff; }
+    .pickup-clear-btn { background: #f3f4f6; color: #374151; }
+  }
+
+  .pickup-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin-bottom: 16rpx;
+    border: 1rpx solid #e5e7eb;
+    border-radius: 14rpx;
+    overflow: hidden;
+    background: #f3f4f6;
+
+    .pickup-tab {
+      flex: 1;
+      min-height: 96rpx;
+      padding: 10rpx 8rpx;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8rpx;
+      color: #374151;
+
+      &:active { opacity: 0.85; }
+
+      &:not(:last-child) {
+        border-right: 1rpx solid #e5e7eb;
+      }
+
+      &.active {
+        background: var(--color-primary);
+        color: #ffffff;
+      }
+    }
+
+	    .pickup-tab-label {
+	      font-size: 24rpx;
+	      font-weight: 600;
+	      line-height: 1.2;
+	      text-align: center;
+	      width: 100%;
+	    }
+
+	    .pickup-tab-count {
+      min-width: 44rpx;
+      height: 36rpx;
+      padding: 0 12rpx;
+      border-radius: 999rpx;
+      background: rgba(0, 0, 0, 0.06);
+      color: #374151;
+      font-size: 22rpx;
+      font-weight: 600;
+	      display: inline-flex;
+	      align-items: center;
+	      justify-content: center;
+	      text-align: center;
+	    }
+
+    .pickup-tab.active .pickup-tab-count {
+      background: rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+    }
   }
   
   .empty-state {
@@ -1627,7 +1908,7 @@ export default {
         justify-content: space-between;
         margin-bottom: 12rpx;
         
-        .history-package { font-size: 28rpx; color: var(--text-primary); font-weight: 500; }
+        .history-sn { font-size: 30rpx; color: var(--text-primary); font-weight: 600; }
         
         .history-time {
           font-size: 24rpx;
@@ -1663,6 +1944,10 @@ export default {
 
           &.return-canceled {
             color: #6b7280;
+          }
+
+          &.installed {
+            color: #2563eb;
           }
 
           &.returned {
@@ -1703,6 +1988,27 @@ export default {
         }
       }
     }
+  }
+}
+
+.history-load-more {
+  margin-top: 14rpx;
+  display: flex;
+  justify-content: center;
+}
+
+.load-more-btn {
+  min-height: 76rpx;
+  padding: 0 28rpx;
+  border-radius: 12rpx;
+  background: #ffffff;
+  border: 1rpx solid #e5e7eb;
+  color: var(--text-primary);
+  font-size: 26rpx;
+
+  &:disabled {
+    color: #9ca3af;
+    border-color: #e5e7eb;
   }
 }
 

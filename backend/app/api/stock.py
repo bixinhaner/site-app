@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, desc, func
+from sqlalchemy import and_, or_, desc, func, case
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 import uuid
@@ -74,6 +74,18 @@ def _add_audit_event(
             details=details,
         )
     )
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 # Pydantic模型
@@ -464,23 +476,180 @@ async def confirm_equipment_pickup(
 async def get_my_pickup_records(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    q: Optional[str] = None,
+    pickup_group: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """获取我的领料记录"""
-    query = db.query(PickupRecord).filter(PickupRecord.picker_id == current_user.id)
-    
-    if start_date:
-        # 支持带 Z 的 UTC 字符串和本地时间字符串
-        query = query.filter(
-            PickupRecord.pickup_time >= datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+    allowed_groups = {"picked", "pending_receive", "installed", "returned"}
+    if pickup_group and pickup_group not in allowed_groups:
+        raise HTTPException(status_code=400, detail="pickup_group 参数不合法")
+
+    try:
+        page = int(page or 1)
+    except Exception:
+        page = 1
+    page = max(page, 1)
+
+    try:
+        page_size = int(page_size or 20)
+    except Exception:
+        page_size = 20
+    page_size = max(1, min(page_size, 100))
+
+    query = (
+        db.query(PickupRecord)
+        .options(
+            joinedload(PickupRecord.package),
+            joinedload(PickupRecord.equipment_instance).joinedload(EquipmentInstance.warehouse),
         )
-    if end_date:
-        query = query.filter(
-            PickupRecord.pickup_time <= datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        .filter(PickupRecord.picker_id == current_user.id)
+    )
+
+    dt_start = _parse_iso_datetime(start_date)
+    dt_end = _parse_iso_datetime(end_date)
+    if dt_start:
+        query = query.filter(PickupRecord.pickup_time >= dt_start)
+    if dt_end:
+        query = query.filter(PickupRecord.pickup_time <= dt_end)
+
+    search = (q or "").strip()
+    if search:
+        # SN/条码：精确/前缀优先；套装名：模糊
+        like_prefix = f"{search}%"
+        like_contains = f"%{search}%"
+        query = query.join(PickupRecord.package).filter(
+            or_(
+                PickupRecord.serial_number == search,
+                PickupRecord.main_device_barcode == search,
+                PickupRecord.serial_number.like(like_prefix),
+                PickupRecord.main_device_barcode.like(like_prefix),
+                EquipmentPackage.package_name.like(like_contains),
+            )
         )
-    
-    records = query.order_by(desc(PickupRecord.pickup_time)).all()
+
+    allow_unbind_status = {
+        InspectionStatusEnum.DRAFT,
+        InspectionStatusEnum.IN_PROGRESS,
+        InspectionStatusEnum.REJECTED,
+    }
+    lock_status = {
+        InspectionStatusEnum.SUBMITTED,
+        InspectionStatusEnum.UNDER_REVIEW,
+        InspectionStatusEnum.APPROVED,
+        InspectionStatusEnum.COMPLETED,
+    }
+
+    # ===== 相关状态（用于分组/排序）=====
+    return_pending_exists = db.query(StockTransaction.id).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+        StockTransaction.related_transaction_id == PickupRecord.transaction_id,
+        StockTransaction.approval_status == "pending_receive",
+    ).exists()
+    return_received_exists = db.query(StockTransaction.id).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+        StockTransaction.related_transaction_id == PickupRecord.transaction_id,
+        StockTransaction.approval_status == "received",
+    ).exists()
+    return_reject_or_cancel_exists = db.query(StockTransaction.id).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+        StockTransaction.related_transaction_id == PickupRecord.transaction_id,
+        StockTransaction.approval_status.in_(["rejected", "canceled"]),
+    ).exists()
+
+    device_level_cond = and_(
+        InspectionCheckItem.sector_id.isnot(None),
+        InspectionCheckItem.band.isnot(None),
+        or_(
+            InspectionCheckItem.cell_id.is_(None),
+            InspectionCheckItem.cell_id
+            == (InspectionCheckItem.sector_id + "_" + InspectionCheckItem.band),
+        ),
+    )
+
+    need_unbind_exists = db.query(InspectionCheckItem.id).join(
+        SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id
+    ).filter(
+        InspectionCheckItem.equipment_sn == PickupRecord.serial_number,
+        device_level_cond,
+        SiteInspection.inspector_id == current_user.id,
+        SiteInspection.status.in_(list(allow_unbind_status)),
+    ).exists()
+
+    installed_locked_exists = db.query(InspectionCheckItem.id).join(
+        SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id
+    ).filter(
+        InspectionCheckItem.equipment_sn == PickupRecord.serial_number,
+        device_level_cond,
+        SiteInspection.status.in_(list(lock_status)),
+    ).exists()
+
+    # ===== 分组数量（用于前端 Tab 展示；随搜索条件变化）=====
+    returned_cond = or_(PickupRecord.is_returned == True, return_received_exists)
+    pending_receive_cond = and_(
+        PickupRecord.is_returned == False,
+        ~return_received_exists,
+        return_pending_exists,
+    )
+    installed_cond = and_(
+        PickupRecord.is_returned == False,
+        ~return_received_exists,
+        ~return_pending_exists,
+        installed_locked_exists,
+    )
+    picked_cond = and_(
+        PickupRecord.is_returned == False,
+        ~return_received_exists,
+        ~return_pending_exists,
+        ~installed_locked_exists,
+    )
+
+    counts_row = (
+        query.order_by(None)
+        .with_entities(
+            func.sum(case((picked_cond, 1), else_=0)).label("picked"),
+            func.sum(case((pending_receive_cond, 1), else_=0)).label("pending_receive"),
+            func.sum(case((installed_cond, 1), else_=0)).label("installed"),
+            func.sum(case((returned_cond, 1), else_=0)).label("returned"),
+        )
+        .one()
+    )
+    group_counts = {
+        "picked": int(getattr(counts_row, "picked", 0) or 0),
+        "pending_receive": int(getattr(counts_row, "pending_receive", 0) or 0),
+        "installed": int(getattr(counts_row, "installed", 0) or 0),
+        "returned": int(getattr(counts_row, "returned", 0) or 0),
+    }
+
+    # ===== 分组筛选 =====
+    if pickup_group == "returned":
+        query = query.filter(returned_cond)
+        query = query.order_by(desc(PickupRecord.returned_at), desc(PickupRecord.pickup_time))
+    elif pickup_group == "pending_receive":
+        query = query.filter(pending_receive_cond)
+        query = query.order_by(desc(PickupRecord.pickup_time))
+    elif pickup_group == "installed":
+        query = query.filter(
+            installed_cond,
+        ).order_by(desc(PickupRecord.pickup_time))
+    elif pickup_group == "picked":
+        query = query.filter(picked_cond)
+        priority = case(
+            (return_reject_or_cancel_exists, 2),
+            (need_unbind_exists, 1),
+            else_=0,
+        )
+        query = query.order_by(desc(priority), desc(PickupRecord.pickup_time))
+    else:
+        query = query.order_by(desc(PickupRecord.pickup_time))
+
+    total = query.order_by(None).count()
+    offset = (page - 1) * page_size
+    records = query.offset(offset).limit(page_size).all()
+    has_more = offset + len(records) < total
 
     # 退库单（方案A）信息：按出库 transaction_id 聚合取最新一条，用于展示“待收货/已收货/拒收/取消”等状态
     related_ids = [r.transaction_id for r in records if r.transaction_id]
@@ -500,7 +669,66 @@ async def get_my_pickup_records(
             return_trans_map = {}
     
     result = []
+    # 仅针对当前页的 SN 聚合检查绑定状态（用于前端分组与标识）
+    sns = []
+    for r in records:
+        sn = (r.serial_number or r.main_device_barcode or "").strip()
+        if sn:
+            sns.append(sn)
+    sns = list({sn for sn in sns if sn})
+
+    need_unbind_sns = set()
+    installed_locked_sns = set()
+    if sns:
+        try:
+            installed_locked_rows = (
+                db.query(InspectionCheckItem.equipment_sn)
+                .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+                .filter(
+                    InspectionCheckItem.equipment_sn.in_(sns),
+                    device_level_cond,
+                    SiteInspection.status.in_(list(lock_status)),
+                )
+                .distinct()
+                .all()
+            )
+            installed_locked_sns = {row[0] for row in installed_locked_rows if row and row[0]}
+
+            need_unbind_rows = (
+                db.query(InspectionCheckItem.equipment_sn)
+                .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+                .filter(
+                    InspectionCheckItem.equipment_sn.in_(sns),
+                    device_level_cond,
+                    SiteInspection.inspector_id == current_user.id,
+                    SiteInspection.status.in_(list(allow_unbind_status)),
+                )
+                .distinct()
+                .all()
+            )
+            need_unbind_sns = {row[0] for row in need_unbind_rows if row and row[0]}
+        except Exception:
+            installed_locked_sns = set()
+            need_unbind_sns = set()
+
     for record in records:
+        sn_for_state = (record.serial_number or record.main_device_barcode or "").strip()
+        binding_state = "none"
+        if sn_for_state and sn_for_state in installed_locked_sns:
+            binding_state = "installed_locked"
+        elif sn_for_state and sn_for_state in need_unbind_sns:
+            binding_state = "need_unbind"
+
+        latest_return = return_trans_map.get(record.transaction_id) if record.transaction_id else None
+        latest_return_status = latest_return.approval_status if latest_return else None
+        pickup_group_value = "picked"
+        if record.is_returned or latest_return_status == "received":
+            pickup_group_value = "returned"
+        elif latest_return_status == "pending_receive":
+            pickup_group_value = "pending_receive"
+        elif binding_state == "installed_locked":
+            pickup_group_value = "installed"
+
         result.append({
             "id": record.id,
             "transaction_id": record.transaction_id,
@@ -518,26 +746,35 @@ async def get_my_pickup_records(
             "pickup_time": to_utc_iso(record.pickup_time) if record.pickup_time else None,
             "is_confirmed": record.is_confirmed,
             "is_returned": record.is_returned,
-            "return_status": return_trans_map.get(record.transaction_id).approval_status if return_trans_map.get(record.transaction_id) else None,
-            "return_document_number": return_trans_map.get(record.transaction_id).document_number if return_trans_map.get(record.transaction_id) else None,
-            "return_warehouse_id": return_trans_map.get(record.transaction_id).warehouse_id if return_trans_map.get(record.transaction_id) else None,
+            "return_status": latest_return_status,
+            "return_document_number": latest_return.document_number if latest_return else None,
+            "return_warehouse_id": latest_return.warehouse_id if latest_return else None,
             "return_warehouse_name": (
-                return_trans_map.get(record.transaction_id).warehouse.warehouse_name
-                if return_trans_map.get(record.transaction_id) and return_trans_map.get(record.transaction_id).warehouse
+                latest_return.warehouse.warehouse_name
+                if latest_return and latest_return.warehouse
                 else None
             ),
             "return_reject_reason": (
-                return_trans_map.get(record.transaction_id).approval_comments
-                if return_trans_map.get(record.transaction_id) and return_trans_map.get(record.transaction_id).approval_status == "rejected"
+                latest_return.approval_comments
+                if latest_return and latest_return.approval_status == "rejected"
                 else None
             ),
             # returned_at / confirmed_at 使用 datetime.now() 写入，按本地->UTC 输出
             "returned_at": to_utc_iso(record.returned_at, assume_local=True) if record.returned_at else None,
             "confirmed_at": to_utc_iso(record.confirmed_at, assume_local=True) if record.confirmed_at else None,
-            "work_order_id": record.work_order_id
+            "work_order_id": record.work_order_id,
+            "pickup_group": pickup_group_value,
+            "binding_state": binding_state,
         })
     
-    return {"pickup_records": result}
+    return {
+        "pickup_records": result,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "has_more": has_more,
+        "group_counts": group_counts,
+    }
 
 # ===== 退库（方案A：申请/收货）=====
 
