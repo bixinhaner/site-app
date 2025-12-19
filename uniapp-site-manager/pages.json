@@ -106,7 +106,7 @@
 		{
 			"path": "pages/stock/scan-pickup",
 			"style": {
-				"navigationBarTitleText": "扫码领料",
+				"navigationBarTitleText": "我的设备",
 				"navigationBarBackgroundColor": "#f97316",
 				"navigationBarTextStyle": "white"
 			}

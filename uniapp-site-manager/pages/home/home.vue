@@ -96,10 +96,10 @@
 				<!-- 报告功能入口为占位，已移除 -->
 				
 
-				<!-- 扫码领料功能 - 管理员/经理/检查员可用，勘察员不可用 -->
+				<!-- 我的设备 - 管理员/经理/检查员可用，勘察员不可用 -->
 				<view class="action-item" v-if="!isSurveyor" @click="goToScanPickup">
 					<view class="action-icon">📦</view>
-					<text class="action-label">{{ $t('stock.pickup') }}</text>
+					<text class="action-label">{{ $t('stock.scanPickup') }}</text>
 				</view>
 				
 				<!-- 公共功能 -->

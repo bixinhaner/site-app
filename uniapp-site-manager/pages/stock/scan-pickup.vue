@@ -1,140 +1,159 @@
 <template>
   <view class="container">
     <view class="header">
-      <text class="title">{{ $t('stock.scan') }}</text>
+      <text class="title">{{ $t('stock.scanPickup') }}</text>
       <view class="scan-info">
-        <text class="info-text">{{ $t('stock.scanInfo') }}</text>
+        <text class="info-text">{{ $t('stock.myDevicesInfo') }}</text>
       </view>
     </view>
 
-    <!-- 扫码区域 -->
-    <view class="scan-section">
-      <view class="scan-button" @click="startScan">
-        <view class="scan-icon">📷</view>
-        <text class="scan-text">{{ $t('stock.clickToScan') }}</text>
+    <!-- 扫码领货（默认折叠） -->
+    <view class="scan-fold">
+      <view class="scan-fold-header" :class="{ expanded: !scanSectionCollapsed }" @click="toggleScanSection">
+        <view class="scan-fold-left">
+          <uni-icons type="scan" size="18" color="#f97316" />
+          <text class="scan-fold-title">{{ $t('stock.scanPickupAction') }}</text>
+        </view>
+        <view class="scan-fold-right">
+          <view class="scan-fold-scan-btn" @click.stop="startScanFromCollapsed">
+            <uni-icons type="scan" size="16" color="#ffffff" />
+            <text class="scan-fold-scan-text">{{ $t('stock.scanNow') }}</text>
+          </view>
+          <uni-icons :type="scanSectionCollapsed ? 'arrow-down' : 'arrow-up'" size="18" color="#6b7280" />
+        </view>
       </view>
-      
-      <view v-if="scanResult" class="scan-result">
-        <text class="result-title">{{ $t('stock.scanResult') }}:</text>
-        <text class="result-code">{{ scanResult }}</text>
-        
-        <!-- 解析后的结果展示 -->
-        <view v-if="parsedBarcode" class="parsed-result">
-          <view v-if="parsedBarcode.success" class="parse-success">
-            <view class="parse-header">
-              <text class="parse-title">{{ $t('stock.identifiedInfo') }}:</text>
-              <text class="parse-format">[{{ getFormatName(parsedBarcode.format) }}]</text>
-            </view>
+
+      <view v-if="!scanSectionCollapsed" class="scan-fold-body">
+        <!-- 扫码区域 -->
+        <view class="scan-section">
+          <view class="scan-button" @click="startScan">
+            <view class="scan-icon">📷</view>
+            <text class="scan-text">{{ $t('stock.clickToScan') }}</text>
+          </view>
+          
+          <view v-if="scanResult" class="scan-result">
+            <text class="result-title">{{ $t('stock.scanResult') }}:</text>
+            <text class="result-code">{{ scanResult }}</text>
             
-            <view class="parse-details">
-              <view v-if="parsedBarcode.sn" class="detail-item">
-                <text class="detail-label">{{ $t('stock.serialNumber') }}:</text>
-                <text class="detail-value sn-value">{{ parsedBarcode.sn }}</text>
+            <!-- 解析后的结果展示 -->
+            <view v-if="parsedBarcode" class="parsed-result">
+              <view v-if="parsedBarcode.success" class="parse-success">
+                <view class="parse-header">
+                  <text class="parse-title">{{ $t('stock.identifiedInfo') }}:</text>
+                  <text class="parse-format">[{{ getFormatName(parsedBarcode.format) }}]</text>
+                </view>
+                
+                <view class="parse-details">
+                  <view v-if="parsedBarcode.sn" class="detail-item">
+                    <text class="detail-label">{{ $t('stock.serialNumber') }}:</text>
+                    <text class="detail-value sn-value">{{ parsedBarcode.sn }}</text>
+                  </view>
+                  
+                  <view v-if="parsedBarcode.mac1" class="detail-item">
+                    <text class="detail-label">{{ $t('stock.macAddress1') }}:</text>
+                    <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac1) }}</text>
+                  </view>
+                  
+                  <view v-if="parsedBarcode.mac2" class="detail-item">
+                    <text class="detail-label">{{ $t('stock.macAddress2') }}:</text>
+                    <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac2) }}</text>
+                  </view>
+                </view>
               </view>
               
-              <view v-if="parsedBarcode.mac1" class="detail-item">
-                <text class="detail-label">{{ $t('stock.macAddress1') }}:</text>
-                <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac1) }}</text>
+              <view v-else class="parse-error">
+                <text class="error-icon">⚠️</text>
+                <text class="error-text">{{ parsedBarcode.error }}</text>
               </view>
-              
-              <view v-if="parsedBarcode.mac2" class="detail-item">
-                <text class="detail-label">{{ $t('stock.macAddress2') }}:</text>
-                <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac2) }}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 工单选择 -->
+        <view v-if="availablePackages.length > 0" class="work-order-section">
+          <view class="section-title">{{ $t('stock.selectWorkOrderOptional') }}</view>
+          <picker @change="onWorkOrderChange" :value="selectedWorkOrderIndex" :range="workOrderOptions">
+            <view class="picker-input">
+              <text>{{ selectedWorkOrder ? selectedWorkOrder.title : $t('stock.noWorkOrder') }}</text>
+              <text class="picker-arrow">▼</text>
+            </view>
+          </picker>
+        </view>
+
+        <!-- 出库仓库选择 -->
+        <view v-if="availablePackages.length > 0" class="work-order-section">
+          <view class="section-title">{{ $t('stock.selectCheckoutWarehouse') }}</view>
+          <picker @change="onWarehouseChange" :value="selectedWarehouseIndex" :range="warehouseOptions">
+            <view class="picker-input">
+              <text>{{ selectedWarehouse ? selectedWarehouse.warehouse_name : $t('common.pleaseSelect') }}</text>
+              <text class="picker-arrow">▼</text>
+            </view>
+          </picker>
+        </view>
+
+        <!-- 套装选择 -->
+        <view v-if="availablePackages.length > 1" class="package-section">
+          <view class="section-title">{{ $t('stock.choosePackage') }}</view>
+          <view class="package-list">
+            <view 
+              v-for="(pkg, index) in availablePackages" 
+              :key="pkg.id"
+              class="package-item"
+              :class="{ 'selected': selectedPackageIndex === index }"
+              @click="selectPackage(index)"
+            >
+              <view class="package-header">
+                <text class="package-name">{{ pkg.package_name }}</text>
+                <text class="package-code">{{ pkg.package_code }}</text>
               </view>
+              <text class="package-type">{{ $t('stock.suitableFor') }}: {{ pkg.site_type || $t('common.all') }}</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 套装清单 -->
+        <view v-if="selectedPackage" class="package-detail">
+          <view class="section-title">{{ $t('stock.packageConfirm') }}</view>
+          
+          <view class="package-info">
+            <view class="info-row">
+              <text class="info-label">{{ $t('stock.packageNameLabel') }}:</text>
+              <text class="info-value">{{ selectedPackage.package_name }}</text>
+            </view>
+            <view class="info-row">
+              <text class="info-label">{{ $t('stock.packageCodeLabel') }}:</text>
+              <text class="info-value">{{ selectedPackage.package_code }}</text>
             </view>
           </view>
           
-          <view v-else class="parse-error">
-            <text class="error-icon">⚠️</text>
-            <text class="error-text">{{ parsedBarcode.error }}</text>
-          </view>
-        </view>
-      </view>
-    </view>
-
-    <!-- 工单选择 -->
-    <view v-if="availablePackages.length > 0" class="work-order-section">
-      <view class="section-title">{{ $t('stock.selectWorkOrderOptional') }}</view>
-      <picker @change="onWorkOrderChange" :value="selectedWorkOrderIndex" :range="workOrderOptions">
-        <view class="picker-input">
-          <text>{{ selectedWorkOrder ? selectedWorkOrder.title : $t('stock.noWorkOrder') }}</text>
-          <text class="picker-arrow">▼</text>
-        </view>
-      </picker>
-    </view>
-
-    <!-- 出库仓库选择 -->
-    <view v-if="availablePackages.length > 0" class="work-order-section">
-      <view class="section-title">{{ $t('stock.selectCheckoutWarehouse') }}</view>
-      <picker @change="onWarehouseChange" :value="selectedWarehouseIndex" :range="warehouseOptions">
-        <view class="picker-input">
-          <text>{{ selectedWarehouse ? selectedWarehouse.warehouse_name : $t('common.pleaseSelect') }}</text>
-          <text class="picker-arrow">▼</text>
-        </view>
-      </picker>
-    </view>
-
-    <!-- 套装选择 -->
-    <view v-if="availablePackages.length > 1" class="package-section">
-      <view class="section-title">{{ $t('stock.choosePackage') }}</view>
-      <view class="package-list">
-        <view 
-          v-for="(pkg, index) in availablePackages" 
-          :key="pkg.id"
-          class="package-item"
-          :class="{ 'selected': selectedPackageIndex === index }"
-          @click="selectPackage(index)"
-        >
-          <view class="package-header">
-            <text class="package-name">{{ pkg.package_name }}</text>
-            <text class="package-code">{{ pkg.package_code }}</text>
-          </view>
-          <text class="package-type">{{ $t('stock.suitableFor') }}: {{ pkg.site_type || $t('common.all') }}</text>
-        </view>
-      </view>
-    </view>
-
-    <!-- 套装清单 -->
-    <view v-if="selectedPackage" class="package-detail">
-      <view class="section-title">{{ $t('stock.packageConfirm') }}</view>
-      
-      <view class="package-info">
-        <view class="info-row">
-          <text class="info-label">{{ $t('stock.packageNameLabel') }}:</text>
-          <text class="info-value">{{ selectedPackage.package_name }}</text>
-        </view>
-        <view class="info-row">
-          <text class="info-label">{{ $t('stock.packageCodeLabel') }}:</text>
-          <text class="info-value">{{ selectedPackage.package_code }}</text>
-        </view>
-      </view>
-      
-      <view class="items-list">
-        <view v-for="item in selectedPackage.items" :key="item.equipment_id" class="item-card">
-          <view class="item-header">
-            <text class="item-name">{{ item.equipment_name }}</text>
-            <view class="item-quantity">
-              <text class="quantity-text">{{ item.quantity }} {{ item.unit }}</text>
-              <text v-if="item.is_required" class="required-tag">{{ $t('stock.requiredTag') }}</text>
+          <view class="items-list">
+            <view v-for="item in selectedPackage.items" :key="item.equipment_id" class="item-card">
+              <view class="item-header">
+                <text class="item-name">{{ item.equipment_name }}</text>
+                <view class="item-quantity">
+                  <text class="quantity-text">{{ item.quantity }} {{ item.unit }}</text>
+                  <text v-if="item.is_required" class="required-tag">{{ $t('stock.requiredTag') }}</text>
+                </view>
+              </view>
+              <text class="item-code">{{ $t('stock.codeLabel') }}: {{ item.equipment_code }}</text>
             </view>
           </view>
-          <text class="item-code">{{ $t('stock.codeLabel') }}: {{ item.equipment_code }}</text>
+          
+          <!-- 确认按钮 -->
+          <view class="action-buttons">
+            <button class="btn-cancel" @click="resetScan">{{ $t('stock.rescan') }}</button>
+            <button class="btn-confirm" @click="confirmPickup" :disabled="confirming">
+              {{ confirming ? $t('stock.confirming') : $t('stock.confirmPickup') }}
+            </button>
+          </view>
         </view>
-      </view>
-      
-      <!-- 确认按钮 -->
-      <view class="action-buttons">
-        <button class="btn-cancel" @click="resetScan">{{ $t('stock.rescan') }}</button>
-        <button class="btn-confirm" @click="confirmPickup" :disabled="confirming">
-          {{ confirming ? $t('stock.confirming') : $t('stock.confirmPickup') }}
-        </button>
       </view>
     </view>
 
-    <!-- 领料记录 -->
+    <!-- 我的设备列表 -->
 	    <view class="history-section">
 	      <view class="section-title">
-	        <text>{{ $t('stock.myPickups') }}</text>
+	        <text>{{ $t('stock.myDevicesList') }}</text>
 	        <view class="refresh-icon" @click="refreshPickupHistory">
 	          <uni-icons type="refreshempty" size="20" color="#2563eb" />
 	        </view>
@@ -176,7 +195,7 @@
       </view>
       
       <view v-else class="history-list">
-        <view v-for="record in pickupHistory" :key="record.id" class="history-item">
+        <view v-for="record in pickupHistory" :key="record.id" class="history-item" @click="openDeviceDetail(record)">
           <view class="history-header">
             <text class="history-sn">{{ record.serial_number || record.main_device_barcode }}</text>
             <text class="history-time">{{ formatTime(record.pickup_time) }}</text>
@@ -209,15 +228,6 @@
               <text class="parsed-value">{{ formatMacAddress(record.mac_address_2) }}</text>
             </view>
           </view>
-          <view class="history-actions" v-if="showReturnAction">
-            <button
-              v-if="shouldShowReturnButton(record)"
-              class="btn-outline btn-sm"
-              @click="openReturnModal(record)"
-            >
-              {{ getReturnButtonLabel(record) }}
-            </button>
-          </view>
         </view>
 
         <view class="history-load-more" v-if="pickupHasMore">
@@ -232,6 +242,136 @@
     <view v-if="loading" class="loading-mask">
       <view class="loading-content">
         <text>{{ $t('stock.processing') }}</text>
+      </view>
+    </view>
+
+    <!-- 设备详情 Bottom Sheet -->
+    <view class="device-modal-mask" v-if="deviceDetailVisible" @click="closeDeviceDetail">
+      <view class="device-modal" @click.stop>
+        <view class="device-modal-header">
+          <text class="device-modal-title">{{ $t('stock.deviceDetailsTitle') }}</text>
+          <view class="device-modal-close" @click="closeDeviceDetail">
+            <uni-icons type="closeempty" size="20" color="#6b7280" />
+          </view>
+        </view>
+
+        <view class="device-modal-body" v-if="deviceDetailRecord">
+          <view class="device-summary">
+            <view class="summary-row">
+              <text class="summary-label">{{ $t('stock.serialNumber') }}</text>
+              <view class="summary-value-wrap">
+                <text class="summary-value mono">{{ deviceDetailSn }}</text>
+                <text class="summary-action" @click="copyDeviceSn">{{ $t('stock.copySn') }}</text>
+              </view>
+            </view>
+            <view v-if="deviceDetailRecord.package_name" class="summary-row">
+              <text class="summary-label">{{ $t('stock.packageLabel') }}</text>
+              <text class="summary-value">{{ deviceDetailRecord.package_name }}</text>
+            </view>
+            <view class="summary-row">
+              <text class="summary-label">{{ $t('common.status') }}</text>
+              <text class="status-badge" :class="deviceStatusBadgeClass">{{ deviceStatusBadgeText }}</text>
+            </view>
+            <view v-if="deviceDetailRecord.return_document_number" class="summary-row">
+              <text class="summary-label">{{ $t('stock.returnDocumentNumber') }}</text>
+              <text class="summary-value mono">{{ deviceDetailRecord.return_document_number }}</text>
+            </view>
+            <view v-if="deviceDetailRecord.return_warehouse_name" class="summary-row">
+              <text class="summary-label">{{ $t('stock.returnWarehouseLabel') }}</text>
+              <text class="summary-value">{{ deviceDetailRecord.return_warehouse_name }}</text>
+            </view>
+            <view v-if="deviceDetailRecord.equipment_instance && deviceDetailRecord.equipment_instance.warehouse_name" class="summary-row">
+              <text class="summary-label">{{ $t('stock.warehouse') }}</text>
+              <text class="summary-value">{{ deviceDetailRecord.equipment_instance.warehouse_name }}</text>
+            </view>
+          </view>
+
+          <view class="device-section">
+            <view class="device-section-title-row">
+              <text class="device-section-title">{{ $t('stock.deviceBindingsTitle') }}</text>
+              <view class="device-section-action" @click="refreshDeviceDetailPreview">
+                <uni-icons type="refreshempty" size="18" color="#2563eb" />
+              </view>
+            </view>
+
+            <view v-if="deviceDetailPreviewLoading" class="device-loading">
+              <text>{{ $t('common.loading') }}</text>
+            </view>
+
+            <view v-else>
+              <view v-if="deviceDetailPreviewAction === 'unbind_blocked'" class="return-hint-card">
+                <view class="hint-header warning">
+                  <text class="hint-title">{{ $t('stock.unbindBlockedTitle') }}</text>
+                  <text class="hint-desc">{{ $t('stock.unbindBlockedTip') }}</text>
+                </view>
+              </view>
+
+              <view v-if="deviceDetailPreviewAction === 'need_unbind'" class="return-hint-card">
+                <view class="hint-header info">
+                  <text class="hint-title">{{ $t('stock.needUnbindTitle') }}</text>
+                  <text class="hint-desc">{{ $t('stock.needUnbindTip') }}</text>
+                </view>
+              </view>
+
+              <view
+                v-if="deviceDetailBindings.length > 0"
+                class="bind-list"
+              >
+                <view
+                  v-for="(b, idx) in deviceDetailBindings"
+                  :key="`${b.inspection_id || idx}`"
+                  class="bind-item"
+                >
+                  <view class="bind-head">
+                    <text class="bind-title">{{ bindingTitle(b) }}</text>
+                    <text class="status-tag" :class="inspectionStatusTagClass(b.inspection_status)">
+                      {{ inspectionStatusText(b.inspection_status) }}
+                    </text>
+                  </view>
+                  <view class="bind-meta">
+                    <text class="meta-item">{{ $t('stock.sectorBandLabel') }}: {{ sectorBandText(b) }}</text>
+                    <text v-if="bindingSiteName(b)" class="meta-item">{{ $t('stock.siteLabel') }}: {{ bindingSiteName(b) }}</text>
+                  </view>
+                  <text v-if="deviceDetailPreviewAction === 'unbind_blocked'" class="bind-reason">{{ bindingReasonText(b) }}</text>
+                </view>
+              </view>
+
+              <view v-else class="device-empty">
+                <text v-if="deviceDetailPreviewAction === 'error'">
+                  {{ deviceDetailPreviewData.detail || deviceDetailPreviewData.message || $t('messages.operationFailed') }}
+                </text>
+                <text v-else-if="deviceDetailPreviewAction === 'no_active_pickup'">
+                  {{ $t('stock.noReturnablePickup') }}
+                </text>
+                <text v-else>
+                  {{ $t('stock.noBindings') }}
+                </text>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view class="device-modal-footer">
+          <button class="modal-btn btn-secondary" :disabled="deviceDetailActionLoading" @click="closeDeviceDetail">
+            {{ $t('common.close') }}
+          </button>
+          <button
+            v-if="canDeviceUnbind"
+            class="modal-btn btn-warning"
+            :disabled="deviceDetailActionLoading"
+            @click="doDeviceUnbind"
+          >
+            {{ $t('stock.oneClickUnbind') }}
+          </button>
+          <button
+            v-if="canOpenReturnFromDetail"
+            class="modal-btn btn-primary"
+            :disabled="deviceDetailActionLoading"
+            @click="openReturnFromDetail"
+          >
+            {{ $t('stock.returnModalTitle') }}
+          </button>
+        </view>
       </view>
     </view>
 
@@ -463,6 +603,8 @@ export default {
     return {
       scanResult: '',
       parsedBarcode: null, // 解析后的条码信息
+      // 扫码领货区域折叠状态（默认折叠）
+      scanSectionCollapsed: true,
       selectedPackageIndex: 0,
       selectedWorkOrderIndex: 0,
       selectedWarehouseIndex: 0,
@@ -473,8 +615,6 @@ export default {
       loading: false,
       confirming: false,
       userLocation: null,
-      // 在 My Pickups 列表提供退库入口
-      showReturnAction: true,
       // My Pickups 分页/搜索/分组
       pickupTab: 'picked',
       pickupSearch: '',
@@ -499,7 +639,16 @@ export default {
       returnPreviewLoading: false,
       returnActionLoading: false,
       returnSelectedWarehouseIndex: 0,
-      cancelReason: ''
+      cancelReason: '',
+
+      // 设备详情 Bottom Sheet
+      deviceDetailVisible: false,
+      deviceDetailRecord: null,
+      deviceDetailPreviewAction: '',
+      deviceDetailPreviewData: {},
+      deviceDetailPreviewLoading: false,
+      deviceDetailPreviewReqId: 0,
+      deviceDetailActionLoading: false,
     }
   },
   
@@ -574,11 +723,52 @@ export default {
 	      if (s === 'rejected') return 'rejected'
 	      if (s === 'canceled') return 'canceled'
 	      return 'none'
-	    }
+	    },
+
+    deviceDetailSn() {
+      return (this.deviceDetailRecord?.serial_number || this.deviceDetailRecord?.main_device_barcode || '').trim()
+    },
+
+    deviceStatusBadgeText() {
+      if (!this.deviceDetailRecord) return '-'
+      if (this.deviceDetailRecord.is_returned) return this.$t('stock.statusReturned')
+      if (this.deviceDetailRecord.return_status) return this.statusTextForReturn(this.deviceDetailRecord.return_status)
+      if (this.deviceDetailRecord.pickup_group === 'installed') return this.$t('stock.statusInstalled')
+      return this.deviceDetailRecord.is_confirmed ? this.$t('stock.statusConfirmed') : this.$t('stock.statusPending')
+    },
+
+    deviceStatusBadgeClass() {
+      if (!this.deviceDetailRecord) return 'none'
+      if (this.deviceDetailRecord.is_returned) return 'done'
+      const s = (this.deviceDetailRecord.return_status || '').toString()
+      if (s === 'pending_receive') return 'pending'
+      if (s === 'rejected') return 'rejected'
+      if (s === 'canceled') return 'canceled'
+      return 'none'
+    },
+
+    deviceDetailBindings() {
+      if (this.deviceDetailPreviewAction === 'need_unbind') return this.deviceDetailPreviewData?.need_unbind || []
+      if (this.deviceDetailPreviewAction === 'unbind_blocked') return this.deviceDetailPreviewData?.blocked_bindings || []
+      return []
+    },
+
+    canDeviceUnbind() {
+      if (this.deviceDetailActionLoading) return false
+      if (!this.deviceDetailRecord) return false
+      if (this.deviceDetailPreviewAction === 'need_unbind') return true
+      return this.deviceDetailRecord.binding_state === 'need_unbind'
+    },
+
+    canOpenReturnFromDetail() {
+      if (this.deviceDetailActionLoading) return false
+      if (!this.deviceDetailRecord) return false
+      return this.deviceDetailRecord.pickup_group !== 'returned'
+    }
 	  },
   
   onLoad() {
-    // 权限检查：勘察员不能访问扫码领料功能
+    // 权限检查：勘察员不能访问我的设备功能
     if (this.userStore.userInfo?.role === 'surveyor') {
       uni.showToast({
         title: this.$t('stock.surveyorNoPermission'),
@@ -603,8 +793,149 @@ export default {
   },
   
   methods: {
+    toggleScanSection() {
+      this.scanSectionCollapsed = !this.scanSectionCollapsed
+    },
+
+    startScanFromCollapsed() {
+      if (this.scanSectionCollapsed) this.scanSectionCollapsed = false
+      this.startScan()
+    },
+
+    openDeviceDetail(record) {
+      if (!record) return
+      this.deviceDetailRecord = record
+      this.deviceDetailVisible = true
+      this.deviceDetailPreviewAction = ''
+      this.deviceDetailPreviewData = {}
+      this.deviceDetailPreviewLoading = false
+      this.deviceDetailActionLoading = false
+      this.refreshDeviceDetailPreview()
+    },
+
+    closeDeviceDetail() {
+      this.deviceDetailVisible = false
+      this.deviceDetailRecord = null
+      this.deviceDetailPreviewAction = ''
+      this.deviceDetailPreviewData = {}
+      this.deviceDetailPreviewLoading = false
+      this.deviceDetailActionLoading = false
+    },
+
+    copyDeviceSn() {
+      const sn = (this.deviceDetailSn || '').trim()
+      if (!sn) return
+      uni.setClipboardData({
+        data: sn,
+        success: () => {
+          uni.showToast({ title: this.$t('stock.copySn'), icon: 'success' })
+        }
+      })
+    },
+
+    async refreshDeviceDetailPreview() {
+      if (!this.deviceDetailRecord) return
+      const barcode = (this.deviceDetailSn || '').trim()
+      if (!barcode) {
+        this.deviceDetailPreviewAction = 'error'
+        this.deviceDetailPreviewData = { detail: this.$t('stock.scanResultEmpty') }
+        return
+      }
+
+      const reqId = (this.deviceDetailPreviewReqId || 0) + 1
+      this.deviceDetailPreviewReqId = reqId
+      this.deviceDetailPreviewLoading = true
+      try {
+        const parsed = parseBarcode(barcode)
+        const res = await new Promise((resolve, reject) => {
+          uni.request({
+            url: buildApiUrl('/api/stock/scan-return/preview'),
+            method: 'POST',
+            header: getAuthHeaders(this.userStore.token),
+            data: {
+              barcode,
+              parsed_barcode: parsed && parsed.success ? parsed : null,
+              gps_location: this.userLocation
+            },
+            success: resolve,
+            fail: reject
+          })
+        })
+        if (this.deviceDetailPreviewReqId !== reqId) return
+
+        if (res.statusCode !== 200) {
+          const detail = res.data?.detail || res.data?.message || this.$t('messages.requestFailedWithCode', { code: res.statusCode })
+          this.deviceDetailPreviewAction = 'error'
+          this.deviceDetailPreviewData = { detail }
+          return
+        }
+
+        this.deviceDetailPreviewAction = res.data?.action || ''
+        this.deviceDetailPreviewData = res.data || {}
+      } catch (error) {
+        if (this.deviceDetailPreviewReqId !== reqId) return
+        const msg = error?.data?.detail || this.$t('messages.networkError')
+        this.deviceDetailPreviewAction = 'error'
+        this.deviceDetailPreviewData = { detail: msg }
+      } finally {
+        if (this.deviceDetailPreviewReqId === reqId) this.deviceDetailPreviewLoading = false
+      }
+    },
+
+    openReturnFromDetail() {
+      const record = this.deviceDetailRecord
+      if (!record) return
+      this.closeDeviceDetail()
+      setTimeout(() => {
+        this.openReturnModal(record)
+      }, 100)
+    },
+
+    async doDeviceUnbind() {
+      const sn = (this.deviceDetailPreviewData?.sn || this.deviceDetailSn || '').trim()
+      if (!sn) return
+
+      uni.showModal({
+        title: this.$t('stock.oneClickUnbind'),
+        content: this.$t('stock.unbindWillClearAndDelete'),
+        confirmText: this.$t('common.confirm'),
+        cancelText: this.$t('common.cancel'),
+        success: async (r) => {
+          if (!r.confirm) return
+          this.deviceDetailActionLoading = true
+          try {
+            const ret = await new Promise((resolve, reject) => {
+              uni.request({
+                url: buildApiUrl('/api/stock/scan-return/unbind'),
+                method: 'POST',
+                header: getAuthHeaders(this.userStore.token),
+                data: { sn },
+                success: resolve,
+                fail: reject
+              })
+            })
+            if (ret.statusCode === 200) {
+              uni.showToast({ title: this.$t('messages.operationSuccess'), icon: 'success' })
+              await this.refreshDeviceDetailPreview()
+              await this.loadPickupHistory(true, 1)
+              this.syncDeviceDetailRecordFromHistory()
+            } else {
+              const msg = ret.data?.detail || ret.data?.message || this.$t('messages.operationFailed')
+              uni.showToast({ title: msg, icon: 'none' })
+            }
+          } catch (error) {
+            const msg = error?.data?.detail || this.$t('messages.operationFailed')
+            uni.showToast({ title: msg, icon: 'none' })
+          } finally {
+            this.deviceDetailActionLoading = false
+          }
+        }
+      })
+    },
+
     async startScan() {
       try {
+        this.scanSectionCollapsed = false
         console.log('开始扫码...')
         const result = await new Promise((resolve, reject) => {
           uni.scanCode({
@@ -824,7 +1155,7 @@ export default {
             showCancel: false,
             confirmText: this.$t('common.confirm'),
             success: () => {
-              this.resetScan()
+              this.resetScan({ collapse: true })
               this.loadPickupHistory()
             }
           })
@@ -835,7 +1166,7 @@ export default {
             showCancel: false,
             confirmText: this.$t('common.confirm'),
             success: () => {
-              this.resetScan()
+              this.resetScan({ collapse: true })
               this.loadPickupHistory()
             }
           })
@@ -879,13 +1210,15 @@ export default {
       }
     },
     
-    resetScan() {
+    resetScan(options = {}) {
+      const collapse = !!options?.collapse
       this.scanResult = ''
       this.parsedBarcode = null
       this.availablePackages = []
       this.selectedPackageIndex = 0
       this.selectedWorkOrderIndex = 0
       this.selectedWarehouseIndex = 0
+      if (collapse) this.scanSectionCollapsed = true
     },
     
     getFormatName(format) {
@@ -1034,6 +1367,12 @@ export default {
       if (latest) this.returnRecord = latest
     },
 
+    syncDeviceDetailRecordFromHistory() {
+      if (!this.deviceDetailRecord?.id) return
+      const latest = (this.pickupHistory || []).find(r => r.id === this.deviceDetailRecord.id)
+      if (latest) this.deviceDetailRecord = latest
+    },
+
     getHistoryStatusText(record) {
       if (!record) return ''
       if (record.pickup_group === 'installed') return this.$t('stock.statusInstalled')
@@ -1053,18 +1392,6 @@ export default {
         'return-canceled': record?.return_status === 'canceled',
         returned: record?.is_returned
       }
-    },
-
-    shouldShowReturnButton(record) {
-      return !!record && record.pickup_group !== 'returned' && !record.is_returned
-    },
-
-    getReturnButtonLabel(record) {
-      if (!record) return ''
-      if (record.return_status === 'pending_receive') return this.$t('stock.viewReturnRequest')
-      if (record.return_status === 'rejected' || record.return_status === 'canceled') return this.$t('stock.reapplyReturn')
-      if (record.pickup_group === 'installed' || record.binding_state === 'installed_locked') return this.$t('stock.viewInstallReason')
-      return this.$t('stock.return')
     },
 
 	    bindingTitle(binding) {
@@ -1466,6 +1793,62 @@ export default {
       color: var(--text-secondary);
     }
   }
+}
+
+.scan-fold {
+  margin-bottom: 20rpx;
+}
+
+.scan-fold-header {
+  background: var(--bg-elevated);
+  padding: 22rpx 24rpx;
+  border-radius: 12rpx;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  &:active { opacity: 0.92; }
+
+  .scan-fold-left {
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+  }
+
+  .scan-fold-title {
+    font-size: 30rpx;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .scan-fold-right {
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+  }
+
+  .scan-fold-scan-btn {
+    display: flex;
+    align-items: center;
+    gap: 8rpx;
+    padding: 10rpx 16rpx;
+    border-radius: 999rpx;
+    background: var(--color-primary);
+  }
+
+  .scan-fold-scan-btn:active { opacity: 0.85; }
+
+  .scan-fold-scan-text {
+    font-size: 24rpx;
+    font-weight: 600;
+    color: #ffffff;
+    line-height: 1;
+  }
+}
+
+.scan-fold-body {
+  margin-top: 14rpx;
 }
 
 .scan-section {
@@ -1902,6 +2285,7 @@ export default {
       border: 1rpx solid #e5e7eb;
       border-radius: 8rpx;
       margin-bottom: 16rpx;
+      &:active { opacity: 0.88; }
       
       .history-header {
         display: flex;
@@ -2047,6 +2431,132 @@ export default {
 .btn-outline { background: #ffffff; color: var(--color-primary); border: 1rpx solid var(--color-primary); display: inline-flex; align-items: center; justify-content: center; min-height: 88rpx; padding: 0 24rpx; border-radius: 12rpx; font-size: 26rpx; }
 
 .btn-sm { min-height: 88rpx; padding: 0 20rpx; font-size: 26rpx; }
+
+/* 设备详情 Bottom Sheet */
+.device-modal-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.device-modal {
+  width: 100%;
+  max-height: 86vh;
+  background: var(--bg-elevated);
+  border-radius: 24rpx 24rpx 0 0;
+  overflow: hidden;
+  box-shadow: 0 -4rpx 16rpx rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+}
+
+.device-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22rpx 24rpx;
+  border-bottom: 1rpx solid #e5e7eb;
+}
+
+.device-modal-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.device-modal-close {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  background: #f9fafb;
+}
+
+.device-modal-close:active { background: #f3f4f6; }
+
+.device-modal-body {
+  padding: 20rpx 24rpx;
+  overflow: auto;
+  flex: 1;
+}
+
+.device-summary {
+  background: var(--bg-page);
+  border-radius: 12rpx;
+  padding: 16rpx 18rpx;
+  margin-bottom: 16rpx;
+}
+
+.device-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 12rpx;
+}
+
+.device-section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.device-section-action {
+  width: 76rpx;
+  height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12rpx;
+  border: 1rpx solid #e5e7eb;
+  background: #ffffff;
+}
+
+.device-section-action:active { opacity: 0.85; }
+
+.device-loading {
+  padding: 20rpx 0;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.device-empty {
+  margin-top: 12rpx;
+  padding: 18rpx;
+  background: var(--bg-page);
+  border-radius: 12rpx;
+  color: var(--text-secondary);
+  font-size: 26rpx;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.device-modal-footer {
+  padding: 18rpx 24rpx env(safe-area-inset-bottom);
+  border-top: 1rpx solid #e5e7eb;
+  display: flex;
+  gap: 16rpx;
+  flex-wrap: wrap;
+}
+
+.device-modal-footer .modal-btn {
+  flex: 1;
+  min-width: 220rpx;
+}
+
+.btn-warning {
+  background: #f59e0b;
+  color: #ffffff;
+}
 
 /* 退库弹窗 */
 .return-modal-mask {
