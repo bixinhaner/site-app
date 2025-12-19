@@ -91,6 +91,10 @@ export const API_ENDPOINTS = {
     CONFIRM_PICKUP: '/api/stock/confirm-pickup',
     MY_PICKUPS: '/api/stock/my-pickups',
     RETURN_PICKUP: '/api/stock/return-pickup',
+    SCAN_RETURN_PREVIEW: '/api/stock/scan-return/preview',
+    SCAN_RETURN_UNBIND: '/api/stock/scan-return/unbind',
+    SCAN_RETURN_REQUEST: '/api/stock/scan-return/request',
+    SCAN_RETURN_CANCEL: '/api/stock/scan-return/cancel',
     TRANSACTIONS: '/api/stock/transactions'
   },
   

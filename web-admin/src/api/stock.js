@@ -80,4 +80,17 @@ export const stockApi = {
 
   updateEquipmentInstance: (instanceId, data) =>
     request.patch(`/api/stock/instances/${instanceId}`, data),
+
+  // ===== 退库（待收货/收货确认）=====
+  returnPreview: (data) =>
+    request.post('/api/stock/scan-return/preview', data),
+
+  getReturnRequests: (params = {}) =>
+    request.get('/api/stock/return-requests', { params }),
+
+  receiveReturn: (data) =>
+    request.post('/api/stock/scan-return/receive', data),
+
+  rejectReturn: (data) =>
+    request.post('/api/stock/scan-return/reject', data),
 }

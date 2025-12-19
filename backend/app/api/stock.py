@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, desc, func
 from typing import List, Optional, Dict
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ from app.models.equipment import (
     EquipmentStatusEnum
 )
 from app.models.work_order import AuditEvent
+from app.models.inspection import InspectionCheckItem, InspectionPhoto, SiteInspection, InspectionStatusEnum, CheckItemStatusEnum
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -33,6 +34,19 @@ router = APIRouter()
 def _ensure_stock_operator(current_user: User) -> None:
     if current_user.role not in ["admin", "warehouse_manager", "manager"]:
         raise HTTPException(status_code=403, detail="权限不足")
+
+def _ensure_warehouse_operator(current_user: User) -> None:
+    # 仓库侧操作：仅仓管/管理员（manager 在 get_current_user 中已被视为 admin）
+    if current_user.role not in ["admin", "warehouse_manager"]:
+        raise HTTPException(status_code=403, detail="权限不足")
+
+
+def _get_managed_warehouse_ids(db: Session, current_user: User) -> Optional[set]:
+    """返回当前用户可管理的仓库ID集合；管理员返回 None 表示全部仓库。"""
+    if current_user.role == "admin":
+        return None
+    ids = db.query(Warehouse.id).filter(Warehouse.manager_id == current_user.id).all()
+    return {row[0] for row in ids}
 
 
 def _add_audit_event(
@@ -180,9 +194,18 @@ async def scan_equipment_checkout(
     parsed_barcode = scan_data.get("parsed_barcode")  # 解析后的条码数据
     work_order_id = scan_data.get("work_order_id")  # 可选的关联工单
     gps_location = scan_data.get("gps_location")
-    
+    warehouse_id = scan_data.get("warehouse_id") or 1
+
     if not barcode:
         raise HTTPException(status_code=400, detail="条码不能为空")
+
+    # 校验仓库存在且启用
+    warehouse = db.query(Warehouse).filter(
+        Warehouse.id == warehouse_id,
+        Warehouse.status == EquipmentStatusEnum.ACTIVE,
+    ).first()
+    if not warehouse:
+        raise HTTPException(status_code=400, detail="仓库不存在或已停用")
     
     # 提取SN和MAC地址信息
     serial_number = None
@@ -233,6 +256,10 @@ async def scan_equipment_checkout(
     # 若设备实例已被他人领料，则禁止重复领料
     if equipment_instance and equipment_instance.issued_to and equipment_instance.issued_to != current_user.id:
         raise HTTPException(status_code=403, detail="设备已被其他用户领料，无法重复领料")
+
+    # 若设备实例存在且仍在仓库中，则要求与所选仓库一致
+    if equipment_instance and equipment_instance.warehouse_id is not None and equipment_instance.warehouse_id != warehouse_id:
+        raise HTTPException(status_code=400, detail="设备不在所选仓库，无法出库")
     
     # 如果没找到设备实例，尝试通过条码前缀匹配设备型号
     if not equipment:
@@ -285,6 +312,7 @@ async def scan_equipment_checkout(
     for item in package.package_items:
         inventory = db.query(Inventory).filter(
             and_(
+                Inventory.warehouse_id == warehouse_id,
                 Inventory.equipment_id == item.equipment_id,
                 Inventory.available_stock >= item.quantity
             )
@@ -311,7 +339,7 @@ async def scan_equipment_checkout(
     transaction = StockTransaction(
         id=transaction_id,
         transaction_type=TransactionTypeEnum.STOCK_OUT,
-        warehouse_id=1,  # 默认仓库
+        warehouse_id=warehouse_id,
         work_order_id=work_order_id,
         package_id=package.id,
         operator_id=current_user.id,
@@ -338,6 +366,7 @@ async def scan_equipment_checkout(
         
         # 更新库存
         inventory = db.query(Inventory).filter(
+            Inventory.warehouse_id == warehouse_id,
             Inventory.equipment_id == item.equipment_id
         ).first()
         
@@ -452,6 +481,23 @@ async def get_my_pickup_records(
         )
     
     records = query.order_by(desc(PickupRecord.pickup_time)).all()
+
+    # 退库单（方案A）信息：按出库 transaction_id 聚合取最新一条，用于展示“待收货/已收货/拒收/取消”等状态
+    related_ids = [r.transaction_id for r in records if r.transaction_id]
+    return_trans_map: Dict[str, StockTransaction] = {}
+    if related_ids:
+        try:
+            return_trans = db.query(StockTransaction).filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                StockTransaction.related_transaction_id.in_(related_ids),
+            ).order_by(desc(StockTransaction.created_at)).all()
+            for rt in return_trans:
+                key = getattr(rt, "related_transaction_id", None)
+                if key and key not in return_trans_map:
+                    return_trans_map[key] = rt
+        except Exception:
+            # 兼容老库/字段缺失等场景：忽略退库信息
+            return_trans_map = {}
     
     result = []
     for record in records:
@@ -472,6 +518,19 @@ async def get_my_pickup_records(
             "pickup_time": to_utc_iso(record.pickup_time) if record.pickup_time else None,
             "is_confirmed": record.is_confirmed,
             "is_returned": record.is_returned,
+            "return_status": return_trans_map.get(record.transaction_id).approval_status if return_trans_map.get(record.transaction_id) else None,
+            "return_document_number": return_trans_map.get(record.transaction_id).document_number if return_trans_map.get(record.transaction_id) else None,
+            "return_warehouse_id": return_trans_map.get(record.transaction_id).warehouse_id if return_trans_map.get(record.transaction_id) else None,
+            "return_warehouse_name": (
+                return_trans_map.get(record.transaction_id).warehouse.warehouse_name
+                if return_trans_map.get(record.transaction_id) and return_trans_map.get(record.transaction_id).warehouse
+                else None
+            ),
+            "return_reject_reason": (
+                return_trans_map.get(record.transaction_id).approval_comments
+                if return_trans_map.get(record.transaction_id) and return_trans_map.get(record.transaction_id).approval_status == "rejected"
+                else None
+            ),
             # returned_at / confirmed_at 使用 datetime.now() 写入，按本地->UTC 输出
             "returned_at": to_utc_iso(record.returned_at, assume_local=True) if record.returned_at else None,
             "confirmed_at": to_utc_iso(record.confirmed_at, assume_local=True) if record.confirmed_at else None,
@@ -480,7 +539,712 @@ async def get_my_pickup_records(
     
     return {"pickup_records": result}
 
-# ===== 归还管理 =====
+# ===== 退库（方案A：申请/收货）=====
+
+def _extract_sn_from_scan(barcode: str, parsed_barcode: Optional[dict]) -> str:
+    if parsed_barcode and isinstance(parsed_barcode, dict) and parsed_barcode.get("success"):
+        sn = (parsed_barcode.get("sn") or "").strip()
+        if sn:
+            return sn
+    return (barcode or "").strip()
+
+
+def _is_device_level_check_item(item: InspectionCheckItem) -> bool:
+    if not item or not item.sector_id or not item.band:
+        return False
+    key = f"{item.sector_id}_{item.band}"
+    # 防御：若 cell_id 缺失，按“设备级”处理（避免误放开绑定要求）
+    if not item.cell_id:
+        return True
+    return str(item.cell_id) == key
+
+
+def _get_active_pickup_by_sn(
+    db: Session,
+    *,
+    sn: str,
+    current_user: User,
+) -> Optional[PickupRecord]:
+    q = db.query(PickupRecord).filter(
+        PickupRecord.picker_id == current_user.id,
+        PickupRecord.is_returned == False,
+        or_(PickupRecord.serial_number == sn, PickupRecord.main_device_barcode == sn),
+    )
+    return q.order_by(desc(PickupRecord.pickup_time)).first()
+
+
+def _get_blocking_bindings(
+    db: Session,
+    *,
+    sn: str,
+    current_user: User,
+) -> Dict[str, list]:
+    """返回两类绑定：
+    - need_unbind: 当前用户且检查状态允许解绑（draft/in_progress/rejected）的设备级绑定
+    - blocked: 不能解绑或不属于当前用户的绑定
+    """
+    q = (
+        db.query(InspectionCheckItem)
+        .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+        .options(
+            joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.work_order),
+            joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.site),
+        )
+        .filter(InspectionCheckItem.equipment_sn == sn)
+    )
+    items: List[InspectionCheckItem] = q.all()
+
+    allow_unbind_status = {
+        InspectionStatusEnum.DRAFT,
+        InspectionStatusEnum.IN_PROGRESS,
+        InspectionStatusEnum.REJECTED,
+    }
+    block_status = {
+        InspectionStatusEnum.SUBMITTED,
+        InspectionStatusEnum.UNDER_REVIEW,
+        InspectionStatusEnum.APPROVED,
+        InspectionStatusEnum.COMPLETED,
+    }
+
+    need_unbind = []
+    blocked = []
+
+    for it in items:
+        if not _is_device_level_check_item(it):
+            continue
+
+        insp: SiteInspection = it.inspection
+        insp_status = insp.status if hasattr(insp, "status") else None
+        work_order = getattr(insp, "work_order", None) if insp else None
+        site = getattr(insp, "site", None) if insp else None
+
+        info = {
+            "inspection_id": insp.id if insp else None,
+            "inspection_status": getattr(insp_status, "value", insp_status),
+            "sector_id": it.sector_id,
+            "band": it.band,
+            "work_order_id": getattr(insp, "work_order_id", None) if insp else None,
+            "work_order_title": getattr(work_order, "title", None) if work_order else None,
+            "site_id": getattr(insp, "site_id", None) if insp else None,
+            "site_name": getattr(site, "site_name", None) if site else None,
+        }
+
+        # 不属于当前用户的检查记录：一律阻断（需人工处理）
+        if insp and insp.inspector_id != current_user.id:
+            info["reason_code"] = "other_inspector"
+            info["reason"] = "设备已绑定到其他检查记录，无法自动解绑"
+            blocked.append(info)
+            continue
+
+        if insp_status in allow_unbind_status:
+            need_unbind.append(info)
+            continue
+
+        if insp_status in block_status:
+            info["reason_code"] = "inspection_locked"
+            info["reason"] = "检查已提交/审核中/已完成，禁止解绑"
+            blocked.append(info)
+            continue
+
+        # 未知状态：保守阻断
+        info["reason_code"] = "status_not_supported"
+        info["reason"] = "检查状态不支持解绑"
+        blocked.append(info)
+
+    return {"need_unbind": need_unbind, "blocked": blocked}
+
+
+def _clear_check_item_review_fields(check_item: InspectionCheckItem, now: datetime) -> None:
+    check_item.review_status = None
+    check_item.review_comments = None
+    check_item.reviewed_by = None
+    check_item.reviewed_at = None
+    check_item.updated_at = now
+
+
+def _safe_remove_upload_file(file_path: Optional[str]) -> None:
+    """仅删除 uploads/ 下的文件，避免误删系统文件。"""
+    import os
+
+    if not file_path:
+        return
+
+    p = str(file_path).strip()
+    if not p:
+        return
+
+    # 兼容 "./uploads/..."
+    if p.startswith("./"):
+        p = p[2:]
+
+    if not p.startswith("uploads/"):
+        return
+
+    try:
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        return
+
+    # 若为后端生成的水印图，尝试一并删除原图
+    if p.endswith("_watermarked.jpg"):
+        base = p[: -len("_watermarked.jpg")]
+        for ext in (".jpg", ".jpeg", ".png"):
+            orig = f"{base}{ext}"
+            try:
+                if os.path.exists(orig):
+                    os.remove(orig)
+            except Exception:
+                continue
+
+
+@router.post("/scan-return/unbind")
+async def scan_return_unbind(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """一键解绑：仅解绑设备级检查项；允许 draft/in_progress/rejected，且必须属于当前用户。
+
+    同时清空检查项填写内容，并删除对应检查照片（含物理文件）。
+    """
+    sn = (payload.get("sn") or "").strip()
+    if not sn:
+        raise HTTPException(status_code=400, detail="缺少SN")
+
+    allow_unbind_status = {
+        InspectionStatusEnum.DRAFT,
+        InspectionStatusEnum.IN_PROGRESS,
+        InspectionStatusEnum.REJECTED,
+    }
+
+    q = (
+        db.query(InspectionCheckItem)
+        .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+        .filter(
+            InspectionCheckItem.equipment_sn == sn,
+            SiteInspection.inspector_id == current_user.id,
+            SiteInspection.status.in_(list(allow_unbind_status)),
+        )
+    )
+    items: List[InspectionCheckItem] = q.all()
+
+    device_items = [it for it in items if _is_device_level_check_item(it)]
+    if not device_items:
+        return {"message": "无可解绑的设备级检查项", "unbind_count": 0}
+
+    now = datetime.utcnow()
+
+    # 删除照片（先删文件再删DB记录）
+    check_item_ids = [it.id for it in device_items]
+    photos = db.query(InspectionPhoto).filter(InspectionPhoto.check_item_id.in_(check_item_ids)).all()
+    for photo in photos:
+        _safe_remove_upload_file(photo.file_path)
+        db.delete(photo)
+
+    # 清理检查项内容并解绑
+    for it in device_items:
+        it.equipment_sn = None
+        it.data_value = None
+        it.validation_result = None
+        it.status = CheckItemStatusEnum.PENDING
+        it.checked_by = None
+        it.checked_at = None
+        _clear_check_item_review_fields(it, now)
+
+    # 设备实例状态回退：pending_inspection/inspected -> issued
+    equipment_instance = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn).first()
+    if equipment_instance and equipment_instance.status in {
+        InventoryStatusEnum.PENDING_INSPECTION,
+        InventoryStatusEnum.INSPECTED,
+    }:
+        equipment_instance.status = InventoryStatusEnum.ISSUED
+        equipment_instance.updated_at = now
+
+    db.commit()
+
+    return {"message": "解绑成功", "unbind_count": len(device_items), "deleted_photos": len(photos)}
+
+
+@router.post("/scan-return/preview")
+async def scan_return_preview(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """扫码退库预览：定位活动领料记录（整单），并检查是否存在需解绑的设备级检查绑定。"""
+    barcode = payload.get("barcode") or ""
+    parsed_barcode = payload.get("parsed_barcode")
+    gps_location = payload.get("gps_location")
+
+    sn = _extract_sn_from_scan(barcode, parsed_barcode)
+    if not sn:
+        raise HTTPException(status_code=400, detail="条码不能为空")
+
+    pickup_record = _get_active_pickup_by_sn(db, sn=sn, current_user=current_user)
+    if not pickup_record:
+        return {"action": "no_active_pickup", "message": "未找到可退库的领料记录"}
+
+    out_trans = db.query(StockTransaction).filter(StockTransaction.id == pickup_record.transaction_id).first()
+    if not out_trans:
+        raise HTTPException(status_code=404, detail="出库单不存在")
+
+    existing_return = db.query(StockTransaction).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+        StockTransaction.related_transaction_id == out_trans.id,
+        StockTransaction.approval_status.in_(["pending_receive", "received"]),
+    ).order_by(desc(StockTransaction.created_at)).first()
+    if existing_return:
+        return {
+            "action": "already_requested",
+            "message": "已存在退库单，无法重复申请",
+            "return_transaction_id": existing_return.id,
+            "return_document_number": existing_return.document_number,
+            "return_status": existing_return.approval_status,
+        }
+
+    bindings = _get_blocking_bindings(db, sn=sn, current_user=current_user)
+    if bindings["blocked"]:
+        return {
+            "action": "unbind_blocked",
+            "message": "存在不可解绑的检查绑定，无法发起退库",
+            "blocked_bindings": bindings["blocked"],
+        }
+    if bindings["need_unbind"]:
+        return {
+            "action": "need_unbind",
+            "message": "存在设备级检查绑定，需先解绑并清理检查内容",
+            "need_unbind": bindings["need_unbind"],
+        }
+
+    items = []
+    for item in out_trans.transaction_items:
+        items.append(
+            {
+                "item_id": item.id,
+                "equipment_id": item.equipment_id,
+                "equipment_name": item.equipment.equipment_name if item.equipment else None,
+                "equipment_code": item.equipment.equipment_code if item.equipment else None,
+                "equipment_category": item.equipment.category if item.equipment else None,
+                "quantity": item.quantity,
+                "unit": item.equipment.unit if item.equipment else None,
+            }
+        )
+
+    return {
+        "action": "preview_ok",
+        "sn": sn,
+        "pickup_record_id": pickup_record.id,
+        "out_transaction_id": out_trans.id,
+        "out_document_number": out_trans.document_number,
+        "out_warehouse_id": out_trans.warehouse_id,
+        "items": items,
+        "gps_location": gps_location,
+    }
+
+
+@router.post("/scan-return/request")
+async def scan_return_request(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """扫码退库申请（待收货）：创建退库单，但不回滚库存；必须先解绑设备级检查项。"""
+    barcode = payload.get("barcode") or ""
+    parsed_barcode = payload.get("parsed_barcode")
+    gps_location = payload.get("gps_location")
+    return_warehouse_id = payload.get("return_warehouse_id")
+    notes = (payload.get("notes") or "").strip()
+
+    sn = _extract_sn_from_scan(barcode, parsed_barcode)
+    if not sn:
+        raise HTTPException(status_code=400, detail="条码不能为空")
+
+    if not return_warehouse_id:
+        raise HTTPException(status_code=400, detail="请选择退入仓库")
+
+    return_wh = db.query(Warehouse).filter(
+        Warehouse.id == return_warehouse_id,
+        Warehouse.status == EquipmentStatusEnum.ACTIVE,
+    ).first()
+    if not return_wh:
+        raise HTTPException(status_code=400, detail="退入仓库不存在或已停用")
+
+    pickup_record = _get_active_pickup_by_sn(db, sn=sn, current_user=current_user)
+    if not pickup_record:
+        raise HTTPException(status_code=404, detail="未找到可退库的领料记录")
+
+    out_trans = db.query(StockTransaction).filter(StockTransaction.id == pickup_record.transaction_id).first()
+    if not out_trans:
+        raise HTTPException(status_code=404, detail="出库单不存在")
+
+    # 检查是否已有活动退库单
+    existing_return = db.query(StockTransaction).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+        StockTransaction.related_transaction_id == out_trans.id,
+        StockTransaction.approval_status.in_(["pending_receive", "received"]),
+    ).order_by(desc(StockTransaction.created_at)).first()
+    if existing_return:
+        raise HTTPException(status_code=400, detail="已存在退库单，无法重复申请")
+
+    bindings = _get_blocking_bindings(db, sn=sn, current_user=current_user)
+    if bindings["blocked"]:
+        raise HTTPException(status_code=400, detail="存在不可解绑的检查绑定，无法发起退库")
+    if bindings["need_unbind"]:
+        raise HTTPException(status_code=400, detail="存在设备级检查绑定，需先解绑并清理检查内容")
+
+    return_transaction_id = str(uuid.uuid4())
+    document_number = f"RET-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}"
+
+    return_trans = StockTransaction(
+        id=return_transaction_id,
+        transaction_type=TransactionTypeEnum.RETURN,
+        warehouse_id=return_warehouse_id,
+        operator_id=current_user.id,
+        scan_barcode=sn,
+        scan_time=datetime.now(),
+        scan_location=gps_location,
+        document_number=document_number,
+        total_quantity=out_trans.total_quantity,
+        notes=notes or f"扫码退库申请 - {sn}",
+        approval_status="pending_receive",
+        related_transaction_id=out_trans.id,
+    )
+    db.add(return_trans)
+
+    # 复制出库明细（整单退）
+    for item in out_trans.transaction_items:
+        db.add(
+            StockTransactionItem(
+                transaction_id=return_transaction_id,
+                equipment_instance_id=item.equipment_instance_id,
+                equipment_id=item.equipment_id,
+                quantity=item.quantity,
+                batch_number=item.batch_number,
+                vendor=getattr(item, "vendor", None),
+                item_notes=getattr(item, "item_notes", None),
+            )
+        )
+
+    db.commit()
+
+    return {
+        "action": "requested",
+        "message": "退库申请已提交，等待仓库收货确认",
+        "sn": sn,
+        "return_transaction_id": return_transaction_id,
+        "return_document_number": document_number,
+        "return_status": "pending_receive",
+        "return_warehouse_id": return_warehouse_id,
+        "return_warehouse_name": return_wh.warehouse_name,
+    }
+
+
+@router.post("/scan-return/cancel")
+async def scan_return_cancel(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return_transaction_id = payload.get("return_transaction_id")
+    reason = (payload.get("reason") or "").strip()
+
+    if not return_transaction_id:
+        raise HTTPException(status_code=400, detail="缺少退库单号")
+
+    trans = db.query(StockTransaction).filter(StockTransaction.id == return_transaction_id).first()
+    if not trans or trans.transaction_type != TransactionTypeEnum.RETURN:
+        raise HTTPException(status_code=404, detail="退库单不存在")
+    if trans.operator_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限取消该退库单")
+    if trans.approval_status != "pending_receive":
+        raise HTTPException(status_code=400, detail="当前状态不可取消")
+
+    trans.approval_status = "canceled"
+    if reason:
+        trans.approval_comments = reason
+    db.commit()
+
+    return {"message": "已取消退库申请", "return_transaction_id": trans.id, "return_status": trans.approval_status}
+
+
+@router.post("/scan-return/receive")
+async def scan_return_receive(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """仓库收货确认：整单回滚库存 + 主设备实例回库 + 标记领料已归还。"""
+    _ensure_warehouse_operator(current_user)
+
+    return_transaction_id = payload.get("return_transaction_id")
+    sn_input = (payload.get("sn_input") or "").strip()
+    receive_notes = (payload.get("receive_notes") or "").strip()
+
+    if not return_transaction_id:
+        raise HTTPException(status_code=400, detail="缺少退库单号")
+    if not sn_input:
+        raise HTTPException(status_code=400, detail="请填写SN用于核验")
+
+    return_trans = db.query(StockTransaction).filter(StockTransaction.id == return_transaction_id).first()
+    if not return_trans or return_trans.transaction_type != TransactionTypeEnum.RETURN:
+        raise HTTPException(status_code=404, detail="退库单不存在")
+    if return_trans.approval_status != "pending_receive":
+        raise HTTPException(status_code=400, detail="退库单状态不可收货确认")
+
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids is not None and return_trans.warehouse_id not in managed_ids:
+        raise HTTPException(status_code=403, detail="无权限处理该仓库的退库单")
+
+    if (return_trans.scan_barcode or "").strip() != sn_input:
+        raise HTTPException(status_code=400, detail="SN核验失败，无法收货确认")
+
+    out_trans_id = getattr(return_trans, "related_transaction_id", None)
+    if not out_trans_id:
+        raise HTTPException(status_code=400, detail="缺少关联出库单，无法收货")
+
+    out_trans = db.query(StockTransaction).filter(StockTransaction.id == out_trans_id).first()
+    if not out_trans:
+        raise HTTPException(status_code=404, detail="关联出库单不存在")
+
+    source_warehouse_id = out_trans.warehouse_id
+    target_warehouse_id = return_trans.warehouse_id
+
+    now = datetime.now()
+
+    # 库存回滚（整单）
+    for item in return_trans.transaction_items:
+        equipment_id = item.equipment_id
+        qty = int(item.quantity or 0)
+        if qty <= 0:
+            continue
+
+        if source_warehouse_id == target_warehouse_id:
+            inv = db.query(Inventory).filter(
+                and_(Inventory.warehouse_id == source_warehouse_id, Inventory.equipment_id == equipment_id)
+            ).first()
+            if not inv or inv.allocated_stock < qty:
+                raise HTTPException(status_code=400, detail="库存回滚失败：已分配库存不足")
+            inv.allocated_stock -= qty
+            inv.available_stock += qty
+            inv.last_updated_by = current_user.id
+        else:
+            inv_src = db.query(Inventory).filter(
+                and_(Inventory.warehouse_id == source_warehouse_id, Inventory.equipment_id == equipment_id)
+            ).first()
+            if not inv_src or inv_src.allocated_stock < qty or inv_src.current_stock < qty:
+                raise HTTPException(status_code=400, detail="库存回滚失败：源仓库存不足")
+            inv_src.allocated_stock -= qty
+            inv_src.current_stock -= qty
+            inv_src.last_updated_by = current_user.id
+
+            inv_tgt = db.query(Inventory).filter(
+                and_(Inventory.warehouse_id == target_warehouse_id, Inventory.equipment_id == equipment_id)
+            ).first()
+            if not inv_tgt:
+                inv_tgt = Inventory(
+                    warehouse_id=target_warehouse_id,
+                    equipment_id=equipment_id,
+                    current_stock=0,
+                    available_stock=0,
+                    reserved_stock=0,
+                    allocated_stock=0,
+                    last_updated_by=current_user.id,
+                )
+                db.add(inv_tgt)
+            inv_tgt.current_stock += qty
+            inv_tgt.available_stock += qty
+            inv_tgt.last_updated_by = current_user.id
+
+    # 主设备实例回库
+    equipment_instance = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn_input).first()
+    if equipment_instance:
+        equipment_instance.status = InventoryStatusEnum.IN_STOCK
+        equipment_instance.issued_to = None
+        equipment_instance.issued_date = None
+        equipment_instance.warehouse_id = target_warehouse_id
+        equipment_instance.updated_at = now
+
+    # 标记领料记录已归还（仅收货确认后）
+    pickup_record = db.query(PickupRecord).filter(
+        PickupRecord.transaction_id == out_trans.id,
+        PickupRecord.picker_id == return_trans.operator_id,
+        PickupRecord.is_returned == False,
+    ).order_by(desc(PickupRecord.pickup_time)).first()
+    if pickup_record:
+        pickup_record.is_returned = True
+        pickup_record.returned_at = now
+        pickup_record.return_notes = receive_notes or "仓库已收货确认"
+
+    return_trans.approval_status = "received"
+    return_trans.approved_by = current_user.id
+    return_trans.approved_at = now
+    return_trans.approval_comments = receive_notes
+    db.commit()
+
+    return {
+        "message": "收货确认成功",
+        "return_transaction_id": return_trans.id,
+        "return_status": return_trans.approval_status,
+    }
+
+
+@router.post("/scan-return/reject")
+async def scan_return_reject(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """仓库拒收：不回滚库存，仅更新退库单状态与原因。"""
+    _ensure_warehouse_operator(current_user)
+
+    return_transaction_id = payload.get("return_transaction_id")
+    reason = (payload.get("reason") or "").strip()
+    if not return_transaction_id:
+        raise HTTPException(status_code=400, detail="缺少退库单号")
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写拒收原因")
+
+    return_trans = db.query(StockTransaction).filter(StockTransaction.id == return_transaction_id).first()
+    if not return_trans or return_trans.transaction_type != TransactionTypeEnum.RETURN:
+        raise HTTPException(status_code=404, detail="退库单不存在")
+    if return_trans.approval_status != "pending_receive":
+        raise HTTPException(status_code=400, detail="退库单状态不可拒收")
+
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids is not None and return_trans.warehouse_id not in managed_ids:
+        raise HTTPException(status_code=403, detail="无权限处理该仓库的退库单")
+
+    now = datetime.now()
+    return_trans.approval_status = "rejected"
+    return_trans.approved_by = current_user.id
+    return_trans.approved_at = now
+    return_trans.approval_comments = reason
+    db.commit()
+
+    return {
+        "message": "已拒收退库申请",
+        "return_transaction_id": return_trans.id,
+        "return_status": return_trans.approval_status,
+    }
+
+
+@router.get("/return-requests")
+async def list_return_requests(
+    status_filter: str = "pending_receive",
+    warehouse_ids: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
+    sn: Optional[str] = None,
+    keyword: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """退库收货工作台列表：仅仓库侧可用，默认只返回待收货退库单。"""
+    _ensure_warehouse_operator(current_user)
+
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+
+    query = (
+        db.query(StockTransaction)
+        .join(Warehouse, StockTransaction.warehouse_id == Warehouse.id)
+        .join(User, StockTransaction.operator_id == User.id)
+        .filter(StockTransaction.transaction_type == TransactionTypeEnum.RETURN)
+    )
+
+    if status_filter and status_filter != "all":
+        query = query.filter(StockTransaction.approval_status == status_filter)
+
+    if warehouse_id:
+        query = query.filter(StockTransaction.warehouse_id == warehouse_id)
+
+    parsed_ids: List[int] = []
+    if warehouse_ids:
+        for part in str(warehouse_ids).split(","):
+            p = part.strip()
+            if not p:
+                continue
+            try:
+                parsed_ids.append(int(p))
+            except ValueError:
+                continue
+    if parsed_ids:
+        query = query.filter(StockTransaction.warehouse_id.in_(parsed_ids))
+
+    if managed_ids is not None:
+        query = query.filter(StockTransaction.warehouse_id.in_(list(managed_ids)))
+
+    if sn:
+        query = query.filter(StockTransaction.scan_barcode == sn.strip())
+
+    if keyword:
+        kw = f"%{keyword.strip()}%"
+        query = query.filter(
+            or_(
+                StockTransaction.document_number.like(kw),
+                StockTransaction.scan_barcode.like(kw),
+                StockTransaction.notes.like(kw),
+                StockTransaction.approval_comments.like(kw),
+                Warehouse.warehouse_name.like(kw),
+                User.full_name.like(kw),
+                User.username.like(kw),
+            )
+        )
+
+    total = query.count()
+    records = query.order_by(desc(StockTransaction.created_at)).offset(skip).limit(limit).all()
+
+    related_ids = [getattr(t, "related_transaction_id", None) for t in records if getattr(t, "related_transaction_id", None)]
+    out_map: Dict[str, StockTransaction] = {}
+    if related_ids:
+        outs = db.query(StockTransaction).filter(StockTransaction.id.in_(related_ids)).all()
+        out_map = {t.id: t for t in outs}
+
+    result = []
+    for trans in records:
+        out_trans = out_map.get(getattr(trans, "related_transaction_id", None))
+
+        items = []
+        for item in trans.transaction_items:
+            items.append(
+                {
+                    "item_id": item.id,
+                    "equipment_id": item.equipment_id,
+                    "equipment_name": item.equipment.equipment_name if item.equipment else None,
+                    "equipment_code": item.equipment.equipment_code if item.equipment else None,
+                    "equipment_category": item.equipment.category if item.equipment else None,
+                    "quantity": item.quantity,
+                    "unit": item.equipment.unit if item.equipment else None,
+                }
+            )
+
+        result.append(
+            {
+                "id": trans.id,
+                "document_number": trans.document_number,
+                "status": trans.approval_status,
+                "reject_reason": trans.approval_comments,
+                "warehouse_id": trans.warehouse_id,
+                "warehouse_name": trans.warehouse.warehouse_name if trans.warehouse else None,
+                "operator_id": trans.operator_id,
+                "operator_name": trans.operator.full_name if trans.operator else None,
+                "created_at": to_utc_iso(trans.created_at) if trans.created_at else None,
+                "operation_time": to_utc_iso(trans.operation_time) if trans.operation_time else None,
+                "scan_barcode": trans.scan_barcode,
+                "notes": trans.notes,
+                "related_transaction_id": getattr(trans, "related_transaction_id", None),
+                "out_document_number": out_trans.document_number if out_trans else None,
+                "out_warehouse_id": out_trans.warehouse_id if out_trans else None,
+                "out_warehouse_name": out_trans.warehouse.warehouse_name if out_trans and out_trans.warehouse else None,
+                "items": items,
+            }
+        )
+
+    return {"records": result, "total": total}
+
+
+# ===== 归还管理（兼容旧接口：改为提交退库申请）=====
 
 @router.post("/return-pickup")
 async def return_equipment_pickup(
@@ -488,13 +1252,10 @@ async def return_equipment_pickup(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """归还领料：将未归还的领料记录标记为已归还，并把设备实例状态恢复为在库。
+    """兼容旧“归还”接口：改为提交退库申请（待仓库收货确认）。
 
-    入参支持：
-    - pickup_record_id: 直接指定领料记录ID（优先）
-    - serial_number: 通过SN定位当前用户的活动领料记录
-    - warehouse_id: 可选，归还入库的仓库，未提供则不修改仓库或采用默认1（如存在）
-    - notes: 可选归还备注
+    说明：为避免“在家退库导致仓库不感知”的风险，本接口不再直接回滚库存/回库设备，
+    只创建一条 transaction_type=return 的退库单，状态为 pending_receive。
     """
     pickup_record_id: Optional[str] = return_data.get("pickup_record_id")
     serial_number: Optional[str] = return_data.get("serial_number")
@@ -518,45 +1279,81 @@ async def return_equipment_pickup(
     if not pickup_record:
         raise HTTPException(status_code=404, detail="未找到活动的领料记录")
 
-    # 标记归还
-    pickup_record.is_returned = True
-    pickup_record.returned_at = datetime.now()
-    pickup_record.return_notes = notes
+    sn = (pickup_record.serial_number or serial_number or "").strip()
+    if not sn:
+        raise HTTPException(status_code=400, detail="缺少序列号(SN)，无法发起退库")
 
-    # 设备实例回库处理
-    equipment_instance = None
-    if pickup_record.equipment_instance_id:
-        equipment_instance = db.query(EquipmentInstance).filter(
-            EquipmentInstance.id == pickup_record.equipment_instance_id
-        ).first()
-    elif pickup_record.serial_number:
-        equipment_instance = db.query(EquipmentInstance).filter(
-            EquipmentInstance.serial_number == pickup_record.serial_number
-        ).first()
+    out_trans = db.query(StockTransaction).filter(StockTransaction.id == pickup_record.transaction_id).first()
+    if not out_trans:
+        raise HTTPException(status_code=404, detail="出库单不存在")
 
-    if equipment_instance:
-        # 将设备置回在库，并清空领料信息
-        equipment_instance.status = InventoryStatusEnum.IN_STOCK
-        equipment_instance.issued_to = None
-        equipment_instance.issued_date = None
-        # 归还仓库逻辑：优先使用传入的 warehouse_id；如未提供且仓库1存在则设为1
-        if warehouse_id is not None:
-            equipment_instance.warehouse_id = warehouse_id
-        else:
-            # 若当前无仓库，尝试设为1（容错）
-            if equipment_instance.warehouse_id is None:
-                default_wh = db.query(Warehouse).filter(Warehouse.id == 1).first()
-                if default_wh:
-                    equipment_instance.warehouse_id = 1
-        equipment_instance.updated_at = datetime.now()
+    # 退入仓库：优先用传入值；未传则按原出库仓库（兼容旧客户端）
+    return_warehouse_id = warehouse_id or out_trans.warehouse_id
+    return_wh = db.query(Warehouse).filter(
+        Warehouse.id == return_warehouse_id,
+        Warehouse.status == EquipmentStatusEnum.ACTIVE,
+    ).first()
+    if not return_wh:
+        raise HTTPException(status_code=400, detail="退入仓库不存在或已停用")
+
+    existing_return = db.query(StockTransaction).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+        StockTransaction.related_transaction_id == out_trans.id,
+        StockTransaction.approval_status.in_(["pending_receive", "received"]),
+    ).order_by(desc(StockTransaction.created_at)).first()
+    if existing_return:
+        raise HTTPException(status_code=400, detail="已存在退库单，无法重复申请")
+
+    bindings = _get_blocking_bindings(db, sn=sn, current_user=current_user)
+    if bindings["blocked"]:
+        raise HTTPException(status_code=400, detail="存在不可解绑的检查绑定，无法发起退库")
+    if bindings["need_unbind"]:
+        raise HTTPException(status_code=400, detail="存在设备级检查绑定，需先解绑并清理检查内容")
+
+    return_transaction_id = str(uuid.uuid4())
+    document_number = f"RET-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}"
+
+    return_trans = StockTransaction(
+        id=return_transaction_id,
+        transaction_type=TransactionTypeEnum.RETURN,
+        warehouse_id=return_warehouse_id,
+        operator_id=current_user.id,
+        scan_barcode=sn,
+        scan_time=datetime.now(),
+        scan_location=return_data.get("gps_location"),
+        document_number=document_number,
+        total_quantity=out_trans.total_quantity,
+        notes=(notes or "").strip() or f"扫码退库申请 - {sn}",
+        approval_status="pending_receive",
+        related_transaction_id=out_trans.id,
+    )
+    db.add(return_trans)
+
+    for item in out_trans.transaction_items:
+        db.add(
+            StockTransactionItem(
+                transaction_id=return_transaction_id,
+                equipment_instance_id=item.equipment_instance_id,
+                equipment_id=item.equipment_id,
+                quantity=item.quantity,
+                batch_number=item.batch_number,
+                vendor=getattr(item, "vendor", None),
+                item_notes=getattr(item, "item_notes", None),
+            )
+        )
 
     db.commit()
 
     return {
-        "message": "归还成功",
+        "message": "退库申请已提交，等待仓库收货确认",
+        "sn": sn,
         "pickup_record_id": pickup_record.id,
-        "serial_number": pickup_record.serial_number,
-        "returned_at": to_utc_iso(pickup_record.returned_at, assume_local=True) if pickup_record.returned_at else None
+        "out_transaction_id": out_trans.id,
+        "return_transaction_id": return_transaction_id,
+        "return_document_number": document_number,
+        "return_status": "pending_receive",
+        "return_warehouse_id": return_warehouse_id,
+        "return_warehouse_name": return_wh.warehouse_name,
     }
 
 # ===== 入库管理 =====
@@ -753,12 +1550,17 @@ async def get_stock_transactions(
             "document_number": trans.document_number,
             "transaction_type": trans.transaction_type,
             "warehouse_id": trans.warehouse_id,
+            "warehouse_name": trans.warehouse.warehouse_name if trans.warehouse else None,
             "operator_name": trans.operator.full_name if trans.operator else None,
             "operation_time": to_utc_iso(trans.operation_time) if trans.operation_time else None,
             "total_quantity": trans.total_quantity,
             "approval_status": trans.approval_status,
+            "approval_comments": trans.approval_comments,
+            "approved_by": trans.approved_by,
+            "approved_at": to_utc_iso(trans.approved_at, assume_local=True) if trans.approved_at else None,
             "scan_barcode": trans.scan_barcode,
             "notes": trans.notes,
+            "related_transaction_id": getattr(trans, "related_transaction_id", None),
             "items": items,
             "task_id": None,
             "package_name": trans.package.package_name if trans.package else None

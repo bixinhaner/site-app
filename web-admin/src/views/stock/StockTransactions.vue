@@ -109,16 +109,63 @@
             {{ formatDateTime(row.operation_time) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" v-if="userStore.isWarehouseManager">
+        <el-table-column label="操作" width="200" v-if="userStore.isWarehouseManager">
           <template #default="{ row }">
-            <el-button size="small" v-if="row.approval_status === 'pending'" @click="approveTransaction(row.id)">
-              审批
+            <el-button
+              v-if="row.transaction_type === 'return' && row.approval_status === 'pending_receive'"
+              size="small"
+              type="success"
+              @click="openReceiveDialog(row)"
+            >
+              收货确认
             </el-button>
-            <el-button size="small" type="info" @click="viewDetail(row)">详情</el-button>
+            <el-button
+              v-if="row.transaction_type === 'return' && row.approval_status === 'pending_receive'"
+              size="small"
+              type="danger"
+              @click="openRejectDialog(row)"
+            >
+              拒收
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
+
+    <!-- 退库收货确认 -->
+    <el-dialog v-model="receiveDialogVisible" title="退库收货确认" width="520px">
+      <el-form :model="receiveForm" label-width="100px">
+        <el-form-item label="退库单号">
+          <el-input v-model="receiveForm.document_number" disabled />
+        </el-form-item>
+        <el-form-item label="SN核验">
+          <el-input v-model="receiveForm.sn_input" placeholder="请输入SN" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="receiveForm.receive_notes" type="textarea" :rows="3" placeholder="可选" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="receiveDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitReceive">确认收货</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 退库拒收 -->
+    <el-dialog v-model="rejectDialogVisible" title="退库拒收" width="520px">
+      <el-form :model="rejectForm" label-width="100px">
+        <el-form-item label="退库单号">
+          <el-input v-model="rejectForm.document_number" disabled />
+        </el-form-item>
+        <el-form-item label="拒收原因">
+          <el-input v-model="rejectForm.reason" type="textarea" :rows="3" placeholder="必填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="rejectDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="submitting" @click="submitReject">确认拒收</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -197,8 +244,11 @@ const getTypeColor = (type) => {
 const getApprovalText = (status) => {
   const statusMap = {
     'pending': '待审批',
+    'pending_receive': '待收货',
     'approved': '已通过',
-    'rejected': '已驳回'
+    'received': '已收货',
+    'rejected': '已拒收',
+    'canceled': '已取消'
   }
   return statusMap[status] || status
 }
@@ -206,8 +256,11 @@ const getApprovalText = (status) => {
 const getApprovalColor = (status) => {
   const colorMap = {
     'pending': 'warning',
+    'pending_receive': 'warning',
     'approved': 'success',
-    'rejected': 'danger'
+    'received': 'success',
+    'rejected': 'danger',
+    'canceled': 'info'
   }
   return colorMap[status] || ''
 }
@@ -271,8 +324,79 @@ const removeStockInItem = (index) => {
   stockInForm.value.items.splice(index, 1)
 }
 
-const onEquipmentChange = (row, index) => {
-  const equipment = equipmentOptions.value.find(eq => eq.id === row.equipment_id)
+const receiveDialogVisible = ref(false)
+const rejectDialogVisible = ref(false)
+const receiveForm = ref({
+  return_transaction_id: '',
+  document_number: '',
+  sn_input: '',
+  receive_notes: '',
+})
+const rejectForm = ref({
+  return_transaction_id: '',
+  document_number: '',
+  reason: '',
+})
+
+const openReceiveDialog = (row) => {
+  receiveForm.value = {
+    return_transaction_id: row.id,
+    document_number: row.document_number,
+    sn_input: row.scan_barcode || '',
+    receive_notes: '',
+  }
+  receiveDialogVisible.value = true
+}
+
+const openRejectDialog = (row) => {
+  rejectForm.value = {
+    return_transaction_id: row.id,
+    document_number: row.document_number,
+    reason: '',
+  }
+  rejectDialogVisible.value = true
+}
+
+const submitReceive = async () => {
+  if (!receiveForm.value.sn_input) {
+    ElMessage.warning('请填写SN用于核验')
+    return
+  }
+  try {
+    submitting.value = true
+    await stockApi.receiveReturn({
+      return_transaction_id: receiveForm.value.return_transaction_id,
+      sn_input: receiveForm.value.sn_input,
+      receive_notes: receiveForm.value.receive_notes,
+    })
+    ElMessage.success('收货确认成功')
+    receiveDialogVisible.value = false
+    loadTransactions()
+  } catch (error) {
+    ElMessage.error('操作失败: ' + (error.response?.data?.detail || '网络错误'))
+  } finally {
+    submitting.value = false
+  }
+}
+
+const submitReject = async () => {
+  if (!rejectForm.value.reason) {
+    ElMessage.warning('请填写拒收原因')
+    return
+  }
+  try {
+    submitting.value = true
+    await stockApi.rejectReturn({
+      return_transaction_id: rejectForm.value.return_transaction_id,
+      reason: rejectForm.value.reason,
+    })
+    ElMessage.success('已拒收')
+    rejectDialogVisible.value = false
+    loadTransactions()
+  } catch (error) {
+    ElMessage.error('操作失败: ' + (error.response?.data?.detail || '网络错误'))
+  } finally {
+    submitting.value = false
   }
 }
 

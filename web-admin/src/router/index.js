@@ -53,6 +53,12 @@ const routes = [
             meta: { title: '入库管理', icon: 'Upload' }
           },
           {
+            path: 'return-receiving',
+            name: 'ReturnReceiving',
+            component: () => import('../views/stock/ReturnReceiving.vue'),
+            meta: { title: '退库收货', icon: 'CircleCheck', roles: ['admin', 'warehouse_manager', 'manager'] }
+          },
+          {
             path: 'history',
             name: 'StockHistory',
             component: () => import('../views/stock/StockHistory.vue'),

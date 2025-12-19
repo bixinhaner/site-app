@@ -16,6 +16,9 @@ def ensure_stock_schema(engine: Engine) -> None:
             "voided_by": "voided_by INTEGER",
             "void_reason": "void_reason TEXT",
         },
+        "stock_transactions": {
+            "related_transaction_id": "related_transaction_id VARCHAR(36)",
+        },
         "stock_transaction_items": {
             "vendor": "vendor VARCHAR(100)",
             "item_notes": "item_notes TEXT",
@@ -38,4 +41,3 @@ def ensure_stock_schema(engine: Engine) -> None:
                 except Exception:
                     # 兼容并发启动/重复执行等场景：若已存在则忽略
                     continue
-

@@ -2171,6 +2171,23 @@ async def bind_equipment_to_sector(
     # 验证设备状态（仅在绑定操作时验证）
     equipment_instance = None
     if not is_unbind:
+        # 若设备已发起“待收货退库”，则禁止继续绑定检查项，避免出现仓库不感知的账实错乱
+        try:
+            from app.models.equipment import StockTransaction, TransactionTypeEnum
+
+            pending_return = db.query(StockTransaction).filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                StockTransaction.approval_status == "pending_receive",
+                StockTransaction.scan_barcode == equipment_sn,
+            ).first()
+            if pending_return:
+                raise HTTPException(status_code=400, detail="设备已发起退库申请（待仓库收货），无法继续绑定检查项")
+        except HTTPException:
+            raise
+        except Exception:
+            # 兼容老库/字段缺失等场景：不阻断绑定
+            pass
+
         from app.models.equipment import EquipmentInstance, InventoryStatusEnum
         # 允许以下状态进行绑定（同一领料人）：已出库、待检查、已检查
         equipment_instance = db.query(EquipmentInstance).filter(
