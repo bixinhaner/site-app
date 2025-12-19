@@ -9,7 +9,7 @@ import { env, log } from './env.js'
 export const API_CONFIG = {
   BASE_URL: env.API_BASE_URL,
   TIMEOUT: 30000, // 增加到30秒
-  
+
   // 请求头配置
   HEADERS: {
     'Content-Type': 'application/json',
@@ -27,7 +27,7 @@ export const API_ENDPOINTS = {
     REFRESH: '/api/auth/refresh',
     CHANGE_PASSWORD: '/api/auth/change-password',
   },
-  
+
   // 用户相关
   USERS: {
     LIST: '/api/users/',
@@ -36,7 +36,7 @@ export const API_ENDPOINTS = {
     UPDATE: (id) => `/api/users/${id}`,
     DELETE: (id) => `/api/users/${id}`
   },
-  
+
   // 站点相关
   SITES: {
     LIST: '/api/sites/',
@@ -47,8 +47,8 @@ export const API_ENDPOINTS = {
     PLANNING: (id) => `/api/sites/${id}/planning`,
     OMC_STATUS: (id) => `/api/sites/${id}/omc/devices`
   },
-  
-  
+
+
   // 检查相关
   INSPECTIONS: {
     LIST: '/api/inspections/',
@@ -59,7 +59,7 @@ export const API_ENDPOINTS = {
     PHOTOS: (id) => `/api/inspections/detail/${id}/photos`,
     DELETE_PHOTO: (photoId) => `/api/inspections/photos/${photoId}`
   },
-  
+
   // 工单（统一工作流）
   WORK_ORDERS: {
     LIST: '/api/work-orders',
@@ -75,7 +75,7 @@ export const API_ENDPOINTS = {
     DELETE_PHOTO: (photoId) => `/api/work-orders/photos/${photoId}`,
     ITEM_UPDATE: (id, itemId) => `/api/work-orders/${id}/items/${itemId}`
   },
-  
+
   // 设备相关
   EQUIPMENT: {
     LIST: '/api/equipment/',
@@ -84,7 +84,7 @@ export const API_ENDPOINTS = {
     PACKAGE_DETAIL: (id) => `/api/equipment/packages/${id}`,
     BARCODE_INFO: (barcode) => `/api/equipment/${barcode}/barcode-info`
   },
-  
+
   // 库存相关
   STOCK: {
     INVENTORY: '/api/stock/inventory',
@@ -98,13 +98,13 @@ export const API_ENDPOINTS = {
     SCAN_RETURN_CANCEL: '/api/stock/scan-return/cancel',
     TRANSACTIONS: '/api/stock/transactions'
   },
-  
+
   // 系统相关
   SYSTEM: {
     HEALTH: '/health',
     VERSION: '/version'
   },
-  
+
   // 用户日志相关
   LOGS: {
     CREATE: '/api/logs',
@@ -134,29 +134,29 @@ export const buildApiUrl = (endpoint) => {
  */
 export const buildImageUrl = (filePath) => {
   if (!filePath) return ''
-  
+
   // 如果已经是完整URL，直接返回
   if (filePath.startsWith('http')) {
     return filePath
   }
-  
+
   // 如果是本地临时文件（包括uni-app临时文件路径），直接返回
-  if (filePath.includes('temp') || 
-      filePath.includes('tmp') ||
-      filePath.includes('_tmp_') ||
-      filePath.startsWith('wxfile://') ||
-      filePath.startsWith('file://') ||
-      filePath.startsWith('/var/mobile/') ||
-      filePath.includes('uniapp_temp')) {
+  if (filePath.includes('temp') ||
+    filePath.includes('tmp') ||
+    filePath.includes('_tmp_') ||
+    filePath.startsWith('wxfile://') ||
+    filePath.startsWith('file://') ||
+    filePath.startsWith('/var/mobile/') ||
+    filePath.includes('uniapp_temp')) {
     return filePath
   }
-  
+
   // 如果路径已经包含 /uploads，直接拼接
   if (filePath.startsWith('/uploads') || filePath.startsWith('uploads')) {
     const cleanPath = filePath.startsWith('/') ? filePath : `/${filePath}`
     return `${API_CONFIG.BASE_URL}${cleanPath}`
   }
-  
+
   // 默认情况，假设是 uploads 目录下的文件
   return `${API_CONFIG.BASE_URL}/${filePath}`
 }
@@ -168,7 +168,7 @@ export const buildImageUrl = (filePath) => {
  */
 export const getAuthHeaders = (token) => {
   if (!token) return {}
-  
+
   return {
     'Authorization': `Bearer ${token}`
   }
@@ -188,7 +188,7 @@ export const createRequestConfig = (options = {}) => {
     },
     ...options
   }
-  
+
   log('Request config:', config)
   return config
 }

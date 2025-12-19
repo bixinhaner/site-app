@@ -47,43 +47,58 @@
       refresher-background="#f7f8fb"
     >
       <view class="order-list">
-        <!-- 空状态提示 - 只在有搜索或筛选条件时显示 -->
-        <view v-if="orders.length === 0 && (searchKeyword || status)" class="empty-state">
-          <text class="empty-icon">📭</text>
-          <text class="empty-text">{{ $t('messages.noData') }}</text>
-        </view>
-        <view
-          class="order-item"
-          v-for="wo in orders"
-          :key="wo.id"
-          :id="`wo-${wo.id}`"
-          :class="{ 'order-item-focused': highlightedWorkOrderId === wo.id }"
-          @click="openDetail(wo)"
-        >
-          <view class="order-header">
-            <text class="order-title">{{ wo.title }}</text>
-            <text class="order-status" :class="'status-' + wo.status">{{ statusText(wo.status) }}</text>
+        <!-- 骨架屏加载状态 -->
+        <template v-if="isLoading">
+          <SkeletonCard mode="list" />
+          <SkeletonCard mode="list" />
+          <SkeletonCard mode="list" />
+        </template>
+        
+        <!-- 空状态 -->
+        <EmptyState 
+          v-else-if="orders.length === 0"
+          :icon="searchKeyword || status ? '🔍' : '📋'"
+          :title="searchKeyword || status ? $t('messages.noSearchResults') || '未找到相关结果' : $t('messages.noData')"
+          :description="searchKeyword || status ? $t('messages.tryDifferentKeyword') || '试试其他关键词或筛选条件' : $t('workorder.noWorkOrders') || '暂无工单'"
+          :actionText="searchKeyword ? $t('common.clearSearch') || '清除搜索' : ''"
+          @action="clearSearch"
+        />
+        
+        <!-- 实际内容 -->
+        <template v-else>
+          <view
+            class="order-item u-pressable-subtle"
+            v-for="wo in orders"
+            :key="wo.id"
+            :id="`wo-${wo.id}`"
+            :class="{ 'order-item-focused': highlightedWorkOrderId === wo.id }"
+            @click="openDetail(wo)"
+          >
+            <view class="order-header">
+              <text class="order-title">{{ wo.title }}</text>
+              <text class="order-status" :class="'status-' + wo.status">{{ statusText(wo.status) }}</text>
+            </view>
+            <view class="order-meta">
+              <text class="site">📍 {{ wo.site_name || wo.site_id }}</text>
+              <text class="time">⏱ {{ formatDateTime(wo.assigned_at) }}</text>
+            </view>
+            <view class="order-actions" v-if="wo.status === 'PENDING'">
+              <button class="accept-btn u-pressable" size="mini" @click.stop="handleAccept(wo)">{{ $t('workorder.accept') }}</button>
+            </view>
+            <view class="order-actions" v-else-if="wo.status === 'ACTIVE'">
+              <button class="continue-btn u-pressable" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.continue') }}</button>
+            </view>
+            <view class="order-actions" v-else-if="wo.status === 'SUBMITTED'">
+              <button class="recall-btn u-pressable" size="mini" @click.stop="handleRecall(wo)">{{ $t('workorder.recall') }}</button>
+            </view>
+            <view class="order-actions" v-else-if="wo.status === 'UNDER_REVIEW'">
+              <button class="recall-btn u-pressable" size="mini" @click.stop="handleRecall(wo)">{{ $t('workorder.recall') }}</button>
+            </view>
+            <view class="order-actions" v-else-if="wo.status === 'REJECTED'">
+              <button class="rejected-btn u-pressable" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.resubmit') }}</button>
+            </view>
           </view>
-          <view class="order-meta">
-            <text class="site">📍 {{ wo.site_name || wo.site_id }}</text>
-            <text class="time">⏱ {{ formatDateTime(wo.assigned_at) }}</text>
-          </view>
-          <view class="order-actions" v-if="wo.status === 'PENDING'">
-            <button class="accept-btn" size="mini" @click.stop="handleAccept(wo)">{{ $t('workorder.accept') }}</button>
-          </view>
-          <view class="order-actions" v-else-if="wo.status === 'ACTIVE'">
-            <button class="continue-btn" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.continue') }}</button>
-          </view>
-          <view class="order-actions" v-else-if="wo.status === 'SUBMITTED'">
-            <button class="recall-btn" size="mini" @click.stop="handleRecall(wo)">{{ $t('workorder.recall') }}</button>
-          </view>
-          <view class="order-actions" v-else-if="wo.status === 'UNDER_REVIEW'">
-            <button class="recall-btn" size="mini" @click.stop="handleRecall(wo)">{{ $t('workorder.recall') }}</button>
-          </view>
-          <view class="order-actions" v-else-if="wo.status === 'REJECTED'">
-            <button class="rejected-btn" size="mini" @click.stop="handleContinue(wo)">{{ $t('common.resubmit') }}</button>
-          </view>
-        </view>
+        </template>
       </view>
 
       <!-- 预留底部空间，避免内容被自定义 tabbar 遮挡 -->
@@ -102,6 +117,8 @@ import { useWorkOrderStore } from '@/stores/workorder'
 import { useLanguageStore } from '@/stores/language'
 import { useUserStore } from '@/stores/user'
 import { trackOperation } from '@/utils/operationTrack.js'
+import SkeletonCard from '@/components/SkeletonCard.vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const store = useWorkOrderStore()
 const languageStore = useLanguageStore()
@@ -113,6 +130,7 @@ const status = ref('')
 const searchKeyword = ref('')
 const showSearch = ref(false)
 const refreshing = ref(false)
+const isLoading = ref(true)
 const isPageVisible = ref(false)
 let searchTimer = null
 
@@ -158,6 +176,7 @@ const reload = async () => {
     console.error('❌ 工单列表刷新异常', error)
     uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
   } finally {
+    isLoading.value = false
     refreshing.value = false
   }
 }

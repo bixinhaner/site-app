@@ -26,49 +26,60 @@
 		<!-- 统计卡片 -->
 		<view class="stats-container">
 			<view class="stats-grid">
-				<!-- 管理员和经理能查看和管理站点，现场工程师只能查看自己的站点 -->
-				<view class="stat-card" @click="goToSites">
-					<view class="stat-icon site-icon">📍</view>
-					<view class="stat-info">
-						<text class="stat-number">{{ siteStats.total }}</text>
-						<text class="stat-label">{{ $t('home.totalSites') }}</text>
-					</view>
-				</view>
+				<!-- 骨架屏加载状态 -->
+				<template v-if="isLoading">
+					<SkeletonCard mode="stat" />
+					<SkeletonCard mode="stat" />
+					<SkeletonCard mode="stat" v-if="canViewStats" />
+					<SkeletonCard mode="stat" v-if="canViewStats" />
+				</template>
 				
-				<!-- 所有角色都能查看检查 -->
-				<view class="stat-card" @click="goToWorkOrders">
-					<view class="stat-icon inspection-icon">🔍</view>
-					<view class="stat-info">
-						<text class="stat-number">{{ workOrderStats.assigned + workOrderStats.in_progress + workOrderStats.submitted }}</text>
-						<text class="stat-label">{{ $t('home.myWorkOrders') }}</text>
+				<!-- 实际内容 -->
+				<template v-else>
+					<!-- 管理员和经理能查看和管理站点，现场工程师只能查看自己的站点 -->
+					<view class="stat-card u-pressable" @click="goToSites">
+						<view class="stat-icon site-icon">📍</view>
+						<view class="stat-info">
+							<text class="stat-number">{{ siteStats.total }}</text>
+							<text class="stat-label">{{ $t('home.totalSites') }}</text>
+						</view>
 					</view>
-				</view>
+					
+					<!-- 所有角色都能查看检查 -->
+					<view class="stat-card u-pressable" @click="goToWorkOrders">
+						<view class="stat-icon inspection-icon">🔍</view>
+						<view class="stat-info">
+							<text class="stat-number">{{ workOrderStats.assigned + workOrderStats.in_progress + workOrderStats.submitted }}</text>
+							<text class="stat-label">{{ $t('home.myWorkOrders') }}</text>
+						</view>
+					</view>
 
-				<!-- 管理员和经理可以看站点状态统计 -->
-				<view class="stat-card" v-if="canViewStats">
-					<view class="stat-icon operational-icon">✅</view>
-					<view class="stat-info">
-						<text class="stat-number">{{ siteStats.operational }}</text>
-						<text class="stat-label">{{ $t('site.operational') }}</text>
+					<!-- 管理员和经理可以看站点状态统计 -->
+					<view class="stat-card" v-if="canViewStats">
+						<view class="stat-icon operational-icon">✅</view>
+						<view class="stat-info">
+							<text class="stat-number">{{ siteStats.operational }}</text>
+							<text class="stat-label">{{ $t('site.operational') }}</text>
+						</view>
 					</view>
-				</view>
 
-				<view class="stat-card" v-if="canViewStats">
-					<view class="stat-icon maintenance-icon">⚠️</view>
-					<view class="stat-info">
-						<text class="stat-number">{{ siteStats.maintenance }}</text>
-						<text class="stat-label">{{ $t('site.maintenance') }}</text>
+					<view class="stat-card" v-if="canViewStats">
+						<view class="stat-icon maintenance-icon">⚠️</view>
+						<view class="stat-info">
+							<text class="stat-number">{{ siteStats.maintenance }}</text>
+							<text class="stat-label">{{ $t('site.maintenance') }}</text>
+						</view>
 					</view>
-				</view>
 
-				<!-- 现场工程师显示活跃工单 -->
-				<view class="stat-card" v-if="isInspector || isSurveyor" @click="goToWorkOrders">
-					<view class="stat-icon inspection-icon">📋</view>
-					<view class="stat-info">
-						<text class="stat-number">{{ workOrderStats.assigned }}</text>
-						<text class="stat-label">{{ $t('home.activeWorkOrders') }}</text>
+					<!-- 现场工程师显示活跃工单 -->
+					<view class="stat-card u-pressable" v-if="isInspector || isSurveyor" @click="goToWorkOrders">
+						<view class="stat-icon inspection-icon">📋</view>
+						<view class="stat-info">
+							<text class="stat-number">{{ workOrderStats.assigned }}</text>
+							<text class="stat-label">{{ $t('home.activeWorkOrders') }}</text>
+						</view>
 					</view>
-				</view>
+				</template>
 				
 			</view>
 		</view>
@@ -80,33 +91,40 @@
 			</view>
 			
 			<view class="actions-grid">
-				<!-- 所有角色都能进行现场检查 -->
-				<view class="action-item" @click="goToNewInspection">
-					<view class="action-icon">📷</view>
-					<text class="action-label">{{ $t('inspection.title') }}</text>
-				</view>
+				<!-- 骨架屏加载状态 -->
+				<template v-if="isLoading">
+					<SkeletonCard mode="action" />
+					<SkeletonCard mode="action" />
+					<SkeletonCard mode="action" />
+					<SkeletonCard mode="action" />
+				</template>
 				
-				<!-- 所有角色都能查看站点列表 -->
-				<view class="action-item" @click="goToSiteList">
-					<view class="action-icon">📋</view>
-					<text class="action-label">{{ $t('site.list') }}</text>
-				</view>
-				
-				
-				<!-- 报告功能入口为占位，已移除 -->
-				
-
-				<!-- 我的设备 - 管理员/经理/检查员可用，勘察员不可用 -->
-				<view class="action-item" v-if="!isSurveyor" @click="goToScanPickup">
-					<view class="action-icon">📦</view>
-					<text class="action-label">{{ $t('stock.scanPickup') }}</text>
-				</view>
-				
-				<!-- 公共功能 -->
-				<view class="action-item" @click="goToMap">
-					<view class="action-icon">🗺️</view>
-					<text class="action-label">{{ $t('site.location') }}</text>
-				</view>
+				<!-- 实际内容 -->
+				<template v-else>
+					<!-- 所有角色都能进行现场检查 -->
+					<view class="action-item u-pressable" @click="goToNewInspection">
+						<view class="action-icon">📷</view>
+						<text class="action-label">{{ $t('inspection.title') }}</text>
+					</view>
+					
+					<!-- 所有角色都能查看站点列表 -->
+					<view class="action-item u-pressable" @click="goToSiteList">
+						<view class="action-icon">📋</view>
+						<text class="action-label">{{ $t('site.list') }}</text>
+					</view>
+					
+					<!-- 我的设备 - 管理员/经理/检查员可用，勘察员不可用 -->
+					<view class="action-item u-pressable" v-if="!isSurveyor" @click="goToScanPickup">
+						<view class="action-icon">📦</view>
+						<text class="action-label">{{ $t('stock.scanPickup') }}</text>
+					</view>
+					
+					<!-- 公共功能 -->
+					<view class="action-item u-pressable" @click="goToMap">
+						<view class="action-icon">🗺️</view>
+						<text class="action-label">{{ $t('site.location') }}</text>
+					</view>
+				</template>
 			</view>
 		</view>
 		
@@ -118,23 +136,42 @@
 			</view>
 			
 			<view class="activity-list">
-				<view 
-					class="activity-item" 
-					v-for="activity in recentActivities" 
-					:key="activity.id"
-					@click="viewActivity(activity)"
-				>
-					<view class="activity-icon" :class="getActivityIconClass(activity.type)">
-						{{ getActivityIcon(activity.type) }}
+				<!-- 骨架屏加载状态 -->
+				<template v-if="isLoading">
+					<SkeletonCard mode="activity" />
+					<SkeletonCard mode="activity" />
+					<SkeletonCard mode="activity" />
+				</template>
+				
+				<!-- 空状态 -->
+				<EmptyState 
+					v-else-if="recentActivities.length === 0"
+					icon="📋"
+					:title="$t('messages.noData')"
+					:description="$t('home.noRecentActivities') || '暂无最近活动'"
+					:compact="true"
+				/>
+				
+				<!-- 实际内容 -->
+				<template v-else>
+					<view 
+						class="activity-item u-pressable-subtle" 
+						v-for="activity in recentActivities" 
+						:key="activity.id"
+						@click="viewActivity(activity)"
+					>
+						<view class="activity-icon" :class="getActivityIconClass(activity.type)">
+							{{ getActivityIcon(activity.type) }}
+						</view>
+						<view class="activity-content">
+							<text class="activity-title">{{ activity.title }}</text>
+							<text class="activity-time">{{ formatTime(activity.created_at) }}</text>
+						</view>
+						<view class="activity-status" :class="getStatusClass(activity.status)">
+							{{ getStatusText(activity.status) }}
+						</view>
 					</view>
-					<view class="activity-content">
-						<text class="activity-title">{{ activity.title }}</text>
-						<text class="activity-time">{{ formatTime(activity.created_at) }}</text>
-					</view>
-					<view class="activity-status" :class="getStatusClass(activity.status)">
-						{{ getStatusText(activity.status) }}
-					</view>
-				</view>
+				</template>
 			</view>
 		</view>
 
@@ -157,6 +194,8 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { formatTimeAgo } from '@/utils/time.js'
+	import SkeletonCard from '@/components/SkeletonCard.vue'
+	import EmptyState from '@/components/EmptyState.vue'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
@@ -183,6 +222,7 @@
 	
 	const recentActivities = ref([])
 	const refreshing = ref(false)
+	const isLoading = ref(true)
 	
 	
 	// 权限控制计算属性
@@ -265,13 +305,14 @@
 			}
 
 		} catch (error) {
-			console.error('Load data error:', error)
-		} finally {
-			if (showLoading) {
-				refreshing.value = false
-			}
+		console.error('Load data error:', error)
+	} finally {
+		isLoading.value = false
+		if (showLoading) {
+			refreshing.value = false
 		}
 	}
+}
 	
 	// 下拉刷新处理
 	const handleRefresh = async () => {

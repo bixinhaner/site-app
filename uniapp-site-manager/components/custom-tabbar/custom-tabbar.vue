@@ -1,18 +1,28 @@
 <template>
 	<view class="custom-tabbar">
 		<view
-      class="tab-item"
+      class="tab-item u-pressable-subtle"
       v-for="(item, index) in visibleTabs"
       :key="index"
       :class="{ active: currentPath === item.pagePath }"
       @click="switchTab(item)"
     >
-			<view class="tab-icon">
+			<view class="tab-icon-wrapper">
         <uni-icons
           :type="getIconType(item.icon)"
           :size="20"
           :color="currentPath === item.pagePath ? ACTIVE_COLOR : INACTIVE_COLOR"
         />
+        <!-- 角标 -->
+        <view 
+          v-if="getBadgeCount(item.icon) > 0" 
+          class="tab-badge"
+          :class="{ 'tab-badge-dot': getBadgeCount(item.icon) > 99 }"
+        >
+          <text class="badge-text" v-if="getBadgeCount(item.icon) <= 99">
+            {{ getBadgeCount(item.icon) }}
+          </text>
+        </view>
       </view>
 			<text class="tab-text">{{ getTabText(item) }}</text>
 		</view>
@@ -20,10 +30,12 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted, getCurrentInstance } from 'vue'
+	import { ref, computed, onMounted, getCurrentInstance, watch } from 'vue'
 	import { useUserStore } from '@/stores/user'
+	import { useWorkOrderStore } from '@/stores/workorder'
 	
 	const userStore = useUserStore()
+	const workOrderStore = useWorkOrderStore()
 	const currentPath = ref('')
 
   const ALL_ROLES = ['admin', 'manager', 'inspector', 'surveyor', 'user']
@@ -81,6 +93,23 @@
 		return $t(item.text)
 	}
 	
+	// 获取角标数量
+	const getBadgeCount = (icon) => {
+		if (icon === 'workorder') {
+			// 返回待处理工单数量（PENDING + ACTIVE 状态）
+			return pendingWorkOrderCount.value
+		}
+		return 0
+	}
+	
+	// 待处理工单数量
+	const pendingWorkOrderCount = computed(() => {
+		const list = workOrderStore.list || []
+		return list.filter(wo => 
+			['PENDING', 'ACTIVE', 'ASSIGNED', 'IN_PROGRESS', 'ACCEPTED'].includes(wo.status)
+		).length
+	})
+	
 	// 获取当前页面路径
 	onMounted(() => {
 		const pages = getCurrentPages()
@@ -131,13 +160,43 @@
         color: var(--color-primary);
     }
     
-    .tab-item.active .tab-icon {
+    .tab-item.active .tab-icon-wrapper {
         transform: scale(1.03);
     }
     
-    .tab-icon {
+    .tab-icon-wrapper {
+        position: relative;
         font-size: 18px;
         margin-bottom: 2px;
+        line-height: 1;
+    }
+    
+    .tab-badge {
+        position: absolute;
+        top: -6px;
+        right: -10px;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        background: var(--color-error);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1.5px solid #fff;
+    }
+    
+    .tab-badge-dot {
+        width: 8px;
+        height: 8px;
+        min-width: 8px;
+        padding: 0;
+    }
+    
+    .badge-text {
+        font-size: 10px;
+        font-weight: 600;
+        color: #fff;
         line-height: 1;
     }
     
@@ -145,3 +204,4 @@
         font-size: 11px;
     }
 </style>
+

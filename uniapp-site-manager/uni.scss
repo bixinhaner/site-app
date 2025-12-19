@@ -134,3 +134,85 @@ $shadow-card: 0 1px 2px rgba(0,0,0,0.06), 0 6px 12px rgba(0,0,0,0.05);
 /* Accessibility helpers */
 .u-tappable { min-height: 44px; min-width: 44px; }
 .u-focusable:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18); border-radius: inherit; }
+
+/* Touch feedback helpers - 触控反馈 */
+.u-pressable {
+  transition: transform 0.12s ease, opacity 0.12s ease;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  &:active {
+    transform: scale(0.96);
+    opacity: 0.85;
+  }
+}
+
+.u-pressable-subtle {
+  transition: transform 0.1s ease, background-color 0.15s ease;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  &:active {
+    transform: translateY(1px);
+    background-color: rgba(0, 0, 0, 0.04);
+  }
+}
+
+.u-pressable-bounce {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  &:active {
+    transform: scale(0.92);
+  }
+}
+
+/* Ripple effect container - 涟漪效果 */
+.u-ripple {
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: width 0.4s ease, height 0.4s ease, opacity 0.4s ease;
+  }
+  
+  &:active::after {
+    width: 200%;
+    height: 200%;
+    opacity: 1;
+    transition: 0s;
+  }
+}
+
+/* Badge - 角标 */
+.u-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-error);
+  border-radius: 9px;
+  line-height: 1;
+}
+
+.u-badge-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  padding: 0;
+  border-radius: 50%;
+}

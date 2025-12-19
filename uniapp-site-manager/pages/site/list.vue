@@ -52,54 +52,64 @@
 		>
 			<!-- 站点列表 -->
 			<view class="site-list">
-				<!-- 空状态提示 - 只在有搜索或筛选条件时显示 -->
-				<view v-if="filteredSites.length === 0 && (searchText || currentFilter !== 'all')" class="empty-state">
-					<text class="empty-icon">📭</text>
-					<text class="empty-text">{{ $t('messages.noData') }}</text>
-				</view>
-				<view
-					class="site-item"
-					v-for="site in filteredSites"
-					:key="site.id"
-					@click="viewSiteDetail(site)"
-				>
-				<view class="site-header">
-					<view class="site-info">
-						<text class="site-name">{{ site.site_name }}</text>
-						<text class="site-code">{{ site.site_code }}</text>
-					</view>
-					<view class="site-status" :class="getStatusClass(site.status)">
-						{{ getStatusText(site.status) }}
-					</view>
-				</view>
+				<!-- 骨架屏加载状态 -->
+				<template v-if="isLoading">
+					<SkeletonCard mode="list" />
+					<SkeletonCard mode="list" />
+					<SkeletonCard mode="list" />
+				</template>
 				
-				<view class="site-details">
-					<view class="detail-item" v-if="site.address">
-						<text class="detail-icon">📍</text>
-						<text class="detail-text">{{ site.address }}</text>
+				<!-- 空状态 -->
+				<EmptyState 
+					v-else-if="filteredSites.length === 0"
+					:icon="searchText || currentFilter !== 'all' ? '🔍' : '📍'"
+					:title="searchText || currentFilter !== 'all' ? $t('messages.noSearchResults') || '未找到相关结果' : $t('messages.noData')"
+					:description="searchText ? $t('messages.tryDifferentKeyword') || '试试其他关键词' : $t('site.noSites') || '暂无站点'"
+					:actionText="searchText ? $t('common.clearSearch') || '清除搜索' : ''"
+					@action="clearSearch"
+				/>
+				
+				<!-- 实际内容 -->
+				<template v-else>
+					<view
+						class="site-item u-pressable-subtle"
+						v-for="site in filteredSites"
+						:key="site.id"
+						@click="viewSiteDetail(site)"
+					>
+					<view class="site-header">
+						<view class="site-info">
+							<text class="site-name">{{ site.site_name }}</text>
+							<text class="site-code">{{ site.site_code }}</text>
+						</view>
+						<view class="site-status" :class="getStatusClass(site.status)">
+							{{ getStatusText(site.status) }}
+						</view>
 					</view>
 					
-					<view class="detail-item" v-if="site.site_type">
-						<text class="detail-icon">🏗️</text>
-						<text class="detail-text">{{ getSiteTypeText(site.site_type) }}</text>
+					<view class="site-details">
+						<view class="detail-item" v-if="site.address">
+							<text class="detail-icon">📍</text>
+							<text class="detail-text">{{ site.address }}</text>
+						</view>
+						
+						<view class="detail-item" v-if="site.site_type">
+							<text class="detail-icon">🏗️</text>
+							<text class="detail-text">{{ getSiteTypeText(site.site_type) }}</text>
+						</view>
+						
+						<view class="detail-item" v-if="site.contact_person">
+							<text class="detail-icon">👤</text>
+							<text class="detail-text">{{ site.contact_person }}</text>
+						</view>
 					</view>
 					
-					<view class="detail-item" v-if="site.contact_person">
-						<text class="detail-icon">👤</text>
-						<text class="detail-text">{{ site.contact_person }}</text>
+					<view class="site-actions">
+						<text class="action-time">{{ formatTime(site.updated_at) }}</text>
+						<text class="action-arrow">›</text>
 					</view>
-				</view>
-				
-				<view class="site-actions">
-					<text class="action-time">{{ formatTime(site.updated_at) }}</text>
-					<text class="action-arrow">›</text>
-				</view>
-			</view>
-
-				<!-- 加载状态 -->
-				<view class="loading-container" v-if="siteStore.loading">
-					<uni-load-more status="loading"></uni-load-more>
-				</view>
+					</view>
+				</template>
 			</view>
 
 			<!-- 预留底部空间，避免内容被自定义 tabbar 遮挡 -->
@@ -123,6 +133,8 @@
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLanguageStore } from '@/stores/language'
 	import { createDebouncedTracker } from '@/utils/operationTrack.js'
+	import SkeletonCard from '@/components/SkeletonCard.vue'
+	import EmptyState from '@/components/EmptyState.vue'
 
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
@@ -133,6 +145,7 @@
 	const currentFilter = ref('all')
 	const showSearch = ref(false)
 	const refreshing = ref(false)
+	const isLoading = ref(true)
 
 	const trackSearchDebounced = createDebouncedTracker(800)
 	const trackSearch = () => {
@@ -332,6 +345,7 @@
 				icon: 'error'
 			})
 		} finally {
+			isLoading.value = false
 			if (showLoading) {
 				refreshing.value = false
 			}
