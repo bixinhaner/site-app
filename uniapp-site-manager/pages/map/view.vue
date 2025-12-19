@@ -20,7 +20,7 @@
 		<!-- 地图切换选择器 -->
 		<view class="map-selector-overlay" v-if="showSelector" @click="showSelector = false">
 			<view class="map-selector" @click.stop>
-				<view class="selector-title">选择地图</view>
+				<view class="selector-title">{{ $t('site.mapSelectorTitle') }}</view>
 				<view class="map-options">
 					<view 
 						class="map-option" 
@@ -29,8 +29,8 @@
 					>
 						<view class="option-icon">🗺️</view>
 						<view class="option-info">
-							<text class="option-name">高德地图</text>
-							<text class="option-desc">国内定位精准</text>
+							<text class="option-name">{{ $t('site.mapAmapName') }}</text>
+							<text class="option-desc">{{ $t('site.mapAmapDesc') }}</text>
 						</view>
 						<view class="option-check" v-if="mapType === 'amap'">✓</view>
 					</view>
@@ -41,8 +41,8 @@
 					>
 						<view class="option-icon">🌏</view>
 						<view class="option-info">
-							<text class="option-name">谷歌地图</text>
-							<text class="option-desc">全球地图覆盖</text>
+							<text class="option-name">{{ $t('site.mapGoogleName') }}</text>
+							<text class="option-desc">{{ $t('site.mapGoogleDesc') }}</text>
 						</view>
 						<view class="option-check" v-if="mapType === 'google'">✓</view>
 					</view>
@@ -53,13 +53,22 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed, getCurrentInstance } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
+	import { useLanguageStore } from '@/stores/language'
+
+	const languageStore = useLanguageStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const t = (key, params = {}) => {
+		// 依赖当前语言，确保切换语言后能更新显示
+		const _ = languageStore.currentLocale
+		return $t(key, params)
+	}
 	
 	// 页面参数
 	const latitude = ref(0)
 	const longitude = ref(0)
-	const locationName = ref('位置')
+	const locationName = ref(t('map.position'))
 	const address = ref('')
 	const mapType = ref('amap') // 默认使用高德地图
 	const showSelector = ref(false)
@@ -99,7 +108,7 @@
 		showSelector.value = false
 		
 		uni.showToast({
-			title: type === 'google' ? '已切换至谷歌地图' : '已切换至高德地图',
+			title: type === 'google' ? t('map.switchToGoogle') : t('map.switchToAmap'),
 			icon: 'success',
 			duration: 1500
 		})
@@ -126,6 +135,8 @@
 		
 		if (options.name) {
 			locationName.value = decodeURIComponent(options.name)
+		} else {
+			locationName.value = t('map.position')
 		}
 		
 		if (options.address) {
@@ -138,7 +149,7 @@
 		
 		// 设置页面标题
 		uni.setNavigationBarTitle({
-			title: locationName.value || '地图'
+			title: locationName.value || t('map.title')
 		})
 	})
 </script>

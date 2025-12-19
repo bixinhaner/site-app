@@ -227,7 +227,7 @@
 				<view class="menu-item" @click="goToLoggingTest" v-if="isAdmin">
 					<view class="menu-left">
 						<text class="menu-icon">🔍</text>
-						<text class="menu-text">日志测试</text>
+						<text class="menu-text">{{ t('profile.loggingTest') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -235,7 +235,7 @@
 				<view class="menu-item" @click="goToLocationPluginTest" v-if="isAdmin">
 					<view class="menu-left">
 						<text class="menu-icon">📍</text>
-						<text class="menu-text">定位插件测试</text>
+						<text class="menu-text">{{ t('profile.locationPluginTest') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -243,7 +243,7 @@
 				<view class="menu-item" @click="goToBuiltinLocationTest" v-if="isAdmin">
 					<view class="menu-left">
 						<text class="menu-icon">🌍</text>
-						<text class="menu-text">内置定位测试</text>
+						<text class="menu-text">{{ t('profile.builtinLocationTest') }}</text>
 					</view>
 					<text class="menu-arrow">›</text>
 				</view>
@@ -295,7 +295,7 @@
 		
 		<!-- 版本信息 -->
 		<view class="version-info">
-			<text class="version-text">站点管理系统 v1.0.0</text>
+			<text class="version-text">{{ t('profile.appName') }} v1.0.0</text>
 			<text class="build-text">Build 20240101</text>
 		</view>
 	</view>
@@ -367,10 +367,11 @@ const isAdmin = computed(() => userStore.isAdmin)
 	// 获取角色文本
 	const getRoleText = (role) => {
 		const roleMap = {
-			'admin': '系统管理员',
-			'manager': '项目经理',
-			'inspector': '安装施工人员',
-			'user': '现场工程师'
+			admin: t('profile.roleAdmin'),
+			manager: t('profile.roleManager'),
+			inspector: t('profile.roleInspector'),
+			surveyor: t('profile.roleSurveyor'),
+			user: t('profile.roleUser')
 		}
 		return roleMap[role] || role
 	}
@@ -378,7 +379,7 @@ const isAdmin = computed(() => userStore.isAdmin)
 	// 更换头像
 	const changeAvatar = () => {
 		uni.showActionSheet({
-			itemList: ['从相册选择', '拍照'],
+			itemList: [t('common.selectFromAlbum'), t('common.takePhoto')],
 			success: (res) => {
 				if (res.tapIndex === 0) {
 					chooseImageFromAlbum()
@@ -414,7 +415,7 @@ const isAdmin = computed(() => userStore.isAdmin)
 	// 上传头像
 	const uploadAvatar = (filePath) => {
 		uni.showLoading({
-			title: '上传中...'
+			title: t('messages.uploading')
 		})
 		
 		// 这里应该调用后端API上传头像
@@ -422,7 +423,7 @@ const isAdmin = computed(() => userStore.isAdmin)
 		setTimeout(() => {
 			uni.hideLoading()
 			uni.showToast({
-				title: '上传成功',
+				title: t('messages.fileUploadSuccess'),
 				icon: 'success'
 			})
 			// 更新用户信息中的头像URL
@@ -523,8 +524,8 @@ const isAdmin = computed(() => userStore.isAdmin)
 	// 修改密码
 	const changePassword = () => {
 		uni.showModal({
-			title: '修改密码',
-			content: '密码修改功能正在开发中',
+			title: t('profile.changePassword'),
+			content: t('profile.changePasswordComingSoon'),
 			showCancel: false
 		})
 	}
@@ -546,12 +547,12 @@ const isAdmin = computed(() => userStore.isAdmin)
 	// 应用设置
 	const showSettings = () => {
 		uni.showActionSheet({
-			itemList: ['消息通知', '数据同步', '清理缓存'],
+			itemList: [t('profile.settingsNotifications'), t('profile.settingsDataSync'), t('profile.settingsClearCache')],
 			success: (res) => {
-				const actions = ['通知设置', '同步设置', '缓存清理']
+				const actions = [t('profile.notificationSettings'), t('profile.syncSettings'), t('profile.cacheCleanup')]
 				uni.showModal({
 					title: actions[res.tapIndex],
-					content: '该功能正在开发中',
+					content: t('messages.featureInDevelopment'),
 					showCancel: false
 				})
 			}
@@ -561,8 +562,8 @@ const isAdmin = computed(() => userStore.isAdmin)
 	// 帮助中心
 	const showHelp = () => {
 		uni.showModal({
-			title: '帮助中心',
-			content: '如需帮助，请联系系统管理员\n\n电话：400-1234-567\n邮箱：support@sitemanager.com',
+			title: t('profile.helpTitle'),
+			content: t('profile.helpContent'),
 			showCancel: false
 		})
 	}

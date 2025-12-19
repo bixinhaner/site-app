@@ -1,89 +1,96 @@
 <template>
-	<view class="logging-test-container">
+	<view class="logging-test-container" :key="languageStore.currentLocale">
 		<view class="header">
-			<text class="title">日志系统测试页面</text>
-			<text class="subtitle">测试各种用户行为日志记录</text>
+			<text class="title">{{ $t('test.logging.title') }}</text>
+			<text class="subtitle">{{ $t('test.logging.subtitle') }}</text>
 		</view>
 		
 		<!-- 基础操作测试 -->
 		<view class="section">
-			<text class="section-title">基础操作测试</text>
+			<text class="section-title">{{ $t('test.logging.sectionBasic') }}</text>
 			<view class="button-grid">
-				<button class="test-btn" @click="testBasicAction">基础操作</button>
-				<button class="test-btn" @click="testUserInteraction">用户交互</button>
-				<button class="test-btn" @click="testFormAction">表单操作</button>
-				<button class="test-btn" @click="testBusinessAction">业务操作</button>
+				<button class="test-btn" @click="testBasicAction">{{ $t('test.logging.btnBasic') }}</button>
+				<button class="test-btn" @click="testUserInteraction">{{ $t('test.logging.btnUserInteraction') }}</button>
+				<button class="test-btn" @click="testFormAction">{{ $t('test.logging.btnForm') }}</button>
+				<button class="test-btn" @click="testBusinessAction">{{ $t('test.logging.btnBusiness') }}</button>
 			</view>
 		</view>
 		
 		<!-- API测试 -->
 		<view class="section">
-			<text class="section-title">API调用测试</text>
+			<text class="section-title">{{ $t('test.logging.sectionApi') }}</text>
 			<view class="button-grid">
-				<button class="test-btn" @click="testApiCall">测试API调用</button>
-				<button class="test-btn" @click="testFailedApiCall">测试失败API</button>
-				<button class="test-btn" @click="testSyncLogs">同步日志</button>
+				<button class="test-btn" @click="testApiCall">{{ $t('test.logging.btnApi') }}</button>
+				<button class="test-btn" @click="testFailedApiCall">{{ $t('test.logging.btnApiFail') }}</button>
+				<button class="test-btn" @click="testSyncLogs">{{ $t('test.logging.btnSync') }}</button>
 			</view>
 		</view>
 		
 		<!-- 错误测试 -->
 		<view class="section">
-			<text class="section-title">错误处理测试</text>
+			<text class="section-title">{{ $t('test.logging.sectionError') }}</text>
 			<view class="button-grid">
-				<button class="test-btn" @click="testJavaScriptError">JS错误</button>
-				<button class="test-btn" @click="testNetworkError">网络错误</button>
-				<button class="test-btn" @click="testCustomError">自定义错误</button>
+				<button class="test-btn" @click="testJavaScriptError">{{ $t('test.logging.btnJsError') }}</button>
+				<button class="test-btn" @click="testNetworkError">{{ $t('test.logging.btnNetworkError') }}</button>
+				<button class="test-btn" @click="testCustomError">{{ $t('test.logging.btnCustomError') }}</button>
 			</view>
 		</view>
 		
 		<!-- GPS和照片测试 -->
 		<view class="section">
-			<text class="section-title">GPS和照片测试</text>
+			<text class="section-title">{{ $t('test.logging.sectionGpsPhoto') }}</text>
 			<view class="button-grid">
-				<button class="test-btn" @click="testGpsAction">GPS操作</button>
-				<button class="test-btn" @click="testPhotoAction">照片操作</button>
-				<button class="test-btn" @click="testSearchAction">搜索操作</button>
+				<button class="test-btn" @click="testGpsAction">{{ $t('test.logging.btnGps') }}</button>
+				<button class="test-btn" @click="testPhotoAction">{{ $t('test.logging.btnPhoto') }}</button>
+				<button class="test-btn" @click="testSearchAction">{{ $t('test.logging.btnSearch') }}</button>
 			</view>
 		</view>
 		
 		<!-- 日志统计 -->
 		<view class="section">
-			<text class="section-title">日志统计</text>
+			<text class="section-title">{{ $t('test.logging.sectionStats') }}</text>
 			<view class="stats-container">
 				<view class="stat-item">
-					<text class="stat-label">当前会话日志:</text>
+					<text class="stat-label">{{ $t('test.logging.labelSessionLogs') }}:</text>
 					<text class="stat-value">{{ logStats.todayLogs }}</text>
 				</view>
 				<view class="stat-item">
-					<text class="stat-label">待同步日志:</text>
+					<text class="stat-label">{{ $t('test.logging.labelPendingLogs') }}:</text>
 					<text class="stat-value">{{ logStats.pendingLogs }}</text>
 				</view>
 				<view class="stat-item">
-					<text class="stat-label">会话ID:</text>
+					<text class="stat-label">{{ $t('test.logging.labelSessionId') }}:</text>
 					<text class="stat-value session-id">{{ logStats.sessionId }}</text>
 				</view>
 			</view>
-			<button class="test-btn refresh-btn" @click="refreshStats">刷新统计</button>
+			<button class="test-btn refresh-btn" @click="refreshStats">{{ $t('test.logging.btnRefreshStats') }}</button>
 		</view>
 		
 		<!-- 日志导出 -->
 		<view class="section">
-			<text class="section-title">日志管理</text>
+			<text class="section-title">{{ $t('test.logging.sectionManage') }}</text>
 			<view class="button-grid">
-				<button class="test-btn" @click="exportLogs">导出日志</button>
-				<button class="test-btn" @click="clearLocalLogs">清理本地日志</button>
-				<button class="test-btn" @click="viewLogDetails">查看详细日志</button>
+				<button class="test-btn" @click="exportLogs">{{ $t('test.logging.btnExport') }}</button>
+				<button class="test-btn" @click="clearLocalLogs">{{ $t('test.logging.btnClearLocal') }}</button>
+				<button class="test-btn" @click="viewLogDetails">{{ $t('test.logging.btnViewDetails') }}</button>
 			</view>
 		</view>
 	</view>
 </template>
 
 <script setup>
-	import { ref, reactive, onMounted } from 'vue'
+	import { ref, reactive, onMounted, getCurrentInstance } from 'vue'
 	import { useLoggerStore } from '@/stores/logger'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
+	import { useLanguageStore } from '@/stores/language'
 	
 	const logger = useLoggerStore()
+	const languageStore = useLanguageStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const t = (key, params = {}) => {
+		const _ = languageStore.currentLocale
+		return $t(key, params)
+	}
 	
 	const logStats = reactive({
 		todayLogs: 0,
@@ -94,6 +101,7 @@
 	
 	// 页面加载时记录日志
 	onMounted(() => {
+		uni.setNavigationBarTitle({ title: t('test.logging.title') })
 		logger.logPageView('/pages/test/logging-test')
 		logger.logAction('LOGGING_TEST_PAGE_LOADED')
 		refreshStats()
@@ -114,7 +122,7 @@
 		})
 		
 		uni.showToast({
-			title: '基础操作已记录',
+			title: t('test.logging.toastBasicRecorded'),
 			icon: 'success'
 		})
 		
@@ -132,7 +140,7 @@
 		})
 		
 		uni.showToast({
-			title: '用户交互已记录',
+			title: t('test.logging.toastUserInteractionRecorded'),
 			icon: 'success'
 		})
 		
@@ -146,7 +154,7 @@
 		logger.logFormAction('test-form', 'submit', null, { formData: 'test-data' })
 		
 		uni.showToast({
-			title: '表单操作已记录',
+			title: t('test.logging.toastFormRecorded'),
 			icon: 'success'
 		})
 		
@@ -165,7 +173,7 @@
 		})
 		
 		uni.showToast({
-			title: '业务操作已记录',
+			title: t('test.logging.toastBusinessRecorded'),
 			icon: 'success'
 		})
 		
@@ -183,7 +191,7 @@
 			})
 			
 			uni.showToast({
-				title: 'API调用成功',
+				title: t('test.logging.toastApiSuccess'),
 				icon: 'success'
 			})
 		} catch (error) {
@@ -202,7 +210,7 @@
 			})
 		} catch (error) {
 			uni.showToast({
-				title: '预期的API错误已记录',
+				title: t('test.logging.toastJsErrorRecorded'),
 				icon: 'none'
 			})
 		}
@@ -215,12 +223,12 @@
 		try {
 			await logger.syncPendingLogs()
 			uni.showToast({
-				title: '日志同步完成',
+				title: t('test.logging.toastSyncDone'),
 				icon: 'success'
 			})
 		} catch (error) {
 			uni.showToast({
-				title: '日志同步失败',
+				title: t('test.logging.toastSyncFailed'),
 				icon: 'error'
 			})
 		}
@@ -241,7 +249,7 @@
 			})
 			
 			uni.showToast({
-				title: 'JavaScript错误已记录',
+				title: t('test.logging.toastExpectedApiErrorRecorded'),
 				icon: 'none'
 			})
 		}
@@ -261,7 +269,7 @@
 		})
 		
 		uni.showToast({
-			title: '网络错误已记录',
+			title: t('test.logging.toastNetworkErrorRecorded'),
 			icon: 'none'
 		})
 		
@@ -284,7 +292,7 @@
 		})
 		
 		uni.showToast({
-			title: '自定义错误已记录',
+			title: t('test.logging.toastCustomErrorRecorded'),
 			icon: 'none'
 		})
 		
@@ -297,7 +305,7 @@
 		logger.logGpsAction('location_success', 116.404, 39.915, 5)
 		
 		uni.showToast({
-			title: 'GPS操作已记录',
+			title: t('test.logging.toastGpsRecorded'),
 			icon: 'success'
 		})
 		
@@ -314,7 +322,7 @@
 		})
 		
 		uni.showToast({
-			title: '照片操作已记录',
+			title: t('test.logging.toastPhotoRecorded'),
 			icon: 'success'
 		})
 		
@@ -327,7 +335,7 @@
 		logger.logSearch('user_search', 'admin', {}, 1)
 		
 		uni.showToast({
-			title: '搜索操作已记录',
+			title: t('test.logging.toastSearchRecorded'),
 			icon: 'success'
 		})
 		
@@ -339,8 +347,8 @@
 		const exportData = logger.exportLogs()
 		
 		uni.showModal({
-			title: '日志导出',
-			content: `共导出 ${exportData.logs.length} 条日志，详细信息请查看控制台`,
+			title: t('test.logging.modalExportTitle'),
+			content: t('test.logging.modalExportContent', { count: exportData.logs.length }),
 			showCancel: false
 		})
 		
@@ -350,8 +358,8 @@
 	// 清理本地日志
 	const clearLocalLogs = () => {
 		uni.showModal({
-			title: '确认清理',
-			content: '是否确认清理本地存储的所有日志？',
+			title: t('test.logging.modalConfirmClearTitle'),
+			content: t('test.logging.modalConfirmClearContent'),
 			success: (res) => {
 				if (res.confirm) {
 					try {
@@ -360,14 +368,14 @@
 						logger.pendingLogs.length = 0
 						
 						uni.showToast({
-							title: '本地日志已清理',
+							title: t('test.logging.toastLocalLogsCleared'),
 							icon: 'success'
 						})
 						
 						refreshStats()
 					} catch (error) {
 						uni.showToast({
-							title: '清理失败',
+							title: t('test.logging.toastClearFailed'),
 							icon: 'error'
 						})
 					}
@@ -381,8 +389,8 @@
 		const recentLogs = logger.logs.slice(-10)
 		
 		uni.showModal({
-			title: '最近10条日志',
-			content: `请查看控制台输出的详细日志信息`,
+			title: t('test.logging.modalRecentTitle'),
+			content: t('test.logging.modalRecentContent'),
 			showCancel: false
 		})
 		

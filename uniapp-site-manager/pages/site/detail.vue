@@ -359,11 +359,11 @@
 	// 获取优先级文本
 	const getPriorityText = (priority) => {
 		const priorityMap = {
-			'high': $t('inspection.priorityHigh') || '高',
-			'normal': $t('inspection.priorityNormal') || '普通',
-			'low': $t('inspection.priorityLow') || '低'
+			high: $t('inspection.priorityHigh'),
+			normal: $t('inspection.priorityNormal'),
+			low: $t('inspection.priorityLow')
 		}
-		return priorityMap[priority] || ( $t('inspection.priorityNormal') || '普通' )
+		return priorityMap[priority] || $t('inspection.priorityNormal')
 	}
 	
 	// 获取检查类型文本

@@ -514,7 +514,9 @@
 						<view class="validation-info">
 							<view class="validation-status" :class="currentItem.validation_result.valid ? 'valid' : 'invalid'">
 								<text class="status-icon">{{ currentItem.validation_result.valid ? '✅' : '❌' }}</text>
-								<text class="status-text">{{ currentItem.validation_result.valid ? '验证通过' : '验证失败' }}</text>
+								<text class="status-text">
+									{{ currentItem.validation_result.valid ? $t('inspection.validationPassed') : $t('inspection.validationFailed') }}
+								</text>
 							</view>
 							<view class="validation-errors" v-if="!currentItem.validation_result.valid">
 								<text 
@@ -561,7 +563,7 @@
 		<!-- 地图选择器 -->
 		<view class="map-selector-overlay" v-if="showMapSelector" @click="showMapSelector = false">
 			<view class="map-selector" @click.stop>
-				<view class="selector-title">选择地图</view>
+				<view class="selector-title">{{ $t('site.mapSelectorTitle') }}</view>
 				<view class="map-options">
 					<view 
 						class="map-option" 
@@ -569,8 +571,8 @@
 					>
 						<view class="option-icon">🗺️</view>
 						<view class="option-info">
-							<text class="option-name">高德地图</text>
-							<text class="option-desc">国内定位精准</text>
+							<text class="option-name">{{ $t('site.mapAmapName') }}</text>
+							<text class="option-desc">{{ $t('site.mapAmapDesc') }}</text>
 						</view>
 						<text class="option-arrow">›</text>
 					</view>
@@ -580,8 +582,8 @@
 					>
 						<view class="option-icon">🌏</view>
 						<view class="option-info">
-							<text class="option-name">谷歌地图</text>
-							<text class="option-desc">全球地图覆盖</text>
+							<text class="option-name">{{ $t('site.mapGoogleName') }}</text>
+							<text class="option-desc">{{ $t('site.mapGoogleDesc') }}</text>
 						</view>
 						<text class="option-arrow">›</text>
 					</view>
@@ -805,12 +807,12 @@
 			if (response.statusCode === 200) {
 				bindingHistory.value = response.data.history || []
 			} else {
-				throw new Error(response.data.detail || '获取历史记录失败')
+				throw new Error(response.data.detail || $t('messages.dataLoadFailed'))
 			}
 		} catch (error) {
 			console.error('获取绑定历史失败:', error)
 			uni.showToast({
-				title: $t('common.loadFailed'),
+				title: $t('messages.dataLoadFailed'),
 				icon: 'none'
 			})
 			showHistoryModal.value = false
@@ -995,7 +997,7 @@
 					} catch (siteError) {
 						console.warn('获取站点信息失败:', siteError)
 						// 设置默认站点名称
-						inspectionData.value.site_name = `站点 ${inspectionData.value.site_id}`
+						inspectionData.value.site_name = $t('site.siteWithId', { id: inspectionData.value.site_id })
 					}
 				}
 			}
@@ -1022,7 +1024,7 @@
 		} catch (error) {
 			console.error('❌ 检查详情加载异常:', error)
 			uni.showToast({
-				title: '加载失败',
+				title: $t('messages.dataLoadFailed'),
 				icon: 'error'
 			})
 		} finally {
@@ -1043,7 +1045,7 @@
 	
 	const getCurrentFilterText = () => {
 		const filter = statusFilters.find(f => f.value === currentFilter.value)
-		return filter ? filter.label : '全部'
+		return filter ? filter.label : $t('common.all')
 	}
 	
 	const viewCheckItem = (item) => {
@@ -1084,7 +1086,7 @@
 	const selectMapType = (mapType) => {
 		showMapSelector.value = false
 		uni.navigateTo({
-			url: `/pages/map/view?latitude=${inspectionData.value.latitude}&longitude=${inspectionData.value.longitude}&name=${encodeURIComponent(inspectionData.value.site_name || '检查位置')}&address=${encodeURIComponent(inspectionData.value.address || '')}&mapType=${mapType}`
+			url: `/pages/map/view?latitude=${inspectionData.value.latitude}&longitude=${inspectionData.value.longitude}&name=${encodeURIComponent(inspectionData.value.site_name || $t('inspection.inspectionLocation'))}&address=${encodeURIComponent(inspectionData.value.address || '')}&mapType=${mapType}`
 		})
 	}
 	
@@ -1128,12 +1130,12 @@
 	// 获取检查员姓名
 	const getInspectorName = () => {
 		if (inspectorInfo.value) {
-			return inspectorInfo.value.full_name || inspectorInfo.value.username || '未知检查员'
+			return inspectorInfo.value.full_name || inspectorInfo.value.username || $t('inspection.unknownInspector')
 		}
 		if (workOrderData.value && workOrderData.value.assigned_to_name) {
 			return workOrderData.value.assigned_to_name
 		}
-		return '加载中...'
+		return $t('common.loading')
 	}
 	
 	// 获取指派时间
@@ -1144,31 +1146,31 @@
 		if (workOrderData.value && workOrderData.value.created_at) {
 			return formatDateTime(workOrderData.value.created_at)
 		}
-		return '未知'
+		return $t('inspection.unknown')
 	}
 	
 	// 获取优先级文本
 	const getPriorityText = (priority) => {
 		const priorityMap = {
-			low: $t('workorder.priorityLow') || $t('inspection.priorityLow'),
-			normal: $t('workorder.priorityNormal') || $t('inspection.priorityNormal'),
-			high: $t('workorder.priorityHigh') || $t('inspection.priorityHigh'),
-			urgent: $t('workorder.priorityUrgent') || $t('inspection.priorityUrgent')
+			low: $t('inspection.priorityLow'),
+			normal: $t('inspection.priorityNormal'),
+			high: $t('inspection.priorityHigh'),
+			urgent: $t('inspection.priorityUrgent')
 		}
-		return priorityMap[priority] || ( $t('workorder.priorityNormal') || $t('inspection.priorityNormal') )
+		return priorityMap[priority] || $t('inspection.priorityNormal')
 	}
 	
 	// 获取工单类型文本
 	const getWorkOrderTypeText = (taskType) => {
 		const typeMap = {
-			opening_inspection: $t('workorder.typeOpening') || $t('inspection.opening'),
-			maintenance: $t('workorder.typeMaintenance') || $t('inspection.maintenance'),
-			power_issue: $t('workorder.typePowerIssue') || 'Power Issue',
-			transmission_issue: $t('workorder.typeTransmissionIssue') || 'Transmission Issue',
-			gps_issue: $t('workorder.typeGPSIssue') || 'GPS Issue',
-			signal_issue: $t('workorder.typeSignalIssue') || 'Signal Issue'
+			opening_inspection: $t('inspection.opening'),
+			maintenance: $t('inspection.maintenance'),
+			power_issue: $t('workorder.typePowerIssue'),
+			transmission_issue: $t('workorder.typeTransmissionIssue'),
+			gps_issue: $t('workorder.typeGPSIssue'),
+			signal_issue: $t('workorder.typeSignalIssue')
 		}
-		return typeMap[taskType] || ($t('workorder.typeOther') || 'Other')
+		return typeMap[taskType] || $t('workorder.typeOther')
 	}
 
 	const getStatusText = (status) => {
@@ -1220,7 +1222,8 @@
 	const formatDateTime = (dateTime) => {
 		if (!dateTime) return ''
 		const date = new Date(dateTime)
-		return date.toLocaleString('zh-CN')
+		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		return date.toLocaleString(locale)
 	}
 	
 	const formatCoordinates = (lat, lon) => {
@@ -1248,26 +1251,26 @@
 		// 开站检查看成一条单独文案（如果有）
 		if (type === 'opening_inspection') {
 			const openingMap = {
-				PENDING: $t('workorder.statusPending') || $t('inspection.pending'),
-				ACTIVE: $t('workorder.statusActive') || $t('inspection.inProgress'),
-				SUBMITTED: $t('workorder.statusSubmitted') || $t('inspection.submitted') || $t('inspection.completed'),
-				UNDER_REVIEW: $t('workorder.statusUnderReview') || $t('inspection.inReview'),
-				APPROVED: $t('workorder.statusApproved') || 'Approved',
-				ACTIVATED: $t('workorder.statusActivated') || 'Activated',
-				COMPLETED: $t('workorder.statusCompleted') || $t('inspection.completed'),
-				REJECTED: $t('workorder.statusRejected') || $t('inspection.rejected') || $t('inspection.failed')
+				PENDING: $t('workorder.pending'),
+				ACTIVE: $t('workorder.inProgress'),
+				SUBMITTED: $t('workorder.submitted'),
+				UNDER_REVIEW: $t('workorder.underReview'),
+				APPROVED: $t('workorder.approved'),
+				ACTIVATED: $t('workorder.activated'),
+				COMPLETED: $t('workorder.completed'),
+				REJECTED: $t('workorder.rejected')
 			}
 			return openingMap[status] || status
 		}
 		const statusMap = {
-			PENDING: $t('workorder.statusPending') || $t('inspection.pending'),
-			ACTIVE: $t('workorder.statusActive') || $t('inspection.inProgress'),
-			SUBMITTED: $t('workorder.statusSubmitted') || $t('inspection.submitted') || $t('inspection.completed'),
-			UNDER_REVIEW: $t('workorder.statusUnderReview') || $t('inspection.inReview'),
-			APPROVED: $t('workorder.statusApproved') || 'Approved',
-			ACTIVATED: $t('workorder.statusActivated') || 'Activated',
-			COMPLETED: $t('workorder.statusCompleted') || $t('inspection.completed'),
-			REJECTED: $t('workorder.statusRejected') || $t('inspection.rejected') || $t('inspection.failed')
+			PENDING: $t('workorder.pending'),
+			ACTIVE: $t('workorder.inProgress'),
+			SUBMITTED: $t('workorder.submitted'),
+			UNDER_REVIEW: $t('workorder.underReview'),
+			APPROVED: $t('workorder.approved'),
+			ACTIVATED: $t('workorder.activated'),
+			COMPLETED: $t('workorder.completed'),
+			REJECTED: $t('workorder.rejected')
 		}
 		return statusMap[status] || status
 	}

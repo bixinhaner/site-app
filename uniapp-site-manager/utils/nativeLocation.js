@@ -1,7 +1,17 @@
+import i18n from './i18n.js'
+
 const STORAGE_KEY = 'native_location_cache_v1'
 const DEFAULT_CACHE_MAX_AGE_MS = 3 * 60 * 1000 // 3分钟
 
 let pluginInstance = null
+
+const t = (key, params = {}) => {
+  try {
+    return i18n?.global?.t ? i18n.global.t(key, params) : key
+  } catch (error) {
+    return key
+  }
+}
 
 const getNativeLocationPlugin = () => {
   try {
@@ -359,7 +369,7 @@ export const getLocationWithAddressOfflineFirst = async (options = {}) => {
           if (!onlineResult.address) {
             try {
               uni.showToast({
-                title: '地址获取失败，已使用GPS坐标',
+                title: t('messages.addressFetchFailedUsingGps'),
                 icon: 'none',
                 duration: 2000,
               })
@@ -372,8 +382,8 @@ export const getLocationWithAddressOfflineFirst = async (options = {}) => {
           console.log('[nativeLocation] 后台在线刷新失败或超时:', onlineResult)
           try {
             const title = offlineFallback.address
-              ? '在线定位失败，已使用上次位置'
-              : '在线定位失败，已使用上次GPS坐标'
+              ? t('messages.onlineLocationFailedUsingLastLocation')
+              : t('messages.onlineLocationFailedUsingLastGps')
             uni.showToast({
               title,
               icon: 'none',
@@ -403,7 +413,7 @@ export const getLocationWithAddressOfflineFirst = async (options = {}) => {
     if (!onlineResult.address) {
       try {
         uni.showToast({
-          title: '地址获取失败，已使用GPS坐标',
+          title: t('messages.addressFetchFailedUsingGps'),
           icon: 'none',
           duration: 2000,
         })
@@ -417,7 +427,7 @@ export const getLocationWithAddressOfflineFirst = async (options = {}) => {
   return {
     success: false,
     code: -1,
-    message: '无法获取GPS坐标，请检查定位权限和系统定位开关',
+    message: t('messages.locationUnavailable'),
     error: 'no_location',
   }
 }

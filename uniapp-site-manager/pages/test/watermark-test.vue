@@ -1,15 +1,15 @@
 <template>
-	<view class="test-container">
+	<view class="test-container" :key="languageStore.currentLocale">
 		<view class="test-header">
-			<text class="test-title">水印功能测试</text>
-			<text class="test-subtitle">测试自动水印添加功能</text>
+			<text class="test-title">{{ $t('test.watermark.title') }}</text>
+			<text class="test-subtitle">{{ $t('test.watermark.subtitle') }}</text>
 		</view>
 		
 		<view class="test-section">
-			<text class="section-title">配置测试</text>
+			<text class="section-title">{{ $t('test.watermark.sectionConfig') }}</text>
 			
 			<view class="config-item">
-				<text class="config-label">水印位置:</text>
+				<text class="config-label">{{ $t('test.watermark.labelWatermarkPosition') }}:</text>
 				<picker 
 					:value="positionIndex" 
 					:range="positionOptions" 
@@ -21,36 +21,36 @@
 			</view>
 			
 			<view class="config-item">
-				<text class="config-label">启用哈希:</text>
+				<text class="config-label">{{ $t('test.watermark.labelHashEnabled') }}:</text>
 				<switch :checked="enableHash" @change="onHashChange" />
 			</view>
 			
 			<view class="config-item">
-				<text class="config-label">启用签名:</text>
+				<text class="config-label">{{ $t('test.watermark.labelSignatureEnabled') }}:</text>
 				<switch :checked="enableSignature" @change="onSignatureChange" />
 			</view>
 		</view>
 		
 		<view class="test-section">
-			<text class="section-title">测试操作</text>
+			<text class="section-title">{{ $t('test.watermark.sectionActions') }}</text>
 			
 			<view class="test-buttons">
 				<button class="test-btn" @click="testCamera" :disabled="isLoading">
-					{{ isLoading ? '处理中...' : '测试拍照水印' }}
+					{{ isLoading ? $t('test.watermark.processing') : $t('test.watermark.btnTestPhoto') }}
 				</button>
 				
 				<button class="test-btn secondary" @click="testOffline">
-					测试离线功能
+					{{ $t('test.watermark.btnTestOffline') }}
 				</button>
 				
 				<button class="test-btn secondary" @click="testSecurity">
-					测试安全验证
+					{{ $t('test.watermark.btnTestSecurity') }}
 				</button>
 			</view>
 		</view>
 		
 		<view class="test-section" v-if="testResults.length > 0">
-			<text class="section-title">测试结果</text>
+			<text class="section-title">{{ $t('test.watermark.sectionResults') }}</text>
 			
 			<view class="results-list">
 				<view 
@@ -70,26 +70,26 @@
 		</view>
 		
 		<view class="test-section" v-if="lastPhoto">
-			<text class="section-title">最新照片</text>
+			<text class="section-title">{{ $t('test.watermark.sectionLatestPhoto') }}</text>
 			
 			<view class="photo-preview">
 				<image :src="lastPhoto.path" mode="aspectFit" class="preview-image"></image>
 				
 				<view class="photo-info">
 					<view class="info-row">
-						<text class="info-label">文件大小:</text>
+						<text class="info-label">{{ $t('test.watermark.fileSize') }}:</text>
 						<text class="info-value">{{ formatFileSize(lastPhoto.size) }}</text>
 					</view>
 					<view class="info-row" v-if="lastPhoto.gps">
-						<text class="info-label">GPS坐标:</text>
+						<text class="info-label">{{ $t('test.watermark.gpsCoordinates') }}:</text>
 						<text class="info-value">{{ formatGPS(lastPhoto.gps) }}</text>
 					</view>
 					<view class="info-row" v-if="lastPhoto.hash">
-						<text class="info-label">哈希值:</text>
+						<text class="info-label">{{ $t('test.watermark.hashValue') }}:</text>
 						<text class="info-value hash">{{ lastPhoto.hash }}</text>
 					</view>
 					<view class="info-row" v-if="lastPhoto.signature">
-						<text class="info-label">数字签名:</text>
+						<text class="info-label">{{ $t('test.watermark.signatureValue') }}:</text>
 						<text class="info-value hash">{{ lastPhoto.signature }}</text>
 					</view>
 				</view>
@@ -99,11 +99,18 @@
 </template>
 
 <script setup>
-	import { ref, onMounted } from 'vue'
+	import { ref, onMounted, computed, getCurrentInstance } from 'vue'
 	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
 	import { useUserStore } from '@/stores/user'
+	import { useLanguageStore } from '@/stores/language'
 	
 	const userStore = useUserStore()
+	const languageStore = useLanguageStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const t = (key, params = {}) => {
+		const _ = languageStore.currentLocale
+		return $t(key, params)
+	}
 	
 	// 响应式数据
 	const isLoading = ref(false)
@@ -112,19 +119,20 @@
 	
 	// 配置选项
 	const positionIndex = ref(0)
-	const positionOptions = ref([
-		{ name: '左下角', value: 'bottomLeft' },
-		{ name: '右下角', value: 'bottomRight' },
-		{ name: '左上角', value: 'topLeft' },
-		{ name: '右上角', value: 'topRight' },
-		{ name: '居中', value: 'center' }
-	])
+	const positionOptions = computed(() => ([
+		{ name: t('test.watermark.positionBottomLeft'), value: 'bottomLeft' },
+		{ name: t('test.watermark.positionBottomRight'), value: 'bottomRight' },
+		{ name: t('test.watermark.positionTopLeft'), value: 'topLeft' },
+		{ name: t('test.watermark.positionTopRight'), value: 'topRight' },
+		{ name: t('test.watermark.positionCenter'), value: 'center' }
+	]))
 	
 	const enableHash = ref(watermarkConfig.security.enableHash)
 	const enableSignature = ref(watermarkConfig.security.enableSignature)
 	
 	// 生命周期
 	onMounted(() => {
+		uni.setNavigationBarTitle({ title: t('test.watermark.title') })
 		addTestResult('测试页面初始化', '水印测试页面加载完成', true)
 	})
 	
@@ -235,7 +243,7 @@
 			title,
 			message,
 			success,
-			timestamp: new Date().toLocaleString('zh-CN')
+			timestamp: new Date().toLocaleString(languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US')
 		})
 		
 		// 限制结果数量
@@ -245,14 +253,14 @@
 	}
 	
 	const formatFileSize = (size) => {
-		if (!size) return '未知'
+		if (!size) return t('test.watermark.unknown')
 		if (size < 1024) return size + 'B'
 		if (size < 1024 * 1024) return (size / 1024).toFixed(1) + 'KB'
 		return (size / (1024 * 1024)).toFixed(1) + 'MB'
 	}
 	
 	const formatGPS = (gps) => {
-		if (!gps || !gps.latitude) return '无GPS信息'
+		if (!gps || !gps.latitude) return t('test.watermark.noGpsInfo')
 		return `${gps.latitude.toFixed(6)}, ${gps.longitude.toFixed(6)}`
 	}
 </script>

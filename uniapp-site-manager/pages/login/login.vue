@@ -57,7 +57,7 @@
 </template>
 
 <script setup>
-	import { ref, reactive, onMounted } from 'vue'
+	import { ref, reactive, onMounted, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
@@ -65,6 +65,7 @@
 	const userStore = useUserStore()
 	const logger = useLoggerStore()
 	const languageStore = useLanguageStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
 	const loading = ref(false)
 	const loginForm = reactive({
@@ -99,7 +100,7 @@
 		if (!loginForm.username || !loginForm.password) {
 			console.log('❌ 验证失败：用户名或密码为空')
 			uni.showToast({
-				title: languageStore.isZh ? '请填写用户名和密码' : 'Please enter username and password',
+				title: $t('messages.usernamePasswordRequired'),
 				icon: 'none'
 			})
 			return
@@ -125,7 +126,7 @@
 				// })
 				
 				uni.showToast({
-					title: languageStore.isZh ? '登录成功' : 'Success',
+					title: $t('messages.loginSuccess'),
 					icon: 'success',
 					duration: 1500
 				})
@@ -142,16 +143,17 @@
 				// 根据errorCode显示国际化错误信息
 				let displayMessage = ''
 				if (result?.errorCode) {
-					const errorCodeMap = {
-						'INVALID_CREDENTIALS': languageStore.isZh ? '用户名或密码错误' : 'Invalid username or password',
-						'NETWORK_TIMEOUT': languageStore.isZh ? '请求超时，请检查网络连接' : 'Request timeout, please check your network connection',
-						'NETWORK_FAIL': languageStore.isZh ? '网络连接失败，请检查服务器状态' : 'Network connection failed, please check server status',
-						'NETWORK_ERROR': languageStore.isZh ? '网络错误' : 'Network error',
-						'SERVER_ERROR': result?.error || (languageStore.isZh ? '服务器错误' : 'Server error')
+					const errorCodeKeyMap = {
+						INVALID_CREDENTIALS: 'messages.invalidCredentials',
+						NETWORK_TIMEOUT: 'messages.networkTimeout',
+						NETWORK_FAIL: 'messages.networkFail',
+						NETWORK_ERROR: 'messages.networkError',
+						SERVER_ERROR: 'messages.loginFailed',
 					}
-					displayMessage = errorCodeMap[result.errorCode] || (result?.error || (languageStore.isZh ? '登录失败，请重试' : 'Login failed, please try again'))
+					const key = errorCodeKeyMap[result.errorCode]
+					displayMessage = (key ? $t(key) : '') || result?.error || $t('messages.loginFailed')
 				} else {
-					displayMessage = result?.error || (languageStore.isZh ? '登录失败，请重试' : 'Login failed, please try again')
+					displayMessage = result?.error || $t('messages.loginFailed')
 				}
 				
 				// logger.logAction('LOGIN_FAILED', {
@@ -180,7 +182,7 @@
 			
 			console.error('登录异常:', error)
 			uni.showToast({
-				title: languageStore.isZh ? '登录异常，请重试' : 'Login error, please try again',
+				title: $t('messages.loginFailed'),
 				icon: 'none',
 				duration: 2000
 			})

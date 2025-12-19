@@ -6,8 +6,8 @@
 				<uni-icons class="back-icon" type="back" size="32rpx" color="#fff" />
 			</view>
 			<view class="location-info">
-				<text class="location-name">站点分布地图</text>
-				<text class="coordinates">共 {{ totalSites }} 个站点</text>
+				<text class="location-name">{{ $t('map.sitesDistributionTitle') }}</text>
+				<text class="coordinates">{{ $t('map.totalSitesCount', { count: totalSites }) }}</text>
 			</view>
 		</view>
 		
@@ -25,7 +25,7 @@
 		<view class="sites-panel" :class="{ collapsed: panelCollapsed }">
 			<view class="panel-header" @click="togglePanel">
 				<view class="panel-title">
-					<text class="title-text">站点列表</text>
+					<text class="title-text">{{ $t('map.siteListTitle') }}</text>
 					<text class="count-badge">{{ filteredSites.length }}</text>
 				</view>
 				<text class="toggle-icon">{{ panelCollapsed ? '▲' : '▼' }}</text>
@@ -39,28 +39,28 @@
 						:class="{ active: currentFilter === 'all' }"
 						@click="setFilter('all')"
 					>
-						<text>全部</text>
+						<text>{{ $t('common.all') }}</text>
 					</view>
 					<view 
 						class="filter-item" 
 						:class="{ active: currentFilter === 'operational' }"
 						@click="setFilter('operational')"
 					>
-						<text>运营中</text>
+						<text>{{ $t('site.operational') }}</text>
 					</view>
 					<view 
 						class="filter-item" 
 						:class="{ active: currentFilter === 'construction' }"
 						@click="setFilter('construction')"
 					>
-						<text>建设中</text>
+						<text>{{ $t('site.construction') }}</text>
 					</view>
 					<view 
 						class="filter-item" 
 						:class="{ active: currentFilter === 'maintenance' }"
 						@click="setFilter('maintenance')"
 					>
-						<text>维护中</text>
+						<text>{{ $t('site.maintenance') }}</text>
 					</view>
 				</view>
 				
@@ -76,7 +76,7 @@
 					</view>
 					<view class="site-info">
 						<text class="site-name">{{ site.site_name }}</text>
-						<text class="site-address">{{ site.address || '暂无地址' }}</text>
+						<text class="site-address">{{ site.address || $t('map.noAddress') }}</text>
 					</view>
 					<view class="site-status" :class="getStatusClass(site.status)">
 						{{ getStatusText(site.status) }}
@@ -84,7 +84,7 @@
 				</view>
 				
 				<view class="empty-state" v-if="filteredSites.length === 0">
-					<text>暂无站点</text>
+					<text>{{ $t('map.noSites') }}</text>
 				</view>
 			</scroll-view>
 		</view>
@@ -97,13 +97,20 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed, getCurrentInstance } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useSiteStore } from '@/stores/site'
 	import { useUserStore } from '@/stores/user'
+	import { useLanguageStore } from '@/stores/language'
 	
 	const siteStore = useSiteStore()
 	const userStore = useUserStore()
+	const languageStore = useLanguageStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const t = (key, params = {}) => {
+		const _ = languageStore.currentLocale
+		return $t(key, params)
+	}
 	
 	// 页面数据
 	const sites = ref([])
@@ -281,14 +288,14 @@
 				}
 			} else {
 				uni.showToast({
-					title: '加载站点失败',
+					title: t('site.loadFailed'),
 					icon: 'error'
 				})
 			}
 		} catch (error) {
 			console.error('Load sites error:', error)
 			uni.showToast({
-				title: '加载失败',
+				title: t('site.loadFailed'),
 				icon: 'error'
 			})
 		} finally {
@@ -327,10 +334,10 @@
 	// 获取状态文本
 	const getStatusText = (status) => {
 		const statusMap = {
-			'operational': '运营中',
-			'construction': '建设中',
-			'maintenance': '维护中',
-			'planning': '规划中'
+			operational: t('site.operational'),
+			construction: t('site.construction'),
+			maintenance: t('site.maintenance'),
+			planning: t('site.planning')
 		}
 		return statusMap[status] || status
 	}
@@ -344,7 +351,7 @@
 	onLoad((options) => {
 		// 设置页面标题
 		uni.setNavigationBarTitle({
-			title: '站点分布地图'
+			title: t('map.sitesDistributionTitle')
 		})
 		
 		// 加载站点数据

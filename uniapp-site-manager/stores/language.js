@@ -69,7 +69,11 @@ export const useLanguageStore = defineStore('language', {
         'pages/inspection/detail': t('inspection.detail'),
         'pages/inspection/review': t('inspection.review'),
         'pages/inspection/camera': t('inspection.camera'),
-        'pages/stock/scan-pickup': t('stock.scanPickup')
+        'pages/stock/scan-pickup': t('stock.scanPickup'),
+        // 测试页面
+        'pages/test/logging-test': t('test.logging.title'),
+        'pages/test-location-plugin/test-location-plugin': t('test.locationPlugin.title'),
+        'pages/test-location-builtin/test-location-builtin': t('test.locationBuiltin.title')
       }
       
       const title = titleMap[route]
@@ -103,8 +107,11 @@ export const useLanguageStore = defineStore('language', {
           this.updatePageTitle(currentPage.route)
         }
         
+        const toastTitle = i18nInstance
+          ? i18nInstance.global.t(locale === 'zh' ? 'messages.languageSwitchedToZh' : 'messages.languageSwitchedToEn')
+          : (locale === 'zh' ? '语言已切换为中文' : 'Language switched to English')
         uni.showToast({
-          title: locale === 'zh' ? '语言已切换为中文' : 'Language switched to English',
+          title: toastTitle,
           icon: 'none',
           duration: 2000
         })
@@ -125,6 +132,12 @@ export const useLanguageStore = defineStore('language', {
         }
         // 初始化时也要更新底部导航栏文本
         this.updateTabBarText()
+        // 初始化时也更新当前页面标题（避免启动后仍显示 pages.json 默认中文标题）
+        const pages = getCurrentPages()
+        if (pages.length > 0) {
+          const currentPage = pages[pages.length - 1]
+          this.updatePageTitle(currentPage.route)
+        }
       } else {
         const systemLocale = uni.getSystemInfoSync().language || 'zh'
         const locale = systemLocale.startsWith('en') ? 'en' : 'zh'

@@ -1,8 +1,8 @@
 <template>
-  <view class="location-test-page">
+  <view class="location-test-page" :key="languageStore.currentLocale">
     <view class="header">
-      <text class="title">内置定位功能测试</text>
-      <text class="subtitle">使用 UniApp 内置定位API</text>
+      <text class="title">{{ $t('test.locationBuiltin.title') }}</text>
+      <text class="subtitle">{{ $t('test.locationBuiltin.subtitle') }}</text>
     </view>
     
     <view class="status-section">
@@ -13,60 +13,60 @@
     </view>
     
     <view class="button-group">
-      <button @click="testBuiltinLocation" class="test-btn primary">获取当前位置</button>
-      <button @click="testChooseLocation" class="test-btn success">选择地图位置</button>
-      <button @click="testOpenLocation" class="test-btn info" :disabled="!currentLocation">在地图中查看</button>
-      <button @click="startLocationWatch" class="test-btn warning" v-if="!isWatching">开始位置监听</button>
-      <button @click="stopLocationWatch" class="test-btn danger" v-if="isWatching">停止位置监听</button>
-      <button @click="testBaiduReverse" class="test-btn info" :disabled="!currentLocation">测试百度逆地理(后端)</button>
-      <button @click="testBaiduReverseUni" class="test-btn info" :disabled="!currentLocation">测试百度逆地理(前端)</button>
+      <button @click="testBuiltinLocation" class="test-btn primary">{{ $t('test.locationBuiltin.btnGetLocation') }}</button>
+      <button @click="testChooseLocation" class="test-btn success">{{ $t('test.locationBuiltin.btnChooseLocation') }}</button>
+      <button @click="testOpenLocation" class="test-btn info" :disabled="!currentLocation">{{ $t('test.locationBuiltin.btnOpenLocation') }}</button>
+      <button @click="startLocationWatch" class="test-btn warning" v-if="!isWatching">{{ $t('test.locationBuiltin.btnStartWatch') }}</button>
+      <button @click="stopLocationWatch" class="test-btn danger" v-if="isWatching">{{ $t('test.locationBuiltin.btnStopWatch') }}</button>
+      <button @click="testBaiduReverse" class="test-btn info" :disabled="!currentLocation">{{ $t('test.locationBuiltin.btnReverseBackend') }}</button>
+      <button @click="testBaiduReverseUni" class="test-btn info" :disabled="!currentLocation">{{ $t('test.locationBuiltin.btnReverseFrontend') }}</button>
     </view>
     
     <view class="result-section" v-if="currentLocation">
-      <text class="section-title">当前位置信息</text>
+      <text class="section-title">{{ $t('test.locationBuiltin.sectionCurrent') }}</text>
       <view class="info-item">
-        <text class="label">纬度:</text>
+        <text class="label">{{ $t('test.locationBuiltin.labelLatitude') }}:</text>
         <text class="value">{{ currentLocation.latitude }}</text>
       </view>
       <view class="info-item">
-        <text class="label">经度:</text>
+        <text class="label">{{ $t('test.locationBuiltin.labelLongitude') }}:</text>
         <text class="value">{{ currentLocation.longitude }}</text>
       </view>
       <view class="info-item">
-        <text class="label">精度:</text>
+        <text class="label">{{ $t('test.locationBuiltin.labelAccuracy') }}:</text>
         <text class="value">{{ currentLocation.accuracy }}米</text>
       </view>
       <view class="info-item">
-        <text class="label">海拔:</text>
+        <text class="label">{{ $t('test.locationBuiltin.labelAltitude') }}:</text>
         <text class="value">{{ currentLocation.altitude }}米</text>
       </view>
       <view class="info-item">
-        <text class="label">速度:</text>
+        <text class="label">{{ $t('test.locationBuiltin.labelSpeed') }}:</text>
         <text class="value">{{ currentLocation.speed }}m/s</text>
       </view>
       <view class="info-item">
-        <text class="label">地址:</text>
-        <text class="value">{{ currentLocation.address || '未获取' }}</text>
+        <text class="label">{{ $t('test.locationBuiltin.labelAddress') }}:</text>
+        <text class="value">{{ currentLocation.address || $t('test.locationBuiltin.addressUnavailable') }}</text>
       </view>
       <view class="info-item">
-        <text class="label">更新时间:</text>
+        <text class="label">{{ $t('test.locationBuiltin.labelUpdatedAt') }}:</text>
         <text class="value">{{ formatTime(currentLocation.timestamp) }}</text>
       </view>
     </view>
     
     <view class="log-section">
-      <text class="section-title">操作日志</text>
+      <text class="section-title">{{ $t('test.locationBuiltin.sectionLogs') }}</text>
       <scroll-view class="log-content" scroll-y>
         <view v-for="(log, index) in logs" :key="index" class="log-item">
           <text class="log-time">[{{ log.time }}]</text>
           <text class="log-message" :class="log.type">{{ log.message }}</text>
         </view>
       </scroll-view>
-      <button @click="clearLogs" class="clear-btn">清空日志</button>
+      <button @click="clearLogs" class="clear-btn">{{ $t('test.locationBuiltin.clearLogs') }}</button>
     </view>
     
     <view class="feature-comparison">
-      <text class="section-title">功能对比</text>
+      <text class="section-title">{{ $t('test.locationBuiltin.sectionCompare') }}</text>
       <view class="comparison-table">
         <view class="table-header">
           <text class="col-feature">功能</text>
@@ -100,6 +100,7 @@
 
 <script>
 import { buildApiUrl } from '@/config/api.js'
+import { useLanguageStore } from '@/stores/language'
 
 // 仅用于测试页面的前端直连百度逆地理
 const BAIDU_AK = '89OHhGHDeH9mxH1HsxV1CWqNubkkEFFQ'
@@ -108,12 +109,13 @@ export default {
   name: 'TestLocationBuiltin',
   data() {
     return {
+      languageStore: useLanguageStore(),
       currentLocation: null,
       isWatching: false,
       watchId: null,
       locationStatus: {
-        text: '准备就绪',
-        desc: '点击按钮测试内置定位功能',
+        text: '',
+        desc: '',
         class: 'status-ready'
       },
       logs: []
@@ -121,6 +123,12 @@ export default {
   },
   
   onLoad() {
+    uni.setNavigationBarTitle({ title: this.$t('test.locationBuiltin.title') })
+    this.updateStatus(
+      this.$t('test.locationBuiltin.statusReadyText'),
+      this.$t('test.locationBuiltin.statusReadyDesc'),
+      'status-ready'
+    )
     this.addLog('页面加载', '开始测试内置定位功能', 'info');
   },
   
@@ -133,7 +141,11 @@ export default {
     // 测试内置定位
     testBuiltinLocation() {
       this.addLog('开始定位', '使用 uni.getLocation API...', 'info');
-      this.updateStatus('定位中...', '正在获取位置信息', 'status-loading');
+      this.updateStatus(
+        this.$t('test.locationBuiltin.statusLocatingText'),
+        this.$t('test.locationBuiltin.statusLocatingDesc'),
+        'status-loading'
+      );
       
       uni.getLocation({
         // 部分平台（尤其是某些 Web/H5 或低版本 SDK）不支持 gcj02，这里统一用 wgs84
@@ -145,7 +157,11 @@ export default {
             timestamp: Date.now()
           };
           
-          this.updateStatus('定位成功', `精度: ${res.accuracy}米`, 'status-success');
+          this.updateStatus(
+            this.$t('test.locationBuiltin.statusSuccessText'),
+            this.$t('test.locationBuiltin.statusAccuracyDesc', { accuracy: res.accuracy }),
+            'status-success'
+          );
           this.addLog('定位成功', `位置: ${res.latitude}, ${res.longitude}`, 'success');
           
           if (res.address) {
@@ -153,17 +169,17 @@ export default {
           }
           
           uni.showToast({
-            title: '定位成功',
+            title: this.$t('test.locationBuiltin.toastLocationSuccess'),
             icon: 'success'
           });
         },
         fail: (err) => {
-          this.updateStatus('定位失败', err.errMsg, 'status-error');
+          this.updateStatus(this.$t('test.locationBuiltin.modalLocationFailedTitle'), err.errMsg, 'status-error');
           this.addLog('定位失败', err.errMsg, 'error');
           
           uni.showModal({
-            title: '定位失败',
-            content: `错误信息: ${err.errMsg}\n\n可能原因:\n1. 未授予定位权限\n2. GPS服务未开启\n3. 网络连接问题`,
+            title: this.$t('test.locationBuiltin.modalLocationFailedTitle'),
+            content: this.$t('test.locationBuiltin.modalLocationFailedContent', { error: err.errMsg }),
             showCancel: false
           });
         }
@@ -184,7 +200,7 @@ export default {
             timestamp: Date.now()
           };
           
-          this.updateStatus('位置选择成功', res.name, 'status-success');
+          this.updateStatus(this.$t('test.locationBuiltin.statusChooseLocationSuccessText'), res.name, 'status-success');
           this.addLog('地图选择成功', `${res.name} - ${res.address}`, 'success');
         },
         fail: (err) => {
@@ -197,7 +213,7 @@ export default {
     testOpenLocation() {
       if (!this.currentLocation) {
         uni.showToast({
-          title: '请先获取位置',
+          title: this.$t('test.locationBuiltin.toastNeedLocationFirst'),
           icon: 'none'
         });
         return;
@@ -208,8 +224,8 @@ export default {
       uni.openLocation({
         latitude: this.currentLocation.latitude,
         longitude: this.currentLocation.longitude,
-        name: this.currentLocation.name || '当前位置',
-        address: this.currentLocation.address?.name || '详细地址',
+        name: this.currentLocation.name || this.$t('map.position'),
+        address: this.currentLocation.address?.name || this.$t('site.detailedAddress'),
         success: () => {
           this.addLog('地图打开成功', '已在地图中显示位置', 'success');
         },
@@ -229,15 +245,23 @@ export default {
           timestamp: Date.now()
         };
         
-        this.updateStatus('位置监听中', `精度: ${res.accuracy}米`, 'status-watching');
+        this.updateStatus(
+          this.$t('test.locationBuiltin.statusWatchingText'),
+          this.$t('test.locationBuiltin.statusAccuracyDesc', { accuracy: res.accuracy }),
+          'status-watching'
+        );
         this.addLog('位置更新', `${res.latitude}, ${res.longitude}`, 'info');
       });
       
       this.isWatching = true;
-      this.updateStatus('监听已启动', '位置变化时自动更新', 'status-watching');
+      this.updateStatus(
+        this.$t('test.locationBuiltin.toastWatchStarted'),
+        this.$t('test.locationBuiltin.statusWatchStartedDesc'),
+        'status-watching'
+      );
       
       uni.showToast({
-        title: '监听已启动',
+        title: this.$t('test.locationBuiltin.toastWatchStarted'),
         icon: 'success'
       });
     },
@@ -250,11 +274,15 @@ export default {
       }
       
       this.isWatching = false;
-      this.updateStatus('监听已停止', '位置监听服务已关闭', 'status-ready');
+      this.updateStatus(
+        this.$t('test.locationBuiltin.toastWatchStopped'),
+        this.$t('test.locationBuiltin.statusWatchStoppedDesc'),
+        'status-ready'
+      );
       this.addLog('停止监听', '位置监听服务已停止', 'info');
       
       uni.showToast({
-        title: '监听已停止',
+        title: this.$t('test.locationBuiltin.toastWatchStopped'),
         icon: 'success'
       });
     },
@@ -293,7 +321,7 @@ export default {
     testBaiduReverse() {
       if (!this.currentLocation) {
         uni.showToast({
-          title: '请先获取位置',
+          title: this.$t('test.locationBuiltin.toastNeedLocationFirst'),
           icon: 'none'
         });
         return;
@@ -312,7 +340,7 @@ export default {
         },
         success: (res) => {
           if (res.statusCode === 200 && res.data) {
-            const addr = res.data.address || '[无地址]';
+            const addr = res.data.address || `[${this.$t('messages.addressUnavailable')}]`;
             this.addLog('百度逆地理成功', addr, 'success');
             // 同步到当前地址字段，方便观察
             this.currentLocation = {
@@ -320,14 +348,14 @@ export default {
               address: addr
             };
             uni.showToast({
-              title: '百度逆地理成功',
+              title: this.$t('test.locationBuiltin.toastReverseSuccess'),
               icon: 'success'
             });
           } else {
             const msg = res.data?.detail || `HTTP ${res.statusCode}`;
             this.addLog('百度逆地理失败', msg, 'error');
             uni.showToast({
-              title: '百度逆地理失败',
+              title: this.$t('test.locationBuiltin.toastReverseFailed'),
               icon: 'none'
             });
           }
@@ -335,7 +363,7 @@ export default {
         fail: (err) => {
           this.addLog('百度逆地理失败', err.errMsg || '请求失败', 'error');
           uni.showToast({
-            title: '请求失败',
+            title: this.$t('test.locationBuiltin.toastRequestFailed'),
             icon: 'none'
           });
         }
@@ -346,7 +374,7 @@ export default {
     testBaiduReverseUni() {
       if (!this.currentLocation) {
         uni.showToast({
-          title: '请先获取位置',
+          title: this.$t('test.locationBuiltin.toastNeedLocationFirst'),
           icon: 'none'
         });
         return;
@@ -368,7 +396,7 @@ export default {
         success: (res) => {
           if (res.statusCode === 200 && res.data && res.data.status === 0) {
             const result = res.data.result || {};
-            const addr = result.formatted_address || '[无地址]';
+            const addr = result.formatted_address || `[${this.$t('messages.addressUnavailable')}]`;
             const desc = result.sematic_description || '';
             this.addLog('前端百度逆地理成功', `${addr} ${desc}`, 'success');
 
@@ -379,14 +407,14 @@ export default {
             };
 
             uni.showToast({
-              title: '前端百度逆地理成功',
+              title: this.$t('test.locationBuiltin.toastReverseFrontendSuccess'),
               icon: 'success'
             });
           } else {
             const msg = (res.data && (res.data.msg || res.data.message)) || `HTTP ${res.statusCode}`;
             this.addLog('前端百度逆地理失败', msg, 'error');
             uni.showToast({
-              title: '前端百度逆地理失败',
+              title: this.$t('test.locationBuiltin.toastReverseFrontendFailed'),
               icon: 'none'
             });
           }
@@ -394,7 +422,7 @@ export default {
         fail: (err) => {
           this.addLog('前端百度逆地理失败', err.errMsg || '请求失败', 'error');
           uni.showToast({
-            title: '请求失败',
+            title: this.$t('test.locationBuiltin.toastRequestFailed'),
             icon: 'none'
           });
         }

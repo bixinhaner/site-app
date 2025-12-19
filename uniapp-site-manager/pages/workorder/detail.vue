@@ -465,9 +465,9 @@ const addWatermarkToImage = async (imagePath, checkItem, gpsData) => {
     
     // 使用新的增强水印功能
     const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
-      inspector: userInfo.value?.username || '未知检查员',
-      checkItem: checkItem.item_name || '检查项目',
-      siteName: order.value?.site_name || '未知站点'
+      inspector: userInfo.value?.username || $t('messages.unknownInspector'),
+      checkItem: checkItem.item_name || $t('inspection.checkItem'),
+      siteName: order.value?.site_name || $t('site.unknownSite')
     }, {
       showAddressDetails: true,  // 显示详细地址信息
       showPOI: false,           // 不显示POI信息
@@ -613,9 +613,9 @@ const openEdit = async (it) => {
   const schema = await store.getItemFieldSchema(orderId.value)
   if (schema.success) {
     const found = (schema.data || []).find(s => s.item_id === it.id)
-    fieldDefs.value = found?.fields || [{ field_id:'note', label:'备注', type:'text', required:false }]
+    fieldDefs.value = found?.fields || [{ field_id:'note', label: $t('inspection.remarks'), type:'text', required:false }]
   } else {
-    fieldDefs.value = [{ field_id:'note', label:'备注', type:'text', required:false }]
+    fieldDefs.value = [{ field_id:'note', label: $t('inspection.remarks'), type:'text', required:false }]
   }
   // 填充已有答案
   const dv = it.data_value || []
@@ -641,23 +641,23 @@ const saveEdit = async () => {
     if (f.required) {
       const empty = (f.type === 'select_multi') ? (!val || val.length === 0) : (val === undefined || val === null || val === '')
       if (empty) {
-        uni.showToast({ title: `${f.label || key} 为必填`, icon: 'none' })
+        uni.showToast({ title: $t('messages.validationRequired', { field: f.label || key }), icon: 'none' })
         return
       }
     }
     const c = f.constraints || {}
     if (f.type === 'number') {
       if (typeof val === 'number') {
-        if (c.min !== undefined && val < c.min) { uni.showToast({ title: `${f.label||key} 不能小于 ${c.min}`, icon:'none' }); return }
-        if (c.max !== undefined && val > c.max) { uni.showToast({ title: `${f.label||key} 不能大于 ${c.max}`, icon:'none' }); return }
+        if (c.min !== undefined && val < c.min) { uni.showToast({ title: $t('messages.validationMinNumber', { field: f.label || key, min: c.min }), icon:'none' }); return }
+        if (c.max !== undefined && val > c.max) { uni.showToast({ title: $t('messages.validationMaxNumber', { field: f.label || key, max: c.max }), icon:'none' }); return }
       }
     }
     if (f.type === 'text' || f.type === 'rich_text') {
       const len = (val || '').length
-      if (c.min_length !== undefined && len < c.min_length) { uni.showToast({ title: `${f.label||key} 最少 ${c.min_length} 字`, icon:'none' }); return }
-      if (c.max_length !== undefined && len > c.max_length) { uni.showToast({ title: `${f.label||key} 最多 ${c.max_length} 字`, icon:'none' }); return }
+      if (c.min_length !== undefined && len < c.min_length) { uni.showToast({ title: $t('messages.validationMinLength', { field: f.label || key, min: c.min_length }), icon:'none' }); return }
+      if (c.max_length !== undefined && len > c.max_length) { uni.showToast({ title: $t('messages.validationMaxLength', { field: f.label || key, max: c.max_length }), icon:'none' }); return }
       if (c.pattern) {
-        try { const re = new RegExp(c.pattern); if (!re.test(val || '')) { uni.showToast({ title: `${f.label||key} 格式不符合`, icon:'none' }); return } } catch(e) {}
+        try { const re = new RegExp(c.pattern); if (!re.test(val || '')) { uni.showToast({ title: $t('messages.validationPattern', { field: f.label || key }), icon:'none' }); return } } catch(e) {}
       }
     }
   }
@@ -670,12 +670,12 @@ const saveEdit = async () => {
   const payload = { data_value: answers, status: editStatus.value }
   const res = await store.updateItem(orderId.value, editItemObj.value.id, payload)
   if (res.success) {
-    uni.showToast({ title: '已保存', icon: 'success' })
+    uni.showToast({ title: $t('messages.saveSuccess'), icon: 'success' })
     editVisible.value = false
     const b = await store.getItems(orderId.value)
     if (b.success) items.value = b.data
   } else {
-    uni.showToast({ title: res.error || '保存失败', icon: 'error' })
+    uni.showToast({ title: res.error || $t('messages.saveFailed'), icon: 'error' })
   }
 }
 

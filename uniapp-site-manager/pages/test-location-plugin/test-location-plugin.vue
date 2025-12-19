@@ -1,8 +1,8 @@
 <template>
-  <view class="location-test-page">
+  <view class="location-test-page" :key="languageStore.currentLocale">
     <view class="header">
-      <text class="title">定位插件测试</text>
-      <text class="subtitle">验证 my-location-plugin 集成状态</text>
+      <text class="title">{{ $t('test.locationPlugin.title') }}</text>
+      <text class="subtitle">{{ $t('test.locationPlugin.subtitle') }}</text>
     </view>
     
     <view class="test-section">
@@ -12,25 +12,25 @@
       </view>
       
       <view class="button-group">
-        <button @click="testPluginLoad" class="test-btn primary">检测插件加载</button>
-        <button @click="checkAvailableMethods" class="test-btn info" :disabled="!pluginLoaded">检查可用方法</button>
-        <button @click="runCompleteTest" class="test-btn warning" :disabled="!pluginLoaded">完整诊断测试</button>
-        <button @click="testPluginBasic" class="test-btn" :disabled="!pluginLoaded">测试插件基本功能</button>
-        <button @click="testPermissions" class="test-btn" :disabled="!pluginLoaded">检查权限状态</button>
-        <button @click="testLocationSync" class="test-btn" :disabled="!pluginLoaded">同步获取位置</button>
-        <button @click="testLocationAsync" class="test-btn success" :disabled="!pluginLoaded">异步获取位置</button>
-        <button @click="testLocationWithAddress" class="test-btn success" :disabled="!pluginLoaded">获取位置+地址</button>
+        <button @click="testPluginLoad" class="test-btn primary">{{ $t('test.locationPlugin.btnDetectLoad') }}</button>
+        <button @click="checkAvailableMethods" class="test-btn info" :disabled="!pluginLoaded">{{ $t('test.locationPlugin.btnCheckMethods') }}</button>
+        <button @click="runCompleteTest" class="test-btn warning" :disabled="!pluginLoaded">{{ $t('test.locationPlugin.btnRunAll') }}</button>
+        <button @click="testPluginBasic" class="test-btn" :disabled="!pluginLoaded">{{ $t('test.locationPlugin.btnBasic') }}</button>
+        <button @click="testPermissions" class="test-btn" :disabled="!pluginLoaded">{{ $t('test.locationPlugin.btnPermissions') }}</button>
+        <button @click="testLocationSync" class="test-btn" :disabled="!pluginLoaded">{{ $t('test.locationPlugin.btnLocationSync') }}</button>
+        <button @click="testLocationAsync" class="test-btn success" :disabled="!pluginLoaded">{{ $t('test.locationPlugin.btnLocationAsync') }}</button>
+        <button @click="testLocationWithAddress" class="test-btn success" :disabled="!pluginLoaded">{{ $t('test.locationPlugin.btnLocationWithAddress') }}</button>
       </view>
     </view>
     
     <view class="result-section" v-if="testResults.length > 0">
-      <text class="section-title">测试结果</text>
+      <text class="section-title">{{ $t('test.locationPlugin.sectionResults') }}</text>
       <scroll-view class="results-list" scroll-y>
         <view v-for="(result, index) in testResults" :key="index" class="result-item">
           <view class="result-header">
             <text class="result-time">{{ result.time }}</text>
             <text class="result-status" :class="result.success ? 'success' : 'error'">
-              {{ result.success ? '成功' : '失败' }}
+              {{ result.success ? $t('test.locationPlugin.resultSuccess') : $t('test.locationPlugin.resultFailed') }}
             </text>
           </view>
           <text class="result-message">{{ result.message }}</text>
@@ -40,25 +40,25 @@
         </view>
       </scroll-view>
       
-      <button @click="clearResults" class="clear-btn">清空结果</button>
+      <button @click="clearResults" class="clear-btn">{{ $t('test.locationPlugin.clearResults') }}</button>
     </view>
     
     <view class="integration-info">
-      <text class="info-title">集成状态检查</text>
+      <text class="info-title">{{ $t('test.locationPlugin.integrationTitle') }}</text>
       <view class="info-item">
-        <text class="info-label">插件目录:</text>
+        <text class="info-label">{{ $t('test.locationPlugin.pluginDir') }}:</text>
         <text class="info-value">nativeplugins/my-location-plugin ✅</text>
       </view>
       <view class="info-item">
-        <text class="info-label">manifest.json:</text>
+        <text class="info-label">{{ $t('test.locationPlugin.manifestConfigured') }}:</text>
         <text class="info-value">已配置 nativePlugins ✅</text>
       </view>
       <view class="info-item">
-        <text class="info-label">AAR文件:</text>
+        <text class="info-label">{{ $t('test.locationPlugin.aarFile') }}:</text>
         <text class="info-value">location-plugin-debug.aar ✅</text>
       </view>
       <view class="info-item">
-        <text class="info-label">权限配置:</text>
+        <text class="info-label">{{ $t('test.locationPlugin.permissionConfig') }}:</text>
         <text class="info-value">AndroidManifest.xml ✅</text>
       </view>
     </view>
@@ -66,15 +66,17 @@
 </template>
 
 <script>
+import { useLanguageStore } from '@/stores/language'
 export default {
   name: 'TestLocationPlugin',
   data() {
     return {
+      languageStore: useLanguageStore(),
       pluginLoaded: false,
       locationPlugin: null,
       pluginStatus: {
-        text: '未检测',
-        desc: '点击按钮检测插件加载状态',
+        text: '',
+        desc: '',
         class: 'status-pending'
       },
       testResults: []
@@ -82,6 +84,12 @@ export default {
   },
   
   onLoad() {
+    uni.setNavigationBarTitle({ title: this.$t('test.locationPlugin.title') })
+    this.pluginStatus = {
+      text: this.$t('test.locationPlugin.statusNotChecked'),
+      desc: this.$t('test.locationPlugin.statusPendingDesc'),
+      class: 'status-pending'
+    }
     this.addResult(false, '页面加载', '🚀 增强版定位插件测试页面已加载');
     this.addResult(false, '说明', '📋 请依次点击按钮进行测试，或使用"完整诊断测试"一键检测所有功能');
   },
@@ -99,8 +107,8 @@ export default {
           this.locationPlugin = plugin;
           this.pluginLoaded = true;
           this.pluginStatus = {
-            text: '插件加载成功',
-            desc: '可以进行功能测试',
+            text: this.$t('test.locationPlugin.statusLoadSuccess'),
+            desc: this.$t('test.locationPlugin.statusLoadSuccessDesc'),
             class: 'status-success'
           };
           
@@ -110,7 +118,7 @@ export default {
           });
           
           uni.showToast({
-            title: '插件加载成功',
+            title: this.$t('test.locationPlugin.statusLoadSuccess'),
             icon: 'success'
           });
           
@@ -120,7 +128,7 @@ export default {
         
       } catch (error) {
         this.pluginStatus = {
-          text: '插件加载失败',
+          text: this.$t('test.locationPlugin.statusLoadFailed'),
           desc: error.message,
           class: 'status-error'
         };
@@ -128,8 +136,8 @@ export default {
         this.addResult(false, '插件加载', `加载失败: ${error.message}`);
         
         uni.showModal({
-          title: '插件加载失败',
-          content: `错误信息: ${error.message}\n\n可能原因:\n1. 插件编译问题\n2. UniApp SDK 依赖缺失\n3. 配置不正确`,
+          title: this.$t('test.locationPlugin.statusLoadFailed'),
+          content: this.$t('test.locationPlugin.modalLoadFailedContent', { error: error.message }),
           showCancel: false
         });
       }
@@ -436,7 +444,7 @@ export default {
               );
               
               uni.showToast({
-                title: '实时定位成功',
+                title: this.$t('test.locationPlugin.toastRealtimeLocationSuccess'),
                 icon: 'success'
               });
             }
@@ -534,7 +542,7 @@ export default {
               );
               
               uni.showToast({
-                title: '地址解析成功',
+                title: this.$t('test.locationPlugin.toastAddressResolvedSuccess'),
                 icon: 'success'
               });
             }

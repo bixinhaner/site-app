@@ -304,7 +304,21 @@
 		return `status-${status}`
 	}
 	
-	const getStatusText = (status) => ({ assigned: '已分配', in_progress: '进行中', submitted: '待审核', approved: '已通过', rejected: '已驳回', completed: '已完成' })[status] || status
+	const getStatusText = (status) => {
+		const statusMap = {
+			ASSIGNED: t('workorder.assigned'),
+			ACTIVE: t('workorder.inProgress'),
+			IN_PROGRESS: t('workorder.inProgress'),
+			ACCEPTED: t('workorder.accepted'),
+			SUBMITTED: t('workorder.submitted'),
+			UNDER_REVIEW: t('workorder.underReview'),
+			APPROVED: t('workorder.approved'),
+			REJECTED: t('workorder.rejected'),
+			COMPLETED: t('workorder.completed'),
+			ACTIVATED: t('workorder.completed'),
+		}
+		return statusMap[status] || status
+	}
 	
 	// 页面跳转方法
 	const goToSites = () => {
@@ -335,14 +349,14 @@
 	
 	const showUserMenu = () => {
 		uni.showActionSheet({
-			itemList: ['个人信息', '退出登录'],
+			itemList: [t('profile.userInfo'), t('profile.logout')],
 			success: (res) => {
 				if (res.tapIndex === 0) {
 					uni.reLaunch({ url: '/pages/profile/profile' })
 				} else if (res.tapIndex === 1) {
 					uni.showModal({
-						title: '确认退出',
-						content: '确定要退出登录吗？',
+						title: t('common.hint'),
+						content: t('messages.confirmLogout'),
 						success: (res) => {
 							if (res.confirm) {
 								userStore.logout()

@@ -3,6 +3,16 @@
  * 支持多种扫码格式解析
  */
 
+import i18n from './i18n.js'
+
+const t = (key, params = {}) => {
+  try {
+    return i18n?.global?.t ? i18n.global.t(key, params) : key
+  } catch (error) {
+    return key
+  }
+}
+
 /**
  * 解析扫码结果
  * @param {string} scanResult 扫码原始结果
@@ -17,7 +27,7 @@ export function parseBarcode(scanResult) {
     console.log('❌ [parseBarcode] 输入无效')
     return {
       success: false,
-      error: '扫码结果为空',
+      error: t('stock.scanResultEmpty'),
       rawData: scanResult
     }
   }
@@ -123,7 +133,7 @@ export function parseBarcode(scanResult) {
     // 如果都不匹配，返回错误
     console.log('❌ [parseBarcode] 所有格式都不匹配')
     result.success = false
-    result.error = '不支持的条码格式'
+    result.error = t('stock.barcodeFormatUnsupported')
     console.log('❌ [parseBarcode] 返回错误结果:', result)
     return result
 
@@ -131,7 +141,7 @@ export function parseBarcode(scanResult) {
     console.log('❌ [parseBarcode] 异常:', error)
     return {
       success: false,
-      error: `解析失败: ${error.message}`,
+      error: t('stock.barcodeParseFailed', { error: error.message }),
       rawData: scanResult
     }
   }

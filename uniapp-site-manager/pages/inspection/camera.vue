@@ -1,5 +1,5 @@
 <template>
-	<view class="camera-container">
+	<view class="camera-container" :key="languageStore.currentLocale">
 		<!-- 状态栏占位 -->
 		<view class="status-bar"></view>
 		
@@ -45,7 +45,7 @@
 			<!-- 拍照要求提示 -->
 			<cover-view class="requirement-overlay" v-if="checkItem?.photo_requirements">
 				<cover-view class="requirement-card">
-					<cover-text class="requirement-title">📸 拍照要求</cover-text>
+					<cover-text class="requirement-title">📸 {{ $t('inspection.photoRequirementsTitle') }}</cover-text>
 					<cover-text class="requirement-desc">{{ checkItem.photo_requirements.description }}</cover-text>
 					<cover-view class="requirement-list" v-if="checkItem.photo_requirements.include">
 						<cover-text 
@@ -81,16 +81,16 @@
 				<!-- 相册按钮（禁用状态） -->
 				<cover-view class="gallery-btn disabled" @tap="showGalleryDisabledTip">
 					<cover-text class="gallery-icon">🖼️</cover-text>
-					<cover-text class="gallery-text">相册</cover-text>
+					<cover-text class="gallery-text">{{ $t('inspection.album') }}</cover-text>
 					<cover-view class="disabled-overlay">
-						<cover-text class="disabled-text">已禁用</cover-text>
+						<cover-text class="disabled-text">{{ $t('inspection.disabled') }}</cover-text>
 					</cover-view>
 				</cover-view>
 			</cover-view>
 			
 			<!-- 拍照进度提示 -->
 			<cover-view class="capture-progress" v-if="isCapturing">
-				<cover-text class="progress-text">📸 拍照中...</cover-text>
+				<cover-text class="progress-text">📸 {{ $t('inspection.capturing') }}</cover-text>
 				<cover-view class="progress-bar">
 					<cover-view class="progress-fill" :style="{ width: captureProgress + '%' }"></cover-view>
 				</cover-view>
@@ -114,7 +114,7 @@
 		<view class="photo-preview-modal" v-if="showPreview" @click="hidePreview">
 			<view class="preview-container" @click.stop>
 				<view class="preview-header">
-					<text class="preview-title">照片预览</text>
+					<text class="preview-title">{{ $t('inspection.photoPreview') }}</text>
 					<button class="preview-close" @click="hidePreview">
 						<uni-icons type="closeempty" size="20" color="#6b7280" />
 					</button>
@@ -126,28 +126,28 @@
 					<!-- 照片信息 -->
 					<view class="photo-info">
 						<view class="info-row">
-							<text class="info-label">GPS坐标:</text>
+							<text class="info-label">{{ $t('inspection.gpsCoordinatesLabel') }}:</text>
 							<text class="info-value">{{ formatGPS(previewPhoto.gps) }}</text>
 						</view>
 						<view class="info-row">
-							<text class="info-label">拍摄时间:</text>
+							<text class="info-label">{{ $t('inspection.shootTimeLabel') }}:</text>
 							<text class="info-value">{{ previewPhoto.timestamp }}</text>
 						</view>
 						<view class="info-row">
-							<text class="info-label">文件大小:</text>
+							<text class="info-label">{{ $t('inspection.fileSizeLabel') }}:</text>
 							<text class="info-value">{{ formatFileSize(previewPhoto.size) }}</text>
 						</view>
 						<view class="info-row" v-if="previewPhoto.gps.accuracy">
-							<text class="info-label">GPS精度:</text>
+							<text class="info-label">{{ $t('inspection.gpsAccuracyLabel') }}:</text>
 							<text class="info-value">{{ previewPhoto.gps.accuracy }}m</text>
 						</view>
 					</view>
 				</view>
 				
 				<view class="preview-actions">
-					<button class="action-btn retry-btn" @click="retakePhoto">重新拍摄</button>
+					<button class="action-btn retry-btn" @click="retakePhoto">{{ $t('inspection.retakePhoto') }}</button>
 					<button class="action-btn confirm-btn" @click="confirmPhoto" :disabled="isUploading">
-						{{ isUploading ? '上传中...' : '确认使用' }}
+						{{ isUploading ? $t('messages.uploading') : $t('inspection.confirmUse') }}
 					</button>
 				</view>
 			</view>
@@ -157,7 +157,7 @@
 		<view class="upload-progress-modal" v-if="showUploadProgress">
 			<view class="upload-container">
 				<view class="upload-icon">📤</view>
-				<text class="upload-title">正在上传照片</text>
+				<text class="upload-title">{{ $t('inspection.uploadingPhotoTitle') }}</text>
 				<view class="upload-progress-bar">
 					<view class="upload-progress-fill" :style="{ width: uploadProgress + '%' }"></view>
 				</view>
@@ -182,11 +182,12 @@ export default {
 </script>
 
 <script setup>
-	import { ref, computed, onMounted, onUnmounted } from 'vue'
+	import { ref, computed, onMounted, onUnmounted, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useOfflineStore } from '@/stores/offline'
 	import { useWorkOrderStore } from '@/stores/workorder'
+	import { useLanguageStore } from '@/stores/language'
 	import { watermarkTool } from '@/utils/watermark.js'
 	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
 	import { getLocationMode, getLocationWithAddressStrategy } from '@/utils/locationStrategy.js'
@@ -195,6 +196,13 @@ export default {
 	const inspectionStore = useInspectionStore()
 	const offlineStore = useOfflineStore()
 	const workOrderStore = useWorkOrderStore()
+	const languageStore = useLanguageStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const t = (key, params = {}) => {
+		// 依赖当前语言，确保切换语言后能更新显示
+		const _ = languageStore.currentLocale
+		return $t(key, params)
+	}
 	
 	// URL参数 (在UniApp中通过onLoad接收)
 	const urlParams = ref({
@@ -268,14 +276,14 @@ export default {
 	
 	const gpsStatusText = computed(() => {
 		if (!gpsInfo.value.latitude) {
-			return 'GPS定位中...'
+			return t('messages.gettingLocation')
 		}
 		
 		if (gpsInfo.value.accuracy > 10) {
-			return `GPS精度较低(${gpsInfo.value.accuracy}m)`
+			return t('messages.lowGPSAccuracy', { accuracy: gpsInfo.value.accuracy })
 		}
 		
-		return `GPS良好(${gpsInfo.value.accuracy}m)`
+		return t('messages.gpsAccuracyGood', { accuracy: gpsInfo.value.accuracy })
 	})
 	
 	// 处理URL参数的函数
@@ -328,8 +336,8 @@ export default {
 		} catch (error) {
 			console.error('相机权限获取失败:', error)
 			uni.showModal({
-				title: '相机权限',
-				content: '需要相机权限才能拍照，请在设置中开启',
+				title: t('inspection.cameraPermissionTitle'),
+				content: t('inspection.cameraPermissionContent'),
 				showCancel: false
 			})
 		}
@@ -417,7 +425,7 @@ export default {
 			fail: (error) => {
 				console.error('获取位置失败:', error)
 				uni.showToast({
-					title: 'GPS定位失败',
+					title: t('messages.gpsLocationFailed'),
 					icon: 'error'
 				})
 			}
@@ -494,7 +502,8 @@ export default {
 	
 	const updateCurrentTime = () => {
 		const now = new Date()
-		currentTime.value = now.toLocaleString('zh-CN', {
+		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		currentTime.value = now.toLocaleString(locale, {
 			year: 'numeric',
 			month: '2-digit',
 			day: '2-digit',
@@ -509,18 +518,28 @@ export default {
 		const modes = ['off', 'on', 'auto']
 		const currentIndex = modes.indexOf(flashMode.value)
 		flashMode.value = modes[(currentIndex + 1) % modes.length]
+
+		const modeText =
+			flashMode.value === 'on'
+				? t('inspection.flashOn')
+				: flashMode.value === 'auto'
+					? t('inspection.flashAuto')
+					: t('inspection.flashOff')
 		
 		uni.showToast({
-			title: `闪光灯: ${flashMode.value === 'on' ? '开启' : flashMode.value === 'auto' ? '自动' : '关闭'}`,
+			title: t('inspection.flashModeToast', { mode: modeText }),
 			icon: 'none'
 		})
 	}
 	
 	const switchCamera = () => {
 		cameraPosition.value = cameraPosition.value === 'back' ? 'front' : 'back'
+
+		const cameraText =
+			cameraPosition.value === 'back' ? t('inspection.backCamera') : t('inspection.frontCamera')
 		
 		uni.showToast({
-			title: `切换到${cameraPosition.value === 'back' ? '后置' : '前置'}摄像头`,
+			title: t('inspection.switchCameraToast', { camera: cameraText }),
 			icon: 'none'
 		})
 	}
@@ -531,8 +550,8 @@ export default {
 		// 检查GPS要求
 		if (checkItem.value?.photo_requirements?.gps_required && !gpsInfo.value.latitude) {
 			uni.showModal({
-				title: 'GPS定位',
-				content: '此检查项需要GPS信息，请等待定位完成',
+				title: t('inspection.gpsRequiredTitle'),
+				content: t('inspection.gpsRequiredContent'),
 				showCancel: false
 			})
 			return
@@ -541,10 +560,10 @@ export default {
 		// 检查GPS精度
 		if (gpsInfo.value.accuracy > 20) {
 			const confirmResult = await uni.showModal({
-				title: 'GPS精度',
-				content: `当前GPS精度较低(${gpsInfo.value.accuracy}m)，可能影响照片质量，是否继续拍照？`,
-				confirmText: '继续拍照',
-				cancelText: '重新定位'
+				title: t('inspection.gpsAccuracyLabel'),
+				content: t('inspection.lowGpsAccuracyPrompt', { accuracy: gpsInfo.value.accuracy }),
+				confirmText: t('inspection.continueTakePhoto'),
+				cancelText: t('inspection.relocate')
 			})
 			
 			if (!confirmResult.confirm) {
@@ -582,7 +601,7 @@ export default {
 		} catch (error) {
 			console.error('拍照失败:', error)
 			uni.showToast({
-				title: '拍照失败',
+				title: t('messages.takePhotoFailed'),
 				icon: 'error'
 			})
 		} finally {
@@ -602,7 +621,7 @@ export default {
 			isProcessingWatermark.value = true
 			
 			uni.showLoading({
-				title: '正在添加GPS水印...',
+				title: t('messages.addingGPSWatermark'),
 				mask: true
 			})
 			
@@ -637,7 +656,7 @@ export default {
 		} catch (error) {
 			console.error('处理拍照结果失败:', error)
 			uni.showToast({
-				title: '处理照片失败',
+				title: t('messages.photoProcessFailed'),
 				icon: 'error'
 			})
 		} finally {
@@ -671,7 +690,7 @@ export default {
 		} catch (error) {
 			console.error('确认照片失败:', error)
 			uni.showToast({
-				title: '保存失败',
+				title: t('messages.saveFailed'),
 				icon: 'error'
 			})
 		} finally {
@@ -692,7 +711,7 @@ export default {
 			await offlineStore.saveOfflineData(offlineData)
 			
 			uni.showToast({
-				title: '已保存到离线',
+				title: t('messages.savedOffline'),
 				icon: 'success'
 			})
 			
@@ -725,11 +744,11 @@ export default {
 			
 			if (result.success) {
 				uni.showToast({
-					title: '上传成功',
+					title: t('messages.uploadSuccess'),
 					icon: 'success'
 				})
 			} else {
-				throw new Error(result.error || '上传失败')
+				throw new Error(result.error || t('messages.uploadFailed'))
 			}
 			
 		} catch (error) {
@@ -770,11 +789,11 @@ export default {
 			
 			if (result.success) {
 				uni.showToast({
-					title: '上传成功',
+					title: t('messages.uploadSuccess'),
 					icon: 'success'
 				})
 			} else {
-				throw new Error(result.error || '上传失败')
+				throw new Error(result.error || t('messages.uploadFailed'))
 			}
 			
 		} catch (error) {
@@ -807,8 +826,8 @@ export default {
 	const onCameraError = (error) => {
 		console.error('相机错误:', error)
 		uni.showModal({
-			title: '相机错误',
-			content: '相机初始化失败，请检查权限设置',
+			title: t('messages.cameraErrorTitle'),
+			content: t('messages.cameraInitFailedContent'),
 			showCancel: false
 		})
 	}
@@ -820,8 +839,8 @@ export default {
 	
 	const showGalleryDisabledTip = () => {
 		uni.showModal({
-			title: '功能限制',
-			content: '为确保照片真实性，现场检查必须实时拍照，不能选择相册中的照片',
+			title: t('messages.featureLimitTitle'),
+			content: t('messages.albumSelectionDisabledContent'),
 			showCancel: false
 		})
 	}
@@ -833,7 +852,7 @@ export default {
 	}
 	
 	const formatGPS = (gps) => {
-		if (!gps?.latitude) return 'GPS获取中...'
+		if (!gps?.latitude) return t('messages.gettingLocation')
 		
 		return `${gps.latitude.toFixed(6)}, ${gps.longitude.toFixed(6)}`
 	}
@@ -870,9 +889,9 @@ export default {
 			await new Promise(resolve => setTimeout(resolve, 100))
 			
 			const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
-				inspector: userStore.userInfo?.username || '未知检查员',
-				checkItem: checkItem.value?.item_name || '检查项目',
-				siteName: currentSite.value?.site_name || '未知站点'
+				inspector: userStore.userInfo?.username || t('messages.unknownInspector'),
+				checkItem: checkItem.value?.item_name || t('inspection.checkItem'),
+				siteName: currentSite.value?.site_name || t('site.unknownSite')
 			}, {
 				showAddressDetails: true,  // 显示详细地址信息
 				showPOI: false,           // 不显示POI信息
@@ -888,7 +907,7 @@ export default {
 			// 不再提供兜底方案，直接抛出错误
 			// 确保只使用原生插件定位，不使用任何备用方案
 			uni.showToast({
-				title: '原生定位插件水印添加失败',
+				title: t('messages.nativeWatermarkFailed'),
 				icon: 'error'
 			})
 			
@@ -947,14 +966,15 @@ export default {
 			lines.push(`📍 ${watermarkData.gps.latitude.toFixed(6)}, ${watermarkData.gps.longitude.toFixed(6)}`)
 			
 			if (watermarkData.gps.accuracy) {
-				lines.push(`📊 精度: ${watermarkData.gps.accuracy.toFixed(1)}m`)
+				lines.push(`📊 ${t('inspection.accuracy')}: ${watermarkData.gps.accuracy.toFixed(1)}m`)
 			}
 		}
 		
 		// 时间信息
 		if (watermarkData.timestamp) {
 			const date = new Date(watermarkData.timestamp)
-			lines.push(`🕐 ${date.toLocaleString('zh-CN')}`)
+			const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+			lines.push(`🕐 ${date.toLocaleString(locale)}`)
 		}
 		
 		// 检查员信息

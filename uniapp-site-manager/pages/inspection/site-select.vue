@@ -56,7 +56,7 @@
 				<view class="site-details">
 					<view class="detail-row">
 						<text class="detail-icon">📍</text>
-						<text class="detail-text">{{ site.location || '位置信息未提供' }}</text>
+						<text class="detail-text">{{ site.location || $t('site.locationNotProvided') }}</text>
 					</view>
 					
 					<view class="detail-row" v-if="site.coordinates">
@@ -66,12 +66,12 @@
 					
 					<view class="detail-row">
 						<text class="detail-icon">🏢</text>
-						<text class="detail-text">{{ site.operator || '未知运营商' }}</text>
+						<text class="detail-text">{{ site.operator || $t('site.unknownOperator') }}</text>
 					</view>
 					
 					<view class="detail-row" v-if="site.last_inspection">
 						<text class="detail-icon">📋</text>
-						<text class="detail-text">上次检查: {{ formatDate(site.last_inspection) }}</text>
+						<text class="detail-text">{{ $t('inspection.lastInspectionWithDate', { date: formatDate(site.last_inspection) }) }}</text>
 					</view>
 				</view>
 				
@@ -79,7 +79,7 @@
 				<view class="site-actions">
 					<view class="site-distance" v-if="site.distance">
 						<text class="distance-icon">📏</text>
-						<text class="distance-text">距离: {{ formatDistance(site.distance) }}</text>
+						<text class="distance-text">{{ $t('inspection.distanceWithValue', { distance: formatDistance(site.distance) }) }}</text>
 					</view>
 					<text class="select-arrow">→</text>
 				</view>
@@ -88,8 +88,8 @@
 			<!-- 空状态 -->
 			<view class="empty-state" v-if="filteredSites.length === 0 && !loading">
 				<text class="empty-icon">🏗️</text>
-				<text class="empty-title">暂无可检查的站点</text>
-				<text class="empty-desc">请联系管理员分配站点或调整筛选条件</text>
+				<text class="empty-title">{{ $t('inspection.noInspectableSitesTitle') }}</text>
+				<text class="empty-desc">{{ $t('inspection.noInspectableSitesDesc') }}</text>
 			</view>
 			
 			<!-- 加载更多 -->
@@ -102,7 +102,7 @@
 		<view class="filter-overlay" v-if="showFilter" @click="hideFilterModal">
 			<view class="filter-modal" @click.stop>
 				<view class="filter-header">
-					<text class="filter-title">筛选条件</text>
+					<text class="filter-title">{{ $t('inspection.filterTitle') }}</text>
 					<view class="filter-close" @click="hideFilterModal">
 						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
 					</view>
@@ -111,7 +111,7 @@
 				<view class="filter-content">
 					<!-- 状态筛选 -->
 					<view class="filter-section">
-						<text class="section-title">站点状态</text>
+						<text class="section-title">{{ $t('inspection.filterSiteStatus') }}</text>
 						<view class="filter-options">
 							<view 
 								class="filter-option"
@@ -127,7 +127,7 @@
 					
 					<!-- 运营商筛选 -->
 					<view class="filter-section">
-						<text class="section-title">运营商</text>
+						<text class="section-title">{{ $t('inspection.filterOperator') }}</text>
 						<view class="filter-options">
 							<view 
 								class="filter-option"
@@ -143,7 +143,7 @@
 					
 					<!-- 距离筛选 -->
 					<view class="filter-section">
-						<text class="section-title">距离范围</text>
+						<text class="section-title">{{ $t('inspection.filterDistanceRange') }}</text>
 						<view class="distance-slider">
 							<slider 
 								:value="filters.maxDistance" 
@@ -152,14 +152,14 @@
 								@change="onDistanceChange"
 								activeColor="#007bff"
 							/>
-							<text class="distance-value">{{ filters.maxDistance }}km 内</text>
+							<text class="distance-value">{{ $t('inspection.filterDistanceWithin', { km: filters.maxDistance }) }}</text>
 						</view>
 					</view>
 				</view>
 				
 				<view class="filter-actions">
-					<button class="filter-reset" @click="resetFilters">重置</button>
-					<button class="filter-apply" @click="applyFilters">应用</button>
+					<button class="filter-reset" @click="resetFilters">{{ $t('common.reset') }}</button>
+					<button class="filter-apply" @click="applyFilters">{{ $t('common.apply') }}</button>
 				</view>
 			</view>
 		</view>
@@ -167,16 +167,23 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed, getCurrentInstance } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
+	import { useLanguageStore } from '@/stores/language'
 	import { getLocationWithAddressStrategy } from '@/utils/locationStrategy.js'
 	
 	const siteStore = useSiteStore()
 	const inspectionStore = useInspectionStore()
 	const userStore = useUserStore()
+	const languageStore = useLanguageStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const t = (key, params = {}) => {
+		const _ = languageStore.currentLocale
+		return $t(key, params)
+	}
 	
 	// 页面参数
 	const inspectionType = ref('opening')
@@ -199,12 +206,12 @@
 	})
 	
 	// 筛选选项
-	const statusOptions = [
-		{ label: '已分配', value: 'assigned' },
-		{ label: '施工中', value: 'under_construction' },
-		{ label: '待验收', value: 'pending_acceptance' },
-		{ label: '运行中', value: 'operational' }
-	]
+	const statusOptions = computed(() => ([
+		{ label: t('site.assigned'), value: 'assigned' },
+		{ label: t('site.underConstruction'), value: 'under_construction' },
+		{ label: t('site.pendingAcceptance'), value: 'pending_acceptance' },
+		{ label: t('site.operational'), value: 'operational' }
+	]))
 	
 	const operatorOptions = ref([])
 	
@@ -311,7 +318,7 @@
 		} catch (error) {
 			console.error('加载站点失败:', error)
 			uni.showToast({
-				title: '加载失败',
+				title: t('site.loadFailed'),
 				icon: 'error'
 			})
 		} finally {
@@ -407,7 +414,7 @@
 			
 			if (result.success) {
 				uni.showToast({
-					title: '检查已创建',
+					title: t('inspection.inspectionCreated'),
 					icon: 'success'
 				})
 				
@@ -416,13 +423,13 @@
 					url: `/pages/inspection/checklist?inspectionId=${result.data.id}`
 				})
 			} else {
-				throw new Error(result.message || '创建检查失败')
+				throw new Error(result.message || t('inspection.createFailed'))
 			}
 			
 		} catch (error) {
 			console.error('创建检查失败:', error)
 			uni.showToast({
-				title: '创建失败',
+				title: t('inspection.createFailed'),
 				icon: 'error'
 			})
 		}
@@ -487,11 +494,11 @@
 	// 工具函数
 	const getInspectionTypeText = (type) => {
 		const typeMap = {
-			opening: '新站点设备安装',
-			installation: '安装检查', // 保留兼容性
-			maintenance: '维护检查'
+			opening: t('inspection.opening'),
+			installation: t('inspection.installation'),
+			maintenance: t('inspection.maintenance')
 		}
-		return typeMap[type] || '检查'
+		return typeMap[type] || t('inspection.check')
 	}
 	
 	const getSiteStatusClass = (status) => {
@@ -509,15 +516,15 @@
 	
 	const getSiteStatusText = (status) => {
 		const statusMap = {
-			planning: '规划中',
-			construction: '建设中',
-			operational: '运行中',
-			maintenance: '维护中',
-			assigned: '已分配',
-			under_construction: '施工中',
-			pending_acceptance: '待验收'
+			planning: t('site.planning'),
+			construction: t('site.construction'),
+			operational: t('site.operational'),
+			maintenance: t('site.maintenance'),
+			assigned: t('site.assigned'),
+			under_construction: t('site.underConstruction'),
+			pending_acceptance: t('site.pendingAcceptance')
 		}
-		return statusMap[status] || '未知'
+		return statusMap[status] || t('inspection.unknown')
 	}
 	
 	const formatCoordinates = (coordinates) => {
@@ -542,7 +549,8 @@
 	const formatDate = (dateStr) => {
 		if (!dateStr) return ''
 		const date = new Date(dateStr)
-		return date.toLocaleDateString('zh-CN')
+		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		return date.toLocaleDateString(locale)
 	}
 </script>
 

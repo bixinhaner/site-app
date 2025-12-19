@@ -248,7 +248,7 @@ export default {
     // 权限检查：勘察员不能访问扫码领料功能
     if (this.userStore.userInfo?.role === 'surveyor') {
       uni.showToast({
-        title: '勘察员无权限访问此功能',
+        title: this.$t('stock.surveyorNoPermission'),
         icon: 'none'
       })
       setTimeout(() => {
