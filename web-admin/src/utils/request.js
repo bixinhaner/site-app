@@ -8,7 +8,8 @@ const request = axios.create({
   baseURL: config.API_BASE_URL,
   timeout: config.TIMEOUT || 10000,
   headers: {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'X-Client': 'web-admin',
   }
 })
 

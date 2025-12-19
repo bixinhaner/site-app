@@ -12,6 +12,7 @@ from app.utils.planning_schema import ensure_planning_schema
 # Ensure new models are imported before creating tables
 from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
+from app.models import operation_log as _operation_log_models  # noqa: F401
 from app.models import survey as _survey_models  # noqa: F401
 from app.models import survey_archive as _survey_archive_models  # noqa: F401
 from app.models import opening_archive as _opening_archive_models  # noqa: F401
@@ -22,8 +23,10 @@ from app.models import geocode_cache as _geocode_cache_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
+from app.api import operation_logs
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
+from app.middleware.operation_log import OperationLogMiddleware
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -43,6 +46,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# 操作日志（功能动作级）中间件：需尽早注册以覆盖所有 /api 请求
+app.add_middleware(OperationLogMiddleware)
 
 # CORS 中间件
 # 注意：当 allow_credentials=True 时，不应使用通配符 "*"。为开发环境显式允许本地前端来源。
@@ -83,6 +89,7 @@ app.include_router(geocode.router, prefix="/api", tags=["地理编码"])
 app.include_router(site_planning.router, prefix="/api/sites", tags=["站点规划"])
 app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单管理"])
 app.include_router(logs.router, prefix="/api", tags=["用户日志"])
+app.include_router(operation_logs.router, prefix="/api", tags=["操作日志"])
 app.include_router(mobile_settings.router, prefix="/api/system", tags=["系统配置"])
 app.include_router(geocode_cache.router, prefix="/api/system", tags=["地理编码缓存"])
 app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])

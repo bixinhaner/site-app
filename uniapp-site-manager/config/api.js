@@ -12,7 +12,8 @@ export const API_CONFIG = {
   
   // 请求头配置
   HEADERS: {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'X-Client': 'uniapp',
   }
 }
 

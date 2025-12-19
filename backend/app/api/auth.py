@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
@@ -49,6 +49,7 @@ def authenticate_user(db: Session, username: str, password: str):
     return user
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
@@ -74,7 +75,14 @@ def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exception
     # Return a proxy so that role checks treat 'manager' the same as 'admin'
-    return _EffectiveRoleUser(user)
+    effective = _EffectiveRoleUser(user)
+    # 供中间件/审计日志使用：保留原始角色与用户信息
+    try:
+        request.state.current_user = effective
+        request.state.raw_user = user
+    except Exception:
+        pass
+    return effective
 
 @router.post("/login", response_model=Token)
 async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):

@@ -185,6 +185,12 @@ const routes = [
             name: 'DataBackup',
             component: () => import('../views/system/DataBackup.vue'),
             meta: { title: '数据备份', icon: 'FolderOpened' }
+          },
+          {
+            path: 'operation-logs',
+            name: 'OperationLogs',
+            component: () => import('../views/system/OperationLogs.vue'),
+            meta: { title: '操作日志', icon: 'Document', roles: ['admin', 'manager'] }
           }
         ]
       },
