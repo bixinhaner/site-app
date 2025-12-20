@@ -7,6 +7,28 @@
 // 移除复杂的geocoding依赖，使用统一定位策略
 
 import { getLocationWithAddressStrategy } from './locationStrategy.js'
+import i18n from './i18n.js'
+
+const t = (key, params = {}) => {
+  try {
+    const fn = i18n?.global?.t
+    if (typeof fn === 'function') return fn.call(i18n.global, key, params)
+  } catch (e) {
+    // ignore
+  }
+  return key
+}
+
+const pad2 = (value) => String(value).padStart(2, '0')
+
+export const formatWatermarkTimestamp = (input = new Date()) => {
+  const date = input instanceof Date ? input : new Date(input)
+  if (!Number.isFinite(date.getTime())) return String(input || '')
+  return (
+    `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}` +
+    ` ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+  )
+}
 
 export class WatermarkTool {
   constructor() {
@@ -177,66 +199,64 @@ export class WatermarkTool {
       }
     }
     
-    // GPS坐标和地址信息
+    // GPS坐标和地址信息（尽量使用“图标 + 数据”，减少语言依赖）
     if (watermarkData.gps) {
-      // 坐标信息（如果有有效坐标）
-      if (watermarkData.gps.latitude && watermarkData.gps.longitude) {
-        lines.push(`📍 ${watermarkData.gps.latitude.toFixed(6)}, ${watermarkData.gps.longitude.toFixed(6)}`)
-        
-        // 精度信息
-        if (watermarkData.gps.accuracy > 0) {
-          lines.push(`📊 精度: ${watermarkData.gps.accuracy.toFixed(1)}m`)
+      const gps = watermarkData.gps || {}
+      const latitude = Number(gps.latitude)
+      const longitude = Number(gps.longitude)
+      const hasCoords = isFinite(latitude) && isFinite(longitude) && !(latitude === 0 && longitude === 0)
+
+      if (hasCoords) {
+        lines.push(`📍 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
+
+        const accuracy = Number(gps.accuracy || 0)
+        if (isFinite(accuracy) && accuracy > 0) {
+          lines.push(`📊 ${accuracy.toFixed(1)}m`)
         }
-        
-        // 详细地址信息（如果有增强的地址数据）
-        if (watermarkData.gps.watermarkAddress && watermarkData.gps.watermarkAddress.length > 0) {
-          // 使用格式化的地址信息
-          watermarkData.gps.watermarkAddress.forEach(addressLine => {
-            lines.push(addressLine)
-          })
-        } else if (watermarkData.gps.address && watermarkData.gps.address !== 'GPS获取失败') {
-          // 兜底显示基本地址
-          lines.push(`🏠 ${watermarkData.gps.address}`)
-        }
-        
-        // 如果有详细地址信息，显示街道信息
-        if (watermarkData.gps.addressInfo) {
-          const addrInfo = watermarkData.gps.addressInfo
-          
-          // 显示街道和门牌号
-          if (addrInfo.street && !lines.some(line => line.includes(addrInfo.street))) {
-            let streetInfo = addrInfo.street
-            if (addrInfo.street_number) {
-              streetInfo += addrInfo.street_number
-            }
-            lines.push(`🛣️ ${streetInfo}`)
+
+        // 地址信息（可选）
+        const showAddressDetails = watermarkData.options?.showAddressDetails !== false
+        if (showAddressDetails) {
+          if (Array.isArray(gps.watermarkAddress) && gps.watermarkAddress.length > 0) {
+            gps.watermarkAddress
+              .map(line => String(line || '').trim())
+              .filter(Boolean)
+              .forEach(line => lines.push(line))
+          } else {
+            const address = String(gps.address || '').trim()
+            if (address) lines.push(`🏠 ${address}`)
           }
-          
-          // 显示POI信息（如果启用且存在）
-          if (addrInfo.poi_name && watermarkData.options?.showPOI) {
-            lines.push(`🏪 ${addrInfo.poi_name}`)
+
+          // POI 信息（可选）
+          if (gps.addressInfo && watermarkData.options?.showPOI) {
+            const poi = String(gps.addressInfo.poi_name || '').trim()
+            if (poi) lines.push(`🏪 ${poi}`)
           }
         }
       } else {
-        // GPS获取失败的情况
-        if (watermarkData.gps.address === 'GPS获取失败') {
-          lines.push(`📍 GPS获取失败`)
-          if (watermarkData.gps.addressError) {
-            lines.push(`⚠️ ${watermarkData.gps.addressError}`)
-          }
-        }
+        // 无有效坐标（例如定位失败）：仅输出可国际化的短提示
+        lines.push(`📍 ${t('messages.gpsNotObtained')}`)
       }
     }
     
-    // 时间信息
+    // 时间信息（固定格式：YYYY-MM-DD HH:mm:ss）
     if (watermarkData.timestamp) {
       const raw = watermarkData.timestamp
-      const date = new Date(raw)
-      if (Number.isFinite(date.getTime())) {
-        lines.push(`🕐 ${date.toLocaleString('zh-CN')}`)
+      let ts = ''
+      if (raw instanceof Date) {
+        ts = formatWatermarkTimestamp(raw)
       } else {
-        lines.push(`🕐 ${String(raw)}`)
+        const str = String(raw || '').trim()
+        if (str) {
+          if (/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(str)) {
+            ts = str
+          } else {
+            const parsed = new Date(str)
+            ts = Number.isFinite(parsed.getTime()) ? formatWatermarkTimestamp(parsed) : str
+          }
+        }
       }
+      if (ts) lines.push(`🕐 ${ts}`)
     }
     
     // 检查员信息
@@ -511,7 +531,7 @@ export class WatermarkTool {
       }
       
       // 从原生插件结果中提取地址信息
-      let address = '位置获取中...'
+      let address = ''
       let watermarkAddress = []
       
       if (locationResult.success && locationResult.data) {
@@ -582,13 +602,13 @@ export class WatermarkTool {
               }
             } else {
               address = `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`
-              watermarkAddress.push(`📍 坐标: ${address}`)
+              // 无地址信息时不额外追加“坐标”文本，坐标行由通用渲染负责
             }
           }
         } else {
           // 如果没有地址信息，仅显示坐标
           address = `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`
-          watermarkAddress.push(`📍 坐标: ${address}`)
+          // 无地址信息时不额外追加“坐标”文本，坐标行由通用渲染负责
         }
       } else {
         // 原生插件调用失败
@@ -605,7 +625,6 @@ export class WatermarkTool {
         accuracy: locationResult.data.accuracy || 0,
         address: address,
         watermarkAddress: watermarkAddress,
-        timestamp: new Date().toLocaleString('zh-CN'),
         addressInfo: locationResult.address,
         provider: locationResult.data.provider || 'native-plugin'
       }
@@ -614,7 +633,7 @@ export class WatermarkTool {
       const enhancedWatermarkData = {
         ...watermarkData,
         gps: gpsInfo,
-        timestamp: watermarkData.timestamp || new Date().toLocaleString('zh-CN'),
+        timestamp: watermarkData.timestamp || formatWatermarkTimestamp(),
         options: {
           showPOI: options.showPOI || false,
           showAddressDetails: options.showAddressDetails !== false
@@ -635,12 +654,10 @@ export class WatermarkTool {
       // 不再提供降级方案，直接抛出错误
       // 确保只使用原生插件定位，不使用任何备用方案
       const failedGpsInfo = {
+        failed: true,
         latitude: 0,
         longitude: 0,
         accuracy: 0,
-        address: '原生定位插件获取失败',
-        watermarkAddress: ['📍 原生定位插件获取失败'],
-        timestamp: new Date().toLocaleString('zh-CN'),
         addressError: error.message,
         provider: 'native-plugin-failed'
       }
@@ -649,7 +666,7 @@ export class WatermarkTool {
       return await this.addWatermark(imagePath, {
         ...watermarkData,
         gps: failedGpsInfo,
-        timestamp: new Date().toLocaleString('zh-CN')
+        timestamp: watermarkData.timestamp || formatWatermarkTimestamp()
       }, options.canvasId)
     }
   }
@@ -672,7 +689,7 @@ export class WatermarkTool {
         
         if (locationResult.success && locationResult.data) {
           const data = locationResult.data
-          let address = '位置获取中...'
+          let address = ''
           let watermarkAddress = []
           
           // 如果原生插件返回了地址信息（使用与单张照片相同的处理逻辑）
@@ -729,12 +746,12 @@ export class WatermarkTool {
                 }
               } else {
                 address = `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`
-                watermarkAddress.push(`📍 坐标: ${address}`)
+                // 无地址信息时不额外追加“坐标”文本，坐标行由通用渲染负责
               }
             }
           } else {
             address = `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`
-            watermarkAddress.push(`📍 坐标: ${address}`)
+            // 无地址信息时不额外追加“坐标”文本，坐标行由通用渲染负责
           }
           
           gpsInfo = {
@@ -743,7 +760,6 @@ export class WatermarkTool {
             accuracy: data.accuracy || 0,
             address: address,
             watermarkAddress: watermarkAddress,
-            timestamp: new Date().toLocaleString('zh-CN'),
             addressInfo: locationResult.address,
             provider: 'native-plugin'
           }
@@ -756,12 +772,10 @@ export class WatermarkTool {
         console.warn('批量处理原生插件GPS获取失败:', error.message)
         // 不再提供降级方案
         gpsInfo = {
+          failed: true,
           latitude: 0,
           longitude: 0,
           accuracy: 0,
-          address: '原生定位插件获取失败',
-          watermarkAddress: ['📍 原生定位插件获取失败'],
-          timestamp: new Date().toLocaleString('zh-CN'),
           addressError: error.message,
           provider: 'native-plugin-failed'
         }
@@ -776,7 +790,7 @@ export class WatermarkTool {
         const enhancedWatermarkData = {
           ...watermarkData,
           gps: gpsInfo,
-          timestamp: Date.now(),
+          timestamp: formatWatermarkTimestamp(),
           photoIndex: i + 1,
           totalPhotos: imagePaths.length,
           options: {

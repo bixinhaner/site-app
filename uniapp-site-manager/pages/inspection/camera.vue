@@ -186,7 +186,6 @@ export default {
 	import { useUserStore } from '@/stores/user'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useOfflineStore } from '@/stores/offline'
-	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLanguageStore } from '@/stores/language'
 	import { watermarkTool } from '@/utils/watermark.js'
 	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
@@ -195,7 +194,6 @@ export default {
 	const userStore = useUserStore()
 	const inspectionStore = useInspectionStore()
 	const offlineStore = useOfflineStore()
-	const workOrderStore = useWorkOrderStore()
 	const languageStore = useLanguageStore()
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	const t = (key, params = {}) => {
@@ -208,8 +206,6 @@ export default {
 	const urlParams = ref({
 		inspectionId: '',
 		checkItemId: '',
-		workOrderId: '',
-		mode: 'inspection',
 		itemIndex: 0
 	})
 	
@@ -217,8 +213,6 @@ export default {
 	const props = defineProps({
 		inspectionId: String,
 		checkItemId: String,
-		workOrderId: String,  // 工单ID
-		mode: String,         // 模式: inspection | workorder
 		itemIndex: {
 			type: Number,
 			default: 0
@@ -294,8 +288,6 @@ export default {
 		urlParams.value = {
 			inspectionId: options.inspectionId || props.inspectionId || '',
 			checkItemId: options.checkItemId || props.checkItemId || '',
-			workOrderId: options.workOrderId || props.workOrderId || '',
-			mode: options.mode || props.mode || 'inspection',
 			itemIndex: parseInt(options.itemIndex || props.itemIndex || '0')
 		}
 		
@@ -758,51 +750,6 @@ export default {
 		}
 	}
 	
-	const uploadPhotoToWorkOrder = async (photoData) => {
-		try {
-			// 模拟上传进度
-			const uploadInterval = setInterval(() => {
-				uploadProgress.value += 10
-				updateUploadSpeed()
-				
-				if (uploadProgress.value >= 100) {
-					clearInterval(uploadInterval)
-				}
-			}, 200)
-			
-			// 调用工单上传接口
-			const result = await workOrderStore.uploadPhoto(
-				props.workOrderId,
-				photoData.path,
-				{
-					item_id: props.checkItemId,
-					gps_latitude: photoData.gps?.latitude || 0,
-					gps_longitude: photoData.gps?.longitude || 0,
-					gps_accuracy: photoData.gps?.accuracy || undefined,
-					watermark_data: {
-						hasWatermark: photoData.hasWatermark,
-						hash: photoData.hash,
-						signature: photoData.signature
-					}
-				}
-			)
-			
-			if (result.success) {
-				uni.showToast({
-					title: t('messages.uploadSuccess'),
-					icon: 'success'
-				})
-			} else {
-				throw new Error(result.error || t('messages.uploadFailed'))
-			}
-			
-		} catch (error) {
-			// 上传失败时保存到离线
-			await savePhotoOffline(photoData)
-			throw error
-		}
-	}
-	
 	const updateUploadSpeed = () => {
 		// 模拟上传速度计算
 		const speeds = ['1.2MB/s', '800KB/s', '1.5MB/s', '600KB/s']
@@ -959,6 +906,16 @@ export default {
 	}
 	
 	const prepareWatermarkText = (watermarkData) => {
+		const formatWatermarkTimestamp = (input = new Date()) => {
+			const date = input instanceof Date ? input : new Date(input)
+			if (!Number.isFinite(date.getTime())) return String(input || '')
+			const pad2 = (v) => String(v).padStart(2, '0')
+			return (
+				`${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}` +
+				` ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+			)
+		}
+
 		const lines = []
 		
 		// GPS坐标信息
@@ -966,15 +923,13 @@ export default {
 			lines.push(`📍 ${watermarkData.gps.latitude.toFixed(6)}, ${watermarkData.gps.longitude.toFixed(6)}`)
 			
 			if (watermarkData.gps.accuracy) {
-				lines.push(`📊 ${t('inspection.accuracy')}: ${watermarkData.gps.accuracy.toFixed(1)}m`)
+				lines.push(`📊 ${watermarkData.gps.accuracy.toFixed(1)}m`)
 			}
 		}
 		
 		// 时间信息
 		if (watermarkData.timestamp) {
-			const date = new Date(watermarkData.timestamp)
-			const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
-			lines.push(`🕐 ${date.toLocaleString(locale)}`)
+			lines.push(`🕐 ${formatWatermarkTimestamp(watermarkData.timestamp)}`)
 		}
 		
 		// 检查员信息

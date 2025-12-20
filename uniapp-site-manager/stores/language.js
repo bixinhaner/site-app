@@ -63,7 +63,6 @@ export const useLanguageStore = defineStore('language', {
         'pages/profile/profile': t('profile.title'),
         'pages/workorder/list': t('workorder.title'),
         'pages/home/home': t('home.title'),
-        'pages/workorder/detail': t('workorder.detail'),
         'pages/site/detail': t('site.detail'),
         'pages/inspection/checklist': t('inspection.checklist'),
         'pages/inspection/detail': t('inspection.detail'),

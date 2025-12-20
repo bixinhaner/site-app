@@ -288,8 +288,8 @@ const openDetail = (wo) => {
       url: `/pages/inspection/detail?id=${wo.inspection_id}&fromWorkOrder=${wo.id}` 
     })
   } else {
-    // 没有关联检查时仍允许查看工单详情
-    uni.navigateTo({ url: `/pages/workorder/detail?id=${wo.id}` })
+    // 工单详情（含工单独立拍照/上传）已废弃：不再允许进入
+    uni.showToast({ title: $t('messages.inspectionIdNotFound'), icon: 'none' })
   }
 }
 

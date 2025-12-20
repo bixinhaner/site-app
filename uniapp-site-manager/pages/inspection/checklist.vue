@@ -1168,7 +1168,7 @@
 											currentItem.value.item_name || $t('inspection.checkItem'),
 											gpsUsed,
 											(!isCamera && !localUploadWatermarkWithGeo)
-												? { skipLocation: true, localUploadNote: '本图片为本地上传照片' }
+												? { skipLocation: true, localUploadNote: $t('messages.localUploadPhotoWatermark') }
 												: {}
 										)
 										usedWatermark = true
@@ -1438,6 +1438,16 @@
 			resolve(formattedAddress)
 		})
 	}
+
+	const formatWatermarkTimestamp = (input = new Date()) => {
+		const date = input instanceof Date ? input : new Date(input)
+		if (!Number.isFinite(date.getTime())) return ''
+		const pad2 = (v) => String(v).padStart(2, '0')
+		return (
+			`${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}` +
+			` ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+		)
+	}
 	
 	// 获取水印工具
 		const getWatermarkTool = () => {
@@ -1499,11 +1509,10 @@
 						let watermarkedPath = null
 						if (skipLocation) {
 							// 本地/相册上传且不携带定位信息：不调用定位与逆地理，仅添加标注水印
-							const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
 							watermarkedPath = await watermarkTool.addWatermark(imagePath, {
 								...watermarkData,
-								localUploadNote: localUploadNote || '本图片为本地上传照片',
-								timestamp: new Date().toLocaleString(locale)
+								localUploadNote: localUploadNote || $t('messages.localUploadPhotoWatermark'),
+								timestamp: formatWatermarkTimestamp()
 							}, 'watermarkCanvas')
 						} else {
 							// 使用新的增强水印功能，使用页面中的canvas，并复用已获取的GPS
@@ -1550,32 +1559,37 @@
 									ctx.drawImage(imagePath, 0, 0, imgWidth, imgHeight)
 								
 								// 添加水印文字
-								const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+								const ts = formatWatermarkTimestamp()
 								const watermarkText = skipLocation
 									? [
-										`${$t('inspection.watermarkTime')}: ${new Date().toLocaleString(locale)}`,
-										(localUploadNote || '本图片为本地上传照片'),
-										`${$t('inspection.watermarkInspector')}: ${inspector}`,
-										`${$t('inspection.watermarkCheckItem')}: ${itemName}`
+										`🕐 ${ts}`,
+										(localUploadNote || $t('messages.localUploadPhotoWatermark')),
+										`👤 ${inspector}`,
+										`📋 ${itemName}`
 									]
 									: [
-										`${$t('inspection.watermarkTime')}: ${new Date().toLocaleString(locale)}`,
-										`${$t('inspection.watermarkCoordinates')}: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
-										`${$t('inspection.watermarkAddress')}: ${address || $t('messages.addressUnavailable')}`,
-										`${$t('inspection.watermarkInspector')}: ${inspector}`,
-										`${$t('inspection.watermarkCheckItem')}: ${itemName}`
+										`🕐 ${ts}`,
+										`📍 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+										...(address ? [`🏠 ${address}`] : []),
+										`👤 ${inspector}`,
+										`📋 ${itemName}`
 									]
 								
 									// 设置水印样式
 									ctx.setFillStyle('rgba(0, 0, 0, 0.7)')
-									ctx.fillRect(10, imgHeight - 140, imgWidth - 20, 130)
+									const lineHeight = 25
+									const boxPaddingTop = 18
+									const boxPaddingBottom = 18
+									const boxHeight = watermarkText.length * lineHeight + boxPaddingTop + boxPaddingBottom
+									const boxY = Math.max(10, imgHeight - boxHeight - 10)
+									ctx.fillRect(10, boxY, imgWidth - 20, boxHeight)
 									
 									ctx.setFillStyle('#ffffff')
 									ctx.setFontSize(18)
 									
 									// 绘制水印文字
 									watermarkText.forEach((text, index) => {
-										ctx.fillText(text, 20, imgHeight - 115 + index * 25)
+										ctx.fillText(text, 20, boxY + boxPaddingTop + (index + 1) * lineHeight - 8)
 									})
 								
 									// 导出处理后的图片

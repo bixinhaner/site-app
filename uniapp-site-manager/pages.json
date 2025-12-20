@@ -52,13 +52,6 @@
 			}
 		},
 		{
-			"path": "pages/workorder/detail",
-			"style": {
-				"navigationBarTitleText": "工单详情",
-				"navigationStyle": "custom"
-			}
-		},
-		{
 			"path": "pages/inspection/review",
 			"style": {
 				"navigationBarTitleText": "检查审核",

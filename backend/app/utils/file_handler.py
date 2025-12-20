@@ -57,13 +57,13 @@ async def generate_watermark(
             # 准备水印文本
             watermark_lines = []
             if "gps_coordinates" in watermark_data:
-                watermark_lines.append(f"📍 GPS: {watermark_data['gps_coordinates']}")
+                watermark_lines.append(f"📍 {watermark_data['gps_coordinates']}")
             if "timestamp" in watermark_data:
-                watermark_lines.append(f"🕐 Time: {watermark_data['timestamp']}")
+                watermark_lines.append(f"🕐 {watermark_data['timestamp']}")
             if "inspector" in watermark_data:
-                watermark_lines.append(f"👤 Inspector: {watermark_data['inspector']}")
+                watermark_lines.append(f"👤 {watermark_data['inspector']}")
             if "accuracy" in watermark_data:
-                watermark_lines.append(f"📊 Accuracy: {watermark_data['accuracy']}")
+                watermark_lines.append(f"📊 {watermark_data['accuracy']}")
             
             # 计算水印位置和大小
             img_width, img_height = img.size

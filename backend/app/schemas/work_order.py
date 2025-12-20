@@ -94,11 +94,6 @@ class ItemReviewRequest(BaseModel):
     comments: Optional[str] = None
 
 
-class PhotoReviewRequest(BaseModel):
-    action: str = Field(..., pattern="^(approved|rejected)$")
-    comments: Optional[str] = None
-
-
 class WorkOrderItemResponse(BaseModel):
     id: str
     work_order_id: str
@@ -117,26 +112,6 @@ class WorkOrderItemResponse(BaseModel):
     photos: List['InspectionPhotoResponse'] = []
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class WorkOrderPhotoResponse(BaseModel):
-    id: str
-    work_order_id: str
-    item_id: Optional[str]
-    original_name: str
-    file_path: str
-    file_size: Optional[int]
-    mime_type: Optional[str]
-    latitude: Optional[float]
-    longitude: Optional[float]
-    address: Optional[str]
-    taken_at: datetime
-    has_watermark: bool
-    review_status: Optional[str]
-    created_at: datetime
 
     class Config:
         from_attributes = True

@@ -71,8 +71,6 @@ export const API_ENDPOINTS = {
     COMPLETE: (id) => `/api/work-orders/${id}/complete`,
     INSPECTION: (id) => `/api/work-orders/${id}/inspection`,
     ITEMS: (id) => `/api/work-orders/${id}/items`,
-    PHOTOS: (id) => `/api/work-orders/${id}/photos`,
-    DELETE_PHOTO: (photoId) => `/api/work-orders/photos/${photoId}`,
     ITEM_UPDATE: (id, itemId) => `/api/work-orders/${id}/items/${itemId}`
   },
 

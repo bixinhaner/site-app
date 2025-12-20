@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON, Boolean, Enum, Float
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON, Enum
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -91,7 +91,6 @@ class WorkOrder(Base):
     inspection = relationship("SiteInspection", foreign_keys=[inspection_id])
     inspections = relationship("SiteInspection", foreign_keys="SiteInspection.work_order_id", back_populates="work_order")
     items = relationship("WorkOrderItem", back_populates="work_order")
-    photos = relationship("WorkOrderPhoto", back_populates="work_order")
 
 
 class WorkOrderItem(Base):
@@ -122,46 +121,6 @@ class WorkOrderItem(Base):
 
     work_order = relationship("WorkOrder", back_populates="items")
     reviewer = relationship("User", foreign_keys=[reviewed_by])
-    photos = relationship("WorkOrderPhoto", back_populates="item")
-
-
-class WorkOrderPhoto(Base):
-    __tablename__ = "work_order_photos"
-
-    id = Column(String(32), primary_key=True)
-    work_order_id = Column(String(32), ForeignKey("work_orders.id"), nullable=False)
-    item_id = Column(String(32), ForeignKey("work_order_items.id"))
-
-    original_name = Column(String(255))
-    file_path = Column(String(500), nullable=False)
-    file_size = Column(Integer)
-    mime_type = Column(String(100))
-
-    latitude = Column(Float)
-    longitude = Column(Float)
-    gps_accuracy = Column(Float)
-    address = Column(Text)
-
-    taken_at = Column(DateTime, nullable=False)
-    camera_info = Column(JSON)
-
-    has_watermark = Column(Boolean, default=False)
-    watermark_data = Column(JSON)
-    hash_value = Column(String(64))
-    digital_signature = Column(Text)
-
-    review_status = Column(String(20))  # approved, rejected, pending
-    review_comments = Column(Text)
-
-    uploaded_by = Column(Integer, ForeignKey("users.id"))
-    upload_ip = Column(String(45))
-
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    work_order = relationship("WorkOrder", back_populates="photos")
-    item = relationship("WorkOrderItem", back_populates="photos")
-    uploader = relationship("User", foreign_keys=[uploaded_by])
 
 
 class AuditEvent(Base):

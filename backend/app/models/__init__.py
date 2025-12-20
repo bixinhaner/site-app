@@ -4,7 +4,7 @@ from .inspection import (
     InspectionTemplate, TemplateBinding, SiteInspection, 
     InspectionCheckItem, InspectionPhoto
 )
-from .work_order import WorkOrder, WorkOrderItem, WorkOrderPhoto, AuditEvent
+from .work_order import WorkOrder, WorkOrderItem, AuditEvent
 from .equipment import Equipment, EquipmentPackage, EquipmentPackageItem, EquipmentInstance, Warehouse, Inventory, StockTransaction, StockTransactionItem, PickupRecord
 from .planning import SitePlanning, SitePlanningSector, SiteAntennaPort, SiteSwitchPort, PlanningChangeLog
 from .survey import SiteSurvey, SiteSurveyPhoto
@@ -23,7 +23,6 @@ __all__ = [
     "InspectionPhoto",
     "WorkOrder",
     "WorkOrderItem",
-    "WorkOrderPhoto",
     "AuditEvent",
     "Equipment",
     "EquipmentPackage",

@@ -529,45 +529,15 @@ async def get_inspection(
         )
     _ensure_surveyor_inspection_type(db, current_user, inspection)
     
-    # 如果检查关联了工单，在照片列表中包含工单照片，并获取驳回意见
+    # 如果检查关联了工单：获取驳回意见（工单照片链路已废弃，不再合并工单照片）
     if inspection.work_order_id:
-        from app.models.work_order import WorkOrder, WorkOrderPhoto
+        from app.models.work_order import WorkOrder
         
         # 获取工单信息（包括驳回意见）
         work_order = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
         if work_order and work_order.status.value == "REJECTED" and work_order.review_comments:
             # 如果工单被驳回且有驳回意见，将其添加到检查的review_comments字段
             inspection.review_comments = work_order.review_comments
-        
-        work_order_photos = db.query(WorkOrderPhoto).filter(
-            WorkOrderPhoto.work_order_id == inspection.work_order_id
-        ).all()
-        
-        # 将工单照片转换为检查照片格式并添加到检查的照片列表中
-        for wo_photo in work_order_photos:
-            # 创建一个临时的检查照片对象用于显示
-            inspection_photo = InspectionPhoto(
-                id=f"wo_{wo_photo.id}",  # 使用前缀标识这是工单照片
-                inspection_id=inspection_id,
-                check_item_id=wo_photo.item_id,
-                original_name=wo_photo.original_name,
-                file_path=wo_photo.file_path,
-                file_size=wo_photo.file_size,
-                mime_type=wo_photo.mime_type,
-                latitude=wo_photo.latitude,
-                longitude=wo_photo.longitude,
-                gps_accuracy=wo_photo.gps_accuracy,
-                address=wo_photo.address,
-                taken_at=wo_photo.taken_at,
-                has_watermark=wo_photo.has_watermark,
-                watermark_data=wo_photo.watermark_data,
-                hash_value=wo_photo.hash_value,
-                uploaded_by=wo_photo.uploaded_by,
-                created_at=wo_photo.created_at,
-                updated_at=wo_photo.updated_at
-            )
-            # 不要添加到数据库，只是临时用于响应
-            inspection.photos.append(inspection_photo)
     
     return inspection
 
