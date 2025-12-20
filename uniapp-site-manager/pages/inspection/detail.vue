@@ -439,7 +439,7 @@
 		<view class="item-detail-overlay" v-if="currentItem" @click="closeItemDetail">
 			<view class="item-detail-modal" @click.stop>
 				<view class="modal-header">
-					<text class="modal-title">{{ currentItem.item_name }}</text>
+					<text class="modal-title">{{ getCheckItemDisplayTitle(currentItem) }}</text>
 					<view class="modal-close" @click="closeItemDetail">
 						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
 					</view>
@@ -473,10 +473,10 @@
 						<view class="data-list">
 							<view 
 								class="data-item"
-								v-for="dataItem in currentItem.data_value"
-								:key="dataItem.field_name"
+								v-for="(dataItem, index) in currentItem.data_value"
+								:key="dataItem.field_name || index"
 							>
-								<text class="data-label">{{ dataItem.field_name }}:</text>
+								<text class="data-label">{{ getDataFieldDisplayName(dataItem, index) }}:</text>
 								<text class="data-value">{{ dataItem.value }}{{ dataItem.unit || '' }}</text>
 							</view>
 						</view>
@@ -1203,6 +1203,47 @@
 			both: $t('inspection.photoAndData')
 		}
 		return typeMap[type] || $t('inspection.unknown')
+	}
+
+	const getCheckItemDisplayTitle = (item) => {
+		const name = String(item?.item_name || '').trim()
+		// 若 item_name 异常（例如 field_...），尝试从 fields 中找一个可读的 label 作为标题
+		if (!name || /^field_\\d+/.test(name)) {
+			const fields = item?.fields
+			if (Array.isArray(fields) && fields.length > 0) {
+				const firstLabel = fields.map(f => String(f?.label || '').trim()).find(v => v)
+				if (firstLabel) return firstLabel
+			}
+			return name || $t('inspection.checkItem')
+		}
+		return name
+	}
+
+	const getDataFieldDisplayName = (dataItem, index) => {
+		const rawName = String(dataItem?.field_name || '').trim()
+		const fallback = $t('inspection.fieldNumber', { index: Number(index) + 1 })
+		if (!rawName) return fallback
+
+		const fields = currentItem.value?.fields
+		if (Array.isArray(fields) && fields.length > 0) {
+			const matchedById = fields.find(f => {
+				const fid = String(f?.field_id || f?.id || f?.key || '').trim()
+				return fid && fid === rawName
+			})
+			const labelFromId = String(matchedById?.label || matchedById?.name || matchedById?.title || '').trim()
+			if (labelFromId) return labelFromId
+
+			const matchedByLabel = fields.find(f => {
+				const label = String(f?.label || f?.name || f?.title || '').trim()
+				return label && label === rawName
+			})
+			const labelFromLabel = String(matchedByLabel?.label || matchedByLabel?.name || matchedByLabel?.title || '').trim()
+			if (labelFromLabel) return labelFromLabel
+		}
+
+		// field_xxx 兜底不展示原始ID，按顺序编号
+		if (/^field_\\d+/.test(rawName)) return fallback
+		return rawName
 	}
 	
 	const formatDateTime = (dateTime) => {
@@ -1949,7 +1990,7 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background: rgba(0, 0, 0, 0.5);
+		background: rgba(0, 0, 0, 0.55);
 		z-index: 1000;
 		display: flex;
 		align-items: center;
@@ -1968,18 +2009,33 @@
 		min-width: 280rpx;
 		overflow: hidden;
 		box-sizing: border-box;
+		box-shadow: 0 24rpx 80rpx rgba(0, 0, 0, 0.25);
+		animation: modalIn 180ms ease-out;
+	}
+	
+	@keyframes modalIn {
+		from {
+			transform: translateY(20rpx) scale(0.98);
+			opacity: 0;
+		}
+		to {
+			transform: translateY(0) scale(1);
+			opacity: 1;
+		}
 	}
 	
 	.modal-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 30rpx;
+		padding: 28rpx 28rpx 22rpx;
 		border-bottom: 1rpx solid var(--border-soft);
+		background: rgba(255, 255, 255, 0.92);
+		backdrop-filter: blur(8px);
 	}
 	
 	.modal-title {
-		font-size: 32rpx;
+		font-size: 34rpx;
 		font-weight: bold;
 		color: var(--text-primary);
 		flex: 1;
@@ -1998,7 +2054,7 @@
 		align-items: center;
 		justify-content: center;
 		border-radius: 44rpx;
-		background: #f8f9fa;
+		background: rgba(0, 0, 0, 0.04);
 	}
 	
 	.close-icon {
@@ -2008,52 +2064,76 @@
 	
 	.modal-content {
 		flex: 1;
-		padding: 20rpx;
+		padding: 22rpx;
+		padding-bottom: 36rpx;
 		overflow-y: auto;
 		box-sizing: border-box;
 		width: 100%;
+		background: #f6f7fb;
 	}
 	
 	.modal-section {
-		margin-bottom: 40rpx;
+		margin-bottom: 22rpx;
+		background: #fff;
+		border-radius: 16rpx;
+		padding: 22rpx;
+		border: 1rpx solid rgba(0, 0, 0, 0.05);
+		box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.06);
 	}
 	
 	.section-title {
 		font-size: 28rpx;
 		font-weight: bold;
-		color: #333;
-		margin-bottom: 20rpx;
+		color: var(--text-primary);
+		margin-bottom: 18rpx;
 		display: block;
+		position: relative;
+		padding-left: 16rpx;
+	}
+	
+	.section-title::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 6rpx;
+		height: 24rpx;
+		border-radius: 3rpx;
+		background: var(--color-primary);
 	}
 	
 	.info-grid {
 		display: flex;
 		flex-direction: column;
-		gap: 20rpx;
+		gap: 16rpx;
 	}
 	
 	.grid-item {
 		display: flex;
 		flex-direction: row;
 		align-items: flex-start;
-		gap: 10rpx;
-		padding: 12rpx 15rpx;
-		background: #f8f9fa;
+		gap: 14rpx;
+		padding: 14rpx 16rpx;
+		background: #f7f8fa;
 		border-radius: 12rpx;
 		width: 100%;
 		box-sizing: border-box;
 		min-width: 0;
+		border: 1rpx solid rgba(0, 0, 0, 0.04);
 	}
 	
 	.grid-label {
 		font-size: 24rpx;
 		color: #666;
-		min-width: 80rpx;
-		max-width: 100rpx;
+		min-width: 140rpx;
+		max-width: 240rpx;
 		flex-shrink: 0;
 		font-weight: 500;
-		word-break: keep-all;
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: inline-block;
 		line-height: 1.4;
 	}
 	
@@ -2062,6 +2142,7 @@
 		color: #333;
 		font-weight: 500;
 		flex: 1;
+		text-align: right;
 		word-break: break-all;
 		overflow-wrap: break-word;
 		hyphens: auto;
@@ -2076,32 +2157,35 @@
 	.data-list {
 		display: flex;
 		flex-direction: column;
-		gap: 15rpx;
+		gap: 14rpx;
 	}
 	
 	.data-item {
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-start;
-		padding: 15rpx;
-		background: #f8f9fa;
+		padding: 14rpx 16rpx;
+		background: #f7f8fa;
 		border-radius: 12rpx;
-		gap: 10rpx;
+		gap: 14rpx;
 		width: 100%;
 		box-sizing: border-box;
 		min-width: 0;
+		border: 1rpx solid rgba(0, 0, 0, 0.04);
 	}
 	
 	.data-label {
 		font-size: 24rpx;
 		color: #666;
-		min-width: 80rpx;
-		max-width: 100rpx;
+		min-width: 140rpx;
+		max-width: 240rpx;
 		flex-shrink: 0;
 		font-weight: 500;
 		line-height: 1.4;
-		word-break: keep-all;
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: inline-block;
 	}
 	
 	.data-value {
@@ -2124,13 +2208,14 @@
 	.photo-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(150rpx, 1fr));
-		gap: 15rpx;
+		gap: 14rpx;
 	}
 	
 	.photo-item {
 		border-radius: 12rpx;
 		overflow: hidden;
-		background: #f8f9fa;
+		background: #f7f8fa;
+		border: 1rpx solid rgba(0, 0, 0, 0.04);
 	}
 	
 	.photo-thumb {
@@ -2140,9 +2225,10 @@
 	
 	/* 验证信息 */
 	.validation-info {
-		background: #f8f9fa;
+		background: #f7f8fa;
 		border-radius: 12rpx;
-		padding: 20rpx;
+		padding: 18rpx;
+		border: 1rpx solid rgba(0, 0, 0, 0.04);
 	}
 	
 	.validation-status {
