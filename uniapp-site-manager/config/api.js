@@ -111,6 +111,14 @@ export const API_ENDPOINTS = {
     STATS: '/api/logs/stats',
     USER_ACTIVITY: (userId) => `/api/logs/users/${userId}/activity`,
     CLEANUP: '/api/logs/cleanup'
+  },
+
+  // App版本升级
+  APP_VERSION: {
+    CHECK: '/api/app-version/check',
+    LATEST: '/api/app-version/latest',
+    DOWNLOAD_START: '/api/app-version/download-start',
+    DOWNLOAD_COMPLETE: '/api/app-version/download-complete'
   }
 }
 

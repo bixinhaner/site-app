@@ -192,6 +192,12 @@ const routes = [
             name: 'OperationLogs',
             component: () => import('../views/system/OperationLogs.vue'),
             meta: { title: '操作日志', icon: 'Document', roles: ['admin', 'manager'] }
+          },
+          {
+            path: 'app-version',
+            name: 'AppVersionManage',
+            component: () => import('../views/system/AppVersionManage.vue'),
+            meta: { title: 'App版本管理', icon: 'Upload', roles: ['admin', 'manager'] }
           }
         ]
       },
@@ -219,7 +225,7 @@ const router = createRouter({
 // 路由守卫
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
-  
+
   if (to.meta.requiresAuth && !userStore.isLoggedIn) {
     next('/login')
   } else if (to.path === '/login' && userStore.isLoggedIn) {

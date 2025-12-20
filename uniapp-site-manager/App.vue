@@ -12,6 +12,7 @@
 	import { useOfflineStore } from '@/stores/offline'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
+	import { useUpgradeStore } from '@/stores/upgrade'
 	import { initInterceptors } from '@/utils/api-interceptor'
 	import { initLocationMode } from '@/utils/locationStrategy.js'
 	
@@ -26,6 +27,10 @@
 	const offlineStore = useOfflineStore()
 	const logger = useLoggerStore()
 	const languageStore = useLanguageStore()
+	const upgradeStore = useUpgradeStore()
+	
+	// 版本更新弹窗显示状态
+	const showUpdateDialog = ref(false)
 
 	const setAndroidNavigationBarWhite = () => {
 		// #ifdef APP-PLUS
@@ -128,6 +133,22 @@
 
 		// 设置 Android 底部导航栏为白色，修复底部黑边
 		setAndroidNavigationBarWhite()
+		
+		// 检测App更新（延迟执行，避免阻塞启动）
+		// #ifdef APP-PLUS
+		setTimeout(async () => {
+			try {
+				console.log('🔄 开始检测App版本更新...')
+				const hasUpdate = await upgradeStore.checkUpdate(true)
+				if (hasUpdate && !upgradeStore.isSilentUpdate) {
+					console.log('📦 发现新版本:', upgradeStore.versionInfo?.version_name)
+					showUpdateDialog.value = true
+				}
+			} catch (error) {
+				console.warn('版本检测失败:', error)
+			}
+		}, 2000)
+		// #endif
 	})
 	
 	onShow(() => {

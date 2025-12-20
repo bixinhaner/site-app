@@ -21,9 +21,10 @@ from app.models import omc_cellname_sync as _omc_cellname_sync_models  # noqa: F
 from app.models import system_config as _system_config_models  # noqa: F401
 from app.models import geocode_cache as _geocode_cache_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
+from app.models import app_version as _app_version_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
-from app.api import operation_logs
+from app.api import operation_logs, app_version
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
 from app.middleware.operation_log import OperationLogMiddleware
@@ -100,6 +101,7 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表盘"]
 app.include_router(omc.router, prefix="/api/omc", tags=["OMC配置"])
 app.include_router(omc_push.router, prefix="/api/omc", tags=["OMC状态上报告"])
 app.include_router(system_backup.router, prefix="/api/system/backup", tags=["系统备份"])
+app.include_router(app_version.router, prefix="/api/app-version", tags=["App版本管理"])
 
 
 @app.on_event("startup")
