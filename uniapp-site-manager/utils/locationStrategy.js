@@ -26,6 +26,8 @@ import { getLocationWithAddressOfflineFirst } from './nativeLocation.js'
 let locationMode = 'baidu'
 // 是否允许检查详情本地上传图片，默认允许
 let allowLocalPhotoUpload = true
+// 检查详情“本地/相册上传”照片水印是否携带经纬度和地址，默认携带（沿用现状）
+let localUploadWatermarkWithGeo = true
 
 export const getLocationMode = () => locationMode
 
@@ -43,6 +45,13 @@ export const getAllowLocalPhotoUpload = () => allowLocalPhotoUpload
 export const setAllowLocalPhotoUpload = (flag) => {
   // 任何非严格 false 的传入都视为允许，避免因为后端缺字段导致意外禁用
   allowLocalPhotoUpload = flag !== false
+}
+
+export const getLocalUploadWatermarkWithGeo = () => localUploadWatermarkWithGeo
+
+export const setLocalUploadWatermarkWithGeo = (flag) => {
+  // 任何非严格 false 的传入都视为携带，避免因为后端缺字段导致意外禁用
+  localUploadWatermarkWithGeo = flag !== false
 }
 
 /**

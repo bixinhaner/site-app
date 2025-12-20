@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { buildApiUrl, API_ENDPOINTS, createRequestConfig } from '@/config/api.js'
-import { setLocationMode, setAllowLocalPhotoUpload } from '@/utils/locationStrategy.js'
+import { setLocationMode, setAllowLocalPhotoUpload, setLocalUploadWatermarkWithGeo } from '@/utils/locationStrategy.js'
 
 export const useUserStore = defineStore('user', () => {
 	const token = ref(uni.getStorageSync('token') || '')
@@ -86,6 +86,12 @@ export const useUserStore = defineStore('user', () => {
 						} else {
 							// 未返回时默认允许
 							setAllowLocalPhotoUpload(true)
+						}
+						if (typeof settingsRes.data.local_upload_watermark_with_geo === 'boolean') {
+							setLocalUploadWatermarkWithGeo(settingsRes.data.local_upload_watermark_with_geo)
+						} else {
+							// 未返回时默认携带（沿用现状）
+							setLocalUploadWatermarkWithGeo(true)
 						}
 					}
 				} catch (e) {
@@ -237,6 +243,11 @@ export const useUserStore = defineStore('user', () => {
 							setAllowLocalPhotoUpload(settingsRes.data.allow_local_photo_upload)
 						} else {
 							setAllowLocalPhotoUpload(true)
+						}
+						if (typeof settingsRes.data.local_upload_watermark_with_geo === 'boolean') {
+							setLocalUploadWatermarkWithGeo(settingsRes.data.local_upload_watermark_with_geo)
+						} else {
+							setLocalUploadWatermarkWithGeo(true)
 						}
 					}
 				} catch (e) {

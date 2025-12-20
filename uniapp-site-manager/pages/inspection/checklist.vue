@@ -1084,8 +1084,9 @@
 	
 	const takePhoto = async () => {
 		// 根据移动端配置决定是否允许本地上传
-		const { getAllowLocalPhotoUpload } = await import('@/utils/locationStrategy.js')
+		const { getAllowLocalPhotoUpload, getLocalUploadWatermarkWithGeo } = await import('@/utils/locationStrategy.js')
 		const allowAlbum = getAllowLocalPhotoUpload()
+		const localUploadWatermarkWithGeo = getLocalUploadWatermarkWithGeo()
 
 		const itemList = allowAlbum
 			? [$t('common.takePhoto'), $t('common.selectFromAlbum')]
@@ -1131,19 +1132,30 @@
 									let gpsUsed = { ...gpsData }
 									
 									// 拍照/相册均添加GPS水印，确保上传后端校验通过
-									console.log(isCamera ? '拍照模式，添加GPS水印' : '相册模式，添加GPS水印')
+									console.log(
+										isCamera
+											? '拍照模式，添加GPS水印'
+											: (localUploadWatermarkWithGeo ? '相册模式，添加GPS水印' : '相册模式，添加本地上传水印（不带经纬度/地址）')
+									)
 									uni.showLoading({
-										title: $t('messages.addingGPSWatermark'),
+										title: (!isCamera && !localUploadWatermarkWithGeo)
+											? $t('messages.addingWatermark')
+											: $t('messages.addingGPSWatermark'),
 										mask: true
 									})
 									try {
 										// 相册模式需要现取一次定位
 										if (!isCamera) {
-											try {
-												gpsUsed = await getHighAccuracyLocation()
-											} catch (gpsErr) {
-												await handleGpsFailure(gpsErr)
-												return
+											if (localUploadWatermarkWithGeo) {
+												try {
+													gpsUsed = await getHighAccuracyLocation()
+												} catch (gpsErr) {
+													await handleGpsFailure(gpsErr)
+													return
+												}
+											} else {
+												// 本地/相册上传且配置为不携带经纬度/地址：不调用定位和逆地理
+												gpsUsed = { latitude: 0, longitude: 0, accuracy: 0, address: '' }
 											}
 										}
 										const watermarkTool = getWatermarkTool()
@@ -1154,7 +1166,10 @@
 											gpsUsed.address,
 											userStore.userInfo?.username || $t('inspection.unknownInspector'),
 											currentItem.value.item_name || $t('inspection.checkItem'),
-											gpsUsed
+											gpsUsed,
+											(!isCamera && !localUploadWatermarkWithGeo)
+												? { skipLocation: true, localUploadNote: '本图片为本地上传照片' }
+												: {}
 										)
 										usedWatermark = true
 										console.log('水印添加成功，最终图片路径:', finalImagePath)
@@ -1164,7 +1179,9 @@
 										if (!isCamera) {
 											uni.hideLoading()
 											uni.showToast({
-												title: $t('messages.gpsNotObtained'),
+												title: (!localUploadWatermarkWithGeo)
+													? $t('messages.photoProcessFailed')
+													: $t('messages.gpsNotObtained'),
 												icon: 'error'
 											})
 											return
@@ -1182,10 +1199,11 @@
 										gps_accuracy: gpsUsed.accuracy,
 										address: gpsUsed.address,
 										has_watermark: usedWatermark,
+										local_upload_without_geo: (!isCamera && !localUploadWatermarkWithGeo),
 										watermark_data: usedWatermark ? {
 											timestamp: new Date().toISOString(),
-											coordinates: `${gpsUsed.latitude},${gpsUsed.longitude}`,
-											accuracy: gpsUsed.accuracy,
+											coordinates: (!isCamera && !localUploadWatermarkWithGeo) ? '' : `${gpsUsed.latitude},${gpsUsed.longitude}`,
+											accuracy: (!isCamera && !localUploadWatermarkWithGeo) ? undefined : gpsUsed.accuracy,
 										inspector: userStore.userInfo?.username || $t('inspection.unknownInspector'),
 										item_name: currentItem.value.item_name || $t('inspection.checkItem')
 										} : null
@@ -1424,9 +1442,11 @@
 	// 获取水印工具
 		const getWatermarkTool = () => {
 			return {
-				addWatermark: async (imagePath, latitude, longitude, address, inspector, itemName, gpsExtra = null) => {
+				addWatermark: async (imagePath, latitude, longitude, address, inspector, itemName, gpsExtra = null, watermarkOptions = {}) => {
 					try {
 						console.log('使用增强GPS地址水印功能')
+						const skipLocation = watermarkOptions && watermarkOptions.skipLocation === true
+						const localUploadNote = watermarkOptions && watermarkOptions.localUploadNote
 					
 					// 先获取图片信息并设置canvas尺寸
 					const imageInfo = await new Promise((resolve, reject) => {
@@ -1475,20 +1495,33 @@
 						最终站点名称: siteName,
 						最终水印数据: watermarkData
 					})
-					
-						// 使用新的增强水印功能，使用页面中的canvas，并复用已获取的GPS
-						const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, watermarkData, {
-							showAddressDetails: true,
-							showPOI: false,
-							canvasId: 'watermarkCanvas',  // 使用页面中已有的canvas
-							gpsOverride: gpsExtra
-						})
+
+						let watermarkedPath = null
+						if (skipLocation) {
+							// 本地/相册上传且不携带定位信息：不调用定位与逆地理，仅添加标注水印
+							const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+							watermarkedPath = await watermarkTool.addWatermark(imagePath, {
+								...watermarkData,
+								localUploadNote: localUploadNote || '本图片为本地上传照片',
+								timestamp: new Date().toLocaleString(locale)
+							}, 'watermarkCanvas')
+						} else {
+							// 使用新的增强水印功能，使用页面中的canvas，并复用已获取的GPS
+							watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, watermarkData, {
+								showAddressDetails: true,
+								showPOI: false,
+								canvasId: 'watermarkCanvas',  // 使用页面中已有的canvas
+								gpsOverride: gpsExtra
+							})
+						}
 					
 					console.log('增强水印添加完成:', watermarkedPath)
 					return watermarkedPath
 					
 				} catch (error) {
 					console.error('增强水印失败，使用原方案:', error)
+					const skipLocation = watermarkOptions && watermarkOptions.skipLocation === true
+					const localUploadNote = watermarkOptions && watermarkOptions.localUploadNote
 					
 					// 兜底方案：使用原有的canvas水印方法
 					return new Promise((resolve, reject) => {
@@ -1518,13 +1551,20 @@
 								
 								// 添加水印文字
 								const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
-								const watermarkText = [
-									`${$t('inspection.watermarkTime')}: ${new Date().toLocaleString(locale)}`,
-									`${$t('inspection.watermarkCoordinates')}: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
-									`${$t('inspection.watermarkAddress')}: ${address || $t('messages.addressUnavailable')}`,
-									`${$t('inspection.watermarkInspector')}: ${inspector}`,
-									`${$t('inspection.watermarkCheckItem')}: ${itemName}`
-								]
+								const watermarkText = skipLocation
+									? [
+										`${$t('inspection.watermarkTime')}: ${new Date().toLocaleString(locale)}`,
+										(localUploadNote || '本图片为本地上传照片'),
+										`${$t('inspection.watermarkInspector')}: ${inspector}`,
+										`${$t('inspection.watermarkCheckItem')}: ${itemName}`
+									]
+									: [
+										`${$t('inspection.watermarkTime')}: ${new Date().toLocaleString(locale)}`,
+										`${$t('inspection.watermarkCoordinates')}: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+										`${$t('inspection.watermarkAddress')}: ${address || $t('messages.addressUnavailable')}`,
+										`${$t('inspection.watermarkInspector')}: ${inspector}`,
+										`${$t('inspection.watermarkCheckItem')}: ${itemName}`
+									]
 								
 									// 设置水印样式
 									ctx.setFillStyle('rgba(0, 0, 0, 0.7)')
@@ -1906,6 +1946,10 @@
 							const photoData = {
 								check_item_id: currentItem.value.id,
 								has_watermark: photo.has_watermark || false
+							}
+
+							if (photo.local_upload_without_geo) {
+								photoData.local_upload_without_geo = true
 							}
 							
 							// 只在有效时添加GPS相关字段

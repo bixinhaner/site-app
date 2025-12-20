@@ -706,6 +706,7 @@ async def upload_inspection_photo(
     gps_longitude: float = Form(0),
     gps_accuracy: Optional[float] = Form(None),
     has_watermark: bool = Form(False),
+    local_upload_without_geo: bool = Form(False),
     replace_existing: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -720,6 +721,7 @@ async def upload_inspection_photo(
     print(f"  gps_longitude: {gps_longitude} (type: {type(gps_longitude)})")
     print(f"  gps_accuracy: {gps_accuracy} (type: {type(gps_accuracy)})")
     print(f"  has_watermark: {has_watermark} (type: {type(has_watermark)})")
+    print(f"  local_upload_without_geo: {local_upload_without_geo} (type: {type(local_upload_without_geo)})")
     print(f"  file.filename: {file.filename}")
     print(f"  file.content_type: {file.content_type}")
     print(f"  current_user: {current_user.username}")
@@ -738,12 +740,21 @@ async def upload_inspection_photo(
             detail="check_item_id 不能为空，照片必须关联到具体的检查项"
         )
     
-    # 验证GPS坐标（拍照时必须有有效GPS坐标）
-    if gps_latitude == 0 and gps_longitude == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GPS坐标无效，现场拍照必须包含有效的位置信息"
-        )
+    # 本地上传（不带经纬度/地址）允许GPS为0，其他场景仍要求有效GPS
+    if local_upload_without_geo:
+        # 本地上传仍要求前端已加水印（标注“本图片为本地上传照片”）
+        if not has_watermark:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="本地上传照片必须带水印"
+            )
+    else:
+        # 验证GPS坐标（拍照等场景必须有有效GPS坐标）
+        if gps_latitude == 0 and gps_longitude == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="GPS坐标无效，现场拍照必须包含有效的位置信息"
+            )
     
     # 验证检查记录存在
     inspection = db.query(SiteInspection).filter(
@@ -832,8 +843,10 @@ async def upload_inspection_photo(
     # 计算文件哈希
     file_hash = calculate_file_hash(watermarked_path)
     
-    # 获取地址信息
-    address = await reverse_geocode(gps_latitude, gps_longitude)
+    # 获取地址信息（本地上传不带定位信息时，不调用逆地理接口）
+    address = None
+    if not local_upload_without_geo:
+        address = await reverse_geocode(gps_latitude, gps_longitude)
     
     # 创建照片记录
     photo = InspectionPhoto(

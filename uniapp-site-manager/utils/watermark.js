@@ -168,6 +168,14 @@ export class WatermarkTool {
    */
   prepareWatermarkText(watermarkData) {
     const lines = []
+
+    // 本地上传提示（用于“不携带经纬度/地址”的场景）
+    if (watermarkData && watermarkData.localUploadNote) {
+      const note = String(watermarkData.localUploadNote || '').trim()
+      if (note) {
+        lines.push(note)
+      }
+    }
     
     // GPS坐标和地址信息
     if (watermarkData.gps) {
@@ -222,8 +230,13 @@ export class WatermarkTool {
     
     // 时间信息
     if (watermarkData.timestamp) {
-      const date = new Date(watermarkData.timestamp)
-      lines.push(`🕐 ${date.toLocaleString('zh-CN')}`)
+      const raw = watermarkData.timestamp
+      const date = new Date(raw)
+      if (Number.isFinite(date.getTime())) {
+        lines.push(`🕐 ${date.toLocaleString('zh-CN')}`)
+      } else {
+        lines.push(`🕐 ${String(raw)}`)
+      }
     }
     
     // 检查员信息

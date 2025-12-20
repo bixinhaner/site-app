@@ -316,6 +316,150 @@
       </el-collapse>
     </el-card>
 
+    <!-- 卡片 3：检查详情本地上传水印定位信息 -->
+    <el-card class="mb16" v-loading="loading">
+      <template #header>
+        <div class="card-header">
+          <span>检查详情本地上传水印</span>
+        </div>
+      </template>
+
+      <el-form :model="form" label-width="200px" :disabled="!canEdit">
+        <!-- 全局默认：本地上传水印是否携带经纬度和地址 -->
+        <el-form-item label="全局默认开关">
+          <el-switch
+            v-model="form.local_upload_watermark_with_geo.default"
+            active-text="携带经纬度和地址"
+            inactive-text="不携带"
+          />
+        </el-form-item>
+
+        <el-form-item label="说明">
+          <ul class="hint-list">
+            <li>仅影响检查详情中“从本地/相册上传”的照片水印。</li>
+            <li>
+              关闭后：App 不再调用定位与地址解析接口，水印中将以“本图片为本地上传照片”替换经纬度/地址信息（其他水印内容不变）。
+            </li>
+            <li>开启后：保持现状，水印携带经纬度与地址信息。</li>
+          </ul>
+        </el-form-item>
+      </el-form>
+
+      <!-- 高级覆盖配置：检查详情本地上传水印 -->
+      <el-collapse v-model="activeAdvancedLocalUploadWatermark" class="mt8">
+        <el-collapse-item name="role-watermark">
+          <template #title>
+            <span>按角色覆盖（本地上传水印）</span>
+          </template>
+          <el-table
+            :data="roleRows"
+            size="small"
+            border
+            style="width: 100%"
+          >
+            <el-table-column prop="label" label="角色" width="140" />
+            <el-table-column label="水印定位信息">
+              <template #default="{ row }">
+                <el-select
+                  v-model="form.local_upload_watermark_with_geo.per_role[row.key]"
+                  placeholder="跟随全局"
+                  style="width: 220px"
+                  :disabled="!canEdit"
+                  clearable
+                >
+                  <el-option label="跟随全局" :value="''" />
+                  <el-option label="携带经纬度和地址" value="allow" />
+                  <el-option label="不携带（标注本地上传）" value="deny" />
+                </el-select>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p class="hint mt8">
+            留空表示该角色使用“全局默认开关”。当同一用户同时满足多个角色时，APP 端会按后端解析的优先级使用配置。
+          </p>
+        </el-collapse-item>
+
+        <el-collapse-item name="user-watermark">
+          <template #title>
+            <span>按用户覆盖（本地上传水印）</span>
+          </template>
+          <div class="user-rules">
+            <div class="user-rule-form">
+              <el-select
+                v-model="newLocalUploadWatermarkUserRule.user_id"
+                filterable
+                remote
+                reserve-keyword
+                placeholder="搜索用户名/姓名/邮箱"
+                :remote-method="searchUsers"
+                :loading="userSelectLoading"
+                style="width: 260px"
+                :disabled="!canEdit"
+              >
+                <el-option
+                  v-for="opt in userOptions"
+                  :key="opt.id"
+                  :label="opt.label"
+                  :value="String(opt.id)"
+                />
+              </el-select>
+              <el-select
+                v-model="newLocalUploadWatermarkUserRule.flag"
+                placeholder="水印定位信息"
+                style="width: 220px; margin-left: 8px"
+                :disabled="!canEdit"
+              >
+                <el-option label="携带经纬度和地址" value="allow" />
+                <el-option label="不携带（标注本地上传）" value="deny" />
+              </el-select>
+              <el-button
+                type="primary"
+                size="small"
+                style="margin-left: 8px"
+                :disabled="!canEdit"
+                @click="addLocalUploadWatermarkUserRule"
+              >
+                添加
+              </el-button>
+            </div>
+
+            <el-table
+              v-if="form.local_upload_watermark_with_geo.per_user.length"
+              :data="form.local_upload_watermark_with_geo.per_user"
+              size="small"
+              border
+              style="width: 100%; margin-top: 8px"
+            >
+              <el-table-column prop="user_id" label="用户ID" width="120" />
+              <el-table-column prop="flag" label="水印定位信息" width="220">
+                <template #default="{ row }">
+                  <span v-if="row.flag === 'allow'">携带经纬度和地址</span>
+                  <span v-else-if="row.flag === 'deny'">不携带（标注本地上传）</span>
+                  <span v-else>（未知）</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="80">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    text
+                    size="small"
+                    :disabled="!canEdit"
+                    @click="removeLocalUploadWatermarkUserRule($index)"
+                  >
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <p class="hint mt8">
+              按用户配置的优先级最高，会覆盖全局与角色配置。
+            </p>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
     <el-card>
       <template #header>
         <div class="card-header">
@@ -365,6 +509,17 @@ const form = ref({
     },
     per_user: [],
   },
+  local_upload_watermark_with_geo: {
+    default: true,
+    per_role: {
+      admin: '',
+      manager: '',
+      inspector: '',
+      surveyor: '',
+      user: '',
+    },
+    per_user: [],
+  },
 })
 
 const newLocationUserRule = ref({
@@ -377,9 +532,15 @@ const newUploadUserRule = ref({
   flag: 'allow',
 })
 
+const newLocalUploadWatermarkUserRule = ref({
+  user_id: '',
+  flag: 'allow',
+})
+
 // 高级配置折叠面板（默认全部收起，减少页面占用）
 const activeAdvancedLocation = ref([])
 const activeAdvancedUpload = ref([])
+const activeAdvancedLocalUploadWatermark = ref([])
 
 // 用户搜索下拉选项
 const userOptions = ref([])
@@ -466,6 +627,7 @@ const loadConfig = async () => {
     const perRole = lm.per_role || {}
     const perUser = lm.per_user || {}
     const uploadRule = raw.allow_local_photo_upload || {}
+    const localUploadWatermarkRule = raw.local_upload_watermark_with_geo || {}
 
     form.value.location_mode.default =
       (lm.default && lm.default.toLowerCase()) === 'native' ? 'native' : 'baidu'
@@ -485,6 +647,14 @@ const loadConfig = async () => {
     fillBoolRuleToForm(
       form.value.allow_local_photo_upload,
       uploadRule,
+      roleKeys,
+      true,
+    )
+
+    // local_upload_watermark_with_geo：使用通用布尔规则映射（true=携带经纬度地址）
+    fillBoolRuleToForm(
+      form.value.local_upload_watermark_with_geo,
+      localUploadWatermarkRule,
       roleKeys,
       true,
     )
@@ -511,6 +681,7 @@ const save = async () => {
         per_user: {},
       },
       allow_local_photo_upload: {},
+      local_upload_watermark_with_geo: {},
     }
 
     // 构建 per_role：仅提交明确选择的模式
@@ -533,6 +704,10 @@ const save = async () => {
     // 构建 allow_local_photo_upload：使用通用布尔规则映射
     payload.allow_local_photo_upload = buildBoolRulePayload(
       form.value.allow_local_photo_upload,
+    )
+
+    payload.local_upload_watermark_with_geo = buildBoolRulePayload(
+      form.value.local_upload_watermark_with_geo,
     )
 
     await mobileSettingsApi.updateMobileSettings(payload)
@@ -615,6 +790,36 @@ const addUploadUserRule = () => {
 
 const removeUploadUserRule = (index) => {
   form.value.allow_local_photo_upload.per_user.splice(index, 1)
+}
+
+const addLocalUploadWatermarkUserRule = () => {
+  const id = String(newLocalUploadWatermarkUserRule.value.user_id || '').trim()
+  const flag = newLocalUploadWatermarkUserRule.value.flag
+  if (!id) {
+    ElMessage.warning('请选择用户')
+    return
+  }
+  if (flag !== 'allow' && flag !== 'deny') {
+    ElMessage.warning('请选择水印定位信息策略')
+    return
+  }
+  const exists = form.value.local_upload_watermark_with_geo.per_user.some(
+    (r) => String(r.user_id) === id,
+  )
+  if (exists) {
+    ElMessage.warning('该用户已存在水印定位信息策略')
+    return
+  }
+  form.value.local_upload_watermark_with_geo.per_user.push({
+    user_id: id,
+    flag,
+  })
+  newLocalUploadWatermarkUserRule.value.user_id = ''
+  newLocalUploadWatermarkUserRule.value.flag = 'allow'
+}
+
+const removeLocalUploadWatermarkUserRule = (index) => {
+  form.value.local_upload_watermark_with_geo.per_user.splice(index, 1)
 }
 
 // 远程搜索用户（用于按用户覆盖的选择器）

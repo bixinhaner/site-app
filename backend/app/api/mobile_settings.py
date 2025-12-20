@@ -60,6 +60,7 @@ class MobileSettingsPayload(BaseModel):
 
   - location_mode: 定位模式配置
   - allow_local_photo_upload: 是否允许检查详情本地上传图片
+  - local_upload_watermark_with_geo: 检查详情本地上传水印是否携带经纬度和地址
 
   未来可在此处继续新增更多配置项，
   每个配置项都采用类似 *Rule 的结构。
@@ -67,6 +68,7 @@ class MobileSettingsPayload(BaseModel):
 
   location_mode: Optional[LocationModeRule] = None
   allow_local_photo_upload: Optional[BoolRule] = None
+  local_upload_watermark_with_geo: Optional[BoolRule] = None
 
 
 class EffectiveMobileSettingsResponse(BaseModel):
@@ -74,6 +76,7 @@ class EffectiveMobileSettingsResponse(BaseModel):
 
   location_mode: str
   allow_local_photo_upload: bool = True
+  local_upload_watermark_with_geo: bool = True
 
 
 def _normalize_mode(mode: str) -> str:
@@ -306,6 +309,7 @@ async def get_mobile_settings(
   location_rule = raw.get("location_mode") or {}
   # allow_local_photo_upload 若不存在，则使用默认结构
   allow_upload_rule = raw.get("allow_local_photo_upload") or {}
+  local_upload_watermark_rule = raw.get("local_upload_watermark_with_geo") or {}
 
   # 构造 LocationModeRule，保证字段存在
   lm = LocationModeRule(
@@ -320,9 +324,16 @@ async def get_mobile_settings(
     per_user=allow_upload_rule.get("per_user") or {},
   )
 
+  local_upload_watermark = BoolRule(
+    default=local_upload_watermark_rule.get("default") if isinstance(local_upload_watermark_rule.get("default"), bool) else True,
+    per_role=local_upload_watermark_rule.get("per_role") or {},
+    per_user=local_upload_watermark_rule.get("per_user") or {},
+  )
+
   return MobileSettingsPayload(
     location_mode=lm,
     allow_local_photo_upload=allow_upload,
+    local_upload_watermark_with_geo=local_upload_watermark,
   )
 
 
@@ -360,6 +371,9 @@ async def update_mobile_settings(
   if payload.allow_local_photo_upload is not None:
     settings["allow_local_photo_upload"] = _normalize_bool_rule(payload.allow_local_photo_upload)
 
+  if payload.local_upload_watermark_with_geo is not None:
+    settings["local_upload_watermark_with_geo"] = _normalize_bool_rule(payload.local_upload_watermark_with_geo)
+
   _save_mobile_settings(db, settings)
 
   # 返回最新配置
@@ -377,9 +391,17 @@ async def update_mobile_settings(
     per_user=allow_upload_rule.get("per_user") or {},
   )
 
+  local_upload_watermark_rule = settings.get("local_upload_watermark_with_geo") or {}
+  local_upload_watermark = BoolRule(
+    default=local_upload_watermark_rule.get("default") if isinstance(local_upload_watermark_rule.get("default"), bool) else True,
+    per_role=local_upload_watermark_rule.get("per_role") or {},
+    per_user=local_upload_watermark_rule.get("per_user") or {},
+  )
+
   return MobileSettingsPayload(
     location_mode=lm,
     allow_local_photo_upload=allow_upload,
+    local_upload_watermark_with_geo=local_upload_watermark,
   )
 
 
@@ -402,9 +424,16 @@ async def get_effective_mobile_settings(
     user=current_user,
     default=True,
   )
+  local_upload_watermark_with_geo = _resolve_bool_for_user(
+    settings,
+    key="local_upload_watermark_with_geo",
+    user=current_user,
+    default=True,
+  )
   return EffectiveMobileSettingsResponse(
     location_mode=location_mode,
     allow_local_photo_upload=allow_local_photo_upload,
+    local_upload_watermark_with_geo=local_upload_watermark_with_geo,
   )
 
 
