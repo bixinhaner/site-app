@@ -15,12 +15,13 @@ from app.core.database import get_db
 from app.core.config import settings
 from app.api.auth import get_current_user
 from app.models.user import User
-from app.models.app_version import AppVersion, AppVersionDownloadLog
+from app.models.app_version import AppVersion, AppVersionDownloadLog, AppVersionReleaseNote, AppVersionReleaseNoteItem
 from app.schemas.app_version import (
     AppVersionCheckRequest, AppVersionCheckResponse, AppVersionInfo,
     AppVersionCreate, AppVersionUpdate, AppVersionResponse, AppVersionListResponse,
     DownloadStartRequest, DownloadCompleteRequest, DownloadStartResponse,
-    FileUploadResponse
+    FileUploadResponse,
+    ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteResponse, ReleaseNoteImageUploadResponse
 )
 
 router = APIRouter()
@@ -423,3 +424,301 @@ async def get_version_stats(
         "latest_version": latest.version_name if latest else None,
         "latest_version_code": latest.version_code if latest else None
     }
+
+
+# ============ Release Notes API ============
+
+# Release Notes 图片上传目录
+RELEASE_NOTES_IMAGE_DIR = "uploads/release-notes"
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+
+
+def _ensure_release_notes_image_dir():
+    """确保Release Notes图片上传目录存在"""
+    if not os.path.exists(RELEASE_NOTES_IMAGE_DIR):
+        os.makedirs(RELEASE_NOTES_IMAGE_DIR)
+
+
+@router.post("/release-notes", response_model=ReleaseNoteResponse)
+async def create_release_note(
+    data: ReleaseNoteCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """创建Release Note（管理员）"""
+    _check_admin(current_user)
+    
+    # 检查版本是否存在
+    version = db.query(AppVersion).filter(AppVersion.id == data.version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    
+    # 检查是否已存在Release Note
+    existing = db.query(AppVersionReleaseNote).filter(
+        AppVersionReleaseNote.version_id == data.version_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="该版本已存在Release Note，请使用更新接口")
+    
+    # 创建Release Note
+    release_note = AppVersionReleaseNote(
+        version_id=data.version_id,
+        title=data.title,
+        title_en=data.title_en,
+        subtitle=data.subtitle,
+        subtitle_en=data.subtitle_en,
+        is_enabled=data.is_enabled
+    )
+    db.add(release_note)
+    db.flush()  # 获取ID但不提交
+    
+    # 创建Release Note Items
+    for item_data in data.items:
+        item = AppVersionReleaseNoteItem(
+            release_note_id=release_note.id,
+            sort_order=item_data.sort_order,
+            item_type=item_data.item_type,
+            content=item_data.content,
+            content_en=item_data.content_en,
+            image_url=item_data.image_url,
+            image_caption=item_data.image_caption,
+            image_caption_en=item_data.image_caption_en
+        )
+        db.add(item)
+    
+    db.commit()
+    db.refresh(release_note)
+    
+    # 查询items
+    items = db.query(AppVersionReleaseNoteItem).filter(
+        AppVersionReleaseNoteItem.release_note_id == release_note.id
+    ).order_by(AppVersionReleaseNoteItem.sort_order).all()
+    
+    return ReleaseNoteResponse(
+        id=release_note.id,
+        version_id=release_note.version_id,
+        title=release_note.title,
+        title_en=release_note.title_en,
+        subtitle=release_note.subtitle,
+        subtitle_en=release_note.subtitle_en,
+        is_enabled=release_note.is_enabled,
+        items=[{
+            "id": item.id,
+            "release_note_id": item.release_note_id,
+            "sort_order": item.sort_order,
+            "item_type": item.item_type,
+            "content": item.content,
+            "content_en": item.content_en,
+            "image_url": item.image_url,
+            "image_caption": item.image_caption,
+            "image_caption_en": item.image_caption_en,
+            "created_at": item.created_at
+        } for item in items],
+        created_at=release_note.created_at,
+        updated_at=release_note.updated_at
+    )
+
+
+@router.get("/release-notes/{version_id}", response_model=ReleaseNoteResponse)
+async def get_release_note(
+    version_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取版本的Release Note（需要登录）"""
+    release_note = db.query(AppVersionReleaseNote).filter(
+        AppVersionReleaseNote.version_id == version_id
+    ).first()
+    
+    if not release_note:
+        raise HTTPException(status_code=404, detail="Release Note不存在")
+    
+    # 查询items
+    items = db.query(AppVersionReleaseNoteItem).filter(
+        AppVersionReleaseNoteItem.release_note_id == release_note.id
+    ).order_by(AppVersionReleaseNoteItem.sort_order).all()
+    
+    return ReleaseNoteResponse(
+        id=release_note.id,
+        version_id=release_note.version_id,
+        title=release_note.title,
+        title_en=release_note.title_en,
+        subtitle=release_note.subtitle,
+        subtitle_en=release_note.subtitle_en,
+        is_enabled=release_note.is_enabled,
+        items=[{
+            "id": item.id,
+            "release_note_id": item.release_note_id,
+            "sort_order": item.sort_order,
+            "item_type": item.item_type,
+            "content": item.content,
+            "content_en": item.content_en,
+            "image_url": item.image_url,
+            "image_caption": item.image_caption,
+            "image_caption_en": item.image_caption_en,
+            "created_at": item.created_at
+        } for item in items],
+        created_at=release_note.created_at,
+        updated_at=release_note.updated_at
+    )
+
+
+@router.put("/release-notes/{release_note_id}", response_model=ReleaseNoteResponse)
+async def update_release_note(
+    release_note_id: int,
+    data: ReleaseNoteUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """更新Release Note（管理员）"""
+    _check_admin(current_user)
+    
+    release_note = db.query(AppVersionReleaseNote).filter(
+        AppVersionReleaseNote.id == release_note_id
+    ).first()
+    
+    if not release_note:
+        raise HTTPException(status_code=404, detail="Release Note不存在")
+    
+    # 更新基本字段
+    if data.title is not None:
+        release_note.title = data.title
+    if data.title_en is not None:
+        release_note.title_en = data.title_en
+    if data.subtitle is not None:
+        release_note.subtitle = data.subtitle
+    if data.subtitle_en is not None:
+        release_note.subtitle_en = data.subtitle_en
+    if data.is_enabled is not None:
+        release_note.is_enabled = data.is_enabled
+    
+    # 如果提供了items，重新创建
+    if data.items is not None:
+        # 删除旧的items
+        db.query(AppVersionReleaseNoteItem).filter(
+            AppVersionReleaseNoteItem.release_note_id == release_note_id
+        ).delete()
+        
+        # 创建新的items
+        for item_data in data.items:
+            item = AppVersionReleaseNoteItem(
+                release_note_id=release_note_id,
+                sort_order=item_data.sort_order,
+                item_type=item_data.item_type,
+                content=item_data.content,
+                content_en=item_data.content_en,
+                image_url=item_data.image_url,
+                image_caption=item_data.image_caption,
+                image_caption_en=item_data.image_caption_en
+            )
+            db.add(item)
+    
+    db.commit()
+    db.refresh(release_note)
+    
+    # 查询items
+    items = db.query(AppVersionReleaseNoteItem).filter(
+        AppVersionReleaseNoteItem.release_note_id == release_note.id
+    ).order_by(AppVersionReleaseNoteItem.sort_order).all()
+    
+    return ReleaseNoteResponse(
+        id=release_note.id,
+        version_id=release_note.version_id,
+        title=release_note.title,
+        title_en=release_note.title_en,
+        subtitle=release_note.subtitle,
+        subtitle_en=release_note.subtitle_en,
+        is_enabled=release_note.is_enabled,
+        items=[{
+            "id": item.id,
+            "release_note_id": item.release_note_id,
+            "sort_order": item.sort_order,
+            "item_type": item.item_type,
+            "content": item.content,
+            "content_en": item.content_en,
+            "image_url": item.image_url,
+            "image_caption": item.image_caption,
+            "image_caption_en": item.image_caption_en,
+            "created_at": item.created_at
+        } for item in items],
+        created_at=release_note.created_at,
+        updated_at=release_note.updated_at
+    )
+
+
+@router.delete("/release-notes/{release_note_id}")
+async def delete_release_note(
+    release_note_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """删除Release Note（管理员）"""
+    _check_admin(current_user)
+    
+    release_note = db.query(AppVersionReleaseNote).filter(
+        AppVersionReleaseNote.id == release_note_id
+    ).first()
+    
+    if not release_note:
+        raise HTTPException(status_code=404, detail="Release Note不存在")
+    
+    # 删除关联的items
+    db.query(AppVersionReleaseNoteItem).filter(
+        AppVersionReleaseNoteItem.release_note_id == release_note_id
+    ).delete()
+    
+    # 删除Release Note
+    db.delete(release_note)
+    db.commit()
+    
+    return {"message": "Release Note已删除", "id": release_note_id}
+
+
+@router.post("/release-notes/upload-image", response_model=ReleaseNoteImageUploadResponse)
+async def upload_release_note_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """上传Release Note图片（管理员）
+    
+    - 支持 jpg, jpeg, png, gif, webp 格式
+    - 最大 5MB
+    """
+    _check_admin(current_user)
+    
+    # 验证文件类型
+    allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+    filename_lower = file.filename.lower()
+    if not any(filename_lower.endswith(ext) for ext in allowed_extensions):
+        raise HTTPException(status_code=400, detail="只支持 jpg, jpeg, png, gif, webp 格式的图片")
+    
+    _ensure_release_notes_image_dir()
+    
+    # 读取文件内容
+    content = await file.read()
+    file_size = len(content)
+    
+    # 检查文件大小
+    if file_size > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail=f"图片大小不能超过 {MAX_IMAGE_SIZE // (1024*1024)}MB")
+    
+    # 生成唯一文件名
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ext = os.path.splitext(file.filename)[1].lower()
+    safe_filename = f"rn_{timestamp}_{hashlib.md5(content[:1024]).hexdigest()[:8]}{ext}"
+    file_path = os.path.join(RELEASE_NOTES_IMAGE_DIR, safe_filename)
+    
+    # 保存文件
+    with open(file_path, "wb") as buffer:
+        buffer.write(content)
+    
+    # 生成URL
+    image_url = f"/uploads/release-notes/{safe_filename}"
+    
+    return ReleaseNoteImageUploadResponse(
+        image_url=image_url,
+        file_name=safe_filename,
+        file_size=file_size
+    )
+

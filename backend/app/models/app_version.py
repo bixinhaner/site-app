@@ -84,3 +84,57 @@ class AppVersionDownloadLog(Base):
 
     def __repr__(self):
         return f"<AppVersionDownloadLog(id={self.id}, version_id={self.version_id}, status={self.download_status})>"
+
+
+class AppVersionReleaseNote(Base):
+    """App版本Release Notes详情页表"""
+    __tablename__ = "app_version_release_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    version_id = Column(Integer, index=True, nullable=False, comment="关联的版本ID")
+    
+    # 标题
+    title = Column(String(100), comment="标题（中文）")
+    title_en = Column(String(100), comment="标题（英文）")
+    subtitle = Column(String(200), comment="副标题（中文）")
+    subtitle_en = Column(String(200), comment="副标题（英文）")
+    
+    # 状态
+    is_enabled = Column(Boolean, default=True, comment="是否启用")
+    
+    # 时间戳
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<AppVersionReleaseNote(id={self.id}, version_id={self.version_id})>"
+
+
+class AppVersionReleaseNoteItem(Base):
+    """App版本Release Notes更新项目表"""
+    __tablename__ = "app_version_release_note_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    release_note_id = Column(Integer, index=True, nullable=False, comment="关联的Release Note ID")
+    
+    # 排序
+    sort_order = Column(Integer, default=0, comment="排序序号")
+    
+    # 类型: text / image
+    item_type = Column(String(20), default="text", comment="类型: text/image")
+    
+    # 文字内容
+    content = Column(Text, comment="文字内容（中文）")
+    content_en = Column(Text, comment="文字内容（英文）")
+    
+    # 图片内容
+    image_url = Column(String(500), comment="图片URL")
+    image_caption = Column(String(200), comment="图片说明（中文）")
+    image_caption_en = Column(String(200), comment="图片说明（英文）")
+    
+    # 时间戳
+    created_at = Column(DateTime, server_default=func.now())
+
+    def __repr__(self):
+        return f"<AppVersionReleaseNoteItem(id={self.id}, type={self.item_type})>"
+

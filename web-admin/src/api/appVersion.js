@@ -59,6 +59,46 @@ export const appVersionAPI = {
                 }
             }
         })
+    },
+
+    // ============ Release Notes API ============
+
+    // 获取版本的Release Note
+    getReleaseNote: (versionId) => {
+        return request.get(`/api/app-version/release-notes/${versionId}`)
+    },
+
+    // 创建Release Note
+    createReleaseNote: (data) => {
+        return request.post('/api/app-version/release-notes', data)
+    },
+
+    // 更新Release Note
+    updateReleaseNote: (releaseNoteId, data) => {
+        return request.put(`/api/app-version/release-notes/${releaseNoteId}`, data)
+    },
+
+    // 删除Release Note
+    deleteReleaseNote: (releaseNoteId) => {
+        return request.delete(`/api/app-version/release-notes/${releaseNoteId}`)
+    },
+
+    // 上传Release Note图片
+    uploadReleaseNoteImage: (file, onProgress) => {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        return request.post('/api/app-version/release-notes/upload-image', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data'
+            },
+            onUploadProgress: (progressEvent) => {
+                if (onProgress && progressEvent.total) {
+                    const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+                    onProgress(percent)
+                }
+            }
+        })
     }
 }
 

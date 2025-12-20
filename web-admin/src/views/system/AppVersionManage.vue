@@ -117,15 +117,19 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" size="small" link @click="editVersion(row)">
               <el-icon><Edit /></el-icon>
               编辑
             </el-button>
+            <el-button type="success" size="small" link @click="openReleaseNotesEditor(row)">
+              <el-icon><Document /></el-icon>
+              详情页
+            </el-button>
             <el-button type="info" size="small" link @click="copyDownloadUrl(row)">
               <el-icon><Link /></el-icon>
-              复制链接
+              链接
             </el-button>
             <el-button type="danger" size="small" link @click="deleteVersion(row)">
               <el-icon><Delete /></el-icon>
@@ -300,6 +304,190 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- Release Notes 编辑器对话框 -->
+    <el-dialog 
+      v-model="showReleaseNotesDialog" 
+      title="Release Notes 详情页编辑"
+      width="900px"
+      @close="resetReleaseNotesForm"
+    >
+      <div class="release-notes-editor">
+        <!-- 已有Release Notes提示 -->
+        <el-alert 
+          v-if="releaseNotesForm.id" 
+          type="success" 
+          :closable="false"
+          style="margin-bottom: 20px"
+        >
+          <template #title>
+            <span>该版本已创建 Release Notes 页面</span>
+            <el-button type="primary" link @click="previewReleaseNotes">
+              <el-icon><View /></el-icon>
+              预览页面
+            </el-button>
+          </template>
+        </el-alert>
+
+        <el-form :model="releaseNotesForm" label-width="100px">
+          <!-- 启用开关 -->
+          <el-form-item label="启用">
+            <el-switch v-model="releaseNotesForm.is_enabled" />
+            <span class="form-tip">关闭后用户将无法查看此 Release Notes 页面</span>
+          </el-form-item>
+
+          <el-divider />
+
+          <!-- 标题区域 -->
+          <el-form-item label="页面标题">
+            <el-input v-model="releaseNotesForm.title" placeholder="例如：v1.2.0 重大更新" />
+          </el-form-item>
+          <el-form-item label="英文标题">
+            <el-input v-model="releaseNotesForm.title_en" placeholder="例如：v1.2.0 Major Update" />
+          </el-form-item>
+          <el-form-item label="副标题">
+            <el-input v-model="releaseNotesForm.subtitle" placeholder="例如：全新的用户体验" />
+          </el-form-item>
+          <el-form-item label="英文副标题">
+            <el-input v-model="releaseNotesForm.subtitle_en" placeholder="例如：Brand New Experience" />
+          </el-form-item>
+
+          <el-divider />
+
+          <!-- 更新项目列表 -->
+          <el-form-item label="更新项目">
+            <div class="items-list">
+              <div 
+                v-for="(item, index) in releaseNotesForm.items" 
+                :key="index"
+                class="item-card"
+                :class="{ 'image-card': item.item_type === 'image' }"
+              >
+                <div class="item-header">
+                  <span class="item-number">{{ index + 1 }}</span>
+                  <el-tag :type="item.item_type === 'text' ? 'primary' : 'success'" size="small">
+                    {{ item.item_type === 'text' ? '📝 文字' : '🖼️ 图片' }}
+                  </el-tag>
+                  <div class="item-actions">
+                    <el-button 
+                      type="primary" 
+                      link 
+                      size="small"
+                      :disabled="index === 0"
+                      @click="moveItem(index, -1)"
+                    >
+                      <el-icon><Top /></el-icon>
+                    </el-button>
+                    <el-button 
+                      type="primary" 
+                      link 
+                      size="small"
+                      :disabled="index === releaseNotesForm.items.length - 1"
+                      @click="moveItem(index, 1)"
+                    >
+                      <el-icon><Bottom /></el-icon>
+                    </el-button>
+                    <el-button type="danger" link size="small" @click="removeItem(index)">
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
+
+                <!-- 文字项目 -->
+                <template v-if="item.item_type === 'text'">
+                  <el-input 
+                    v-model="item.content" 
+                    type="textarea" 
+                    :rows="2" 
+                    placeholder="中文内容"
+                    style="margin-bottom: 8px"
+                  />
+                  <el-input 
+                    v-model="item.content_en" 
+                    type="textarea" 
+                    :rows="2" 
+                    placeholder="英文内容（可选）"
+                  />
+                </template>
+
+                <!-- 图片项目 -->
+                <template v-else-if="item.item_type === 'image'">
+                  <div class="image-upload-area">
+                    <el-upload
+                      v-if="!item.image_url"
+                      :auto-upload="false"
+                      :show-file-list="false"
+                      accept=".jpg,.jpeg,.png,.gif,.webp"
+                      @change="(file) => handleImageUpload(file, index)"
+                    >
+                      <el-button type="primary">
+                        <el-icon><Upload /></el-icon>
+                        选择图片
+                      </el-button>
+                      <template #tip>
+                        <div class="upload-tip">支持 jpg/png/gif/webp，最大 5MB</div>
+                      </template>
+                    </el-upload>
+                    <div v-else class="image-preview">
+                      <img :src="getFullImageUrl(item.image_url)" @error="handleImageError" />
+                      <el-button 
+                        type="danger" 
+                        size="small" 
+                        class="remove-image-btn"
+                        @click="item.image_url = ''"
+                      >
+                        移除图片
+                      </el-button>
+                    </div>
+                  </div>
+                  <el-input 
+                    v-model="item.image_caption" 
+                    placeholder="图片说明（中文）"
+                    style="margin-top: 8px"
+                  />
+                  <el-input 
+                    v-model="item.image_caption_en" 
+                    placeholder="图片说明（英文，可选）"
+                    style="margin-top: 8px"
+                  />
+                </template>
+              </div>
+
+              <!-- 添加按钮 -->
+              <div class="add-buttons">
+                <el-button @click="addItem('text')">
+                  <el-icon><Plus /></el-icon>
+                  添加文字项目
+                </el-button>
+                <el-button @click="addItem('image')">
+                  <el-icon><Picture /></el-icon>
+                  添加图片项目
+                </el-button>
+              </div>
+            </div>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <template #footer>
+        <el-button @click="showReleaseNotesDialog = false">取消</el-button>
+        <el-button 
+          v-if="releaseNotesForm.id"
+          type="danger" 
+          @click="deleteReleaseNotes"
+          :loading="releaseNotesSubmitting"
+        >
+          删除 Release Notes
+        </el-button>
+        <el-button 
+          type="primary" 
+          @click="saveReleaseNotes"
+          :loading="releaseNotesSubmitting"
+        >
+          {{ releaseNotesForm.id ? '保存修改' : '创建 Release Notes' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -308,10 +496,13 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Upload, Refresh, Box, CircleCheck, Download, Cpu, Edit, Delete, Link,
-  UploadFilled, Warning, InfoFilled, Hide
+  UploadFilled, Warning, InfoFilled, Hide, Document, View, Top, Bottom, Plus, Picture
 } from '@element-plus/icons-vue'
 import { appVersionAPI } from '@/api/appVersion'
 import config from '@/config/env.js'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
 
 // 响应式数据
 const loading = ref(false)
@@ -618,6 +809,208 @@ onMounted(() => {
   loadVersionList()
   loadStats()
 })
+
+// ============ Release Notes 相关 ============
+
+const showReleaseNotesDialog = ref(false)
+const releaseNotesSubmitting = ref(false)
+const currentVersionForReleaseNotes = ref(null)
+
+const releaseNotesForm = reactive({
+  id: null,
+  version_id: null,
+  title: '',
+  title_en: '',
+  subtitle: '',
+  subtitle_en: '',
+  is_enabled: true,
+  items: []
+})
+
+// 打开 Release Notes 编辑器
+const openReleaseNotesEditor = async (version) => {
+  currentVersionForReleaseNotes.value = version
+  releaseNotesForm.version_id = version.id
+  
+  // 尝试加载已有的 Release Notes
+  try {
+    const data = await appVersionAPI.getReleaseNote(version.id)
+    Object.assign(releaseNotesForm, {
+      id: data.id,
+      title: data.title || '',
+      title_en: data.title_en || '',
+      subtitle: data.subtitle || '',
+      subtitle_en: data.subtitle_en || '',
+      is_enabled: data.is_enabled,
+      items: data.items.map(item => ({
+        sort_order: item.sort_order,
+        item_type: item.item_type,
+        content: item.content || '',
+        content_en: item.content_en || '',
+        image_url: item.image_url || '',
+        image_caption: item.image_caption || '',
+        image_caption_en: item.image_caption_en || ''
+      }))
+    })
+  } catch (error) {
+    // 404 表示不存在，初始化空表单
+    if (error.response?.status === 404) {
+      resetReleaseNotesForm()
+      releaseNotesForm.version_id = version.id
+      releaseNotesForm.title = `v${version.version_name} 更新说明`
+      releaseNotesForm.title_en = `v${version.version_name} Release Notes`
+    } else {
+      ElMessage.error('加载 Release Notes 失败')
+      return
+    }
+  }
+  
+  showReleaseNotesDialog.value = true
+}
+
+// 重置 Release Notes 表单
+const resetReleaseNotesForm = () => {
+  Object.assign(releaseNotesForm, {
+    id: null,
+    version_id: null,
+    title: '',
+    title_en: '',
+    subtitle: '',
+    subtitle_en: '',
+    is_enabled: true,
+    items: []
+  })
+}
+
+// 添加项目
+const addItem = (type) => {
+  releaseNotesForm.items.push({
+    sort_order: releaseNotesForm.items.length,
+    item_type: type,
+    content: '',
+    content_en: '',
+    image_url: '',
+    image_caption: '',
+    image_caption_en: ''
+  })
+}
+
+// 移除项目
+const removeItem = (index) => {
+  releaseNotesForm.items.splice(index, 1)
+  // 更新排序
+  releaseNotesForm.items.forEach((item, i) => {
+    item.sort_order = i
+  })
+}
+
+// 移动项目
+const moveItem = (index, direction) => {
+  const newIndex = index + direction
+  if (newIndex < 0 || newIndex >= releaseNotesForm.items.length) return
+  
+  const items = [...releaseNotesForm.items]
+  const temp = items[index]
+  items[index] = items[newIndex]
+  items[newIndex] = temp
+  
+  // 更新排序
+  items.forEach((item, i) => {
+    item.sort_order = i
+  })
+  
+  releaseNotesForm.items = items
+}
+
+// 上传图片
+const handleImageUpload = async (file, index) => {
+  try {
+    const result = await appVersionAPI.uploadReleaseNoteImage(file.raw)
+    releaseNotesForm.items[index].image_url = result.image_url
+    ElMessage.success('图片上传成功')
+  } catch (error) {
+    ElMessage.error('图片上传失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+// 获取完整图片URL
+const getFullImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return config.API_BASE_URL + url
+}
+
+// 图片加载失败
+const handleImageError = (e) => {
+  e.target.style.display = 'none'
+}
+
+// 保存 Release Notes
+const saveReleaseNotes = async () => {
+  releaseNotesSubmitting.value = true
+  
+  try {
+    const data = {
+      version_id: releaseNotesForm.version_id,
+      title: releaseNotesForm.title,
+      title_en: releaseNotesForm.title_en,
+      subtitle: releaseNotesForm.subtitle,
+      subtitle_en: releaseNotesForm.subtitle_en,
+      is_enabled: releaseNotesForm.is_enabled,
+      items: releaseNotesForm.items.map((item, index) => ({
+        sort_order: index,
+        item_type: item.item_type,
+        content: item.content || null,
+        content_en: item.content_en || null,
+        image_url: item.image_url || null,
+        image_caption: item.image_caption || null,
+        image_caption_en: item.image_caption_en || null
+      }))
+    }
+    
+    if (releaseNotesForm.id) {
+      await appVersionAPI.updateReleaseNote(releaseNotesForm.id, data)
+      ElMessage.success('Release Notes 已更新')
+    } else {
+      const result = await appVersionAPI.createReleaseNote(data)
+      releaseNotesForm.id = result.id
+      ElMessage.success('Release Notes 已创建')
+    }
+  } catch (error) {
+    ElMessage.error('保存失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    releaseNotesSubmitting.value = false
+  }
+}
+
+// 删除 Release Notes
+const deleteReleaseNotes = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除此 Release Notes 页面吗？',
+      '确认删除',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+    
+    releaseNotesSubmitting.value = true
+    await appVersionAPI.deleteReleaseNote(releaseNotesForm.id)
+    ElMessage.success('Release Notes 已删除')
+    showReleaseNotesDialog.value = false
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败: ' + (error.response?.data?.detail || error.message))
+    }
+  } finally {
+    releaseNotesSubmitting.value = false
+  }
+}
+
+// 预览 Release Notes
+const previewReleaseNotes = () => {
+  if (currentVersionForReleaseNotes.value) {
+    router.push(`/settings/release-notes/${currentVersionForReleaseNotes.value.id}`)
+  }
+}
 </script>
 
 <style scoped>
@@ -762,5 +1155,88 @@ onMounted(() => {
   .stats-row {
     grid-template-columns: 1fr;
   }
+}
+
+/* Release Notes 编辑器 */
+.release-notes-editor {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.items-list {
+  width: 100%;
+}
+
+.item-card {
+  background: #f8f9fa;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.item-card.image-card {
+  background: #f0f9eb;
+  border-color: #c2e7b0;
+}
+
+.item-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.item-number {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.item-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.image-upload-area {
+  margin-top: 8px;
+}
+
+.upload-tip {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.image-preview {
+  position: relative;
+  display: inline-block;
+}
+
+.image-preview img {
+  max-width: 300px;
+  max-height: 200px;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+}
+
+.remove-image-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.add-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
 }
 </style>

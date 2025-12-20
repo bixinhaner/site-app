@@ -198,6 +198,12 @@ const routes = [
             name: 'AppVersionManage',
             component: () => import('../views/system/AppVersionManage.vue'),
             meta: { title: 'App版本管理', icon: 'Upload', roles: ['admin', 'manager'] }
+          },
+          {
+            path: 'release-notes/:versionId',
+            name: 'ReleaseNotesPreview',
+            component: () => import('../views/system/ReleaseNotesPreview.vue'),
+            meta: { title: 'Release Notes', icon: 'Document', hidden: true, roles: ['admin', 'manager'] }
           }
         ]
       },

@@ -161,3 +161,71 @@ class FileUploadResponse(BaseModel):
     file_size: int
     file_md5: str
     download_url: str
+
+
+# ============ Release Notes ============
+
+class ReleaseNoteItemBase(BaseModel):
+    """Release Note项目基础"""
+    sort_order: int = 0
+    item_type: Literal["text", "image"] = "text"
+    content: Optional[str] = None
+    content_en: Optional[str] = None
+    image_url: Optional[str] = None
+    image_caption: Optional[str] = None
+    image_caption_en: Optional[str] = None
+
+
+class ReleaseNoteItemCreate(ReleaseNoteItemBase):
+    """创建Release Note项目"""
+    pass
+
+
+class ReleaseNoteItemResponse(ReleaseNoteItemBase):
+    """Release Note项目响应"""
+    id: int
+    release_note_id: int
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReleaseNoteBase(BaseModel):
+    """Release Note基础"""
+    title: Optional[str] = None
+    title_en: Optional[str] = None
+    subtitle: Optional[str] = None
+    subtitle_en: Optional[str] = None
+    is_enabled: bool = True
+
+
+class ReleaseNoteCreate(ReleaseNoteBase):
+    """创建Release Note"""
+    version_id: int
+    items: List[ReleaseNoteItemCreate] = []
+
+
+class ReleaseNoteUpdate(ReleaseNoteBase):
+    """更新Release Note"""
+    items: Optional[List[ReleaseNoteItemCreate]] = None
+
+
+class ReleaseNoteResponse(ReleaseNoteBase):
+    """Release Note响应"""
+    id: int
+    version_id: int
+    items: List[ReleaseNoteItemResponse] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReleaseNoteImageUploadResponse(BaseModel):
+    """Release Note图片上传响应"""
+    image_url: str
+    file_name: str
+    file_size: int
+
