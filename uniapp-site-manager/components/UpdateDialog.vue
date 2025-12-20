@@ -6,7 +6,7 @@
         <view class="icon-container">
           <text class="update-icon">🚀</text>
         </view>
-        <text class="title">发现新版本</text>
+        <text class="title">{{ i18n.newVersionFound.value }}</text>
         <text class="version">v{{ versionInfo?.version_name }}</text>
       </view>
       
@@ -14,13 +14,13 @@
       <view class="dialog-content">
         <!-- 文件大小 -->
         <view class="info-row">
-          <text class="info-label">📦 更新大小:</text>
+          <text class="info-label">📦 {{ i18n.updateSize.value }}:</text>
           <text class="info-value">{{ formattedFileSize }}</text>
         </view>
         
         <!-- 更新日志 -->
         <view class="release-notes" v-if="releaseNotes">
-          <text class="notes-title">📝 更新内容:</text>
+          <text class="notes-title">📝 {{ i18n.releaseNotes.value }}:</text>
           <scroll-view scroll-y class="notes-content">
             <text class="notes-text">{{ releaseNotes }}</text>
           </scroll-view>
@@ -51,7 +51,7 @@
           class="btn btn-secondary"
           @click="handleLater"
         >
-          {{ $t ? $t('common.later') : '稍后提醒' }}
+          {{ i18n.later.value }}
         </button>
         
         <!-- 主操作按钮 -->
@@ -67,7 +67,7 @@
       
       <!-- 强制更新提示 -->
       <view class="force-tip" v-if="isForceUpdate">
-        <text class="tip-text">⚠️ 此版本为重要更新，必须升级后才能使用</text>
+        <text class="tip-text">⚠️ {{ i18n.forceUpdateTip.value }}</text>
       </view>
     </view>
   </view>
@@ -76,6 +76,7 @@
 <script setup>
 import { computed, watch } from 'vue'
 import { useUpgradeStore } from '@/stores/upgrade'
+import { useLanguageStore } from '@/stores/language'
 
 const props = defineProps({
   visible: {
@@ -87,8 +88,48 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'close', 'installed'])
 
 const upgradeStore = useUpgradeStore()
+const languageStore = useLanguageStore()
 
-// 计算属性
+// ============ 国际化翻译 ============
+// 翻译字典
+const translations = {
+  zh: {
+    newVersionFound: '发现新版本',
+    updateSize: '更新大小',
+    releaseNotes: '更新内容',
+    downloading: '正在下载...',
+    downloadComplete: '下载完成',
+    retry: '重试',
+    installNow: '立即安装',
+    updateNow: '立即更新',
+    later: '稍后提醒',
+    forceUpdateTip: '此版本为重要更新，必须升级后才能使用',
+    pleaseUpdate: '请先完成更新'
+  },
+  en: {
+    newVersionFound: 'New Version Available',
+    updateSize: 'Update Size',
+    releaseNotes: 'What\'s New',
+    downloading: 'Downloading...',
+    downloadComplete: 'Download Complete',
+    retry: 'Retry',
+    installNow: 'Install Now',
+    updateNow: 'Update Now',
+    later: 'Later',
+    forceUpdateTip: 'This is a critical update. Please update to continue using the app.',
+    pleaseUpdate: 'Please complete the update first'
+  }
+}
+
+// 响应式翻译函数 - 使用 computed 确保语言切换时自动更新
+const t = (key) => {
+  return computed(() => {
+    const locale = languageStore.currentLocale || 'zh'
+    return translations[locale]?.[key] || key
+  })
+}
+
+// ============ 计算属性 ============
 const versionInfo = computed(() => upgradeStore.versionInfo)
 const isForceUpdate = computed(() => upgradeStore.isForceUpdate)
 const isDownloading = computed(() => upgradeStore.isDownloading)
@@ -97,27 +138,51 @@ const downloadProgress = computed(() => upgradeStore.downloadProgress)
 const formattedFileSize = computed(() => upgradeStore.formattedFileSize)
 const errorMessage = computed(() => upgradeStore.errorMessage)
 
-// 更新日志（支持中英文）
+// 国际化文本（响应式）
+const i18n = {
+  newVersionFound: t('newVersionFound'),
+  updateSize: t('updateSize'),
+  releaseNotes: t('releaseNotes'),
+  downloading: t('downloading'),
+  downloadComplete: t('downloadComplete'),
+  retry: t('retry'),
+  installNow: t('installNow'),
+  updateNow: t('updateNow'),
+  later: t('later'),
+  forceUpdateTip: t('forceUpdateTip'),
+  pleaseUpdate: t('pleaseUpdate')
+}
+
+// 更新日志（根据当前语言自动选择）
 const releaseNotes = computed(() => {
   if (!versionInfo.value) return ''
-  // TODO: 根据当前语言选择
-  return versionInfo.value.release_notes || versionInfo.value.release_notes_en || ''
+  
+  // 根据当前语言选择对应的更新说明
+  if (languageStore.currentLocale === 'en') {
+    // 英文环境：优先显示英文说明，如果没有则显示中文
+    return versionInfo.value.release_notes_en || versionInfo.value.release_notes || ''
+  } else {
+    // 中文环境：优先显示中文说明，如果没有则显示英文
+    return versionInfo.value.release_notes || versionInfo.value.release_notes_en || ''
+  }
 })
 
-// 进度文本
+// 进度文本（响应式）
 const progressText = computed(() => {
-  if (isDownloadComplete.value) return '下载完成'
-  if (isDownloading.value) return '正在下载...'
+  if (isDownloadComplete.value) return i18n.downloadComplete.value
+  if (isDownloading.value) return i18n.downloading.value
   return ''
 })
 
-// 主按钮文本
+// 主按钮文本（响应式）
 const primaryButtonText = computed(() => {
-  if (errorMessage.value) return '重试'
-  if (isDownloadComplete.value) return '立即安装'
-  if (isDownloading.value) return '下载中...'
-  return '立即更新'
+  if (errorMessage.value) return i18n.retry.value
+  if (isDownloadComplete.value) return i18n.installNow.value
+  if (isDownloading.value) return i18n.downloading.value
+  return i18n.updateNow.value
 })
+
+// ============ 方法 ============
 
 // 处理遮罩点击
 const handleMaskClick = () => {
@@ -186,7 +251,7 @@ const preventBack = () => {
   // 强制更新时阻止返回
   if (isForceUpdate.value) {
     uni.showToast({
-      title: '请先完成更新',
+      title: i18n.pleaseUpdate.value,
       icon: 'none'
     })
   }
