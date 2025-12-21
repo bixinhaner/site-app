@@ -57,6 +57,7 @@ export const appVersionAPI = {
             headers: {
                 'Content-Type': 'multipart/form-data'
             },
+            timeout: 1800000, // 30分钟超时，防止大文件上传中断
             onUploadProgress: (progressEvent) => {
                 if (onProgress && progressEvent.total) {
                     const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
@@ -97,6 +98,7 @@ export const appVersionAPI = {
             headers: {
                 'Content-Type': 'multipart/form-data'
             },
+            timeout: 300000, // 5分钟超时
             onUploadProgress: (progressEvent) => {
                 if (onProgress && progressEvent.total) {
                     const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
