@@ -106,6 +106,11 @@ export const appVersionAPI = {
                 }
             }
         })
+    },
+
+    // 获取下载日志
+    getDownloadLogs: (params) => {
+        return request.get('/api/app-version/download-logs', { params })
     }
 }
 

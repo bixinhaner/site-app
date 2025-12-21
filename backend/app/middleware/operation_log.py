@@ -395,6 +395,13 @@ def _should_skip(path: str, method: str) -> bool:
     # 轨迹上报接口由业务接口本身写入日志，避免中间件重复写入
     if p.rstrip("/") == "/api/operation-logs/track":
         return True
+    
+    # App版本检查和下载埋点接口已有专门日志表，也不记入通用操作日志
+    if p.startswith("/api/app-version/check") or \
+       p.startswith("/api/app-version/download-start") or \
+       p.startswith("/api/app-version/download-complete"):
+        return True
+
     if p.startswith("/uploads"):
         return True
     m = (method or "").upper()

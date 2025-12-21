@@ -12,8 +12,14 @@ def ensure_app_version_schema(engine: Engine) -> None:
         "app_versions": {
             "show_release_notes": "show_release_notes BOOLEAN DEFAULT 0",
         },
+        "app_version_download_logs": {
+            "user_id": "user_id INTEGER",
+            "username": "username VARCHAR(50)",
+            "user_role": "user_role VARCHAR(50)",
+        },
         "app_version_usage_logs": {
-            # 如果需要添加新列，在这里定义
+            "username": "username VARCHAR(50)",
+            "user_role": "user_role VARCHAR(50)",
         },
     }
 

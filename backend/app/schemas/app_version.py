@@ -46,6 +46,9 @@ class AppVersionCheckRequest(BaseModel):
     device_model: Optional[str] = None
     device_brand: Optional[str] = None
     os_version: Optional[str] = None
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+    user_role: Optional[str] = None
 
 
 class AppVersionInfo(BaseModel):
@@ -142,6 +145,40 @@ class DownloadStartRequest(BaseModel):
     device_brand: Optional[str] = None
     os_version: Optional[str] = None
     network_type: Optional[str] = None
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+    user_role: Optional[str] = None
+
+
+class DownloadLogResponse(BaseModel):
+    """下载日志响应"""
+    id: int
+    version_id: int
+    version_code: int
+    device_id: Optional[str] = None
+    device_model: Optional[str] = None
+    device_brand: Optional[str] = None
+    os_version: Optional[str] = None
+    from_version_code: Optional[int] = None
+    download_status: str
+    download_progress: int
+    error_message: Optional[str] = None
+    ip_address: Optional[str] = None
+    network_type: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+    user_role: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DownloadLogListResponse(BaseModel):
+    """下载日志列表响应"""
+    logs: List[DownloadLogResponse]
+    total: int
 
 
 class DownloadCompleteRequest(BaseModel):

@@ -21,7 +21,8 @@ from app.schemas.app_version import (
     AppVersionCreate, AppVersionUpdate, AppVersionResponse, AppVersionListResponse,
     DownloadStartRequest, DownloadCompleteRequest, DownloadStartResponse,
     FileUploadResponse,
-    ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteResponse, ReleaseNoteImageUploadResponse
+    ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteResponse, ReleaseNoteImageUploadResponse,
+    DownloadLogListResponse, DownloadLogResponse
 )
 
 router = APIRouter()
@@ -89,6 +90,10 @@ async def check_version(
             AppVersionUsageLog.logged_date == today
         ).first()
         
+        # 准备用户信息
+        username_val = request.username or ""
+        user_role_val = request.user_role or ""
+
         if not existing_log:
             # 记录新的使用日志
             client_ip = req.client.host if req.client else None
@@ -99,13 +104,23 @@ async def check_version(
                 os_version=request.os_version,
                 version_code=request.current_version_code,
                 ip_address=client_ip,
-                logged_date=today
+                logged_date=today,
+                user_id=request.user_id,
+                username=username_val,
+                user_role=user_role_val
             )
             db.add(usage_log)
             try:
                 db.commit()
             except Exception:
                 db.rollback()  # 日志记录失败不影响主流程
+        else:
+            # 如果已有记录但没有用户信息，补充用户信息
+            if request.user_id and not existing_log.user_id:
+                existing_log.user_id = request.user_id
+                existing_log.username = username_val
+                existing_log.user_role = user_role_val
+                db.commit()
     
     # 查询最新启用版本
     latest_version = db.query(AppVersion).filter(
@@ -182,7 +197,10 @@ async def record_download_start(
         from_version_code=request.from_version_code,
         download_status="started",
         network_type=request.network_type,
-        ip_address=client_ip
+        ip_address=client_ip,
+        user_id=request.user_id,
+        username=request.username,
+        user_role=request.user_role
     )
     db.add(log)
     
@@ -454,6 +472,35 @@ async def get_version_stats(
         "latest_version": latest.version_name if latest else None,
         "latest_version_code": latest.version_code if latest else None
     }
+
+
+@router.get("/download-logs", response_model=DownloadLogListResponse)
+async def get_download_logs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    username: Optional[str] = None,
+    version_code: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取下载日志列表（管理员）"""
+    _check_admin(current_user)
+    
+    query = db.query(AppVersionDownloadLog)
+    
+    if username:
+        query = query.filter(AppVersionDownloadLog.username.ilike(f"%{username}%"))
+    
+    if version_code:
+        query = query.filter(AppVersionDownloadLog.version_code == version_code)
+        
+    total = query.count()
+    logs = query.order_by(desc(AppVersionDownloadLog.started_at)).offset(skip).limit(limit).all()
+    
+    return DownloadLogListResponse(
+        logs=[DownloadLogResponse.from_orm(log) for log in logs],
+        total=total
+    )
 
 
 @router.get("/usage-stats")

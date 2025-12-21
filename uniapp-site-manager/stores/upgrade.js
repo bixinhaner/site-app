@@ -4,6 +4,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useUserStore } from '@/stores/user'
 import { buildApiUrl, API_ENDPOINTS } from '@/config/api.js'
 import {
     getCurrentVersion,
@@ -16,6 +17,8 @@ import {
 } from '@/utils/upgrade.js'
 
 export const useUpgradeStore = defineStore('upgrade', () => {
+    const userStore = useUserStore()
+
     // ============ 状态 ============
 
     // 版本检测结果
@@ -109,8 +112,9 @@ export const useUpgradeStore = defineStore('upgrade', () => {
             const currentVersion = getCurrentVersion()
             const deviceId = getDeviceId()
             const deviceInfo = getDeviceInfo()
+            const userInfo = userStore.userInfo || {}
 
-            console.log('检测版本更新:', { currentVersion, deviceId })
+            console.log('检测版本更新:', { currentVersion, deviceId, username: userInfo.username })
 
             const response = await uni.request({
                 url: buildApiUrl(API_ENDPOINTS.APP_VERSION.CHECK),
@@ -120,7 +124,10 @@ export const useUpgradeStore = defineStore('upgrade', () => {
                     device_id: deviceId,
                     device_model: deviceInfo.deviceModel,
                     device_brand: deviceInfo.deviceBrand,
-                    os_version: deviceInfo.osVersion
+                    os_version: deviceInfo.osVersion,
+                    user_id: userInfo.id,
+                    username: userInfo.username,
+                    user_role: userInfo.role
                 }
             })
 
@@ -173,6 +180,7 @@ export const useUpgradeStore = defineStore('upgrade', () => {
             const currentVersion = getCurrentVersion()
             const deviceInfo = getDeviceInfo()
             const networkType = await getNetworkType()
+            const userInfo = userStore.userInfo || {}
 
             try {
                 const logResponse = await uni.request({
@@ -186,7 +194,10 @@ export const useUpgradeStore = defineStore('upgrade', () => {
                         device_model: deviceInfo.deviceModel,
                         device_brand: deviceInfo.deviceBrand,
                         os_version: deviceInfo.osVersion,
-                        network_type: networkType
+                        network_type: networkType,
+                        user_id: userInfo.id,
+                        username: userInfo.username,
+                        user_role: userInfo.role
                     }
                 })
                 if (logResponse.statusCode === 200) {
