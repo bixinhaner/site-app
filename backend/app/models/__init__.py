@@ -12,7 +12,7 @@ from .survey_archive import SiteSurveyArchive, SiteSurveyArchiveVersion, SiteSur
 from .opening_archive import SiteOpeningArchive, SiteOpeningArchiveVersion, SiteOpeningArchiveKVIndex
 from .ssv_archive import SiteSSVArchive, SiteSSVArchiveVersion, SiteSSVArchiveKVIndex
 from .omc_cellname_sync import OmcCellNameSync
-from .app_version import AppVersion, AppVersionDownloadLog, AppVersionReleaseNote, AppVersionReleaseNoteItem
+from .app_version import AppVersion, AppVersionDownloadLog, AppVersionReleaseNote, AppVersionReleaseNoteItem, AppVersionUsageLog
 
 __all__ = [
     "User",
@@ -55,4 +55,5 @@ __all__ = [
     "AppVersionDownloadLog",
     "AppVersionReleaseNote",
     "AppVersionReleaseNoteItem",
+    "AppVersionUsageLog",
 ]

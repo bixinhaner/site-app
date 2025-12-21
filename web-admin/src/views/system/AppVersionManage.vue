@@ -8,6 +8,10 @@
           <el-icon><Upload /></el-icon>
           发布新版本
         </el-button>
+        <el-button type="success" @click="goToUsageStats">
+          <el-icon><DataAnalysis /></el-icon>
+          使用统计
+        </el-button>
         <el-button @click="loadVersionList" :loading="loading">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -260,6 +264,11 @@
           />
         </el-form-item>
         
+        <el-form-item label="显示Release Notes">
+          <el-switch v-model="versionForm.show_release_notes" />
+          <span class="form-tip" style="margin-left: 12px">启用后App更新弹窗中显示"查看详情"按钮</span>
+        </el-form-item>
+        
         <el-form-item label="最低兼容版本" prop="min_version_code">
           <el-input-number 
             v-model="versionForm.min_version_code" 
@@ -361,13 +370,10 @@
                 v-for="(item, index) in releaseNotesForm.items" 
                 :key="index"
                 class="item-card"
-                :class="{ 'image-card': item.item_type === 'image' }"
               >
                 <div class="item-header">
                   <span class="item-number">{{ index + 1 }}</span>
-                  <el-tag :type="item.item_type === 'text' ? 'primary' : 'success'" size="small">
-                    {{ item.item_type === 'text' ? '📝 文字' : '🖼️ 图片' }}
-                  </el-tag>
+                  <span class="item-title">更新项目 {{ index + 1 }}</span>
                   <div class="item-actions">
                     <el-button 
                       type="primary" 
@@ -393,13 +399,14 @@
                   </div>
                 </div>
 
-                <!-- 文字项目 -->
-                <template v-if="item.item_type === 'text'">
+                <!-- 文字内容（必填） -->
+                <div class="field-group">
+                  <label class="field-label">📝 文字说明</label>
                   <el-input 
                     v-model="item.content" 
                     type="textarea" 
                     :rows="2" 
-                    placeholder="中文内容"
+                    placeholder="中文内容（必填）"
                     style="margin-bottom: 8px"
                   />
                   <el-input 
@@ -408,10 +415,11 @@
                     :rows="2" 
                     placeholder="英文内容（可选）"
                   />
-                </template>
+                </div>
 
-                <!-- 图片项目 -->
-                <template v-else-if="item.item_type === 'image'">
+                <!-- 图片（可选） -->
+                <div class="field-group">
+                  <label class="field-label">🖼️ 配图（可选）</label>
                   <div class="image-upload-area">
                     <el-upload
                       v-if="!item.image_url"
@@ -420,9 +428,9 @@
                       accept=".jpg,.jpeg,.png,.gif,.webp"
                       @change="(file) => handleImageUpload(file, index)"
                     >
-                      <el-button type="primary">
+                      <el-button type="default" size="small">
                         <el-icon><Upload /></el-icon>
-                        选择图片
+                        添加图片
                       </el-button>
                       <template #tip>
                         <div class="upload-tip">支持 jpg/png/gif/webp，最大 5MB</div>
@@ -441,27 +449,27 @@
                     </div>
                   </div>
                   <el-input 
+                    v-if="item.image_url"
                     v-model="item.image_caption" 
                     placeholder="图片说明（中文）"
+                    size="small"
                     style="margin-top: 8px"
                   />
                   <el-input 
+                    v-if="item.image_url"
                     v-model="item.image_caption_en" 
                     placeholder="图片说明（英文，可选）"
+                    size="small"
                     style="margin-top: 8px"
                   />
-                </template>
+                </div>
               </div>
 
               <!-- 添加按钮 -->
               <div class="add-buttons">
-                <el-button @click="addItem('text')">
+                <el-button type="primary" @click="addItem('text')">
                   <el-icon><Plus /></el-icon>
-                  添加文字项目
-                </el-button>
-                <el-button @click="addItem('image')">
-                  <el-icon><Picture /></el-icon>
-                  添加图片项目
+                  添加更新项目
                 </el-button>
               </div>
             </div>
@@ -496,13 +504,18 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Upload, Refresh, Box, CircleCheck, Download, Cpu, Edit, Delete, Link,
-  UploadFilled, Warning, InfoFilled, Hide, Document, View, Top, Bottom, Plus, Picture
+  UploadFilled, Warning, InfoFilled, Hide, Document, View, Top, Bottom, Plus, Picture, DataAnalysis
 } from '@element-plus/icons-vue'
 import { appVersionAPI } from '@/api/appVersion'
 import config from '@/config/env.js'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+
+// 跳转到使用统计页面
+const goToUsageStats = () => {
+  router.push('/settings/app-usage-stats')
+}
 
 // 响应式数据
 const loading = ref(false)
@@ -535,7 +548,8 @@ const versionForm = reactive({
   release_notes_en: '',
   min_version_code: 0,
   gray_scale_percent: 100,
-  is_active: true
+  is_active: true,
+  show_release_notes: false
 })
 
 // 表单验证规则
@@ -668,7 +682,8 @@ const editVersion = (version) => {
     release_notes_en: version.release_notes_en || '',
     min_version_code: version.min_version_code || 0,
     gray_scale_percent: version.gray_scale_percent,
-    is_active: version.is_active
+    is_active: version.is_active,
+    show_release_notes: version.show_release_notes || false
   })
   showPublishDialog.value = true
 }
@@ -687,7 +702,8 @@ const handleSubmit = async () => {
         release_notes_en: versionForm.release_notes_en,
         min_version_code: versionForm.min_version_code,
         gray_scale_percent: versionForm.gray_scale_percent,
-        is_active: versionForm.is_active
+        is_active: versionForm.is_active,
+        show_release_notes: versionForm.show_release_notes
       })
       ElMessage.success('版本更新成功')
     } else {
@@ -704,7 +720,8 @@ const handleSubmit = async () => {
         release_notes_en: versionForm.release_notes_en,
         min_version_code: versionForm.min_version_code,
         gray_scale_percent: versionForm.gray_scale_percent,
-        is_active: versionForm.is_active
+        is_active: versionForm.is_active,
+        show_release_notes: versionForm.show_release_notes
       })
       ElMessage.success('版本发布成功')
     }
@@ -1175,22 +1192,19 @@ const previewReleaseNotes = () => {
   margin-bottom: 16px;
 }
 
-.item-card.image-card {
-  background: #f0f9eb;
-  border-color: #c2e7b0;
-}
-
 .item-header {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 .item-number {
   width: 28px;
   height: 28px;
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: #409eff;
   color: #fff;
   border-radius: 8px;
   display: flex;
@@ -1200,14 +1214,34 @@ const previewReleaseNotes = () => {
   font-weight: 600;
 }
 
+.item-title {
+  font-weight: 500;
+  color: #303133;
+}
+
 .item-actions {
   margin-left: auto;
   display: flex;
   gap: 4px;
 }
 
+.field-group {
+  margin-bottom: 16px;
+}
+
+.field-group:last-child {
+  margin-bottom: 0;
+}
+
+.field-label {
+  display: block;
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
 .image-upload-area {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .upload-tip {

@@ -15,7 +15,7 @@ from app.core.database import get_db
 from app.core.config import settings
 from app.api.auth import get_current_user
 from app.models.user import User
-from app.models.app_version import AppVersion, AppVersionDownloadLog, AppVersionReleaseNote, AppVersionReleaseNoteItem
+from app.models.app_version import AppVersion, AppVersionDownloadLog, AppVersionReleaseNote, AppVersionReleaseNoteItem, AppVersionUsageLog
 from app.schemas.app_version import (
     AppVersionCheckRequest, AppVersionCheckResponse, AppVersionInfo,
     AppVersionCreate, AppVersionUpdate, AppVersionResponse, AppVersionListResponse,
@@ -70,6 +70,7 @@ def _check_gray_scale(device_id: Optional[str], percent: int) -> bool:
 @router.post("/check", response_model=AppVersionCheckResponse)
 async def check_version(
     request: AppVersionCheckRequest,
+    req: Request,
     db: Session = Depends(get_db)
 ):
     """检测App是否有新版本
@@ -77,7 +78,35 @@ async def check_version(
     - 查询当前启用的最新版本
     - 比较版本号，判断是否需要更新
     - 检查灰度发布配置
+    - 记录使用日志用于统计
     """
+    # 记录使用日志（每个设备每天只记录一次）
+    today = datetime.now().strftime("%Y-%m-%d")
+    if request.device_id:
+        # 检查今天是否已记录
+        existing_log = db.query(AppVersionUsageLog).filter(
+            AppVersionUsageLog.device_id == request.device_id,
+            AppVersionUsageLog.logged_date == today
+        ).first()
+        
+        if not existing_log:
+            # 记录新的使用日志
+            client_ip = req.client.host if req.client else None
+            usage_log = AppVersionUsageLog(
+                device_id=request.device_id,
+                device_model=request.device_model,
+                device_brand=request.device_brand,
+                os_version=request.os_version,
+                version_code=request.current_version_code,
+                ip_address=client_ip,
+                logged_date=today
+            )
+            db.add(usage_log)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()  # 日志记录失败不影响主流程
+    
     # 查询最新启用版本
     latest_version = db.query(AppVersion).filter(
         AppVersion.is_active == True
@@ -113,6 +142,7 @@ async def check_version(
             file_md5=latest_version.file_md5,
             release_notes=latest_version.release_notes,
             release_notes_en=latest_version.release_notes_en,
+            show_release_notes=latest_version.show_release_notes or False,
             published_at=latest_version.published_at
         )
     )
@@ -426,6 +456,126 @@ async def get_version_stats(
     }
 
 
+@router.get("/usage-stats")
+async def get_usage_stats(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取App使用统计详情（管理员）
+    
+    返回：
+    - 总设备数、日活、月活
+    - 版本分布
+    - 每日活跃趋势
+    - 设备品牌分布
+    """
+    _check_admin(current_user)
+    
+    from sqlalchemy import func, distinct
+    from datetime import datetime, timedelta
+    
+    today = datetime.now().date()
+    start_date = today - timedelta(days=days)
+    
+    # 总独立设备数
+    total_devices = db.query(func.count(distinct(AppVersionUsageLog.device_id))).scalar() or 0
+    
+    # 今日活跃设备数 (DAU)
+    today_str = today.strftime("%Y-%m-%d")
+    dau = db.query(func.count(distinct(AppVersionUsageLog.device_id))).filter(
+        AppVersionUsageLog.logged_date == today_str
+    ).scalar() or 0
+    
+    # 最近7日活跃设备数 (WAU)
+    week_ago = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+    wau = db.query(func.count(distinct(AppVersionUsageLog.device_id))).filter(
+        AppVersionUsageLog.logged_date >= week_ago
+    ).scalar() or 0
+    
+    # 最近30日活跃设备数 (MAU)
+    month_ago = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    mau = db.query(func.count(distinct(AppVersionUsageLog.device_id))).filter(
+        AppVersionUsageLog.logged_date >= month_ago
+    ).scalar() or 0
+    
+    # 版本分布（最近30天的活跃设备）
+    version_dist = db.query(
+        AppVersionUsageLog.version_code,
+        func.count(distinct(AppVersionUsageLog.device_id)).label("device_count")
+    ).filter(
+        AppVersionUsageLog.logged_date >= month_ago
+    ).group_by(
+        AppVersionUsageLog.version_code
+    ).order_by(desc("device_count")).all()
+    
+    # 转换版本码为版本名
+    version_distribution = []
+    version_map = {}
+    versions = db.query(AppVersion.version_code, AppVersion.version_name).all()
+    for v in versions:
+        version_map[v.version_code] = v.version_name
+    
+    for vc, count in version_dist:
+        version_name = version_map.get(vc, f"v{vc // 10000}.{(vc % 10000) // 100}.{vc % 100}")
+        version_distribution.append({
+            "version_code": vc,
+            "version_name": version_name,
+            "device_count": count
+        })
+    
+    # 每日活跃趋势
+    daily_trend = db.query(
+        AppVersionUsageLog.logged_date,
+        func.count(distinct(AppVersionUsageLog.device_id)).label("device_count")
+    ).filter(
+        AppVersionUsageLog.logged_date >= start_date.strftime("%Y-%m-%d")
+    ).group_by(
+        AppVersionUsageLog.logged_date
+    ).order_by(AppVersionUsageLog.logged_date).all()
+    
+    daily_active_trend = [{"date": d, "count": c} for d, c in daily_trend]
+    
+    # 设备品牌分布
+    brand_dist = db.query(
+        AppVersionUsageLog.device_brand,
+        func.count(distinct(AppVersionUsageLog.device_id)).label("device_count")
+    ).filter(
+        AppVersionUsageLog.logged_date >= month_ago,
+        AppVersionUsageLog.device_brand.isnot(None)
+    ).group_by(
+        AppVersionUsageLog.device_brand
+    ).order_by(desc("device_count")).limit(10).all()
+    
+    brand_distribution = [{"brand": b or "Unknown", "count": c} for b, c in brand_dist]
+    
+    # 系统版本分布
+    os_dist = db.query(
+        AppVersionUsageLog.os_version,
+        func.count(distinct(AppVersionUsageLog.device_id)).label("device_count")
+    ).filter(
+        AppVersionUsageLog.logged_date >= month_ago,
+        AppVersionUsageLog.os_version.isnot(None)
+    ).group_by(
+        AppVersionUsageLog.os_version
+    ).order_by(desc("device_count")).limit(10).all()
+    
+    os_distribution = [{"os_version": os or "Unknown", "count": c} for os, c in os_dist]
+    
+    return {
+        "summary": {
+            "total_devices": total_devices,
+            "dau": dau,
+            "wau": wau,
+            "mau": mau
+        },
+        "version_distribution": version_distribution,
+        "daily_active_trend": daily_active_trend,
+        "brand_distribution": brand_distribution,
+        "os_distribution": os_distribution
+    }
+
+
 # ============ Release Notes API ============
 
 # Release Notes 图片上传目录
@@ -522,10 +672,9 @@ async def create_release_note(
 @router.get("/release-notes/{version_id}", response_model=ReleaseNoteResponse)
 async def get_release_note(
     version_id: int,
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取版本的Release Note（需要登录）"""
+    """获取版本的Release Note（公开接口，无需登录）"""
     release_note = db.query(AppVersionReleaseNote).filter(
         AppVersionReleaseNote.version_id == version_id
     ).first()

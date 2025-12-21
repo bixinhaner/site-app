@@ -26,6 +26,13 @@
           </scroll-view>
         </view>
         
+        <!-- 查看详情按钮 -->
+        <view class="view-details-section" v-if="showReleaseNotesLink && !isDownloading && !isDownloadComplete">
+          <button class="btn-view-details" @click="handleViewDetails">
+            📖 {{ i18n.viewDetails.value }}
+          </button>
+        </view>
+        
         <!-- 下载进度 -->
         <view class="progress-section" v-if="isDownloading || isDownloadComplete">
           <view class="progress-bar-container">
@@ -103,6 +110,7 @@ const translations = {
     installNow: '立即安装',
     updateNow: '立即更新',
     later: '稍后提醒',
+    viewDetails: '查看详情',
     forceUpdateTip: '此版本为重要更新，必须升级后才能使用',
     pleaseUpdate: '请先完成更新'
   },
@@ -116,6 +124,7 @@ const translations = {
     installNow: 'Install Now',
     updateNow: 'Update Now',
     later: 'Later',
+    viewDetails: 'View Details',
     forceUpdateTip: 'This is a critical update. Please update to continue using the app.',
     pleaseUpdate: 'Please complete the update first'
   }
@@ -138,6 +147,11 @@ const downloadProgress = computed(() => upgradeStore.downloadProgress)
 const formattedFileSize = computed(() => upgradeStore.formattedFileSize)
 const errorMessage = computed(() => upgradeStore.errorMessage)
 
+// 是否显示"查看详情"按钮（根据后端配置）
+const showReleaseNotesLink = computed(() => {
+  return versionInfo.value?.show_release_notes === true
+})
+
 // 国际化文本（响应式）
 const i18n = {
   newVersionFound: t('newVersionFound'),
@@ -149,6 +163,7 @@ const i18n = {
   installNow: t('installNow'),
   updateNow: t('updateNow'),
   later: t('later'),
+  viewDetails: t('viewDetails'),
   forceUpdateTip: t('forceUpdateTip'),
   pleaseUpdate: t('pleaseUpdate')
 }
@@ -201,6 +216,16 @@ const handleClose = () => {
 const handleLater = () => {
   upgradeStore.skipCurrentVersion()
   handleClose()
+}
+
+// 查看详情（跳转到App内Release Notes页面）
+const handleViewDetails = () => {
+  if (!versionInfo.value?.id) return
+  
+  // 跳转到App内原生Release Notes页面
+  uni.navigateTo({
+    url: `/pages/release-notes/release-notes?versionId=${versionInfo.value.id}&versionName=${versionInfo.value.version_name || ''}`
+  })
 }
 
 // 主操作
@@ -356,6 +381,25 @@ const preventBack = () => {
         color: #333;
         line-height: 1.6;
         white-space: pre-wrap;
+      }
+    }
+  }
+  
+  .view-details-section {
+    margin-top: 20rpx;
+    text-align: center;
+    
+    .btn-view-details {
+      display: inline-block;
+      background: transparent;
+      border: 2rpx solid var(--color-primary, #f97316);
+      color: var(--color-primary, #f97316);
+      font-size: 26rpx;
+      padding: 12rpx 32rpx;
+      border-radius: 32rpx;
+      
+      &:active {
+        background: rgba(249, 115, 22, 0.1);
       }
     }
   }

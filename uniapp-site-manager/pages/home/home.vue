@@ -181,6 +181,13 @@
 		</scroll-view>
 		<!-- 自定义底部导航栏（替代原生 tabBar 图标） -->
 		<custom-tabbar />
+		
+		<!-- 版本更新弹窗 -->
+		<UpdateDialog 
+			v-model:visible="showUpdateDialog"
+			@close="handleDialogClose"
+			@installed="handleUpdateInstalled"
+		/>
 	</view>
 </template>
 
@@ -192,16 +199,30 @@
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
+	import { useUpgradeStore } from '@/stores/upgrade'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { formatTimeAgo } from '@/utils/time.js'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 	import EmptyState from '@/components/EmptyState.vue'
+	import UpdateDialog from '@/components/UpdateDialog.vue'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const workOrderStore = useWorkOrderStore()
 	const logger = useLoggerStore()
 	const languageStore = useLanguageStore()
+	const upgradeStore = useUpgradeStore()
+	
+	// 版本更新弹窗显示状态（与store同步）
+	const showUpdateDialog = ref(false)
+	
+	// 监听全局弹窗状态，确保任何页面都能响应
+	watch(() => upgradeStore.shouldShowDialog, (newVal) => {
+		if (newVal) {
+			console.log('📢 监听到全局更新弹窗状态变化，显示弹窗')
+			showUpdateDialog.value = true
+		}
+	}, { immediate: true })
 	
 	const instance = getCurrentInstance()
 	const t = (key, params = {}) => instance.appContext.config.globalProperties.$t(key, params)
@@ -444,7 +465,22 @@
 		setTimeout(() => {
 			loadData()
 		}, 100)
+		
+		// 版本检测由App.vue全局触发，这里通过watch监听upgradeStore.shouldShowDialog自动响应
 	})
+	
+	// 更新安装完成处理
+	const handleUpdateInstalled = () => {
+		console.log('✅ 更新安装完成')
+		showUpdateDialog.value = false
+		upgradeStore.hideDialog()  // 同步清除全局状态
+	}
+	
+	// 弹窗关闭处理
+	const handleDialogClose = () => {
+		showUpdateDialog.value = false
+		upgradeStore.hideDialog()  // 同步清除全局状态
+	}
 	
 	// 页面显示时刷新数据
 	onShow(() => {

@@ -115,6 +115,7 @@ export const API_ENDPOINTS = {
 
   // App版本升级
   APP_VERSION: {
+    BASE: '/api/app-version',
     CHECK: '/api/app-version/check',
     LATEST: '/api/app-version/latest',
     DOWNLOAD_START: '/api/app-version/download-start',

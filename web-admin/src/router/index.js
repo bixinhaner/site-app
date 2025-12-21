@@ -204,6 +204,12 @@ const routes = [
             name: 'ReleaseNotesPreview',
             component: () => import('../views/system/ReleaseNotesPreview.vue'),
             meta: { title: 'Release Notes', icon: 'Document', hidden: true, roles: ['admin', 'manager'] }
+          },
+          {
+            path: 'app-usage-stats',
+            name: 'AppVersionStats',
+            component: () => import('../views/system/AppVersionStats.vue'),
+            meta: { title: 'App使用统计', icon: 'DataAnalysis', hidden: true, roles: ['admin', 'manager'] }
           }
         ]
       },

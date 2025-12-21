@@ -2,11 +2,13 @@
   <div class="release-notes-preview-page">
     <!-- 页面头部 -->
     <div class="page-header">
-      <el-button @click="goBack" type="default">
-        <el-icon><ArrowLeft /></el-icon>
-        返回版本管理
-      </el-button>
-      <h1>Release Notes 预览</h1>
+      <div class="header-left">
+        <el-button @click="goBack" type="default">
+          <el-icon><ArrowLeft /></el-icon>
+          返回
+        </el-button>
+        <h1>Release Notes 预览</h1>
+      </div>
       <div class="header-actions">
         <el-button @click="toggleLanguage" type="info">
           <el-icon><Switch /></el-icon>
@@ -28,49 +30,53 @@
     <!-- Release Notes 内容 -->
     <div v-else class="release-notes-container">
       <!-- 头部卡片 -->
-      <div class="header-card">
-        <div class="version-badge">🚀</div>
-        <h1 class="main-title">{{ localizedTitle }}</h1>
-        <p class="sub-title">{{ localizedSubtitle }}</p>
+      <el-card class="header-card">
+        <div class="header-content">
+          <div class="version-badge">🚀</div>
+          <div class="title-section">
+            <h1 class="main-title">{{ localizedTitle }}</h1>
+            <p class="sub-title" v-if="localizedSubtitle">{{ localizedSubtitle }}</p>
+          </div>
+        </div>
         <div class="version-info">
-          <span class="version-tag">v{{ versionInfo?.version_name }}</span>
+          <el-tag type="primary" size="large">v{{ versionInfo?.version_name }}</el-tag>
           <span class="date-tag" v-if="releaseNote.created_at">
             发布于 {{ formatDate(releaseNote.created_at) }}
           </span>
         </div>
-      </div>
+      </el-card>
 
       <!-- 更新项目列表 -->
-      <div class="items-container">
-        <div 
-          v-for="(item, index) in releaseNote.items" 
-          :key="item.id"
-          class="update-item"
-          :class="{ 'image-item': item.item_type === 'image' }"
-        >
-          <!-- 文字项目 -->
-          <template v-if="item.item_type === 'text'">
+      <el-card class="items-card">
+        <template #header>
+          <span>更新内容</span>
+        </template>
+        <div class="items-list">
+          <div 
+            v-for="(item, index) in releaseNote.items" 
+            :key="item.id"
+            class="update-item"
+          >
             <div class="item-number">{{ index + 1 }}</div>
             <div class="item-content">
-              <p class="item-text" v-html="formatContent(getLocalizedContent(item))"></p>
+              <!-- 文字内容 -->
+              <p class="item-text" v-if="getLocalizedContent(item)" v-html="formatContent(getLocalizedContent(item))"></p>
+              
+              <!-- 图片内容 -->
+              <div class="item-image" v-if="item.image_url">
+                <img 
+                  :src="getFullImageUrl(item.image_url)" 
+                  :alt="getLocalizedCaption(item)"
+                  @error="handleImageError"
+                />
+                <p class="image-caption" v-if="getLocalizedCaption(item)">
+                  {{ getLocalizedCaption(item) }}
+                </p>
+              </div>
             </div>
-          </template>
-
-          <!-- 图片项目 -->
-          <template v-else-if="item.item_type === 'image'">
-            <div class="image-wrapper">
-              <img 
-                :src="getFullImageUrl(item.image_url)" 
-                :alt="getLocalizedCaption(item)"
-                @error="handleImageError"
-              />
-              <p class="image-caption" v-if="getLocalizedCaption(item)">
-                {{ getLocalizedCaption(item) }}
-              </p>
-            </div>
-          </template>
+          </div>
         </div>
-      </div>
+      </el-card>
 
       <!-- 底部信息 -->
       <div class="footer-info">
@@ -198,7 +204,7 @@ onMounted(() => {
 <style scoped>
 .release-notes-preview-page {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f5f7fa;
   padding: 20px;
 }
 
@@ -206,124 +212,114 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 30px;
-  padding: 0 20px;
+  margin-bottom: 24px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .page-header h1 {
   margin: 0;
-  color: #fff;
+  color: #1f2937;
   font-size: 20px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .loading-container,
 .empty-container {
   background: #fff;
-  border-radius: 20px;
+  border-radius: 8px;
   padding: 60px 40px;
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
 .release-notes-container {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
 /* 头部卡片 */
 .header-card {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 24px;
-  padding: 50px 40px;
-  text-align: center;
-  margin-bottom: 30px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-}
-
-.version-badge {
-  font-size: 64px;
   margin-bottom: 20px;
 }
 
+.header-content {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.version-badge {
+  font-size: 48px;
+}
+
+.title-section {
+  flex: 1;
+}
+
 .main-title {
-  font-size: 32px;
+  font-size: 24px;
   font-weight: 700;
-  color: #1a1a2e;
-  margin: 0 0 12px 0;
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #1f2937;
+  margin: 0 0 8px 0;
 }
 
 .sub-title {
-  font-size: 18px;
-  color: #666;
-  margin: 0 0 24px 0;
+  font-size: 16px;
+  color: #6b7280;
+  margin: 0;
 }
 
 .version-info {
   display: flex;
-  justify-content: center;
+  align-items: center;
   gap: 16px;
-  flex-wrap: wrap;
-}
-
-.version-tag {
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: #fff;
-  padding: 8px 20px;
-  border-radius: 20px;
-  font-size: 14px;
-  font-weight: 600;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
 }
 
 .date-tag {
-  color: #999;
+  color: #9ca3af;
   font-size: 14px;
-  padding: 8px 20px;
 }
 
 /* 更新项目列表 */
-.items-container {
+.items-card {
+  margin-bottom: 20px;
+}
+
+.items-list {
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
 .update-item {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 16px;
-  padding: 24px 30px;
   display: flex;
   align-items: flex-start;
-  gap: 20px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.update-item:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
-}
-
-.update-item.image-item {
-  padding: 0;
-  overflow: hidden;
+  gap: 16px;
+  padding: 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
 }
 
 .item-number {
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  background: #409eff;
   color: #fff;
-  border-radius: 12px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -333,37 +329,33 @@ onMounted(() => {
 
 .item-text {
   margin: 0;
-  font-size: 16px;
-  line-height: 1.8;
-  color: #333;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #374151;
 }
 
-/* 图片项目 */
-.image-wrapper {
-  width: 100%;
+.item-image {
+  margin-top: 12px;
 }
 
-.image-wrapper img {
-  width: 100%;
-  display: block;
-  border-radius: 16px 16px 0 0;
+.item-image img {
+  max-width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .image-caption {
-  padding: 16px 24px;
-  margin: 0;
-  font-size: 14px;
-  color: #666;
+  margin: 8px 0 0 0;
+  font-size: 13px;
+  color: #6b7280;
   text-align: center;
-  background: #f8f9fa;
-  border-radius: 0 0 16px 16px;
 }
 
 /* 底部信息 */
 .footer-info {
   text-align: center;
-  padding: 40px 20px;
-  color: rgba(255, 255, 255, 0.8);
+  padding: 24px 20px;
+  color: #9ca3af;
   font-size: 14px;
 }
 
@@ -377,27 +369,28 @@ onMounted(() => {
     padding: 15px;
   }
 
-  .header-card {
-    padding: 30px 20px;
+  .header-content {
+    flex-direction: column;
+    text-align: center;
   }
 
   .main-title {
-    font-size: 24px;
+    font-size: 20px;
   }
 
   .sub-title {
-    font-size: 15px;
+    font-size: 14px;
   }
 
   .update-item {
-    padding: 16px 20px;
+    padding: 12px;
   }
 
   .item-number {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    font-size: 14px;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    font-size: 12px;
   }
 
   .item-text {

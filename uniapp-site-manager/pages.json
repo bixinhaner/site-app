@@ -124,6 +124,13 @@
 				"navigationBarTitleText": "站点分布地图",
 				"navigationStyle": "custom"
 			}
+		},
+		{
+			"path": "pages/release-notes/release-notes",
+			"style": {
+				"navigationBarTitleText": "版本更新详情",
+				"navigationStyle": "custom"
+			}
 		}
 	],
 	"globalStyle": {

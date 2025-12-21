@@ -123,6 +123,13 @@
 
     <!-- 自定义底部导航栏 -->
     <custom-tabbar />
+    
+    <!-- 版本更新弹窗 -->
+    <UpdateDialog 
+      v-model:visible="showUpdateDialog"
+      @close="handleDialogClose"
+      @installed="handleUpdateInstalled"
+    />
   </view>
 </template>
 
@@ -132,14 +139,17 @@ import { onShow } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 import { useLanguageStore } from '@/stores/language'
 import { useUserStore } from '@/stores/user'
+import { useUpgradeStore } from '@/stores/upgrade'
 import { trackOperation } from '@/utils/operationTrack.js'
 import CustomNavbar from '@/components/CustomNavbar.vue'
 import SkeletonCard from '@/components/SkeletonCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import UpdateDialog from '@/components/UpdateDialog.vue'
 
 const store = useWorkOrderStore()
 const languageStore = useLanguageStore()
 const userStore = useUserStore()
+const upgradeStore = useUpgradeStore()
 const orders = ref([])
 const scrollIntoView = ref('')
 const highlightedWorkOrderId = ref(null)
@@ -150,6 +160,26 @@ const refreshing = ref(false)
 const isLoading = ref(true)
 const isPageVisible = ref(false)
 let searchTimer = null
+
+// 版本更新弹窗状态
+const showUpdateDialog = ref(false)
+
+// 监听全局弹窗状态
+watch(() => upgradeStore.shouldShowDialog, (newVal) => {
+  if (newVal) {
+    showUpdateDialog.value = true
+  }
+}, { immediate: true })
+
+const handleDialogClose = () => {
+  showUpdateDialog.value = false
+  upgradeStore.hideDialog()
+}
+
+const handleUpdateInstalled = () => {
+  showUpdateDialog.value = false
+  upgradeStore.hideDialog()
+}
 
 const { $t } = getCurrentInstance().appContext.config.globalProperties
 

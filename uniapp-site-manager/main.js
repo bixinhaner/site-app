@@ -7,16 +7,48 @@ import { setI18nInstance } from './stores/language.js'
 import { trackPageView } from './utils/operationTrack.js'
 import { useUserStore } from './stores/user.js'
 
+// 统一拦截 showToast
+// 解决 UniApp 原生 toast 带图标时文字长度限制问题（通常最多7个汉字）
+// 自动转换为纯文本模式 + Emoji，确保长文本完整显示
+const originalShowToast = uni.showToast
+uni.showToast = function (options = {}) {
+	const title = options.title || ''
+	const icon = options.icon || 'success'
+	const image = options.image
+
+	// 如果已经指定了 none 或者使用了自定义图片，则不处理
+	if (icon === 'none' || image) {
+		return originalShowToast.call(uni, options)
+	}
+
+	// 检查文本长度（简单按字符数判断，汉字占1，英文占1，保守阈值设为7）
+	// 实测带图标时超过7-8个字就会被截断
+	if (title.length > 7) {
+		// 映射图标到 Emoji
+		let prefix = ''
+		if (icon === 'success') prefix = '✅ '
+		else if (icon === 'error' || icon === 'fail') prefix = '❌ '
+		else if (icon === 'exception') prefix = '❗ '
+		else if (icon === 'loading') prefix = '⏳ '
+
+		// 强制转换为纯文本模式
+		options.icon = 'none'
+		options.title = prefix + title
+	}
+
+	return originalShowToast.call(uni, options)
+}
+
 export function createApp() {
 	const app = createSSRApp(App)
 	const pinia = createPinia()
-	
+
 	app.use(pinia)
 	app.use(i18n)
 
 	// 全局组件：确保 Options API / script setup 均可直接使用
 	app.component('CustomNavbar', CustomNavbar)
-	
+
 	// 设置i18n实例给语言store使用
 	setI18nInstance(i18n)
 
@@ -40,7 +72,7 @@ export function createApp() {
 			trackPageView()
 		}
 	})
-	
+
 	return {
 		app
 	}

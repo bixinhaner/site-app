@@ -47,6 +47,14 @@
 				{{ loading ? $t('login.loggingIn') : $t('login.loginBtn') }}
 			</button>
 			
+			<!-- 记住密码开关 -->
+			<view class="remember-password" @click="rememberPassword = !rememberPassword">
+				<view class="checkbox" :class="{ 'checked': rememberPassword }">
+					<text v-if="rememberPassword" class="check-icon">✓</text>
+				</view>
+				<text class="remember-text">{{ $t('login.rememberPassword') }}</text>
+			</view>
+			
 			<view class="support-text">
 				<text>{{ $t('login.contactAdmin') }}</text>
 			</view>
@@ -64,7 +72,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
-	import { env } from '@/config/env.js'
+	import { env, getVersion } from '@/config/env.js'
 	
 	const userStore = useUserStore()
 	const logger = useLoggerStore()
@@ -72,11 +80,46 @@
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
 	const loading = ref(false)
-	const appVersion = env.APP_VERSION
+	const appVersion = ref(env.APP_VERSION)
+	const rememberPassword = ref(false)
 	const loginForm = reactive({
 		username: '',
 		password: ''
 	})
+	
+	// 读取保存的登录凭据
+	const loadSavedCredentials = () => {
+		try {
+			const saved = uni.getStorageSync('savedCredentials')
+			if (saved) {
+				loginForm.username = saved.username || ''
+				loginForm.password = saved.password || ''
+				rememberPassword.value = true
+				console.log('🔑 已加载保存的登录凭据')
+			}
+		} catch (e) {
+			console.warn('加载保存的登录凭据失败:', e)
+		}
+	}
+	
+	// 保存登录凭据
+	const saveCredentials = () => {
+		try {
+			if (rememberPassword.value) {
+				uni.setStorageSync('savedCredentials', {
+					username: loginForm.username,
+					password: loginForm.password
+				})
+				console.log('💾 已保存登录凭据')
+			} else {
+				// 如果取消记住密码，则清除保存的凭据
+				uni.removeStorageSync('savedCredentials')
+				console.log('🗑️ 已清除保存的登录凭据')
+			}
+		} catch (e) {
+			console.warn('保存登录凭据失败:', e)
+		}
+	}
 	
 	// 页面加载时记录日志
 	onMounted(() => {
@@ -93,6 +136,9 @@
 		// } catch (error) {
 		// 	console.error('❌ Error in login page onMounted:', error)
 		// }
+		
+		// 加载保存的登录凭据
+		loadSavedCredentials()
 	})
 	
 	// 处理登录
@@ -135,6 +181,9 @@
 					icon: 'success',
 					duration: 1500
 				})
+				
+				// 保存登录凭据（根据用户选择）
+				saveCredentials()
 				
 				// 跳转到首页（自定义底部导航，使用 reLaunch 作为入口）
 				setTimeout(() => {
@@ -199,9 +248,21 @@
 		languageStore.toggleLocale()
 	}
 	
-	// 初始化语言
+	// 初始化语言和版本号
 	onMounted(() => {
 		languageStore.initLocale()
+		
+		// 动态获取版本号（延迟确保plus已完全初始化）
+		// #ifdef APP-PLUS
+		setTimeout(() => {
+			const version = getVersion()
+			console.log('📱 Login页获取到App版本号:', version)
+			appVersion.value = version
+		}, 100)
+		// #endif
+		// #ifndef APP-PLUS
+		appVersion.value = getVersion()
+		// #endif
 	})
 </script>
 
@@ -292,7 +353,7 @@
 		border-radius: var(--radius-sm);
 		font-size: 16px;
 		font-weight: 600;
-		margin-bottom: 20px;
+		margin-bottom: 16px;
 		transition: all 0.2s ease;
 		box-sizing: border-box;
 		box-shadow: 0 2px 10px rgba(var(--color-primary-rgb), 0.26);
@@ -300,6 +361,42 @@
 		&:not(:disabled):active { transform: translateY(1px); }
 		&:disabled { opacity: 0.6; cursor: not-allowed; }
 		&.loading { opacity: 0.8; }
+	}
+	
+	.remember-password {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+		margin-bottom: 20px;
+		
+		.checkbox {
+			width: 22px;
+			height: 22px;
+			border: 2px solid #d1d5db;
+			border-radius: 4px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			transition: all 0.2s ease;
+			background: #fff;
+			
+			&.checked {
+				background: var(--color-primary);
+				border-color: var(--color-primary);
+			}
+			
+			.check-icon {
+				color: #fff;
+				font-size: 14px;
+				font-weight: 700;
+			}
+		}
+		
+		.remember-text {
+			color: #6b7280;
+			font-size: 14px;
+		}
 	}
 	
 	.support-text { text-align: center; font-size: 14px; color: var(--text-secondary); }

@@ -59,6 +59,7 @@ class AppVersionInfo(BaseModel):
     file_md5: Optional[str] = None
     release_notes: Optional[str] = None
     release_notes_en: Optional[str] = None
+    show_release_notes: bool = False
     published_at: Optional[datetime] = None
 
     class Config:
@@ -81,6 +82,7 @@ class AppVersionCreate(AppVersionBase):
     file_md5: Optional[str] = None
     file_name: Optional[str] = None
     is_active: bool = True
+    show_release_notes: bool = False
 
 
 class AppVersionUpdate(BaseModel):
@@ -92,6 +94,7 @@ class AppVersionUpdate(BaseModel):
     min_version_code: Optional[int] = None
     gray_scale_percent: Optional[int] = None
     is_active: Optional[bool] = None
+    show_release_notes: Optional[bool] = None
     download_url: Optional[str] = None
 
     @validator('gray_scale_percent')
@@ -110,6 +113,7 @@ class AppVersionResponse(AppVersionBase):
     file_name: Optional[str] = None
     is_active: bool
     is_latest: bool
+    show_release_notes: bool = False
     download_count: int
     install_count: int
     created_at: datetime

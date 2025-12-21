@@ -1,28 +1,28 @@
 // 临时使用简化的国际化方案，等待vue-i18n依赖问题解决
 const createI18n = (options) => {
   const { locale, fallbackLocale, messages } = options
-  
+
   return {
     global: {
       locale: locale,
       fallbackLocale: fallbackLocale,
       messages: messages,
-      t: function(key, params = {}) {
+      t: function (key, params = {}) {
         const keys = key.split('.')
         let value = this.messages[this.locale]
         for (const k of keys) {
           value = value?.[k]
         }
-        
+
         if (!value) return key
-        
+
         // 支持参数插值，如 {minutes} {hours} 等
         if (typeof value === 'string' && Object.keys(params).length > 0) {
           return value.replace(/\{(\w+)\}/g, (match, paramKey) => {
             return params[paramKey] !== undefined ? params[paramKey] : match
           })
         }
-        
+
         return value
       }
     },
@@ -92,6 +92,7 @@ const messages = {
       loginBtn: '登录',
       loggingIn: '登录中...',
       contactAdmin: '如需账号请联系管理后台',
+      rememberPassword: '记住密码',
       version: '版本'
     },
     home: {
@@ -359,7 +360,7 @@ const messages = {
       priorityNormal: '正常',
       priorityHigh: '高',
       priorityUrgent: '紧急',
-      
+
       // 检查清单页面
       checklistTitle: '检查清单',
       siteInfo: '站点信息',
@@ -393,7 +394,7 @@ const messages = {
       submitFailed: '提交失败',
       inspectionCompleted: '检查已完成',
       cannotModify: '检查已完成，无法修改',
-      
+
       // 额外的通用字段
       itemsUnit: '项',
       photosUnit: '张',
@@ -413,7 +414,7 @@ const messages = {
       saveDraft: '保存草稿',
       submitInspection: '提交检查',
       itemsCount: '项',
-      
+
       // 模态框相关
       equipmentBinding: '设备绑定',
       boundEquipment: '已绑定设备',
@@ -432,7 +433,7 @@ const messages = {
       addCheckNote: '添加检查备注...',
       cancel: '取消',
       save: '保存',
-      
+
       // JavaScript 弹窗相关
       needBindTitle: '需要绑定设备',
       needBindContent: '需要先绑定设备才能进行检查，是否现在扫码绑定？',
@@ -447,7 +448,7 @@ const messages = {
       bindSuccessContent: '设备已成功绑定到该设备',
       unbindSuccessTitle: '解绑成功',
       confirm: '确定',
-      
+
       // 工具函数文本
       installation: '安装检查',
       opening: '新站点设备安装',
@@ -455,7 +456,7 @@ const messages = {
       check: '检查',
       skipped: '跳过',
       unknown: '未知',
-      
+
       // 设备绑定相关新增
       boundDevice: '绑定设备',
       deviceNotBound: '设备未绑定',
@@ -497,6 +498,11 @@ const messages = {
       security: '安全',
       notifications: '通知',
       preferences: '偏好设置',
+      checkUpdate: '检查更新',
+      checking: '检查中...',
+      alreadyLatest: '已是最新版本',
+      checkFailed: '检查更新失败',
+      onlyAppSupport: '仅App支持检查更新',
       theme: '主题',
       avatar: '头像',
       name: '姓名',
@@ -516,7 +522,7 @@ const messages = {
       builtinLocationTest: '内置定位测试',
       about: '关于应用',
       aboutTitle: '关于应用',
-      aboutContent: '站点信息管理系统\n\n版本：v1.0.0\n开发商：技术团队\n\n专业的通信站点管理解决方案',
+      aboutContent: '站点信息管理系统\n\n专业的通信站点管理解决方案',
       roleAdmin: '系统管理员',
       roleManager: '项目经理',
       roleInspector: '安装施工人员',
@@ -997,6 +1003,7 @@ const messages = {
       loginBtn: 'Login',
       loggingIn: 'Logging in...',
       contactAdmin: 'Accounts are managed by the admin console',
+      rememberPassword: 'Remember Password',
       version: 'Version'
     },
     home: {
@@ -1266,7 +1273,7 @@ const messages = {
       priorityNormal: 'Normal',
       priorityHigh: 'High',
       priorityUrgent: 'Urgent',
-      
+
       // 检查清单页面
       checklistTitle: 'Checklist',
       basicInfo: 'Basic Information',
@@ -1304,7 +1311,7 @@ const messages = {
       submitFailed: 'Submit failed',
       inspectionCompleted: 'Inspection completed',
       cannotModify: 'Inspection completed, cannot modify',
-      
+
       // 额外的通用字段
       itemsUnit: ' items',
       photosUnit: ' photos',
@@ -1324,7 +1331,7 @@ const messages = {
       saveDraft: 'Save Draft',
       submitInspection: 'Submit Inspection',
       itemsCount: ' items',
-      
+
       // 模态框相关
       equipmentBinding: 'Equipment Binding',
       boundEquipment: 'Bound Equipment',
@@ -1351,7 +1358,7 @@ const messages = {
       cancel: 'Cancel',
       save: 'Save',
       savingInProgress: 'Saving...',
-      
+
       // JavaScript 弹窗相关
       needBindTitle: 'Need to bind equipment',
       needBindContent: 'Need to bind equipment before inspection. Scan to bind now?',
@@ -1366,7 +1373,7 @@ const messages = {
       bindSuccessContent: 'Device successfully bound',
       unbindSuccessTitle: 'Unbind Success',
       confirm: 'Confirm',
-      
+
       // 工具函数文本
       installation: 'Installation Inspection',
       opening: 'New Site Equipment Installation',
@@ -1378,7 +1385,7 @@ const messages = {
       failed: 'Failed',
       skipped: 'Skipped',
       unknown: 'Unknown',
-      
+
       // Equipment binding additions
       boundDevice: 'Bound Device',
       deviceNotBound: 'Device Not Bound',
@@ -1421,6 +1428,11 @@ const messages = {
       security: 'Security',
       notifications: 'Notifications',
       preferences: 'Preferences',
+      checkUpdate: 'Check for Updates',
+      checking: 'Checking...',
+      alreadyLatest: 'Already up to date',
+      checkFailed: 'Check for updates failed',
+      onlyAppSupport: 'Update check only available in App',
       theme: 'Theme',
       avatar: 'Avatar',
       name: 'Name',
@@ -1440,7 +1452,7 @@ const messages = {
       builtinLocationTest: 'Built-in Location Test',
       about: 'About App',
       aboutTitle: 'About App',
-      aboutContent: 'Site Information Management System\n\nVersion: v1.0.0\nDeveloper: Technical Team\n\nProfessional telecommunication site management solution',
+      aboutContent: 'Site Information Management System\n\nProfessional telecommunication site management solution',
       roleAdmin: 'Administrator',
       roleManager: 'Project Manager',
       roleInspector: 'Installer',

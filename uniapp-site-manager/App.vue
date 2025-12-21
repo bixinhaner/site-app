@@ -15,6 +15,7 @@
 	import { useUpgradeStore } from '@/stores/upgrade'
 	import { initInterceptors } from '@/utils/api-interceptor'
 	import { initLocationMode } from '@/utils/locationStrategy.js'
+	// UpdateDialog已移至home.vue渲染，因为App.vue的template在UniApp App端不会渲染
 	
 	const globalLoading = ref(false)
 	const loadingText = ref({
@@ -28,9 +29,6 @@
 	const logger = useLoggerStore()
 	const languageStore = useLanguageStore()
 	const upgradeStore = useUpgradeStore()
-	
-	// 版本更新弹窗显示状态
-	const showUpdateDialog = ref(false)
 
 	const setAndroidNavigationBarWhite = () => {
 		// #ifdef APP-PLUS
@@ -134,30 +132,42 @@
 		// 设置 Android 底部导航栏为白色，修复底部黑边
 		setAndroidNavigationBarWhite()
 		
-		// 检测App更新（延迟执行，避免阻塞启动）
+		// 全局版本检测（延迟执行，避免阻塞启动）
+		// 检测后store会自动设置shouldShowDialog状态，由页面级组件处理弹窗显示
 		// #ifdef APP-PLUS
-		setTimeout(async () => {
+		const checkVersionWithRetry = async () => {
 			try {
-				console.log('🔄 开始检测App版本更新...')
+				console.log('🔄 App启动：开始检测版本更新...')
 				const hasUpdate = await upgradeStore.checkUpdate(true)
-				if (hasUpdate && !upgradeStore.isSilentUpdate) {
-					console.log('📦 发现新版本:', upgradeStore.versionInfo?.version_name)
-					showUpdateDialog.value = true
-				}
+				// checkUpdate内部会自动设置shouldShowDialog状态
+				return hasUpdate
 			} catch (error) {
-				console.warn('版本检测失败:', error)
+				console.warn('版本检测失败，5分钟后重试:', error)
+				// 网络失败时5分钟后重试一次
+				setTimeout(() => {
+					console.log('🔄 重试版本检测...')
+					upgradeStore.checkUpdate(true).catch(e => console.warn('重试版本检测失败:', e))
+				}, 5 * 60 * 1000) // 5分钟
+				return false
 			}
-		}, 2000)
+		}
+		setTimeout(checkVersionWithRetry, 2000)
 		// #endif
 	})
 	
 	onShow(() => {
 		console.log('App Show')
-		console.log('⚠️ Logger calls temporarily disabled in onShow for debugging')
 		setAndroidNavigationBarWhite()
-		// logger.logAction('APP_SHOW', {
-		// 	timestamp: new Date().toISOString()
-		// })
+		
+		// App从后台恢复时检测更新
+		// #ifdef APP-PLUS
+		const ONE_HOUR = 60 * 60 * 1000
+		const lastCheck = upgradeStore.lastCheckTime || 0
+		if (Date.now() - lastCheck > ONE_HOUR) {
+			console.log('🔄 App恢复：距离上次检测超过1小时，重新检测版本更新...')
+			upgradeStore.checkUpdate(true)
+		}
+		// #endif
 	})
 	
 	onHide(() => {

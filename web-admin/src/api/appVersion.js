@@ -43,6 +43,11 @@ export const appVersionAPI = {
         return request.get('/api/app-version/stats')
     },
 
+    // 获取使用统计详情（DAU、版本分布等）
+    getUsageStats: (days = 30) => {
+        return request.get('/api/app-version/usage-stats', { params: { days } })
+    },
+
     // 上传APK文件
     uploadApk: (file, onProgress) => {
         const formData = new FormData()

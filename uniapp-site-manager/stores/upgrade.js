@@ -35,6 +35,8 @@ export const useUpgradeStore = defineStore('upgrade', () => {
 
     // 用户跳过的版本码
     const skippedVersion = ref(uni.getStorageSync('upgrade_skipped_version') || null)
+    // 跳过时间戳（用于24小时过期判断）
+    const skippedTime = ref(uni.getStorageSync('upgrade_skipped_time') || null)
 
     // 下载日志ID（用于统计）
     const downloadLogId = ref(null)
@@ -42,15 +44,30 @@ export const useUpgradeStore = defineStore('upgrade', () => {
     // 错误信息
     const errorMessage = ref(null)
 
+    // 是否应该显示更新弹窗（全局状态，任何页面都可以监听）
+    const shouldShowDialog = ref(false)
+
     // ============ 计算属性 ============
 
     // 是否有可用更新
     const hasUpdate = computed(() => {
         if (!checkResult.value) return false
         if (!checkResult.value.has_update) return false
-        // 检查是否被跳过
+        // 检查是否被跳过（强制更新不能跳过）
         if (skippedVersion.value === checkResult.value.version_info?.version_code) {
-            return checkResult.value.update_type === 'force' // 强制更新不能跳过
+            // 强制更新不能跳过
+            if (checkResult.value.update_type === 'force') return true
+            // 检查跳过是否过期（24小时后重新提示）
+            const SKIP_EXPIRE_TIME = 24 * 60 * 60 * 1000 // 24小时
+            if (skippedTime.value && Date.now() - skippedTime.value > SKIP_EXPIRE_TIME) {
+                // 跳过已过期，清除跳过记录
+                skippedVersion.value = null
+                skippedTime.value = null
+                uni.removeStorageSync('upgrade_skipped_version')
+                uni.removeStorageSync('upgrade_skipped_time')
+                return true
+            }
+            return false // 跳过未过期
         }
         return true
     })
@@ -117,6 +134,15 @@ export const useUpgradeStore = defineStore('upgrade', () => {
                 // 如果有更新且是静默更新，自动开始下载
                 if (response.data.has_update && response.data.update_type === 'silent') {
                     startDownload()
+                }
+
+                // 如果有更新且不是静默更新，设置全局弹窗标志
+                if (response.data.has_update && response.data.update_type !== 'silent') {
+                    // 检查是否被跳过（强制更新不能跳过）
+                    const versionCode = response.data.version_info?.version_code
+                    if (skippedVersion.value !== versionCode || response.data.update_type === 'force') {
+                        shouldShowDialog.value = true
+                    }
                 }
 
                 return response.data.has_update
@@ -249,15 +275,19 @@ export const useUpgradeStore = defineStore('upgrade', () => {
     }
 
     /**
-     * 跳过当前版本
+     * 跳过当前版本（24小时后会重新提示）
      */
     const skipCurrentVersion = () => {
         if (versionInfo.value?.version_code) {
             skippedVersion.value = versionInfo.value.version_code
+            skippedTime.value = Date.now()
             uni.setStorageSync('upgrade_skipped_version', skippedVersion.value)
+            uni.setStorageSync('upgrade_skipped_time', skippedTime.value)
+            console.log('⏭️ 跳过版本:', skippedVersion.value, ', 24小时后重新提示')
         }
-        // 清除检测结果
+        // 清除检测结果和弹窗状态
         checkResult.value = null
+        shouldShowDialog.value = false
     }
 
     /**
@@ -279,6 +309,20 @@ export const useUpgradeStore = defineStore('upgrade', () => {
         return startDownload()
     }
 
+    /**
+     * 显示更新弹窗
+     */
+    const showDialog = () => {
+        shouldShowDialog.value = true
+    }
+
+    /**
+     * 隐藏更新弹窗
+     */
+    const hideDialog = () => {
+        shouldShowDialog.value = false
+    }
+
     return {
         // 状态
         checkResult,
@@ -288,6 +332,7 @@ export const useUpgradeStore = defineStore('upgrade', () => {
         lastCheckTime,
         skippedVersion,
         errorMessage,
+        shouldShowDialog,
 
         // 计算属性
         hasUpdate,
@@ -304,6 +349,8 @@ export const useUpgradeStore = defineStore('upgrade', () => {
         installUpdate,
         skipCurrentVersion,
         resetDownload,
-        retryDownload
+        retryDownload,
+        showDialog,
+        hideDialog
     }
 })

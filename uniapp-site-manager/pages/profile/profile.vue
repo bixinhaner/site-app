@@ -170,21 +170,7 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="viewMyInspections">
-					<view class="menu-left">
-						<uni-icons class="menu-icon" type="list" size="18" color="#6b7280" />
-						<text class="menu-text">{{ $t('inspection.list') }}</text>
-					</view>
-					<text class="menu-arrow">›</text>
-				</view>
-				
-				<view class="menu-item" @click="viewMySites" v-if="canViewSites">
-					<view class="menu-left">
-						<uni-icons class="menu-icon" type="location" size="18" color="#6b7280" />
-						<text class="menu-text">{{ userInfo?.role === 'inspector' ? $t('site.title') : $t('site.list') }}</text>
-					</view>
-					<text class="menu-arrow">›</text>
-				</view>
+
 			</view>
 			
 			<view class="menu-group">
@@ -208,12 +194,17 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="showHelp">
+				<!-- 检查更新 -->
+				<view class="menu-item" @click="checkForUpdate">
 					<view class="menu-left">
-						<uni-icons class="menu-icon" type="help" size="18" color="#6b7280" />
-						<text class="menu-text">{{ $t('profile.preferences') }}</text>
+						<uni-icons class="menu-icon" type="cloud-download" size="18" color="#6b7280" />
+						<text class="menu-text">{{ $t('profile.checkUpdate') }}</text>
 					</view>
-					<text class="menu-arrow">›</text>
+					<view class="menu-right">
+						<text class="version-text" v-if="!isCheckingUpdate">v{{ appVersion }}</text>
+						<text class="checking-text" v-else>{{ $t('profile.checking') }}</text>
+						<text class="menu-arrow">›</text>
+					</view>
 				</view>
 				
 				<view class="menu-item" @click="showAbout">
@@ -263,6 +254,13 @@
 		<!-- 自定义底部导航栏 -->
 		<custom-tabbar />
 		
+		<!-- 版本更新弹窗 -->
+		<UpdateDialog 
+			v-model:visible="showUpdateDialog"
+			@close="handleDialogClose"
+			@installed="handleUpdateInstalled"
+		/>
+		
 		<!-- 语言设置弹窗 -->
 		<view class="language-modal" v-if="showLanguageModal" @click="closeLanguagePopup">
 			<view class="language-popup" @click.stop>
@@ -306,17 +304,67 @@
 	import { useSiteStore } from '@/stores/site'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useLanguageStore } from '@/stores/language'
+	import { useUpgradeStore } from '@/stores/upgrade'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
-	import { env } from '@/config/env.js'
+	import { env, getVersion } from '@/config/env.js'
+	import UpdateDialog from '@/components/UpdateDialog.vue'
 	
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const inspectionStore = useInspectionStore()
 	const languageStore = useLanguageStore()
+	const upgradeStore = useUpgradeStore()
 	
 	const instance = getCurrentInstance()
 	const $t = instance.appContext.config.globalProperties.$t
-	const appVersion = env.APP_VERSION
+	
+	// 版本号（从manifest.json动态获取）
+	const appVersion = ref(env.APP_VERSION)
+	
+	// 检查更新状态
+	const isCheckingUpdate = ref(false)
+	
+	// 手动检查更新
+	const checkForUpdate = async () => {
+		// #ifdef APP-PLUS
+		if (isCheckingUpdate.value) return
+		
+		isCheckingUpdate.value = true
+		
+		try {
+			const hasUpdate = await upgradeStore.checkUpdate(false)
+			
+			if (hasUpdate) {
+				// 有更新，显示弹窗
+				showUpdateDialog.value = true
+			} else {
+				// 没有更新
+				uni.showToast({
+					title: $t('profile.alreadyLatest'),
+					icon: 'success',
+					duration: 2000
+				})
+			}
+		} catch (error) {
+			console.error('检查更新失败:', error)
+			uni.showToast({
+				title: $t('profile.checkFailed'),
+				icon: 'none',
+				duration: 2000
+			})
+		} finally {
+			isCheckingUpdate.value = false
+		}
+		// #endif
+		
+		// #ifndef APP-PLUS
+		uni.showToast({
+			title: $t('profile.onlyAppSupport'),
+			icon: 'none',
+			duration: 2000
+		})
+		// #endif
+	}
 	
 	// 使用computed创建响应式的t函数
 	const t = (key) => {
@@ -328,6 +376,25 @@
 	const showLanguageModal = ref(false)
 	const showUserInfoModal = ref(false)
 	const showPasswordModal = ref(false)
+	const showUpdateDialog = ref(false)
+	
+	// 监听全局弹窗状态
+	watch(() => upgradeStore.shouldShowDialog, (newVal) => {
+		if (newVal) {
+			showUpdateDialog.value = true
+		}
+	}, { immediate: true })
+	
+	const handleDialogClose = () => {
+		showUpdateDialog.value = false
+		upgradeStore.hideDialog()
+	}
+	
+	const handleUpdateInstalled = () => {
+		showUpdateDialog.value = false
+		upgradeStore.hideDialog()
+	}
+	
 	const userForm = reactive({
 		full_name: '',
 		email: '',
@@ -571,9 +638,11 @@ const isAdmin = computed(() => userStore.isAdmin)
 	
 	// 关于应用
 	const showAbout = () => {
+		// 动态获取最新版本号
+		const currentVersion = getVersion()
 		uni.showModal({
 			title: t('profile.aboutTitle'),
-			content: t('profile.aboutContent'),
+			content: `${t('profile.aboutContent')}\n\n${t('profile.appName')} v${currentVersion}`,
 			showCancel: false
 		})
 	}
@@ -751,6 +820,19 @@ const isAdmin = computed(() => userStore.isAdmin)
 		uni.setNavigationBarTitle({
 			title: $t('profile.title')
 		})
+		
+		// 动态获取版本号（延迟确保plus已完全初始化）
+		// #ifdef APP-PLUS
+		setTimeout(() => {
+			const version = getVersion()
+			console.log('📱 获取到App版本号:', version)
+			appVersion.value = version
+		}, 100)
+		// #endif
+		// #ifndef APP-PLUS
+		appVersion.value = getVersion()
+		// #endif
+		
 		if (userInfo.value) {
 			loadUserStats()
 		}
@@ -905,6 +987,9 @@ const isAdmin = computed(() => userStore.isAdmin)
 	}
 	
 	.menu-value { font-size: 14px; color: var(--text-secondary); }
+	
+	.version-text { font-size: 13px; color: var(--text-tertiary); }
+	.checking-text { font-size: 13px; color: var(--color-primary); }
 	
 	// 语言设置弹窗
 	.language-modal {

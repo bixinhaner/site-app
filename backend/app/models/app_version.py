@@ -40,6 +40,9 @@ class AppVersion(Base):
     is_active = Column(Boolean, default=True, comment="是否启用")
     is_latest = Column(Boolean, default=False, comment="是否为最新版本")
     
+    # Release Notes链接显示控制
+    show_release_notes = Column(Boolean, default=False, comment="是否在更新弹窗显示查看详情按钮")
+    
     # 统计
     download_count = Column(Integer, default=0, comment="下载次数")
     install_count = Column(Integer, default=0, comment="安装次数")
@@ -137,4 +140,34 @@ class AppVersionReleaseNoteItem(Base):
 
     def __repr__(self):
         return f"<AppVersionReleaseNoteItem(id={self.id}, type={self.item_type})>"
+
+
+class AppVersionUsageLog(Base):
+    """App版本使用日志表 - 用于统计DAU、版本分布等"""
+    __tablename__ = "app_version_usage_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 设备信息
+    device_id = Column(String(100), nullable=False, index=True, comment="设备唯一标识")
+    device_model = Column(String(100), comment="设备型号")
+    device_brand = Column(String(50), comment="设备品牌")
+    os_version = Column(String(20), comment="系统版本")
+    
+    # 版本信息
+    version_code = Column(Integer, nullable=False, index=True, comment="当前版本码")
+    version_name = Column(String(20), comment="当前版本号")
+    
+    # 用户信息（可选，未登录时为空）
+    user_id = Column(Integer, index=True, comment="用户ID")
+    
+    # 网络信息
+    ip_address = Column(String(50), comment="IP地址")
+    
+    # 时间戳（使用日期作为索引，便于按天统计）
+    logged_at = Column(DateTime, server_default=func.now(), index=True, comment="记录时间")
+    logged_date = Column(String(10), index=True, comment="记录日期 YYYY-MM-DD，用于去重")
+
+    def __repr__(self):
+        return f"<AppVersionUsageLog(id={self.id}, device_id={self.device_id}, version={self.version_code})>"
 

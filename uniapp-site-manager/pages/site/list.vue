@@ -123,6 +123,13 @@
 
     <!-- 自定义底部导航栏 -->
     <custom-tabbar />
+    
+    <!-- 版本更新弹窗 -->
+    <UpdateDialog 
+      v-model:visible="showUpdateDialog"
+      @close="handleDialogClose"
+      @installed="handleUpdateInstalled"
+    />
 	</view>
 </template>
 
@@ -132,21 +139,44 @@
 	import { useSiteStore } from '@/stores/site'
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLanguageStore } from '@/stores/language'
+	import { useUpgradeStore } from '@/stores/upgrade'
 	import { createDebouncedTracker } from '@/utils/operationTrack.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 	import EmptyState from '@/components/EmptyState.vue'
+	import UpdateDialog from '@/components/UpdateDialog.vue'
 
 	const userStore = useUserStore()
 	const siteStore = useSiteStore()
 	const workOrderStore = useWorkOrderStore()
 	const languageStore = useLanguageStore()
+	const upgradeStore = useUpgradeStore()
 
 	const searchText = ref('')
 	const currentFilter = ref('all')
 	const showSearch = ref(false)
 	const refreshing = ref(false)
 	const isLoading = ref(true)
+	
+	// 版本更新弹窗状态
+	const showUpdateDialog = ref(false)
+	
+	// 监听全局弹窗状态
+	watch(() => upgradeStore.shouldShowDialog, (newVal) => {
+		if (newVal) {
+			showUpdateDialog.value = true
+		}
+	}, { immediate: true })
+	
+	const handleDialogClose = () => {
+		showUpdateDialog.value = false
+		upgradeStore.hideDialog()
+	}
+	
+	const handleUpdateInstalled = () => {
+		showUpdateDialog.value = false
+		upgradeStore.hideDialog()
+	}
 
 	const trackSearchDebounced = createDebouncedTracker(800)
 	const trackSearch = () => {
