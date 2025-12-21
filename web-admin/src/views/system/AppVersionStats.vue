@@ -123,7 +123,7 @@
             :key="index"
             class="dist-item"
           >
-            <div class="dist-label">Android {{ item.os_version }}</div>
+            <div class="dist-label">{{ item.os_version }}</div>
             <div class="dist-bar">
               <div 
                 class="dist-bar-fill os-bar" 
@@ -391,7 +391,7 @@ onUnmounted(() => {
 
 .dist-item {
   display: grid;
-  grid-template-columns: 100px 1fr 50px;
+  grid-template-columns: 140px 1fr 50px;
   align-items: center;
   gap: 12px;
 }
