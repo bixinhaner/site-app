@@ -115,7 +115,8 @@ export const downloadApk = (url, onProgress) => {
             {
                 filename: '_doc/update/',  // 保存到私有目录
                 retry: 3,
-                retryInterval: 3
+                retryInterval: 10,  // 重试间隔10秒
+                timeout: 60         // 连接超时60秒
             },
             (download, status) => {
                 console.log('下载完成，状态:', status)

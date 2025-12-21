@@ -196,6 +196,11 @@ export const useUpgradeStore = defineStore('upgrade', () => {
                 console.warn('记录下载开始失败:', e)
             }
 
+            // 开启屏幕常亮，防止息屏导致下载中断
+            // #ifdef APP-PLUS
+            plus.device.setWakelock(true)
+            // #endif
+
             // 开始下载
             const result = await downloadApk(
                 versionInfo.value.download_url,
@@ -253,6 +258,11 @@ export const useUpgradeStore = defineStore('upgrade', () => {
             downloadStatus.value = 'failed'
             errorMessage.value = error.message || '下载失败'
             return false
+        } finally {
+            // 关闭屏幕常亮
+            // #ifdef APP-PLUS
+            plus.device.setWakelock(false)
+            // #endif
         }
     }
 
