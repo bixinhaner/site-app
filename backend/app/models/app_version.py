@@ -80,7 +80,12 @@ class AppVersionDownloadLog(Base):
     # 网络信息
     ip_address = Column(String(50), comment="IP地址")
     network_type = Column(String(20), comment="网络类型: wifi/4g/5g")
-    
+
+    # 用户信息（可选，未登录时为空）
+    user_id = Column(Integer, index=True, comment="用户ID")
+    username = Column(String(50), comment="用户名")
+    user_role = Column(String(50), comment="用户角色")
+
     # 时间戳
     started_at = Column(DateTime, server_default=func.now())
     completed_at = Column(DateTime)
@@ -160,6 +165,8 @@ class AppVersionUsageLog(Base):
     
     # 用户信息（可选，未登录时为空）
     user_id = Column(Integer, index=True, comment="用户ID")
+    username = Column(String(50), comment="用户名")
+    user_role = Column(String(50), comment="用户角色")
     
     # 网络信息
     ip_address = Column(String(50), comment="IP地址")
@@ -170,4 +177,3 @@ class AppVersionUsageLog(Base):
 
     def __repr__(self):
         return f"<AppVersionUsageLog(id={self.id}, device_id={self.device_id}, version={self.version_code})>"
-

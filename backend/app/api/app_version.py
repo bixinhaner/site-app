@@ -120,7 +120,10 @@ async def check_version(
                 existing_log.user_id = request.user_id
                 existing_log.username = username_val
                 existing_log.user_role = user_role_val
-                db.commit()
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()  # 日志记录失败不影响主流程
     
     # 查询最新启用版本
     latest_version = db.query(AppVersion).filter(
@@ -917,4 +920,3 @@ async def upload_release_note_image(
         file_name=safe_filename,
         file_size=file_size
     )
-
