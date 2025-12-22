@@ -4,7 +4,7 @@ App版本管理API
 """
 import os
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, Query
@@ -29,6 +29,17 @@ router = APIRouter()
 
 # APK上传目录
 APK_UPLOAD_DIR = "uploads/apk"
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    将数据库取出的 naive datetime 视为 UTC，并规范为 tz-aware UTC。
+    FastAPI 序列化 tz-aware datetime 时会带上 +00:00，从而让前端正确按本地时区展示。
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _ensure_apk_dir():
@@ -232,7 +243,8 @@ async def record_download_complete(
         raise HTTPException(status_code=404, detail="下载记录不存在")
     
     log.download_status = request.status
-    log.completed_at = datetime.now()
+    # started_at（SQLite CURRENT_TIMESTAMP）为 UTC；completed_at 也统一写 UTC，避免前端计算耗时出现 +8h 偏差
+    log.completed_at = datetime.utcnow()
     
     if request.status == "failed" and request.error_message:
         log.error_message = request.error_message
@@ -501,7 +513,15 @@ async def get_download_logs(
     logs = query.order_by(desc(AppVersionDownloadLog.started_at)).offset(skip).limit(limit).all()
     
     return DownloadLogListResponse(
-        logs=[DownloadLogResponse.from_orm(log) for log in logs],
+        logs=[
+            DownloadLogResponse.model_validate(log).model_copy(
+                update={
+                    "started_at": _as_utc(getattr(log, "started_at", None)),
+                    "completed_at": _as_utc(getattr(log, "completed_at", None)),
+                }
+            )
+            for log in logs
+        ],
         total=total
     )
 
