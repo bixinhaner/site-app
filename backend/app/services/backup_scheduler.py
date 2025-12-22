@@ -1,6 +1,7 @@
+import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 from app.core.database import SessionLocal
@@ -16,6 +17,7 @@ from app.utils.timezone import to_utc_iso
 
 
 _scheduler_started = False
+logger = logging.getLogger(__name__)
 
 
 def _parse_iso(dt_str: Optional[str]) -> Optional[datetime]:
@@ -23,7 +25,10 @@ def _parse_iso(dt_str: Optional[str]) -> Optional[datetime]:
         return None
     try:
         # to_utc_iso 使用的是 UTC ISO，支持带 Z
-        return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
     except Exception:
         return None
 
@@ -53,12 +58,13 @@ def _backup_scheduler_loop():
     - 每 60 秒检查一次配置
     - 若到达下次执行时间则触发一次定时备份
     """
+    logger.info("数据备份调度器已启动（轮询间隔 60 秒）")
     while True:
         try:
             db = SessionLocal()
             try:
                 config = load_backup_config(db)
-                now_utc = datetime.utcnow()
+                now_utc = datetime.now(timezone.utc)
                 next_run_at = _get_next_run_time(config, now_utc)
 
                 if not config.get("enabled") or not next_run_at:
@@ -73,6 +79,11 @@ def _backup_scheduler_loop():
 
                 # 到达或超过下次运行时间，执行一次定时备份
                 try:
+                    logger.info(
+                        "触发定时备份：now=%s next_run_at=%s",
+                        to_utc_iso(now_utc),
+                        to_utc_iso(next_run_at),
+                    )
                     result = perform_backup(db, trigger_type="scheduled", trigger_user=None)
                     if result.get("status") == "success":
                         # 仅在成功时记录 last_run_at / last_success_at
@@ -81,15 +92,17 @@ def _backup_scheduler_loop():
                         config["last_success_at"] = config["last_run_at"]
                         save_backup_config(db, config)
                         db.commit()
+                        logger.info("定时备份成功：backup_file=%s", result.get("backup_file"))
                 except Exception:
                     # 定时任务失败在 perform_backup 内部已写入日志，这里仅忽略
-                    pass
+                    logger.exception("定时备份执行失败")
 
             finally:
                 db.close()
 
         except Exception:
             # 调度器自身异常不应终止循环
+            logger.exception("数据备份调度器循环异常")
             time.sleep(60)
 
 
