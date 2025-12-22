@@ -120,7 +120,8 @@ async def check_version(
     - 记录使用日志用于统计
     """
     # 记录使用日志（每个设备每天只记录一次）
-    today = datetime.now().strftime("%Y-%m-%d")
+    # logged_date 使用 UTC 作为“天”的边界（避免服务器本地时区差异导致前后端对不上）
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if request.device_id:
         # 检查今天是否已记录
         existing_log = db.query(AppVersionUsageLog).filter(
@@ -153,11 +154,27 @@ async def check_version(
             except Exception:
                 db.rollback()  # 日志记录失败不影响主流程
         else:
+            changed = False
+
+            # 方案B：同一设备同一天若升级到更高版本，则更新当天记录为新版本
+            # 这样版本分布能反映“当天最新版本”（而不是当天第一次启动的版本）
+            try:
+                old_vc = int(existing_log.version_code) if existing_log.version_code is not None else None
+            except Exception:
+                old_vc = None
+            new_vc = request.current_version_code
+            if old_vc is None or (new_vc and new_vc > old_vc):
+                existing_log.version_code = new_vc
+                changed = True
+
             # 如果已有记录但没有用户信息，补充用户信息
             if request.user_id and not existing_log.user_id:
                 existing_log.user_id = request.user_id
                 existing_log.username = username_val
                 existing_log.user_role = user_role_val
+                changed = True
+
+            if changed:
                 try:
                     db.commit()
                 except Exception:
@@ -620,10 +637,12 @@ async def get_usage_stats(
     _check_admin(current_user)
     
     from sqlalchemy import func, distinct
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     
-    today = datetime.now().date()
+    # 统计窗口与 logged_date 统一按 UTC 计算，避免时区差异导致数据错位
+    today = datetime.now(timezone.utc).date()
     start_date = today - timedelta(days=days)
+    start_date_str = start_date.strftime("%Y-%m-%d")
     
     # 总独立设备数
     total_devices = db.query(func.count(distinct(AppVersionUsageLog.device_id))).scalar() or 0
@@ -646,15 +665,43 @@ async def get_usage_stats(
         AppVersionUsageLog.logged_date >= month_ago
     ).scalar() or 0
     
-    # 版本分布（最近30天的活跃设备）
-    version_dist = db.query(
-        AppVersionUsageLog.version_code,
-        func.count(distinct(AppVersionUsageLog.device_id)).label("device_count")
+    # 方案C：版本/品牌/系统版本分布均以“窗口内每设备一条快照”为准，避免同一设备多次上报导致重复计数
+    # 取法：
+    # - 每个 device_id 取窗口内 version_code 最大的那条记录
+    # - 若 version_code 相同，取 logged_at 最新的一条；再按 id 兜底
+    ranked = db.query(
+        AppVersionUsageLog.device_id.label("device_id"),
+        AppVersionUsageLog.version_code.label("version_code"),
+        AppVersionUsageLog.device_brand.label("device_brand"),
+        AppVersionUsageLog.os_version.label("os_version"),
+        func.row_number().over(
+            partition_by=AppVersionUsageLog.device_id,
+            order_by=(
+                AppVersionUsageLog.version_code.desc(),
+                AppVersionUsageLog.logged_at.desc(),
+                AppVersionUsageLog.id.desc(),
+            ),
+        ).label("rn"),
     ).filter(
-        AppVersionUsageLog.logged_date >= month_ago
+        AppVersionUsageLog.logged_date >= start_date_str
+    ).subquery()
+
+    device_snapshot = db.query(
+        ranked.c.device_id,
+        ranked.c.version_code,
+        ranked.c.device_brand,
+        ranked.c.os_version,
+    ).filter(ranked.c.rn == 1).subquery()
+
+    # 版本分布（最近 N 天，按 device_snapshot 汇总）
+    version_dist = db.query(
+        device_snapshot.c.version_code,
+        func.count(device_snapshot.c.device_id).label("device_count"),
     ).group_by(
-        AppVersionUsageLog.version_code
-    ).order_by(desc("device_count")).all()
+        device_snapshot.c.version_code
+    ).order_by(
+        func.count(device_snapshot.c.device_id).desc()
+    ).all()
     
     # 转换版本码为版本名
     version_distribution = []
@@ -676,7 +723,7 @@ async def get_usage_stats(
         AppVersionUsageLog.logged_date,
         func.count(distinct(AppVersionUsageLog.device_id)).label("device_count")
     ).filter(
-        AppVersionUsageLog.logged_date >= start_date.strftime("%Y-%m-%d")
+        AppVersionUsageLog.logged_date >= start_date_str
     ).group_by(
         AppVersionUsageLog.logged_date
     ).order_by(AppVersionUsageLog.logged_date).all()
@@ -685,27 +732,29 @@ async def get_usage_stats(
     
     # 设备品牌分布
     brand_dist = db.query(
-        AppVersionUsageLog.device_brand,
-        func.count(distinct(AppVersionUsageLog.device_id)).label("device_count")
+        device_snapshot.c.device_brand,
+        func.count(device_snapshot.c.device_id).label("device_count")
     ).filter(
-        AppVersionUsageLog.logged_date >= month_ago,
-        AppVersionUsageLog.device_brand.isnot(None)
+        device_snapshot.c.device_brand.isnot(None)
     ).group_by(
-        AppVersionUsageLog.device_brand
-    ).order_by(desc("device_count")).limit(10).all()
+        device_snapshot.c.device_brand
+    ).order_by(
+        func.count(device_snapshot.c.device_id).desc()
+    ).limit(10).all()
     
     brand_distribution = [{"brand": b or "Unknown", "count": c} for b, c in brand_dist]
     
     # 系统版本分布
     os_dist = db.query(
-        AppVersionUsageLog.os_version,
-        func.count(distinct(AppVersionUsageLog.device_id)).label("device_count")
+        device_snapshot.c.os_version,
+        func.count(device_snapshot.c.device_id).label("device_count")
     ).filter(
-        AppVersionUsageLog.logged_date >= month_ago,
-        AppVersionUsageLog.os_version.isnot(None)
+        device_snapshot.c.os_version.isnot(None)
     ).group_by(
-        AppVersionUsageLog.os_version
-    ).order_by(desc("device_count")).limit(10).all()
+        device_snapshot.c.os_version
+    ).order_by(
+        func.count(device_snapshot.c.device_id).desc()
+    ).limit(10).all()
     
     os_distribution = [{"os_version": os or "Unknown", "count": c} for os, c in os_dist]
     
