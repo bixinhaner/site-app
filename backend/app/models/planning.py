@@ -93,8 +93,8 @@ class SitePlanningCell(Base):
     band_code = Column(String(20))  # 归一化 Band，如 B28/B40/B3/N41
     sheet_name = Column(String(50))
 
-    tower_id = Column(String(50), index=True)  # Excel 中的 TOWER ID，用作 SITE ID
-    site_information = Column(String(100))
+    tower_id = Column(String(50), index=True)  # Excel 中的 TOWER ID（塔编号）
+    site_information = Column(String(100))  # Excel 中的 SiteCode（用于匹配 sites.site_code）
     site_name = Column(String(200))
 
     local_cell_id = Column(Integer)  # LOCAL CELL ID

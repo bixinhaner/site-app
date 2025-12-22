@@ -28,7 +28,7 @@
 
     <el-card>
       <el-table :data="results" border size="small">
-        <el-table-column prop="site_code" label="TOWER ID / SiteCode" width="160" />
+        <el-table-column prop="site_code" label="SiteCode" width="160" />
         <el-table-column prop="site_id" label="站点ID" width="80" />
         <el-table-column label="结果" width="80">
           <template #default="{ row }">
@@ -88,7 +88,7 @@
       <div v-if="detailLog">
         <el-descriptions :column="2" border size="small" class="mb16">
           <el-descriptions-item label="站点ID">{{ detailSite?.site_id }}</el-descriptions-item>
-          <el-descriptions-item label="TOWER ID / SiteCode">
+          <el-descriptions-item label="SiteCode">
             {{ detailSite?.site_code || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="操作">{{ detailLog.operation }}</el-descriptions-item>

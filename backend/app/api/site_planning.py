@@ -281,7 +281,15 @@ def _ensure_site_plannable(site: Site):
 
 
 def _normalize_tower_id(value) -> Optional[str]:
-    """将 Excel 中的 TOWER ID 规范化为用于匹配站点的 SITE ID（site_code）。"""
+    """规范化 Excel 中的 TOWER ID（塔 ID）。"""
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
+
+
+def _normalize_site_code(value) -> Optional[str]:
+    """将 Excel 中的 SiteCode 规范化为用于匹配站点的站点编码（sites.site_code）。"""
     if value is None:
         return None
     s = str(value).strip()
@@ -502,11 +510,11 @@ def _create_new_version(
 
 def _collect_lld_rows_by_tower(excel: pd.ExcelFile) -> dict:
     """
-    按 TOWER ID 聚合 LLD 行数据。
+    按 SiteCode 聚合 LLD 行数据（用于匹配 sites.site_code）。
 
     返回结构:
         {
-          "TOWER_ID": [
+          "SiteCode": [
               {"rat": "LTE"|"NR", "band_code": "B20"/"N41", "sheet_name": "4G"/"5G", "row": {...}},
               ...
           ],
@@ -549,22 +557,29 @@ def _collect_lld_rows_by_tower(excel: pd.ExcelFile) -> dict:
         df.rename(columns=_normalize_lld_column_name, inplace=True)
 
         def add_row(row_dict: dict, rat: str, band_code: Optional[str], sheet_label: str):
-            tower_id = _normalize_tower_id(_first_not_null(row_dict, ["TOWER ID"]))
+            site_code = _normalize_site_code(_first_not_null(row_dict, ["SiteCode"]))
             local_cell_val = _first_not_null(row_dict, ["Sector ID Local ID", "Sector ID"])
-            if not tower_id or local_cell_val is None:
+            if not site_code or local_cell_val is None:
                 return
+            tower_id = _normalize_tower_id(_first_not_null(row_dict, ["TOWER ID"]))
             b = _to_str(band_code)
             b = b.upper() if b else None
-            rows_by_tower.setdefault(tower_id, []).append(
+            rows_by_tower.setdefault(site_code, []).append(
                 {
                     "rat": rat,
                     "band_code": b or sheet_label,
                     "sheet_name": sheet_label,
+                    "tower_id": tower_id,
                     "row": row_dict,
                 }
             )
 
         if upper in ("4G", "4G CELL", "LTE"):
+            if "SiteCode" not in df.columns:
+                raise HTTPException(
+                    status_code=400,
+                    detail="LLD 模板缺少 SiteCode 列（原 SITE INFORMATION 已改名为 SiteCode），请下载最新模板重新导入。",
+                )
             for _, r in df.iterrows():
                 row_dict = r.to_dict()
                 band = _to_str(_first_not_null(row_dict, ["BAND", "Band"]))
@@ -575,6 +590,11 @@ def _collect_lld_rows_by_tower(excel: pd.ExcelFile) -> dict:
             continue
 
         if upper in ("5G", "5G CELL", "NR"):
+            if "SiteCode" not in df.columns:
+                raise HTTPException(
+                    status_code=400,
+                    detail="LLD 模板缺少 SiteCode 列（原 SITE INFORMATION 已改名为 SiteCode），请下载最新模板重新导入。",
+                )
             for _, r in df.iterrows():
                 row_dict = r.to_dict()
                 band = _to_str(_first_not_null(row_dict, ["Band", "BAND"]))
@@ -591,7 +611,7 @@ def _collect_lld_rows_by_tower(excel: pd.ExcelFile) -> dict:
 
 def _build_cell_dict_from_row(
     site_id: int,
-    tower_id: str,
+    tower_id: Optional[str],
     meta: dict,
 ) -> dict:
     """将 LLD 行解析为 SitePlanningCell 可用的字段字典（不含 planning_id）。"""
@@ -607,7 +627,7 @@ def _build_cell_dict_from_row(
     known_cols = set(
         [
             "TOWER ID",
-            "SITE INFORMATION",
+            "SiteCode",
             "SITE NAME",
             "CELL NAME",
             "ENB ID",
@@ -689,7 +709,7 @@ def _build_cell_dict_from_row(
         "band_code": band_code,
         "sheet_name": sheet_name,
         "tower_id": tower_id,
-        "site_information": _to_str(_first_not_null(row, ["SITE INFORMATION"])),
+        "site_information": _to_str(_first_not_null(row, ["SiteCode"])),
         "site_name": _to_str(_first_not_null(row, ["SITE NAME"])),
         "local_cell_id": _to_int(_first_not_null(row, local_cell_candidates)),
         "cell_name": _to_str(_first_not_null(row, ["CELL NAME"])),
@@ -1640,7 +1660,7 @@ async def lld_batch_upload_planning(
 
     - 仅支持新模板：Sheet 为 4G/5G（频段从行内 BAND/Band 列读取）
 
-    使用 TOWER ID 作为 SITE ID，匹配 sites.site_code。
+    使用 SiteCode 作为 SITE ID，匹配 sites.site_code。
     """
     if current_user.role not in ["admin", "manager", "planner"]:
         raise HTTPException(status_code=403, detail="Not enough permissions")
@@ -1658,21 +1678,21 @@ async def lld_batch_upload_planning(
     if not rows_by_tower:
         raise HTTPException(
             status_code=400,
-            detail="未在 LLD 文件中找到有效的规划数据（请检查是否包含 4G/5G Sheet，且 TOWER ID 与 4G: Sector ID Local ID / 5G: Sector ID 列存在且非空）",
+            detail="未在 LLD 文件中找到有效的规划数据（请检查是否包含 4G/5G Sheet，且 SiteCode 与 4G: Sector ID Local ID / 5G: Sector ID 列存在且非空）",
         )
 
     results: List[BatchPlanningResult] = []
     success_count = 0
     failed_count = 0
 
-    for tower_id, metas in rows_by_tower.items():
+    for site_code, metas in rows_by_tower.items():
         errors: List[str] = []
         warnings: List[str] = []
         try:
-            site = db.query(Site).filter(Site.site_code == tower_id).first()
+            site = db.query(Site).filter(Site.site_code == site_code).first()
             if not site:
                 errors.append("站点不存在：请先在‘站点信息导入’创建站点并完成勘察")
-                results.append(BatchPlanningResult(site_code=tower_id, success=False, errors=errors))
+                results.append(BatchPlanningResult(site_code=site_code, success=False, errors=errors))
                 failed_count += 1
                 continue
 
@@ -1681,14 +1701,14 @@ async def lld_batch_upload_planning(
                 _ensure_site_plannable(site)
             except HTTPException as he:
                 errors.append(str(he.detail))
-                results.append(BatchPlanningResult(site_code=tower_id, site_id=site.id, success=False, errors=errors))
+                results.append(BatchPlanningResult(site_code=site_code, site_id=site.id, success=False, errors=errors))
                 failed_count += 1
                 continue
 
             # 构造 Cell 明细
             cell_dicts: List[dict] = []
             for meta in metas:
-                cell = _build_cell_dict_from_row(site.id, tower_id, meta)
+                cell = _build_cell_dict_from_row(site.id, meta.get("tower_id"), meta)
                 if cell.get("local_cell_id") is None:
                     # 理论上上游已经过滤过，这里再次防御
                     continue
@@ -1696,7 +1716,7 @@ async def lld_batch_upload_planning(
 
             if not cell_dicts:
                 errors.append("该站点在 LLD 中没有有效的小区行（4G: Sector ID Local ID / 5G: Sector ID 为空）")
-                results.append(BatchPlanningResult(site_code=tower_id, site_id=site.id, success=False, errors=errors))
+                results.append(BatchPlanningResult(site_code=site_code, site_id=site.id, success=False, errors=errors))
                 failed_count += 1
                 continue
 
@@ -1718,7 +1738,7 @@ async def lld_batch_upload_planning(
 
                 results.append(
                     BatchPlanningResult(
-                        site_code=tower_id,
+                        site_code=site_code,
                         site_id=site.id,
                         success=True,
                         warnings=warnings,
@@ -1749,7 +1769,7 @@ async def lld_batch_upload_planning(
 
             results.append(
                 BatchPlanningResult(
-                    site_code=tower_id,
+                    site_code=site_code,
                     site_id=site.id,
                     success=True,
                     version_created=planning.version,
@@ -1783,7 +1803,7 @@ async def lld_upload_planning_for_site(
     current_user: User = Depends(get_current_user),
 ):
     """
-    单站 LLD 导入：只处理 LLD 文件中 TOWER ID 与该站点 site_code 匹配的行。
+    单站 LLD 导入：只处理 LLD 文件中 SiteCode 与该站点 site_code 匹配的行。
     返回 BatchPlanningResult 以复用前端展示逻辑。
     """
     if current_user.role not in ["admin", "manager", "planner"]:
@@ -1806,7 +1826,7 @@ async def lld_upload_planning_for_site(
     rows_by_tower = _collect_lld_rows_by_tower(excel)
     metas = rows_by_tower.get(site.site_code) or []
     if not metas:
-        raise HTTPException(status_code=400, detail=f"LLD 文件中未找到与站点编码 {site.site_code} 匹配的 TOWER ID 行")
+        raise HTTPException(status_code=400, detail=f"LLD 文件中未找到与站点编码 {site.site_code} 匹配的 SiteCode 行")
 
     errors: List[str] = []
     warnings: List[str] = []
@@ -1826,7 +1846,7 @@ async def lld_upload_planning_for_site(
 
     cell_dicts: List[dict] = []
     for meta in metas:
-        cell = _build_cell_dict_from_row(site.id, site.site_code, meta)
+        cell = _build_cell_dict_from_row(site.id, meta.get("tower_id"), meta)
         if cell.get("local_cell_id") is None:
             continue
         cell_dicts.append(cell)

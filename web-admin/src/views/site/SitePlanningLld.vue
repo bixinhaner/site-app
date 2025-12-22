@@ -125,7 +125,7 @@
                       <div class="field-item"><span class="field-label">BandCode</span><span class="field-value">{{ row.band_code || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">Sheet</span><span class="field-value">{{ row.sheet_name || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">TOWER ID</span><span class="field-value">{{ row.tower_id || '-' }}</span></div>
-                      <div class="field-item"><span class="field-label">SITE INFORMATION</span><span class="field-value">{{ row.site_information || '-' }}</span></div>
+                      <div class="field-item"><span class="field-label">SiteCode</span><span class="field-value">{{ row.site_information || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">SITE NAME</span><span class="field-value">{{ row.site_name || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">TOWER NAME</span><span class="field-value">{{ row.tower_name || '-' }}</span></div>
                       <div class="field-item"><span class="field-label">Town</span><span class="field-value">{{ row.town || '-' }}</span></div>
@@ -346,7 +346,7 @@
                           <div class="field-item"><span class="field-label">BandCode</span><span class="field-value">{{ row.band_code || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">Sheet</span><span class="field-value">{{ row.sheet_name || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">TOWER ID</span><span class="field-value">{{ row.tower_id || '-' }}</span></div>
-                          <div class="field-item"><span class="field-label">SITE INFORMATION</span><span class="field-value">{{ row.site_information || '-' }}</span></div>
+                          <div class="field-item"><span class="field-label">SiteCode</span><span class="field-value">{{ row.site_information || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">SITE NAME</span><span class="field-value">{{ row.site_name || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">TOWER NAME</span><span class="field-value">{{ row.tower_name || '-' }}</span></div>
                           <div class="field-item"><span class="field-label">Town</span><span class="field-value">{{ row.town || '-' }}</span></div>
