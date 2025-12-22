@@ -23,7 +23,7 @@
           {{ equipmentInfo.vendor || '-' }}
         </el-descriptions-item>
         <el-descriptions-item label="所在仓库">
-          {{ equipmentInfo.warehouse_name || '-' }}
+          {{ displayWarehouseName }}
         </el-descriptions-item>
       </el-descriptions>
     </div>
@@ -160,6 +160,18 @@ const omcStatus = ref(null)
 const refreshCooldown = ref(0)
 let cooldownTimer = null
 
+const displayWarehouseName = computed(() => {
+  const info = equipmentInfo.value || {}
+  if (info.warehouse_id !== undefined && info.warehouse_id !== null) {
+    return info.warehouse_name || '-'
+  }
+  if (info.warehouse_id === null) {
+    if (info.last_warehouse_name) return `已出库（上个仓库：${info.last_warehouse_name}）`
+    return '已出库'
+  }
+  return info.warehouse_name || info.last_warehouse_name || info.stock_in_warehouse_name || '-'
+})
+
 const loadOmcStatus = async () => {
   if (!props.sn) {
     ElMessage.warning('暂无设备SN，无法查询OMC状态')
@@ -271,7 +283,7 @@ const lifecycleStages = computed(() => {
         设备SN: equipmentInfo.value.serial_number,
         条码: equipmentInfo.value.barcode || '-',
         供应商: equipmentInfo.value.vendor || '-',
-        仓库: equipmentInfo.value.warehouse_name || '-'
+        仓库: equipmentInfo.value.stock_in_warehouse_name || equipmentInfo.value.warehouse_name || equipmentInfo.value.last_warehouse_name || '-'
       }
     })
   }

@@ -134,32 +134,39 @@
         </template>
         
         <el-form :model="importForm" label-width="120px">
-          <el-row :gutter="20">
-            <el-col :span="12">
-              <el-form-item label="导入对象" required>
-                <el-radio-group v-model="importForm.import_target" @change="handleImportTargetChange">
-                  <el-radio-button label="main_device">主设备</el-radio-button>
-                  <el-radio-button label="auxiliary">辅料</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item :label="importTargetLabel" required>
-                <el-select
-                  v-model="importForm.equipment_type_id"
-                  :placeholder="importForm.import_target === 'auxiliary' ? '选择要导入的辅料类型' : '选择要导入的主设备类型'"
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="eq in importEquipmentOptions"
-                    :key="eq.id"
-                    :label="`${eq.equipment_name} (${eq.equipment_code})`"
-                    :value="eq.id"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-          </el-row>
+	          <el-row :gutter="20">
+	            <el-col :span="12">
+	              <el-form-item label="导入对象" required>
+	                <el-radio-group v-model="importForm.import_target" @change="handleImportTargetChange">
+	                  <el-radio-button label="main_device">主设备</el-radio-button>
+	                  <el-radio-button label="auxiliary">辅料</el-radio-button>
+	                </el-radio-group>
+	              </el-form-item>
+	            </el-col>
+	            <el-col :span="12">
+	              <el-form-item v-if="importForm.import_target === 'main_device'" :label="importTargetLabel" required>
+	                <el-select
+	                  v-model="importForm.equipment_type_id"
+	                  placeholder="选择要导入的主设备类型"
+	                  style="width: 100%"
+	                >
+	                  <el-option
+	                    v-for="eq in importEquipmentOptions"
+	                    :key="eq.id"
+	                    :label="`${eq.equipment_name} (${eq.equipment_code})`"
+	                    :value="eq.id"
+	                  />
+	                </el-select>
+	              </el-form-item>
+	              <el-form-item v-else label="辅料类型">
+	                <el-alert
+	                  type="info"
+	                  :closable="false"
+	                  title="辅料导入无需选择类型，请在 Excel 的“辅料类型(编码)”列填写辅材编码"
+	                />
+	              </el-form-item>
+	            </el-col>
+	          </el-row>
           <el-row :gutter="20">
             <el-col :span="12">
               <el-form-item label="目标仓库" required>
@@ -204,36 +211,39 @@
           <div class="el-upload__text">
             将Excel文件拖到此处，或<em>点击上传</em>
           </div>
-          <template #tip>
-            <div class="el-upload__tip">
-              只能上传 xlsx/xls 文件，请先下载模板查看格式要求
-            </div>
-          </template>
-        </el-upload>
+	          <template #tip>
+	            <div class="el-upload__tip">
+	              <div>只能上传 xlsx/xls 文件，请先下载模板查看格式要求</div>
+	              <div v-if="importForm.import_target === 'auxiliary'">
+	                提示：导入的辅料类型(编码)需与系统中已存在的辅材编码一致
+	              </div>
+	            </div>
+	          </template>
+	        </el-upload>
       </el-card>
 
       <!-- 数据预览 -->
       <el-card v-if="previewData.length > 0" class="preview-card">
         <template #header>
           <span>数据预览</span>
-          <el-tag
-            v-if="importForm.import_target === 'auxiliary'"
-            type="info"
-            size="small"
-            style="margin-left: 10px"
-          >
-            共 {{ previewData.length }} 条 / 合计 {{ auxiliaryTotalQuantity }} {{ getEquipmentUnit(importForm.equipment_type_id) }}
-          </el-tag>
+	          <el-tag
+	            v-if="importForm.import_target === 'auxiliary'"
+	            type="info"
+	            size="small"
+	            style="margin-left: 10px"
+	          >
+	            共 {{ previewData.length }} 种 / 合计 {{ auxiliaryTotalQuantity }}
+	          </el-tag>
           <el-tag v-else type="info" size="small" style="margin-left: 10px">共 {{ previewData.length }} 条数据</el-tag>
         </template>
 
-        <el-table :data="previewData.slice(0, 10)" border size="small" max-height="400">
-          <template v-if="importForm.import_target === 'auxiliary'">
-            <el-table-column prop="quantity" label="数量" width="100" />
-            <el-table-column prop="batch_number" label="批次号" width="120" />
-            <el-table-column prop="vendor" label="供应商" width="120" />
-            <el-table-column prop="notes" label="备注" min-width="160" />
-          </template>
+	        <el-table :data="previewData.slice(0, 10)" border size="small" max-height="400">
+	          <template v-if="importForm.import_target === 'auxiliary'">
+	            <el-table-column prop="equipment_code" label="辅料编码" width="160" />
+	            <el-table-column prop="equipment_name" label="辅料名称" width="180" />
+	            <el-table-column prop="quantity" label="数量" width="100" />
+	            <el-table-column prop="batch_number" label="批次号" width="120" />
+	          </template>
           <template v-else>
             <el-table-column prop="sn" label="SN序列号" width="180" />
             <el-table-column prop="mac_address" label="MAC地址" width="150" />
@@ -271,7 +281,7 @@
             <span class="stat-value">{{ importResult.document_number }}</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">条目数:</span>
+            <span class="stat-label">种类数:</span>
             <span class="stat-value">{{ importResult.total_rows }}</span>
           </div>
           <div class="stat-item success">
@@ -350,6 +360,8 @@ const importResult = ref(null)
 const currentFile = ref(null)
 const mainDeviceOptions = ref([])
 const auxiliaryOptions = ref([])
+const auxiliaryRawRows = ref([])
+const auxiliaryImportErrors = ref([])
 const importTargetLabel = computed(() =>
   importForm.value.import_target === 'auxiliary' ? '辅料类型' : '主设备类型'
 )
@@ -541,9 +553,11 @@ const resetForm = () => {
 
 // 批量导入相关方法
 const canImport = computed(() => {
-  return importForm.value.equipment_type_id && 
-         importForm.value.warehouse_id && 
-         previewData.value.length > 0
+  if (!importForm.value.warehouse_id || previewData.value.length === 0) return false
+  if (importForm.value.import_target === 'auxiliary') {
+    return auxiliaryImportErrors.value.length === 0
+  }
+  return Boolean(importForm.value.equipment_type_id)
 })
 
 const handleMethodChange = () => {
@@ -589,11 +603,15 @@ const handleImportTargetChange = () => {
 
 const downloadAuxTemplate = () => {
   try {
-    const templateData = [
-      ['数量', '批次号', '备注', '供应商'],
-      [10, 'BATCH2024001', '辅料批量入库示例', '华为'],
-      [5, 'BATCH2024002', '', '中兴']
-    ]
+    const templateHeader = ['辅料类型(编码)', '数量', '批次号', '备注', '供应商']
+    const auxSamples = auxiliaryOptions.value.filter((i) => i && i.equipment_code).slice(0, 2)
+    const templateData = [templateHeader]
+    if (auxSamples.length > 0) {
+      templateData.push([auxSamples[0].equipment_code, 10, 'BATCH2024001', '辅料批量入库示例', '华为'])
+    }
+    if (auxSamples.length > 1) {
+      templateData.push([auxSamples[1].equipment_code, 5, 'BATCH2024002', '', '中兴'])
+    }
     const worksheet = XLSX.utils.aoa_to_sheet(templateData)
     const workbook = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(workbook, worksheet, '辅料入库模板')
@@ -623,8 +641,11 @@ const beforeUpload = () => {
   return false // 阻止自动上传
 }
 
-const handleFileChange = (file) => {
+const handleFileChange = async (file) => {
   currentFile.value = file.raw
+  if (importForm.value.import_target === 'auxiliary' && auxiliaryOptions.value.length === 0) {
+    await loadBatchImportOptions()
+  }
   parseExcelFile(file.raw)
 }
 
@@ -632,6 +653,8 @@ const handleFileRemove = () => {
   currentFile.value = null
   previewData.value = []
   importResult.value = null
+  auxiliaryRawRows.value = []
+  auxiliaryImportErrors.value = []
 }
 
 // 辅助函数：将Excel日期序列号或各种日期格式转换为标准日期格式
@@ -766,43 +789,129 @@ const parseMainDeviceRows = (jsonData) => {
 }
 
 const parseAuxiliaryRows = (jsonData) => {
-  // 辅料模板：数量 / 批次号 / 备注 / 供应商
-  const parsedData = []
-  const invalidRows = []
+  // 辅料模板：辅料类型(编码) / 数量 / 批次号 / 备注 / 供应商
+  const rawRows = []
+  const errors = []
+
+  const headerRow = (jsonData && jsonData[0]) ? jsonData[0] : []
+  const normalize = (v) => String(v ?? '').trim().replace(/\s+/g, '')
+  const findCol = (candidates) => {
+    const normalized = headerRow.map(normalize)
+    for (const cand of candidates) {
+      const idx = normalized.findIndex((h) => h.includes(normalize(cand)))
+      if (idx >= 0) return idx
+    }
+    return -1
+  }
+
+  const colCode = findCol(['辅料类型(编码)', '辅料类型', '辅材类型', '辅料编码', '辅材编码'])
+  const colQuantity = findCol(['数量'])
+  const colBatch = findCol(['批次号', '批次'])
+  const colNotes = findCol(['备注'])
+  const colVendor = findCol(['供应商'])
+
+  if (colCode < 0 || colQuantity < 0) {
+    auxiliaryImportErrors.value = [{ row: 1, reason: '模板格式不正确：缺少“辅料类型(编码)”或“数量”列，请下载最新模板' }]
+    previewData.value = []
+    auxiliaryRawRows.value = []
+    ElMessage.error('模板格式不正确，请下载最新模板后重新导入')
+    return
+  }
+
+  const auxCodeMap = new Map(
+    auxiliaryOptions.value
+      .filter((eq) => eq && eq.equipment_code)
+      .map((eq) => [String(eq.equipment_code).trim(), eq])
+  )
 
   for (let i = 1; i < jsonData.length; i++) {
     const row = jsonData[i] || []
     const hasAnyValue = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '')
     if (!hasAnyValue) continue
 
-    const rawQuantity = row[0]
+    const rowNumber = i + 1
+    const equipmentCode = row[colCode] ? String(row[colCode]).trim() : ''
+    if (!equipmentCode) {
+      errors.push({ row: rowNumber, reason: '辅料类型(编码)不能为空' })
+      continue
+    }
+
+    const matched = auxCodeMap.get(equipmentCode)
+    if (!matched) {
+      errors.push({ row: rowNumber, reason: `辅料编码不存在或非辅材：${equipmentCode}` })
+      continue
+    }
+
+    const rawQuantity = row[colQuantity]
     const quantity = Number(String(rawQuantity ?? '').trim())
-
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      invalidRows.push({ row: i + 1, reason: '数量必须为大于0的数字' })
+      errors.push({ row: rowNumber, reason: '数量必须为大于0的数字' })
       continue
     }
-
     if (!Number.isInteger(quantity)) {
-      invalidRows.push({ row: i + 1, reason: '数量必须为整数' })
+      errors.push({ row: rowNumber, reason: '数量必须为整数' })
       continue
     }
 
-    parsedData.push({
-      quantity: quantity,
-      batch_number: row[1] ? String(row[1]).trim() : '',
-      notes: row[2] ? String(row[2]).trim() : '',
-      vendor: row[3] ? String(row[3]).trim() : ''
+    rawRows.push({
+      row: rowNumber,
+      equipment_code: equipmentCode,
+      equipment_id: matched.id,
+      equipment_name: matched.equipment_name,
+      quantity,
+      batch_number: colBatch >= 0 && row[colBatch] ? String(row[colBatch]).trim() : '',
+      notes: colNotes >= 0 && row[colNotes] ? String(row[colNotes]).trim() : '',
+      vendor: colVendor >= 0 && row[colVendor] ? String(row[colVendor]).trim() : ''
     })
   }
 
-  if (invalidRows.length > 0) {
-    const preview = invalidRows.slice(0, 10).map((r) => `行${r.row}:${r.reason}`).join('，')
-    ElMessage.warning(`已跳过 ${invalidRows.length} 行无效数据（示例：${preview}）`)
+  // 合并同一辅料编码（数量求和），批次号不一致则阻止导入
+  const mergedMap = new Map()
+  for (const r of rawRows) {
+    const key = r.equipment_code
+    const existing = mergedMap.get(key)
+    if (!existing) {
+      mergedMap.set(key, {
+        equipment_code: r.equipment_code,
+        equipment_id: r.equipment_id,
+        equipment_name: r.equipment_name,
+        quantity: r.quantity,
+        batch_number: r.batch_number || ''
+      })
+      continue
+    }
+
+    existing.quantity += r.quantity
+
+    const existingBatch = String(existing.batch_number || '').trim()
+    const rowBatch = String(r.batch_number || '').trim()
+    if (existingBatch && rowBatch && existingBatch !== rowBatch) {
+      errors.push({
+        row: r.row,
+        reason: `同一辅料编码(${key})存在多个批次号，无法合并，请在Excel中保持一致或合并为一行`
+      })
+      continue
+    }
+    if (!existingBatch && rowBatch) {
+      existing.batch_number = rowBatch
+    }
   }
 
-  previewData.value = parsedData
-  ElMessage.success(`已解析 ${parsedData.length} 条数据`)
+  auxiliaryImportErrors.value = errors
+  auxiliaryRawRows.value = rawRows
+  if (errors.length > 0) {
+    previewData.value = []
+    const preview = errors.slice(0, 20).map((r) => `行${r.row}:${r.reason}`).join('\n')
+    ElMessageBox.alert(
+      `发现 ${errors.length} 处问题，已阻止导入：\n\n${preview}${errors.length > 20 ? `\n\n... 还有 ${errors.length - 20} 条` : ''}`,
+      '辅料导入校验失败',
+      { type: 'error' }
+    )
+    return
+  }
+
+  previewData.value = Array.from(mergedMap.values()).sort((a, b) => String(a.equipment_code).localeCompare(String(b.equipment_code)))
+  ElMessage.success(`已解析 ${rawRows.length} 行数据，合并后 ${previewData.value.length} 种辅料`)
 }
 
 const submitImport = async () => {
@@ -811,15 +920,19 @@ const submitImport = async () => {
 
     if (importForm.value.import_target === 'auxiliary') {
       const totalQuantity = auxiliaryTotalQuantity.value
+      if (auxiliaryImportErrors.value.length > 0) {
+        ElMessage.error('辅料导入校验未通过，请修正Excel后重新上传')
+        return
+      }
       await ElMessageBox.confirm(
-        `确认导入辅料入库？\\n条目数：${previewData.value.length}\\n入库总数量：${totalQuantity}`,
+        `确认导入辅料入库？\\n原始行数：${auxiliaryRawRows.value.length}\\n辅料种类数：${previewData.value.length}\\n入库总数量：${totalQuantity}`,
         '导入确认',
         { type: 'warning' }
       )
 
-      const vendors = [...new Set(previewData.value.map((i) => (i.vendor || '').trim()).filter(Boolean))]
+      const vendors = [...new Set(auxiliaryRawRows.value.map((i) => (i.vendor || '').trim()).filter(Boolean))]
       const vendorText = vendors.length > 0 ? `，供应商：${vendors.join(',')}` : ''
-      const rawNotes = previewData.value.map((i) => (i.notes || '').trim()).filter(Boolean)
+      const rawNotes = auxiliaryRawRows.value.map((i) => (i.notes || '').trim()).filter(Boolean)
       const uniqueNotes = [...new Set(rawNotes)]
       const noteText =
         uniqueNotes.length > 0
@@ -828,11 +941,17 @@ const submitImport = async () => {
       const notes = `辅料批量导入 - ${currentFile.value?.name || ''}${vendorText}${noteText}`
 
       const items = previewData.value.map((row) => ({
-        equipment_id: importForm.value.equipment_type_id,
+        equipment_id: row.equipment_id,
         quantity: Number(row.quantity) || 0,
         batch_number: row.batch_number || '',
         serial_number: ''
       }))
+
+      const missing = items.filter((i) => !i.equipment_id)
+      if (missing.length > 0) {
+        ElMessage.error('存在无法匹配的辅料编码，请刷新页面后重新上传')
+        return
+      }
 
       const res = await stockApi.createStockIn({
         warehouse_id: importForm.value.warehouse_id,
@@ -927,6 +1046,8 @@ const resetImport = (options = {}) => {
   previewData.value = []
   importResult.value = null
   currentFile.value = null
+  auxiliaryRawRows.value = []
+  auxiliaryImportErrors.value = []
   if (uploadRef.value) {
     uploadRef.value.clearFiles()
   }
@@ -960,7 +1081,7 @@ const jumpToStockHistory = () => {
 
 const loadBatchImportOptions = async () => {
   try {
-    const response = await equipmentApi.getEquipmentList()
+    const response = await equipmentApi.getEquipmentList({ status: 'active', limit: 2000 })
     mainDeviceOptions.value = response.filter(eq => eq.category === 'main_device')
     auxiliaryOptions.value = response.filter(eq => eq.category === 'auxiliary')
   } catch (error) {

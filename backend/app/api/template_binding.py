@@ -561,6 +561,101 @@ async def update_template(
     }
 
 
+@router.delete("/templates/{template_id}", response_model=dict)
+async def delete_template(
+    template_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除检查模板（物理删除）
+
+    规则：
+    - 已被绑定（template_bindings）或已被任何检查/档案引用时，禁止删除。
+    """
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="权限不足",
+        )
+
+    template = db.query(InspectionTemplate).filter(InspectionTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="模板不存在",
+        )
+
+    bindings_count = (
+        db.query(func.count(TemplateBinding.id))
+        .filter(TemplateBinding.template_id == template_id)
+        .scalar()
+        or 0
+    )
+    inspections_count = (
+        db.query(func.count(SiteInspection.id))
+        .filter(SiteInspection.template_id == template_id)
+        .scalar()
+        or 0
+    )
+
+    from app.models.opening_archive import SiteOpeningArchive
+    from app.models.survey_archive import SiteSurveyArchive
+    from app.models.ssv_archive import SiteSSVArchive
+
+    opening_archives_count = (
+        db.query(func.count(SiteOpeningArchive.id))
+        .filter(SiteOpeningArchive.template_id == template_id)
+        .scalar()
+        or 0
+    )
+    survey_archives_count = (
+        db.query(func.count(SiteSurveyArchive.id))
+        .filter(SiteSurveyArchive.template_id == template_id)
+        .scalar()
+        or 0
+    )
+    ssv_archives_count = (
+        db.query(func.count(SiteSSVArchive.id))
+        .filter(SiteSSVArchive.template_id == template_id)
+        .scalar()
+        or 0
+    )
+
+    if any(
+        count > 0
+        for count in [
+            bindings_count,
+            inspections_count,
+            opening_archives_count,
+            survey_archives_count,
+            ssv_archives_count,
+        ]
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "模板已被绑定或已被使用，禁止删除",
+                "bindings_count": bindings_count,
+                "inspections_count": inspections_count,
+                "opening_archives_count": opening_archives_count,
+                "survey_archives_count": survey_archives_count,
+                "ssv_archives_count": ssv_archives_count,
+            },
+        )
+
+    try:
+        db.delete(template)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"删除失败：{exc}",
+        )
+
+    return {"message": "模板删除成功", "template_id": template_id}
+
+
 @router.get("/templates/{template_id}/bindings", response_model=List[TemplateBindingResponse])
 async def get_template_bindings(
     template_id: str,

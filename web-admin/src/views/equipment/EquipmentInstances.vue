@@ -30,7 +30,11 @@
         </el-table-column>
         <el-table-column prop="barcode" label="条码" width="200" />
         <el-table-column prop="vendor" label="供应商" width="140" />
-        <el-table-column prop="warehouse_name" label="所在仓库" width="160" />
+        <el-table-column label="所在仓库" width="220">
+          <template #default="{ row }">
+            <span>{{ formatWarehouseDisplay(row) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="120" />
         <el-table-column label="绑定信息" width="300">
           <template #default="{ row }">
@@ -236,6 +240,18 @@ const displayedItems = computed(() => {
     (i.vendor || '').toLowerCase().includes(kw)
   )
 })
+
+const formatWarehouseDisplay = (row) => {
+  if (!row) return '-'
+  if (row.warehouse_id !== undefined && row.warehouse_id !== null) {
+    return row.warehouse_name || '-'
+  }
+  if (row.warehouse_id === null) {
+    if (row.last_warehouse_name) return `已出库（上个仓库：${row.last_warehouse_name}）`
+    return '已出库'
+  }
+  return row.warehouse_name || row.last_warehouse_name || '-'
+}
 
 const loadEquipments = async () => {
   try {

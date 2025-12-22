@@ -16,7 +16,11 @@ from app.models.equipment import (
     EquipmentStatusEnum,
     Inventory,
     SNImportRecord,
+    StockTransaction,
     StockTransactionItem,
+    TransactionTypeEnum,
+    Warehouse,
+    PickupRecord,
 )
 from app.models.equipment import EquipmentInstance  # noqa: E402
 from app.utils.timezone import to_utc_iso
@@ -499,6 +503,45 @@ async def search_equipment_instance(
     issuer = instance.issuer
     warehouse = instance.warehouse
 
+    current_warehouse_id = instance.warehouse_id
+    current_warehouse_name = warehouse.warehouse_name if warehouse else None
+
+    stock_in_warehouse_id = None
+    stock_in_warehouse_name = None
+
+    stock_in_row = (
+        db.query(StockTransaction.warehouse_id, Warehouse.warehouse_name)
+        .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+        .join(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+        .filter(
+            StockTransactionItem.equipment_instance_id == instance.id,
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_IN,
+        )
+        .order_by(StockTransaction.operation_time.asc())
+        .first()
+    )
+    if stock_in_row:
+        stock_in_warehouse_id, stock_in_warehouse_name = stock_in_row
+
+    last_warehouse_id = current_warehouse_id
+    last_warehouse_name = current_warehouse_name
+
+    if last_warehouse_id is None:
+        pickup_row = (
+            db.query(StockTransaction.warehouse_id, Warehouse.warehouse_name)
+            .join(PickupRecord, PickupRecord.transaction_id == StockTransaction.id)
+            .join(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+            .filter(PickupRecord.equipment_instance_id == instance.id)
+            .order_by(PickupRecord.pickup_time.desc())
+            .first()
+        )
+        if pickup_row:
+            last_warehouse_id, last_warehouse_name = pickup_row
+
+    if stock_in_warehouse_id is None:
+        stock_in_warehouse_id = current_warehouse_id or last_warehouse_id
+        stock_in_warehouse_name = current_warehouse_name or last_warehouse_name
+
     return {
         "id": instance.id,
         "serial_number": instance.serial_number,
@@ -508,7 +551,12 @@ async def search_equipment_instance(
         "equipment_id": equipment.id if equipment else None,
         "equipment_name": equipment.equipment_name if equipment else None,
         "equipment_code": equipment.equipment_code if equipment else None,
-        "warehouse_name": warehouse.warehouse_name if warehouse else None,
+        "warehouse_id": current_warehouse_id,
+        "warehouse_name": current_warehouse_name,
+        "stock_in_warehouse_id": stock_in_warehouse_id,
+        "stock_in_warehouse_name": stock_in_warehouse_name,
+        "last_warehouse_id": last_warehouse_id,
+        "last_warehouse_name": last_warehouse_name,
         # issued_date 历史上使用 datetime.now()（本地时间）写入，这里按本地时间换算到 UTC
         "issued_at": to_utc_iso(instance.issued_date, assume_local=True) if instance.issued_date else None,
         "issued_to": issuer.id if issuer else None,

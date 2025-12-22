@@ -2330,7 +2330,11 @@ async def get_equipment_instances(
     current_user: User = Depends(get_current_user)
 ):
     """获取设备实例列表"""
-    query = db.query(EquipmentInstance).filter(EquipmentInstance.equipment_id == equipment_id)
+    query = (
+        db.query(EquipmentInstance)
+        .options(joinedload(EquipmentInstance.warehouse))
+        .filter(EquipmentInstance.equipment_id == equipment_id)
+    )
 
     if not include_voided:
         query = query.filter(or_(EquipmentInstance.is_voided == False, EquipmentInstance.is_voided.is_(None)))
@@ -2339,9 +2343,56 @@ async def get_equipment_instances(
         query = query.filter(EquipmentInstance.status == status)
     
     instances = query.order_by(desc(EquipmentInstance.created_at)).all()
+
+    # warehouse_id 为空即视为已出库（或在库外），需回溯上个仓库信息用于前端展示
+    out_instance_ids = [inst.id for inst in instances if inst.warehouse_id is None]
+    last_warehouse_map = {}
+    if out_instance_ids:
+        latest_pickup_subq = (
+            db.query(
+                PickupRecord.equipment_instance_id.label("equipment_instance_id"),
+                func.max(PickupRecord.pickup_time).label("last_pickup_time"),
+            )
+            .filter(PickupRecord.equipment_instance_id.in_(out_instance_ids))
+            .group_by(PickupRecord.equipment_instance_id)
+            .subquery()
+        )
+
+        pickup_rows = (
+            db.query(
+                PickupRecord.equipment_instance_id,
+                StockTransaction.warehouse_id,
+                Warehouse.warehouse_name,
+            )
+            .join(
+                latest_pickup_subq,
+                and_(
+                    PickupRecord.equipment_instance_id == latest_pickup_subq.c.equipment_instance_id,
+                    PickupRecord.pickup_time == latest_pickup_subq.c.last_pickup_time,
+                ),
+            )
+            .join(StockTransaction, StockTransaction.id == PickupRecord.transaction_id)
+            .join(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+            .all()
+        )
+        for equipment_instance_id, warehouse_id, warehouse_name in pickup_rows:
+            last_warehouse_map[equipment_instance_id] = {
+                "warehouse_id": warehouse_id,
+                "warehouse_name": warehouse_name,
+            }
     
     result = []
     for instance in instances:
+        current_warehouse_id = instance.warehouse_id
+        current_warehouse_name = instance.warehouse.warehouse_name if instance.warehouse else None
+
+        last_warehouse_id = current_warehouse_id
+        last_warehouse_name = current_warehouse_name
+        if current_warehouse_id is None:
+            last_info = last_warehouse_map.get(instance.id) or {}
+            last_warehouse_id = last_info.get("warehouse_id")
+            last_warehouse_name = last_info.get("warehouse_name")
+
         instance_is_voided = bool(getattr(instance, "is_voided", False))
         display_sn = instance.original_serial_number if instance_is_voided and getattr(instance, "original_serial_number", None) else instance.serial_number
         display_barcode = display_sn if instance_is_voided and getattr(instance, "original_serial_number", None) else instance.barcode
@@ -2367,7 +2418,10 @@ async def get_equipment_instances(
             "quality_status": instance.quality_status,
             "status": instance.status,
             "location": instance.location,
-            "warehouse_name": instance.warehouse.warehouse_name if instance.warehouse else None,
+            "warehouse_id": current_warehouse_id,
+            "warehouse_name": current_warehouse_name,
+            "last_warehouse_id": last_warehouse_id,
+            "last_warehouse_name": last_warehouse_name,
             "created_at": to_utc_iso(instance.created_at) if instance.created_at else None
         })
     

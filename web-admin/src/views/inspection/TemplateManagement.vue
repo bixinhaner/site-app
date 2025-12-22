@@ -504,7 +504,14 @@ const handleDeleteTemplate = async (template) => {
   } catch (error) {
     if (error !== 'cancel') {
       console.error('删除模板失败:', error)
-      ElMessage.error('删除模板失败')
+      const detail = error?.response?.data?.detail
+      if (typeof detail === 'string') {
+        ElMessage.error(`删除失败：${detail}`)
+      } else if (detail?.message) {
+        ElMessage.error(`删除失败：${detail.message}`)
+      } else {
+        ElMessage.error('删除模板失败')
+      }
     }
   }
 }
