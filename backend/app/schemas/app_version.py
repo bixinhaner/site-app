@@ -99,6 +99,9 @@ class AppVersionUpdate(BaseModel):
     is_active: Optional[bool] = None
     show_release_notes: Optional[bool] = None
     download_url: Optional[str] = None
+    file_size: Optional[int] = None
+    file_md5: Optional[str] = None
+    file_name: Optional[str] = None
 
     @validator('gray_scale_percent')
     def validate_gray_scale(cls, v):
@@ -269,4 +272,3 @@ class ReleaseNoteImageUploadResponse(BaseModel):
     image_url: str
     file_name: str
     file_size: int
-

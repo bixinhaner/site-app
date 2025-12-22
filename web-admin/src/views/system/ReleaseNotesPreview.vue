@@ -41,7 +41,7 @@
         <div class="version-info">
           <el-tag type="primary" size="large">v{{ versionInfo?.version_name }}</el-tag>
           <span class="date-tag" v-if="releaseNote.created_at">
-            发布于 {{ formatDate(releaseNote.created_at) }}
+            创建于 {{ formatDate(releaseNote.created_at) }}
           </span>
         </div>
       </el-card>

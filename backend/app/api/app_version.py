@@ -361,6 +361,23 @@ def _check_admin(current_user: User):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
+def _recalc_latest_active_version(db: Session) -> None:
+    """
+    重新计算“最新已发布版本”：
+    - 仅在 is_active=True 的版本中，选择 version_code 最大者标记为 is_latest=True
+    - 其余全部置为 False
+    """
+    latest_active = db.query(AppVersion).filter(
+        AppVersion.is_active == True
+    ).order_by(desc(AppVersion.version_code)).first()
+
+    # 先清空
+    db.query(AppVersion).filter(AppVersion.is_latest == True).update({"is_latest": False})
+
+    # 再标记最新已发布
+    if latest_active:
+        db.query(AppVersion).filter(AppVersion.id == latest_active.id).update({"is_latest": True})
+
 
 @router.get("/versions", response_model=AppVersionListResponse)
 async def list_versions(
@@ -379,6 +396,18 @@ async def list_versions(
     
     total = query.count()
     versions = query.order_by(desc(AppVersion.version_code)).offset(skip).limit(limit).all()
+
+    # 保证返回的 is_latest 表示“最新已发布版本”
+    latest_active = db.query(AppVersion).filter(
+        AppVersion.is_active == True
+    ).order_by(desc(AppVersion.version_code)).first()
+    latest_active_id = latest_active.id if latest_active else None
+    if latest_active_id:
+        for v in versions:
+            v.is_latest = (v.id == latest_active_id)
+    else:
+        for v in versions:
+            v.is_latest = False
     
     return AppVersionListResponse(
         versions=[AppVersionResponse.from_orm(v) for v in versions],
@@ -410,7 +439,12 @@ async def create_version(
 ):
     """创建新版本（管理员）"""
     _check_admin(current_user)
-    
+
+    # 若立即发布，必须提供APK信息
+    if version_data.is_active:
+        if not version_data.download_url or not version_data.file_name:
+            raise HTTPException(status_code=400, detail="发布版本必须先上传APK文件")
+
     # 检查版本号是否已存在
     existing = db.query(AppVersion).filter(
         AppVersion.version_code == version_data.version_code
@@ -432,17 +466,14 @@ async def create_version(
         min_version_code=version_data.min_version_code,
         gray_scale_percent=version_data.gray_scale_percent,
         is_active=version_data.is_active,
+        show_release_notes=version_data.show_release_notes or False,
         published_at=datetime.now() if version_data.is_active else None
     )
-    
-    # 如果是最新版本，更新is_latest标志
-    latest = db.query(AppVersion).order_by(desc(AppVersion.version_code)).first()
-    if not latest or version_data.version_code > latest.version_code:
-        version.is_latest = True
-        # 清除其他版本的is_latest标志
-        db.query(AppVersion).filter(AppVersion.is_latest == True).update({"is_latest": False})
-    
+
     db.add(version)
+    db.flush()
+
+    _recalc_latest_active_version(db)
     db.commit()
     db.refresh(version)
     
@@ -465,13 +496,29 @@ async def update_version(
     
     # 更新字段
     update_data = version_data.dict(exclude_unset=True)
+
+    # 已发布版本禁止替换APK文件信息
+    file_fields = {"download_url", "file_size", "file_md5", "file_name"}
+    if version.is_active and any(field in update_data for field in file_fields):
+        raise HTTPException(status_code=400, detail="已发布版本不允许替换APK文件，请创建新版本或在草稿阶段上传")
+
+    # 草稿发布校验：从草稿变更为发布时，必须具备APK信息
+    if version_data.is_active is True and not version.is_active:
+        new_download_url = update_data.get("download_url", version.download_url)
+        new_file_name = update_data.get("file_name", version.file_name)
+        if not new_download_url or not new_file_name:
+            raise HTTPException(status_code=400, detail="发布版本必须先上传APK文件")
+
     for field, value in update_data.items():
         setattr(version, field, value)
     
     # 如果激活状态变更为True，设置发布时间
     if version_data.is_active is True and not version.published_at:
         version.published_at = datetime.now()
-    
+
+    # SessionLocal 默认 autoflush=False，这里显式 flush，确保后续重新计算 is_latest 基于最新状态
+    db.flush()
+    _recalc_latest_active_version(db)
     db.commit()
     db.refresh(version)
     
@@ -498,6 +545,9 @@ async def delete_version(
     #         os.remove(file_path)
     
     db.delete(version)
+    db.flush()
+
+    _recalc_latest_active_version(db)
     db.commit()
     
     return {"message": "版本已删除", "version_id": version_id}
@@ -868,15 +918,33 @@ async def create_release_note(
 @router.get("/release-notes/{version_id}", response_model=ReleaseNoteResponse)
 async def get_release_note(
     version_id: int,
+    req: Request,
     db: Session = Depends(get_db)
 ):
-    """获取版本的Release Note（公开接口，无需登录）"""
+    """获取版本的Release Note
+
+    - 已发布且启用：公开可访问
+    - 草稿版本或禁用：仅管理员（携带 Bearer Token）可访问
+    """
+    version = db.query(AppVersion).filter(AppVersion.id == version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="Release Note不存在")
+
+    token_user = _try_get_access_user(req, db)
+    is_admin = bool(token_user and token_user.role == "admin")
+
     release_note = db.query(AppVersionReleaseNote).filter(
         AppVersionReleaseNote.version_id == version_id
     ).first()
     
     if not release_note:
         raise HTTPException(status_code=404, detail="Release Note不存在")
+
+    if not is_admin:
+        if not version.is_active:
+            raise HTTPException(status_code=404, detail="Release Note不存在")
+        if not release_note.is_enabled:
+            raise HTTPException(status_code=404, detail="Release Note不存在")
     
     # 查询items
     items = db.query(AppVersionReleaseNoteItem).filter(

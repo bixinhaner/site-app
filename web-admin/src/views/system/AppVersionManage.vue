@@ -4,9 +4,13 @@
     <div class="page-header">
       <h1>App版本管理</h1>
       <div class="header-actions">
-        <el-button type="primary" @click="showPublishDialog = true">
+        <el-button type="primary" @click="openPublishDialog">
           <el-icon><Upload /></el-icon>
           发布新版本
+        </el-button>
+        <el-button type="warning" @click="openDraftDialog">
+          <el-icon><Plus /></el-icon>
+          创建草稿版本
         </el-button>
         <el-button type="success" @click="goToUsageStats">
           <el-icon><DataAnalysis /></el-icon>
@@ -131,7 +135,7 @@
               <el-icon><Document /></el-icon>
               详情页
             </el-button>
-            <el-button type="info" size="small" link @click="copyDownloadUrl(row)">
+            <el-button type="info" size="small" link :disabled="!row.download_url" @click="copyDownloadUrl(row)">
               <el-icon><Link /></el-icon>
               链接
             </el-button>
@@ -160,10 +164,20 @@
     <!-- 发布新版本对话框 -->
     <el-dialog 
       v-model="showPublishDialog" 
-      :title="editingVersion ? '编辑版本' : '发布新版本'" 
+      :title="publishDialogTitle" 
       width="700px"
       @close="resetForm"
     >
+      <el-alert
+        v-if="createMode === 'draft' && !editingVersion"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 16px"
+      >
+        <template #title>
+          <span>草稿版本无需上传APK。创建后可先完善 Release Notes，开发完成后再上传APK并发布。</span>
+        </template>
+      </el-alert>
       <el-form 
         ref="formRef" 
         :model="versionForm" 
@@ -171,7 +185,7 @@
         label-width="120px"
       >
         <!-- 步骤1：上传APK -->
-        <el-form-item label="APK文件" prop="download_url" v-if="!editingVersion">
+        <el-form-item label="APK文件" prop="download_url" v-if="showApkUpload">
           <div class="upload-section">
             <el-upload
               ref="uploadRef"
@@ -209,7 +223,7 @@
           </div>
         </el-form-item>
 
-        <el-divider v-if="!editingVersion" />
+        <el-divider v-if="showApkUpload" />
         
         <!-- 版本信息 -->
         <el-form-item label="版本号" prop="version_name">
@@ -295,7 +309,7 @@
           />
         </el-form-item>
         
-        <el-form-item label="立即发布" prop="is_active">
+        <el-form-item label="立即发布" prop="is_active" v-if="createMode !== 'draft' || editingVersion">
           <el-switch v-model="versionForm.is_active" />
           <span class="form-tip">关闭则保存为草稿，不会推送给用户</span>
         </el-form-item>
@@ -307,9 +321,9 @@
           type="primary" 
           @click="handleSubmit" 
           :loading="submitting"
-          :disabled="!editingVersion && !uploadedFileInfo"
+          :disabled="submitDisabled"
         >
-          {{ editingVersion ? '保存修改' : '发布版本' }}
+          {{ submitButtonText }}
         </el-button>
       </template>
     </el-dialog>
@@ -500,7 +514,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Upload, Refresh, Box, CircleCheck, Download, Cpu, Edit, Delete, Link,
@@ -532,8 +546,59 @@ const pagination = reactive({
 // 对话框相关
 const showPublishDialog = ref(false)
 const editingVersion = ref(null)
+const createMode = ref('publish') // publish | draft
 const formRef = ref()
 const uploadRef = ref()
+
+const publishDialogTitle = computed(() => {
+  if (editingVersion.value) {
+    return editingVersion.value.is_active ? '编辑版本' : '编辑草稿版本'
+  }
+  return createMode.value === 'draft' ? '创建草稿版本' : '发布新版本'
+})
+
+const showApkUpload = computed(() => {
+  if (editingVersion.value) {
+    return editingVersion.value.is_active === false
+  }
+  return createMode.value !== 'draft'
+})
+
+const needsApkFile = computed(() => {
+  if (!versionForm.is_active) return false
+  // 新建并立即发布
+  if (!editingVersion.value) return true
+  // 草稿发布
+  return editingVersion.value.is_active === false
+})
+
+const submitDisabled = computed(() => {
+  if (submitting.value) return true
+  if (needsApkFile.value) return !versionForm.download_url || !versionForm.file_name
+  return false
+})
+
+const submitButtonText = computed(() => {
+  if (editingVersion.value) {
+    const publishingDraft = editingVersion.value.is_active === false && versionForm.is_active === true
+    return publishingDraft ? '发布版本' : '保存修改'
+  }
+  return versionForm.is_active ? '发布版本' : '创建草稿'
+})
+
+const openPublishDialog = () => {
+  resetForm()
+  createMode.value = 'publish'
+  versionForm.is_active = true
+  showPublishDialog.value = true
+}
+
+const openDraftDialog = () => {
+  resetForm()
+  createMode.value = 'draft'
+  versionForm.is_active = false
+  showPublishDialog.value = true
+}
 
 // 表单数据
 const versionForm = reactive({
@@ -669,7 +734,15 @@ const handleFileRemove = () => {
 
 // 编辑版本
 const editVersion = (version) => {
+  createMode.value = 'publish'
   editingVersion.value = version
+  fileList.value = []
+  uploadProgress.value = 0
+  uploadedFileInfo.value = version.file_name ? {
+    file_name: version.file_name,
+    file_size: version.file_size,
+    file_md5: version.file_md5
+  } : null
   Object.assign(versionForm, {
     version_name: version.version_name,
     version_code: version.version_code,
@@ -696,7 +769,7 @@ const handleSubmit = async () => {
     
     if (editingVersion.value) {
       // 更新版本
-      await appVersionAPI.updateVersion(editingVersion.value.id, {
+      const payload = {
         update_type: versionForm.update_type,
         release_notes: versionForm.release_notes,
         release_notes_en: versionForm.release_notes_en,
@@ -704,8 +777,20 @@ const handleSubmit = async () => {
         gray_scale_percent: versionForm.gray_scale_percent,
         is_active: versionForm.is_active,
         show_release_notes: versionForm.show_release_notes
-      })
-      ElMessage.success('版本更新成功')
+      }
+
+      // 仅草稿阶段允许替换/补充APK文件信息
+      if (editingVersion.value.is_active === false) {
+        payload.download_url = versionForm.download_url
+        payload.file_size = versionForm.file_size
+        payload.file_md5 = versionForm.file_md5
+        payload.file_name = versionForm.file_name
+      }
+
+      await appVersionAPI.updateVersion(editingVersion.value.id, payload)
+
+      const publishedNow = editingVersion.value.is_active === false && versionForm.is_active === true
+      ElMessage.success(publishedNow ? '草稿已发布' : '版本更新成功')
     } else {
       // 创建新版本
       await appVersionAPI.createVersion({
@@ -723,7 +808,7 @@ const handleSubmit = async () => {
         is_active: versionForm.is_active,
         show_release_notes: versionForm.show_release_notes
       })
-      ElMessage.success('版本发布成功')
+      ElMessage.success(versionForm.is_active ? '版本发布成功' : '草稿创建成功')
     }
     
     showPublishDialog.value = false
@@ -745,6 +830,7 @@ const handleStatusChange = async (row) => {
     await appVersionAPI.updateVersion(row.id, { is_active: row.is_active })
     ElMessage.success(row.is_active ? '版本已启用' : '版本已禁用')
     loadStats()
+    loadVersionList()
   } catch (error) {
     row.is_active = !row.is_active
     ElMessage.error('操作失败: ' + (error.response?.data?.detail || error.message))
@@ -775,6 +861,10 @@ const deleteVersion = async (row) => {
 
 // 复制下载链接
 const copyDownloadUrl = async (row) => {
+  if (!row.download_url) {
+    ElMessage.warning('该版本暂无下载链接')
+    return
+  }
   const url = row.download_url.startsWith('http') 
     ? row.download_url 
     : config.API_BASE_URL + row.download_url
@@ -789,6 +879,7 @@ const copyDownloadUrl = async (row) => {
 
 // 重置表单
 const resetForm = () => {
+  createMode.value = 'publish'
   editingVersion.value = null
   fileList.value = []
   uploadedFileInfo.value = null
@@ -805,7 +896,8 @@ const resetForm = () => {
     release_notes_en: '',
     min_version_code: 0,
     gray_scale_percent: 100,
-    is_active: true
+    is_active: true,
+    show_release_notes: false
   })
 }
 
