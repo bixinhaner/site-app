@@ -5,7 +5,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { buildApiUrl, API_ENDPOINTS } from '@/config/api.js'
+import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 import {
     getCurrentVersion,
     getDeviceId,
@@ -180,12 +180,18 @@ export const useUpgradeStore = defineStore('upgrade', () => {
             const currentVersion = getCurrentVersion()
             const deviceInfo = getDeviceInfo()
             const networkType = await getNetworkType()
-            const userInfo = userStore.userInfo || {}
+            const userInfo = userStore.userInfo || uni.getStorageSync('userInfo') || {}
+            const token = userStore.token || uni.getStorageSync('token') || ''
+            const authHeaders = {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders(token),
+            }
 
             try {
                 const logResponse = await uni.request({
                     url: buildApiUrl(API_ENDPOINTS.APP_VERSION.DOWNLOAD_START),
                     method: 'POST',
+                    header: authHeaders,
                     data: {
                         version_id: versionInfo.value.id,
                         version_code: versionInfo.value.version_code,
@@ -230,6 +236,7 @@ export const useUpgradeStore = defineStore('upgrade', () => {
                         await uni.request({
                             url: buildApiUrl(API_ENDPOINTS.APP_VERSION.DOWNLOAD_COMPLETE),
                             method: 'POST',
+                            header: authHeaders,
                             data: {
                                 log_id: downloadLogId.value,
                                 status: 'completed'
@@ -251,6 +258,7 @@ export const useUpgradeStore = defineStore('upgrade', () => {
                         await uni.request({
                             url: buildApiUrl(API_ENDPOINTS.APP_VERSION.DOWNLOAD_COMPLETE),
                             method: 'POST',
+                            header: authHeaders,
                             data: {
                                 log_id: downloadLogId.value,
                                 status: 'failed',

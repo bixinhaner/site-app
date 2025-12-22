@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from jose import JWTError, jwt
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -40,6 +41,32 @@ def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+def _try_get_access_user(req: Request, db: Session) -> Optional[User]:
+    """尝试从 Authorization: Bearer <token> 解析当前用户（失败则返回 None，不影响主流程）。"""
+    auth = req.headers.get("authorization") or req.headers.get("Authorization")
+    if not auth:
+        return None
+
+    parts = auth.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+
+    token = parts[1]
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("type") != "access":
+            return None
+        username = payload.get("sub")
+        if not username:
+            return None
+    except JWTError:
+        return None
+
+    user = db.query(User).filter(User.username == username).first()
+    if user is None or not getattr(user, "is_active", True):
+        return None
+    return user
 
 
 def _ensure_apk_dir():
@@ -199,6 +226,32 @@ async def record_download_start(
     """记录下载开始事件"""
     # 获取客户端IP
     client_ip = req.client.host if req.client else None
+
+    # 允许在不强制鉴权的前提下，尽可能记录真实用户信息：
+    # - App 可能在未登录时也会触发升级；此时保持为空，前端展示为 "-"
+    # - 若携带 Bearer Token，则以 token 对应用户为准（比客户端上报更可信）
+    token_user = _try_get_access_user(req, db)
+    user_id_val = request.user_id
+    username_val = request.username
+    user_role_val = request.user_role
+    if token_user:
+        user_id_val = token_user.id
+        username_val = token_user.username
+        user_role_val = token_user.role
+    else:
+        # 若客户端只传了部分用户信息（例如仅 user_id），则补齐 username/role，便于 WebAdmin 展示
+        if user_id_val is not None and not username_val:
+            db_user = db.query(User).filter(User.id == user_id_val).first()
+            if db_user:
+                username_val = db_user.username
+                if not user_role_val:
+                    user_role_val = db_user.role
+        elif username_val and user_id_val is None:
+            db_user = db.query(User).filter(User.username == username_val).first()
+            if db_user:
+                user_id_val = db_user.id
+                if not user_role_val:
+                    user_role_val = db_user.role
     
     # 创建下载日志
     log = AppVersionDownloadLog(
@@ -212,9 +265,9 @@ async def record_download_start(
         download_status="started",
         network_type=request.network_type,
         ip_address=client_ip,
-        user_id=request.user_id,
-        username=request.username,
-        user_role=request.user_role
+        user_id=user_id_val,
+        username=username_val,
+        user_role=user_role_val
     )
     db.add(log)
     
@@ -232,6 +285,7 @@ async def record_download_start(
 @router.post("/download-complete")
 async def record_download_complete(
     request: DownloadCompleteRequest,
+    req: Request,
     db: Session = Depends(get_db)
 ):
     """记录下载完成事件"""
@@ -245,6 +299,29 @@ async def record_download_complete(
     log.download_status = request.status
     # started_at（SQLite CURRENT_TIMESTAMP）为 UTC；completed_at 也统一写 UTC，避免前端计算耗时出现 +8h 偏差
     log.completed_at = datetime.utcnow()
+
+    # 若 download-start 阶段未能获取用户信息，这里再补一次（仅在字段为空时）
+    token_user = _try_get_access_user(req, db)
+    if token_user:
+        if getattr(log, "user_id", None) is None:
+            log.user_id = token_user.id
+        if not getattr(log, "username", None):
+            log.username = token_user.username
+        if not getattr(log, "user_role", None):
+            log.user_role = token_user.role
+    # 若仍为部分缺失（例如历史逻辑只写了 user_id），则再兜底补齐
+    if getattr(log, "user_id", None) is not None and not getattr(log, "username", None):
+        db_user = db.query(User).filter(User.id == log.user_id).first()
+        if db_user:
+            log.username = db_user.username
+            if not getattr(log, "user_role", None):
+                log.user_role = db_user.role
+    elif getattr(log, "username", None) and getattr(log, "user_id", None) is None:
+        db_user = db.query(User).filter(User.username == log.username).first()
+        if db_user:
+            log.user_id = db_user.id
+            if not getattr(log, "user_role", None):
+                log.user_role = db_user.role
     
     if request.status == "failed" and request.error_message:
         log.error_message = request.error_message
