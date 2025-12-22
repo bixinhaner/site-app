@@ -63,14 +63,21 @@
               <p class="item-text" v-if="getLocalizedContent(item)" v-html="formatContent(getLocalizedContent(item))"></p>
               
               <!-- 图片内容 -->
-              <div class="item-image" v-if="item.image_url">
-                <img 
-                  :src="getFullImageUrl(item.image_url)" 
-                  :alt="getLocalizedCaption(item)"
+              <div
+                v-for="(img, imgIndex) in getItemImages(item)"
+                :key="img.image_url + '_' + imgIndex"
+                class="item-image"
+              >
+                <el-image
+                  :src="getFullImageUrl(img.image_url)"
+                  :preview-src-list="getItemPreviewSrcList(item)"
+                  :initial-index="imgIndex"
+                  :alt="getLocalizedImageCaption(img)"
+                  preview-teleported
                   @error="handleImageError"
                 />
-                <p class="image-caption" v-if="getLocalizedCaption(item)">
-                  {{ getLocalizedCaption(item) }}
+                <p class="image-caption" v-if="getLocalizedImageCaption(img)">
+                  {{ getLocalizedImageCaption(img) }}
                 </p>
               </div>
             </div>
@@ -139,6 +146,33 @@ const getLocalizedCaption = (item) => {
     : (item.image_caption || item.image_caption_en || '')
 }
 
+const getLocalizedImageCaption = (img) => {
+  return currentLang.value === 'en'
+    ? (img.image_caption_en || img.image_caption || '')
+    : (img.image_caption || img.image_caption_en || '')
+}
+
+const getItemImages = (item) => {
+  const images = Array.isArray(item.images) ? item.images : []
+  if (images.length) {
+    return images
+      .filter(img => img && img.image_url)
+      .slice()
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+  }
+
+  if (item.image_url) {
+    return [{
+      sort_order: 0,
+      image_url: item.image_url,
+      image_caption: item.image_caption,
+      image_caption_en: item.image_caption_en
+    }]
+  }
+
+  return []
+}
+
 const formatContent = (content) => {
   if (!content) return ''
   // 将换行符转换为 <br>
@@ -160,8 +194,12 @@ const getFullImageUrl = (url) => {
   return config.API_BASE_URL + url
 }
 
+const getItemPreviewSrcList = (item) => {
+  return getItemImages(item).map(img => getFullImageUrl(img.image_url))
+}
+
 const handleImageError = (e) => {
-  e.target.style.display = 'none'
+  if (e?.target?.style) e.target.style.display = 'none'
 }
 
 // 加载数据
@@ -338,10 +376,16 @@ onMounted(() => {
   margin-top: 12px;
 }
 
-.item-image img {
+.item-image .el-image {
+  display: block;
+  width: 100%;
   max-width: 100%;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.item-image :deep(.el-image__preview) {
+  cursor: zoom-in;
 }
 
 .image-caption {

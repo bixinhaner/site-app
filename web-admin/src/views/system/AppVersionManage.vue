@@ -433,16 +433,92 @@
 
                 <!-- 图片（可选） -->
                 <div class="field-group">
-                  <label class="field-label">🖼️ 配图（可选）</label>
+                  <div class="images-header">
+                    <label class="field-label">🖼️ 配图（最多10张，支持拖拽排序）</label>
+                    <span class="images-count">{{ (item.images?.length || 0) }}/{{ MAX_IMAGES_PER_ITEM }}</span>
+                  </div>
+
+                  <div v-if="item.images && item.images.length" class="images-grid">
+                    <div
+                      v-for="(img, imgIndex) in item.images"
+                      :key="imgIndex"
+                      class="image-card"
+                      draggable="true"
+                      @dragstart="handleImageDragStart(index, imgIndex)"
+                      @dragover.prevent
+                      @drop="handleImageDrop(index, imgIndex)"
+                    >
+                      <div class="image-thumb">
+                        <el-image
+                          :src="getFullImageUrl(img.image_url)"
+                          :preview-src-list="getItemPreviewSrcList(item)"
+                          :initial-index="imgIndex"
+                          fit="cover"
+                          preview-teleported
+                          draggable="false"
+                          @error="handleImageError"
+                        />
+                        <div class="image-index">{{ imgIndex + 1 }}</div>
+                      </div>
+                      <div class="image-meta">
+                        <div class="image-actions">
+                          <el-button
+                            type="primary"
+                            link
+                            size="small"
+                            :disabled="imgIndex === 0"
+                            @click="moveImage(index, imgIndex, -1)"
+                          >
+                            <el-icon><Top /></el-icon>
+                          </el-button>
+                          <el-button
+                            type="primary"
+                            link
+                            size="small"
+                            :disabled="imgIndex === item.images.length - 1"
+                            @click="moveImage(index, imgIndex, 1)"
+                          >
+                            <el-icon><Bottom /></el-icon>
+                          </el-button>
+                          <el-button type="danger" link size="small" @click="removeImage(index, imgIndex)">
+                            <el-icon><Delete /></el-icon>
+                          </el-button>
+                        </div>
+
+                        <el-input
+                          v-model="img.image_caption"
+                          placeholder="图片说明（中文）"
+                          size="small"
+                          style="margin-top: 8px"
+                        />
+                        <el-input
+                          v-model="img.image_caption_en"
+                          placeholder="图片说明（英文，可选）"
+                          size="small"
+                          style="margin-top: 8px"
+                        />
+                      </div>
+                    </div>
+
+                    <div class="image-dropzone" @dragover.prevent @drop="handleImageDropToEnd(index)">
+                      拖拽到此处放到最后
+                    </div>
+                  </div>
+
                   <div class="image-upload-area">
                     <el-upload
-                      v-if="!item.image_url"
                       :auto-upload="false"
                       :show-file-list="false"
                       accept=".jpg,.jpeg,.png,.gif,.webp"
+                      multiple
+                      :disabled="(item.images?.length || 0) + (item._uploading_images || 0) >= MAX_IMAGES_PER_ITEM"
                       @change="(file) => handleImageUpload(file, index)"
                     >
-                      <el-button type="default" size="small">
+                      <el-button
+                        type="default"
+                        size="small"
+                        :disabled="(item.images?.length || 0) + (item._uploading_images || 0) >= MAX_IMAGES_PER_ITEM"
+                      >
                         <el-icon><Upload /></el-icon>
                         添加图片
                       </el-button>
@@ -450,32 +526,7 @@
                         <div class="upload-tip">支持 jpg/png/gif/webp，最大 5MB</div>
                       </template>
                     </el-upload>
-                    <div v-else class="image-preview">
-                      <img :src="getFullImageUrl(item.image_url)" @error="handleImageError" />
-                      <el-button 
-                        type="danger" 
-                        size="small" 
-                        class="remove-image-btn"
-                        @click="item.image_url = ''"
-                      >
-                        移除图片
-                      </el-button>
-                    </div>
                   </div>
-                  <el-input 
-                    v-if="item.image_url"
-                    v-model="item.image_caption" 
-                    placeholder="图片说明（中文）"
-                    size="small"
-                    style="margin-top: 8px"
-                  />
-                  <el-input 
-                    v-if="item.image_url"
-                    v-model="item.image_caption_en" 
-                    placeholder="图片说明（英文，可选）"
-                    size="small"
-                    style="margin-top: 8px"
-                  />
                 </div>
               </div>
 
@@ -924,6 +975,12 @@ onMounted(() => {
 const showReleaseNotesDialog = ref(false)
 const releaseNotesSubmitting = ref(false)
 const currentVersionForReleaseNotes = ref(null)
+const MAX_IMAGES_PER_ITEM = 10
+
+const imageDragState = reactive({
+  itemIndex: null,
+  imageIndex: null
+})
 
 const releaseNotesForm = reactive({
   id: null,
@@ -951,15 +1008,34 @@ const openReleaseNotesEditor = async (version) => {
       subtitle: data.subtitle || '',
       subtitle_en: data.subtitle_en || '',
       is_enabled: data.is_enabled,
-      items: data.items.map(item => ({
-        sort_order: item.sort_order,
-        item_type: item.item_type,
-        content: item.content || '',
-        content_en: item.content_en || '',
-        image_url: item.image_url || '',
-        image_caption: item.image_caption || '',
-        image_caption_en: item.image_caption_en || ''
-      }))
+      items: (data.items || []).map(item => {
+        const rawImages = Array.isArray(item.images) ? item.images : []
+        const legacyImage = item.image_url ? [{
+          sort_order: 0,
+          image_url: item.image_url,
+          image_caption: item.image_caption || '',
+          image_caption_en: item.image_caption_en || ''
+        }] : []
+
+        const images = (rawImages.length ? rawImages : legacyImage)
+          .filter(img => img && img.image_url)
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+          .slice(0, MAX_IMAGES_PER_ITEM)
+          .map((img, i) => ({
+            sort_order: i,
+            image_url: img.image_url || '',
+            image_caption: img.image_caption || '',
+            image_caption_en: img.image_caption_en || ''
+          }))
+
+        return {
+          sort_order: item.sort_order,
+          item_type: item.item_type,
+          content: item.content || '',
+          content_en: item.content_en || '',
+          images
+        }
+      })
     })
   } catch (error) {
     // 404 表示不存在，初始化空表单
@@ -998,9 +1074,7 @@ const addItem = (type) => {
     item_type: type,
     content: '',
     content_en: '',
-    image_url: '',
-    image_caption: '',
-    image_caption_en: ''
+    images: []
   })
 }
 
@@ -1031,15 +1105,116 @@ const moveItem = (index, direction) => {
   releaseNotesForm.items = items
 }
 
+const normalizeImagesOrder = (item) => {
+  if (!item.images || !Array.isArray(item.images)) {
+    item.images = []
+    return
+  }
+  item.images = item.images
+    .filter(img => img && img.image_url)
+    .slice(0, MAX_IMAGES_PER_ITEM)
+    .map((img, i) => ({
+      sort_order: i,
+      image_url: img.image_url,
+      image_caption: img.image_caption || '',
+      image_caption_en: img.image_caption_en || ''
+    }))
+}
+
 // 上传图片
 const handleImageUpload = async (file, index) => {
+  const item = releaseNotesForm.items[index]
+  if (!item) return
+  if (!item.images) item.images = []
+  if (item._uploading_images == null) item._uploading_images = 0
+
+  const currentTotal = item.images.length + item._uploading_images
+  if (currentTotal >= MAX_IMAGES_PER_ITEM) {
+    ElMessage.warning(`每个更新项目最多支持${MAX_IMAGES_PER_ITEM}张图片`)
+    return
+  }
+
+  item._uploading_images += 1
   try {
     const result = await appVersionAPI.uploadReleaseNoteImage(file.raw)
-    releaseNotesForm.items[index].image_url = result.image_url
+    item.images.push({
+      sort_order: item.images.length,
+      image_url: result.image_url,
+      image_caption: '',
+      image_caption_en: ''
+    })
+    normalizeImagesOrder(item)
     ElMessage.success('图片上传成功')
   } catch (error) {
     ElMessage.error('图片上传失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    item._uploading_images = Math.max(0, item._uploading_images - 1)
   }
+}
+
+// 移除图片
+const removeImage = (itemIndex, imageIndex) => {
+  const item = releaseNotesForm.items[itemIndex]
+  if (!item?.images) return
+  item.images.splice(imageIndex, 1)
+  normalizeImagesOrder(item)
+}
+
+// 移动图片
+const moveImage = (itemIndex, imageIndex, direction) => {
+  const item = releaseNotesForm.items[itemIndex]
+  if (!item?.images) return
+  const newIndex = imageIndex + direction
+  if (newIndex < 0 || newIndex >= item.images.length) return
+  const images = [...item.images]
+  const temp = images[imageIndex]
+  images[imageIndex] = images[newIndex]
+  images[newIndex] = temp
+  item.images = images
+  normalizeImagesOrder(item)
+}
+
+const handleImageDragStart = (itemIndex, imageIndex) => {
+  imageDragState.itemIndex = itemIndex
+  imageDragState.imageIndex = imageIndex
+}
+
+const handleImageDrop = (itemIndex, targetImageIndex) => {
+  if (imageDragState.itemIndex === null || imageDragState.imageIndex === null) return
+  if (imageDragState.itemIndex !== itemIndex) return
+
+  const item = releaseNotesForm.items[itemIndex]
+  if (!item?.images) return
+
+  const fromIndex = imageDragState.imageIndex
+  if (fromIndex === targetImageIndex) return
+
+  const images = [...item.images]
+  const [moved] = images.splice(fromIndex, 1)
+  images.splice(targetImageIndex, 0, moved)
+  item.images = images
+  normalizeImagesOrder(item)
+
+  imageDragState.itemIndex = null
+  imageDragState.imageIndex = null
+}
+
+const handleImageDropToEnd = (itemIndex) => {
+  if (imageDragState.itemIndex === null || imageDragState.imageIndex === null) return
+  if (imageDragState.itemIndex !== itemIndex) return
+
+  const item = releaseNotesForm.items[itemIndex]
+  if (!item?.images) return
+
+  const fromIndex = imageDragState.imageIndex
+  const images = [...item.images]
+  const [moved] = images.splice(fromIndex, 1)
+  images.push(moved)
+  item.images = images
+  normalizeImagesOrder(item)
+
+  imageDragState.itemIndex = null
+  imageDragState.imageIndex = null
 }
 
 // 获取完整图片URL
@@ -1049,9 +1224,16 @@ const getFullImageUrl = (url) => {
   return config.API_BASE_URL + url
 }
 
+const getItemPreviewSrcList = (item) => {
+  const images = Array.isArray(item?.images) ? item.images : []
+  return images
+    .filter(img => img && img.image_url)
+    .map(img => getFullImageUrl(img.image_url))
+}
+
 // 图片加载失败
 const handleImageError = (e) => {
-  e.target.style.display = 'none'
+  if (e?.target?.style) e.target.style.display = 'none'
 }
 
 // 保存 Release Notes
@@ -1071,9 +1253,15 @@ const saveReleaseNotes = async () => {
         item_type: item.item_type,
         content: item.content || null,
         content_en: item.content_en || null,
-        image_url: item.image_url || null,
-        image_caption: item.image_caption || null,
-        image_caption_en: item.image_caption_en || null
+        image_url: item.images?.[0]?.image_url || null,
+        image_caption: item.images?.[0]?.image_caption || null,
+        image_caption_en: item.images?.[0]?.image_caption_en || null,
+        images: (item.images || []).slice(0, MAX_IMAGES_PER_ITEM).map((img, imgIndex) => ({
+          sort_order: imgIndex,
+          image_url: img.image_url || null,
+          image_caption: img.image_caption || null,
+          image_caption_en: img.image_caption_en || null
+        }))
       }))
     }
     
@@ -1330,6 +1518,85 @@ const previewReleaseNotes = () => {
   font-size: 13px;
   color: #606266;
   margin-bottom: 8px;
+}
+
+.images-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.images-count {
+  color: #909399;
+  font-size: 12px;
+}
+
+.images-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.image-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+  cursor: grab;
+}
+
+.image-thumb {
+  position: relative;
+  width: 120px;
+  height: 90px;
+  flex-shrink: 0;
+}
+
+.image-thumb .el-image {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  border: 1px solid #e8e8e8;
+}
+
+.image-thumb :deep(.el-image__preview) {
+  cursor: zoom-in;
+}
+
+.image-index {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  height: 20px;
+  line-height: 20px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #fff;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.image-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.image-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.image-dropzone {
+  padding: 16px 12px;
+  border: 1px dashed #dcdfe6;
+  border-radius: 8px;
+  color: #909399;
+  font-size: 12px;
+  text-align: center;
 }
 
 .image-upload-area {

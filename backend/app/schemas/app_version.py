@@ -209,6 +209,14 @@ class FileUploadResponse(BaseModel):
 
 # ============ Release Notes ============
 
+class ReleaseNoteImage(BaseModel):
+    """Release Note图片信息（支持多图）"""
+    sort_order: int = 0
+    image_url: str
+    image_caption: Optional[str] = None
+    image_caption_en: Optional[str] = None
+
+
 class ReleaseNoteItemBase(BaseModel):
     """Release Note项目基础"""
     sort_order: int = 0
@@ -218,6 +226,13 @@ class ReleaseNoteItemBase(BaseModel):
     image_url: Optional[str] = None
     image_caption: Optional[str] = None
     image_caption_en: Optional[str] = None
+    images: Optional[List[ReleaseNoteImage]] = None
+
+    @validator('images')
+    def validate_images(cls, v):
+        if v is not None and len(v) > 10:
+            raise ValueError('每个更新项目最多支持10张图片')
+        return v
 
 
 class ReleaseNoteItemCreate(ReleaseNoteItemBase):

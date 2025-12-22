@@ -139,6 +139,7 @@ class AppVersionReleaseNoteItem(Base):
     image_url = Column(String(500), comment="图片URL")
     image_caption = Column(String(200), comment="图片说明（中文）")
     image_caption_en = Column(String(200), comment="图片说明（英文）")
+    images_json = Column(Text, comment="多图信息（JSON）")
     
     # 时间戳
     created_at = Column(DateTime, server_default=func.now())

@@ -53,14 +53,19 @@
 						</text>
 						
 						<!-- 图片内容 -->
-						<view class="item-image" v-if="item.image_url">
-							<image 
-								:src="getFullImageUrl(item.image_url)" 
+						<view
+							v-for="(img, imgIndex) in getItemImages(item)"
+							:key="img.image_url + '_' + imgIndex"
+							class="item-image"
+						>
+							<image
+								:src="getFullImageUrl(img.image_url)"
 								mode="widthFix"
+								@click="previewItemImages(item, imgIndex)"
 								@error="handleImageError"
 							/>
-							<text class="image-caption" v-if="getLocalizedCaption(item)">
-								{{ getLocalizedCaption(item) }}
+							<text class="image-caption" v-if="getLocalizedImageCaption(img)">
+								{{ getLocalizedImageCaption(img) }}
 							</text>
 						</view>
 					</view>
@@ -150,6 +155,34 @@ const getLocalizedCaption = (item) => {
 		: (item.image_caption || item.image_caption_en || '')
 }
 
+const getLocalizedImageCaption = (img) => {
+	const locale = languageStore.currentLocale
+	return locale === 'en'
+		? (img.image_caption_en || img.image_caption || '')
+		: (img.image_caption || img.image_caption_en || '')
+}
+
+const getItemImages = (item) => {
+	const images = Array.isArray(item.images) ? item.images : []
+	if (images.length) {
+		return images
+			.filter(img => img && img.image_url)
+			.slice()
+			.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+	}
+
+	if (item.image_url) {
+		return [{
+			sort_order: 0,
+			image_url: item.image_url,
+			image_caption: item.image_caption,
+			image_caption_en: item.image_caption_en
+		}]
+	}
+
+	return []
+}
+
 const formatDate = (dateString) => {
 	if (!dateString) return ''
 	const date = new Date(dateString)
@@ -169,6 +202,18 @@ const getFullImageUrl = (url) => {
 
 const handleImageError = (e) => {
 	console.warn('图片加载失败:', e)
+}
+
+const previewItemImages = (item, imgIndex) => {
+	const urls = getItemImages(item)
+		.map(img => getFullImageUrl(img.image_url))
+		.filter(Boolean)
+	if (!urls.length) return
+	const current = urls[imgIndex] || urls[0]
+	uni.previewImage({
+		urls,
+		current
+	})
 }
 
 const goBack = () => {

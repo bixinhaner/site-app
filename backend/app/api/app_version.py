@@ -4,6 +4,7 @@ App版本管理API
 """
 import os
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -827,12 +828,86 @@ async def get_usage_stats(
 # Release Notes 图片上传目录
 RELEASE_NOTES_IMAGE_DIR = "uploads/release-notes"
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+MAX_IMAGES_PER_ITEM = 10
 
 
 def _ensure_release_notes_image_dir():
     """确保Release Notes图片上传目录存在"""
     if not os.path.exists(RELEASE_NOTES_IMAGE_DIR):
         os.makedirs(RELEASE_NOTES_IMAGE_DIR)
+
+def _normalize_release_note_item_images(item_data) -> list:
+    """
+    统一处理单图/多图输入，输出可存储的 images 列表（按 sort_order 排序并重排为 0..n-1）。
+    item_data: ReleaseNoteItemCreate / ReleaseNoteItemBase
+    """
+    images = []
+
+    # 优先使用新字段 images
+    raw_images = getattr(item_data, "images", None) or []
+    for img in raw_images:
+        image_url = getattr(img, "image_url", None)
+        if not image_url:
+            continue
+        images.append({
+            "sort_order": int(getattr(img, "sort_order", 0) or 0),
+            "image_url": image_url,
+            "image_caption": getattr(img, "image_caption", None),
+            "image_caption_en": getattr(img, "image_caption_en", None),
+        })
+
+    # 兼容旧字段 image_url
+    if not images and getattr(item_data, "image_url", None):
+        images = [{
+            "sort_order": 0,
+            "image_url": item_data.image_url,
+            "image_caption": getattr(item_data, "image_caption", None),
+            "image_caption_en": getattr(item_data, "image_caption_en", None),
+        }]
+
+    if len(images) > MAX_IMAGES_PER_ITEM:
+        raise HTTPException(status_code=400, detail=f"每个更新项目最多支持{MAX_IMAGES_PER_ITEM}张图片")
+
+    images.sort(key=lambda x: x.get("sort_order", 0))
+    for i, img in enumerate(images):
+        img["sort_order"] = i
+    return images
+
+def _parse_release_note_item_images(item: AppVersionReleaseNoteItem) -> list:
+    """从数据库解析多图信息；若无则兼容旧字段单图。"""
+    images = []
+    if getattr(item, "images_json", None):
+        try:
+            parsed = json.loads(item.images_json)
+            if isinstance(parsed, list):
+                for img in parsed:
+                    if not isinstance(img, dict):
+                        continue
+                    image_url = img.get("image_url")
+                    if not image_url:
+                        continue
+                    images.append({
+                        "sort_order": int(img.get("sort_order", 0) or 0),
+                        "image_url": image_url,
+                        "image_caption": img.get("image_caption"),
+                        "image_caption_en": img.get("image_caption_en"),
+                    })
+        except Exception:
+            images = []
+
+    # fallback to legacy fields
+    if not images and getattr(item, "image_url", None):
+        images = [{
+            "sort_order": 0,
+            "image_url": item.image_url,
+            "image_caption": getattr(item, "image_caption", None),
+            "image_caption_en": getattr(item, "image_caption_en", None),
+        }]
+
+    images.sort(key=lambda x: x.get("sort_order", 0))
+    for i, img in enumerate(images):
+        img["sort_order"] = i
+    return images
 
 
 @router.post("/release-notes", response_model=ReleaseNoteResponse)
@@ -870,15 +945,19 @@ async def create_release_note(
     
     # 创建Release Note Items
     for item_data in data.items:
+        images = _normalize_release_note_item_images(item_data)
+        first_image = images[0] if images else {}
+        images_json = json.dumps(images, ensure_ascii=False) if images else None
         item = AppVersionReleaseNoteItem(
             release_note_id=release_note.id,
             sort_order=item_data.sort_order,
             item_type=item_data.item_type,
             content=item_data.content,
             content_en=item_data.content_en,
-            image_url=item_data.image_url,
-            image_caption=item_data.image_caption,
-            image_caption_en=item_data.image_caption_en
+            image_url=first_image.get("image_url"),
+            image_caption=first_image.get("image_caption"),
+            image_caption_en=first_image.get("image_caption_en"),
+            images_json=images_json
         )
         db.add(item)
     
@@ -908,6 +987,7 @@ async def create_release_note(
             "image_url": item.image_url,
             "image_caption": item.image_caption,
             "image_caption_en": item.image_caption_en,
+            "images": _parse_release_note_item_images(item),
             "created_at": item.created_at
         } for item in items],
         created_at=release_note.created_at,
@@ -969,6 +1049,7 @@ async def get_release_note(
             "image_url": item.image_url,
             "image_caption": item.image_caption,
             "image_caption_en": item.image_caption_en,
+            "images": _parse_release_note_item_images(item),
             "created_at": item.created_at
         } for item in items],
         created_at=release_note.created_at,
@@ -1014,15 +1095,19 @@ async def update_release_note(
         
         # 创建新的items
         for item_data in data.items:
+            images = _normalize_release_note_item_images(item_data)
+            first_image = images[0] if images else {}
+            images_json = json.dumps(images, ensure_ascii=False) if images else None
             item = AppVersionReleaseNoteItem(
                 release_note_id=release_note_id,
                 sort_order=item_data.sort_order,
                 item_type=item_data.item_type,
                 content=item_data.content,
                 content_en=item_data.content_en,
-                image_url=item_data.image_url,
-                image_caption=item_data.image_caption,
-                image_caption_en=item_data.image_caption_en
+                image_url=first_image.get("image_url"),
+                image_caption=first_image.get("image_caption"),
+                image_caption_en=first_image.get("image_caption_en"),
+                images_json=images_json
             )
             db.add(item)
     
@@ -1052,6 +1137,7 @@ async def update_release_note(
             "image_url": item.image_url,
             "image_caption": item.image_caption,
             "image_caption_en": item.image_caption_en,
+            "images": _parse_release_note_item_images(item),
             "created_at": item.created_at
         } for item in items],
         created_at=release_note.created_at,

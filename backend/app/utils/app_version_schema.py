@@ -21,6 +21,9 @@ def ensure_app_version_schema(engine: Engine) -> None:
             "username": "username VARCHAR(50)",
             "user_role": "user_role VARCHAR(50)",
         },
+        "app_version_release_note_items": {
+            "images_json": "images_json TEXT",
+        },
     }
 
     inspector = inspect(engine)
