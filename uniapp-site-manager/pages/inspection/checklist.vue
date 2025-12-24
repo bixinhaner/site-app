@@ -808,7 +808,12 @@
 			// 从已有数据中恢复值
 			if (item.data_value && item.data_value.length > 0) {
 				item.data_value.forEach(dataItem => {
-					const field = fields.find(f => f.label === dataItem.field_name)
+					// 优先按 field_id 匹配（后端会把 field_name 规范化为 field_id）
+					const field = fields.find(f =>
+						f.field_id !== undefined &&
+						f.field_id !== null &&
+						String(f.field_id) === String(dataItem.field_name)
+					) || fields.find(f => f.label === dataItem.field_name)
 					if (field) {
 						field.value = dataItem.value
 					}
@@ -1911,15 +1916,26 @@
 			return
 		}
 
-		try {
-			savingItem.value = true
-			
-			// 准备数据
-			const dataValue = currentItem.value.dataFields?.map(field => ({
-				field_name: field.label,
-				value: field.value,
-				unit: field.unit
-			})).filter(item => item.value) || []
+			try {
+				savingItem.value = true
+				
+				// 准备数据
+				const dataValue = (currentItem.value.dataFields || [])
+					.map(field => ({
+						// 后端期望 field_name=field_id；兼容旧逻辑无field_id时使用label
+						field_name: field.field_id || field.label,
+						value: field.value,
+						unit: field.unit
+					}))
+					// 仅过滤真正“未填写”的值，保留 0/false
+					.filter(item => {
+						if (!item.field_name) return false
+						const v = item.value
+						if (v === undefined || v === null) return false
+						if (typeof v === 'string') return v.trim() !== ''
+						if (Array.isArray(v)) return v.length > 0
+						return true
+					})
 			
 			// 确定状态
 			let status = 'pending'

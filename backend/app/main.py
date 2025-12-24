@@ -10,6 +10,7 @@ from app.utils.geocode_schema import ensure_geocode_schema
 from app.utils.site_schema import ensure_site_schema
 from app.utils.planning_schema import ensure_planning_schema
 from app.utils.app_version_schema import ensure_app_version_schema
+from app.utils.inspection_schema import ensure_inspection_schema
 # Ensure new models are imported before creating tables
 from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
@@ -42,6 +43,8 @@ ensure_site_schema(engine)
 ensure_planning_schema(engine)
 # 轻量迁移：为 app_versions 旧表补列（SQLite 友好）
 ensure_app_version_schema(engine)
+# 轻量迁移：为 inspection_check_items 旧表补列（SQLite 友好）
+ensure_inspection_schema(engine)
 
 app = FastAPI(
     title="站点信息管理系统 API",

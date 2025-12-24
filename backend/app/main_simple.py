@@ -9,12 +9,15 @@ from app.core.database import engine, Base, get_db
 from app.core.security import create_access_token, verify_password
 from app.models.user import User
 from app.schemas.user import UserLogin, Token, UserResponse
+from app.utils.inspection_schema import ensure_inspection_schema
 
 # 导入基本API
 from app.api import auth, users, sites, inspections
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
+# 轻量迁移：为 inspection_check_items 旧表补列（SQLite 友好）
+ensure_inspection_schema(engine)
 
 app = FastAPI(
     title="站点信息管理系统 API",

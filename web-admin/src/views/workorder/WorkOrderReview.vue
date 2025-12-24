@@ -180,6 +180,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="review_comments" label="审核意见" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="notes" label="现场备注" min-width="200" show-overflow-tooltip />
           <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" size="small" @click="viewItemDetail(row)">详情</el-button>
@@ -239,6 +240,7 @@
             <span v-else>待审核</span>
           </el-descriptions-item>
           <el-descriptions-item label="审核意见">{{ selectedItem.review_comments || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="现场备注">{{ selectedItem.notes || '-' }}</el-descriptions-item>
         </el-descriptions>
 
         <!-- 数据内容 -->

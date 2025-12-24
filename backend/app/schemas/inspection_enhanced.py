@@ -168,6 +168,7 @@ class InspectionCheckItemUpdate(BaseModel):
     status: Optional[CheckItemStatusEnum] = None
     data_value: Optional[List[CheckItemDataValue]] = None
     sector_id: Optional[str] = None
+    notes: Optional[str] = None
 
 class InspectionPhotoCreate(BaseModel):
     """创建检查照片"""
@@ -218,6 +219,7 @@ class InspectionCheckItemResponse(BaseModel):
     data_value: Optional[List[Dict[str, Any]]] = None
     validation_result: Optional[Dict[str, Any]] = None
     fields: Optional[List[Dict[str, Any]]] = None  # 字段配置
+    notes: Optional[str] = None
     checked_at: Optional[datetime]
     review_status: Optional[str]
     review_comments: Optional[str]

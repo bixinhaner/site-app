@@ -106,6 +106,7 @@ class WorkOrderItemResponse(BaseModel):
     status: str
     data_value: Optional[List[Dict[str, Any]]]
     validation_result: Optional[Dict[str, Any]]
+    notes: Optional[str] = None
     review_status: Optional[str]
     review_comments: Optional[str]
     reviewed_at: Optional[datetime]

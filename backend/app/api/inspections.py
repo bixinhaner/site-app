@@ -1674,7 +1674,7 @@ async def update_inspection_item(
         return getattr(v, 'value', v)
 
     for field, value in update_fields.items():
-        if field not in ('status', 'data_value', 'sector_id'):
+        if field not in ('status', 'data_value', 'sector_id', 'notes'):
             continue
         if _norm(getattr(check_item, field, None)) != _norm(value):
             content_changed = True

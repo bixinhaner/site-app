@@ -176,6 +176,7 @@ class InspectionCheckItem(Base):
     data_value = Column(JSON)  # 存储填写的数据
     validation_result = Column(JSON)  # 验证结果
     fields = Column(JSON)  # 字段配置（从模板继承）
+    notes = Column(Text)  # 检查项备注（前端填写，需持久化）
     
     # 检查人员和时间
     checked_by = Column(Integer, ForeignKey("users.id"))
