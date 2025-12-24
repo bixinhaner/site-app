@@ -16,6 +16,7 @@ from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.site import Site
+from app.models.work_order import WorkOrder, WorkOrderTypeEnum, WorkOrderStatusEnum
 from app.models.planning import (
     SitePlanning,
     SitePlanningSector,
@@ -37,6 +38,7 @@ from app.schemas.planning import (
     PlanningCell,
     SitePlanningLldResponse,
     SitePlanningLldSummary,
+    LldEditPolicy,
     PlanningCellUpdate,
     PlanningCellCreate,
     LldPlanningSummaryItem,
@@ -48,6 +50,30 @@ from app.schemas.planning import (
 
 
 router = APIRouter()
+
+LLD_EDIT_ALLOWED_ROLES = {"admin", "manager", "planner"}
+LLD_LOCKED_FIELDS = [
+    "rat",
+    "band_code",
+    "local_cell_id",
+    "tower_id",
+    "enb_id",
+    "gnb_id",
+    "eci",
+    "nci",
+    "pci",
+    "frequency",
+    "bandwidth",
+]
+LLD_FULL_EDIT_SITE_STATUSES = {"planning", "planned"}
+LLD_ACTIVE_OPENING_WO_STATUSES = [
+    WorkOrderStatusEnum.PENDING,
+    WorkOrderStatusEnum.ACTIVE,
+    WorkOrderStatusEnum.SUBMITTED,
+    WorkOrderStatusEnum.UNDER_REVIEW,
+    WorkOrderStatusEnum.APPROVED,
+    WorkOrderStatusEnum.ACTIVATED,
+]
 
 LLD_TEMPLATE_HEADER_TO_FIELD: Dict[str, str] = {
     # base fields
@@ -117,6 +143,210 @@ LLD_TEMPLATE_HEADER_TO_FIELD: Dict[str, str] = {
     "NTP IP2": "ntp_ip2",
     "Remark": "remark",
 }
+
+
+def _has_active_opening_work_order(db: Session, site_id: int) -> bool:
+    if not site_id:
+        return False
+    exists = (
+        db.query(WorkOrder.id)
+        .filter(
+            WorkOrder.site_id == site_id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status.in_(LLD_ACTIVE_OPENING_WO_STATUSES),
+        )
+        .first()
+    )
+    return bool(exists)
+
+
+def _active_opening_work_orders_site_ids(db: Session, site_ids: List[int]) -> set:
+    ids = [int(i) for i in (site_ids or []) if i]
+    if not ids:
+        return set()
+    rows = (
+        db.query(WorkOrder.site_id)
+        .filter(
+            WorkOrder.site_id.in_(ids),
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status.in_(LLD_ACTIVE_OPENING_WO_STATUSES),
+        )
+        .distinct()
+        .all()
+    )
+    return {int(r[0]) for r in rows if r and r[0] is not None}
+
+
+def _compute_lld_edit_policy(site: Site, has_active_opening_wo: bool, current_user: User) -> LldEditPolicy:
+    status = (getattr(site, "status", None) or "").strip()
+    has_role = bool(current_user and getattr(current_user, "role", None) in LLD_EDIT_ALLOWED_ROLES)
+
+    if not has_role:
+        return LldEditPolicy(
+            mode="readonly",
+            can_edit=False,
+            can_import=False,
+            can_add_cell=False,
+            can_delete_cell=False,
+            locked_fields=LLD_LOCKED_FIELDS,
+            reason="无权限编辑规划",
+        )
+
+    if status == "survey_pending":
+        return LldEditPolicy(
+            mode="readonly",
+            can_edit=False,
+            can_import=False,
+            can_add_cell=False,
+            can_delete_cell=False,
+            locked_fields=LLD_LOCKED_FIELDS,
+            reason="站点尚处于勘察阶段（survey_pending），暂不允许录入/编辑规划信息",
+        )
+
+    # 规划中/规划完成：若不存在进行中的开站工单，则可全量编辑；否则降级为受限编辑
+    if status in LLD_FULL_EDIT_SITE_STATUSES and not has_active_opening_wo:
+        return LldEditPolicy(
+            mode="full",
+            can_edit=True,
+            can_import=True,
+            can_add_cell=True,
+            can_delete_cell=True,
+            locked_fields=LLD_LOCKED_FIELDS,
+            reason=None,
+        )
+
+    # 其他阶段（或存在进行中开站工单）统一为受限编辑
+    reason = None
+    if has_active_opening_wo:
+        reason = "存在进行中的开站工单，规划仅允许修改非关键信息"
+    else:
+        reason = f"站点当前阶段为 {status or '-'}，规划仅允许修改非关键信息"
+
+    return LldEditPolicy(
+        mode="limited",
+        can_edit=True,
+        can_import=True,
+        can_add_cell=False,
+        can_delete_cell=False,
+        locked_fields=LLD_LOCKED_FIELDS,
+        reason=reason,
+    )
+
+
+def _format_lld_cell_key(key: Dict[str, Any]) -> str:
+    rat = key.get("rat") or "-"
+    band = key.get("band_code") or "-"
+    lcid = key.get("local_cell_id")
+    lcid_str = str(lcid) if lcid is not None else "-"
+    return f"{rat}/{band}/LCID={lcid_str}"
+
+
+def _find_lld_policy_conflicts_for_import(policy: LldEditPolicy, diff: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """根据编辑策略检查导入带来的变更是否包含被禁止的操作。
+
+    limited 模式下禁止：
+    - Cell 增删（created/deleted）
+    - 锁字段变更（LLD_LOCKED_FIELDS）
+    """
+    if not policy or policy.mode != "limited":
+        return None
+
+    cell_changes = (diff or {}).get("cell_changes") or []
+    created = []
+    deleted = []
+    locked_field_changes = []
+
+    for chg in cell_changes:
+        change_type = chg.get("change_type")
+        key = chg.get("key") or {}
+        if change_type == "created":
+            created.append({"key": key})
+            continue
+        if change_type == "deleted":
+            deleted.append({"key": key})
+            continue
+        if change_type == "updated":
+            for f in chg.get("changes") or []:
+                field = f.get("field")
+                if field in LLD_LOCKED_FIELDS:
+                    locked_field_changes.append(
+                        {
+                            "key": key,
+                            "field": field,
+                            "old": f.get("old"),
+                            "new": f.get("new"),
+                        }
+                    )
+
+    if not created and not deleted and not locked_field_changes:
+        return None
+
+    return {
+        "created": created,
+        "deleted": deleted,
+        "locked_field_changes": locked_field_changes,
+    }
+
+
+def _build_lld_policy_conflict_errors(policy: LldEditPolicy, conflicts: Dict[str, Any]) -> List[str]:
+    created = conflicts.get("created") or []
+    deleted = conflicts.get("deleted") or []
+    locked = conflicts.get("locked_field_changes") or []
+
+    locked_fields_text = "，".join(LLD_LOCKED_FIELDS)
+
+    lines = [
+        (policy.reason or "站点处于受限编辑状态：仅允许修改非关键信息。"),
+        f"受限编辑禁止：新增/删除 Cell，修改关键字段（{locked_fields_text}）。",
+    ]
+
+    if created:
+        sample = "；".join(_format_lld_cell_key(i.get("key") or {}) for i in created[:5])
+        lines.append(f"检测到将新增 Cell：{len(created)} 个（示例：{sample}）")
+    if deleted:
+        sample = "；".join(_format_lld_cell_key(i.get("key") or {}) for i in deleted[:5])
+        lines.append(f"检测到将删除 Cell：{len(deleted)} 个（示例：{sample}）")
+    if locked:
+        sample_items = []
+        for it in locked[:5]:
+            sample_items.append(
+                f"{_format_lld_cell_key(it.get('key') or {})} 字段 {it.get('field')}: {it.get('old')} -> {it.get('new')}"
+            )
+        lines.append(f"检测到关键字段变更：{len(locked)} 处（示例：{'；'.join(sample_items)}）")
+
+    lines.append("请修正 LLD Excel 后重试导入。")
+    return lines
+
+
+def _merge_lld_cell_diff_into_planning_log(db: Session, planning_id: int, cell_diff: Optional[Dict[str, Any]]) -> None:
+    """将 LLD Cell 级 diff 合并写入规划变更日志（PlanningChangeLog.diff）。"""
+    if not planning_id or not cell_diff:
+        return
+    log_entry = (
+        db.query(PlanningChangeLog)
+        .filter(PlanningChangeLog.planning_id == planning_id)
+        .order_by(PlanningChangeLog.created_at.desc())
+        .first()
+    )
+    if not log_entry:
+        return
+
+    merged = log_entry.diff or {}
+
+    existing_cf = set(merged.get("changed_fields") or [])
+    for f in cell_diff.get("changed_fields") or []:
+        existing_cf.add(f)
+    if existing_cf:
+        merged["changed_fields"] = sorted(existing_cf)
+
+    existing_cc = merged.get("cell_changes") or []
+    existing_cc.extend(cell_diff.get("cell_changes") or [])
+    if existing_cc:
+        merged["cell_changes"] = existing_cc
+
+    log_entry.diff = merged
+    db.add(log_entry)
+    db.commit()
 
 # 反向映射：模板列名 -> cell 字段名
 for _field_name, _candidates in LLD_CELL_EXTRA_FIELD_CANDIDATES.items():
@@ -1919,18 +2149,41 @@ async def lld_batch_upload_planning(
             nr_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "NR")
             bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
 
+            has_active_opening_wo = _has_active_opening_work_order(db, site.id)
+            edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
+
+            # 用于受限策略校验/预览的 diff
+            current_planning = _get_current_planning(db, site.id)
+            old_cells: List[SitePlanningCell] = []
+            if current_planning:
+                old_cells = (
+                    db.query(SitePlanningCell)
+                    .filter(SitePlanningCell.planning_id == current_planning.id)
+                    .all()
+                )
+            preview_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
+
+            conflicts = _find_lld_policy_conflicts_for_import(edit_policy, preview_diff)
+            if conflicts:
+                errors.extend(_build_lld_policy_conflict_errors(edit_policy, conflicts))
+                results.append(
+                    BatchPlanningResult(
+                        site_code=site_code,
+                        site_id=site.id,
+                        success=False,
+                        errors=errors,
+                        warnings=warnings,
+                        lte_cell_count=lte_cell_count,
+                        nr_cell_count=nr_cell_count,
+                        bands=bands,
+                        preview_diff=preview_diff or None,
+                    )
+                )
+                failed_count += 1
+                continue
+
             if dry_run:
                 # 试运行：不落库，但返回更详细的 Cell 变更预览，方便前端展示
-                current_planning = _get_current_planning(db, site.id)
-                old_cells: List[SitePlanningCell] = []
-                if current_planning:
-                    old_cells = (
-                        db.query(SitePlanningCell)
-                        .filter(SitePlanningCell.planning_id == current_planning.id)
-                        .all()
-                    )
-                preview_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
-
                 results.append(
                     BatchPlanningResult(
                         site_code=site_code,
@@ -1977,7 +2230,7 @@ async def lld_batch_upload_planning(
             success_count += 1
         except Exception as e:
             errors.append(str(e))
-            results.append(BatchPlanningResult(site_code=tower_id, success=False, errors=errors))
+            results.append(BatchPlanningResult(site_code=site_code, success=False, errors=errors))
             failed_count += 1
 
     return BatchImportReport(
@@ -2054,6 +2307,27 @@ async def lld_upload_planning_for_site(
     nr_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "NR")
     bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
 
+    has_active_opening_wo = _has_active_opening_work_order(db, site.id)
+    edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
+
+    # 预先计算 diff（用于受限策略校验与 dry_run 预览）
+    cell_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
+
+    conflicts = _find_lld_policy_conflicts_for_import(edit_policy, cell_diff)
+    if conflicts:
+        errors.extend(_build_lld_policy_conflict_errors(edit_policy, conflicts))
+        return BatchPlanningResult(
+            site_code=site.site_code,
+            site_id=site.id,
+            success=False,
+            errors=errors,
+            warnings=warnings,
+            lte_cell_count=lte_cell_count,
+            nr_cell_count=nr_cell_count,
+            bands=bands,
+            preview_diff=cell_diff or None,
+        )
+
     if dry_run:
         return BatchPlanningResult(
             site_code=site.site_code,
@@ -2063,6 +2337,7 @@ async def lld_upload_planning_for_site(
             lte_cell_count=lte_cell_count,
             nr_cell_count=nr_cell_count,
             bands=bands,
+            preview_diff=cell_diff or None,
         )
 
     base = _build_planning_from_cells(site.id, cell_dicts)
@@ -2078,32 +2353,9 @@ async def lld_upload_planning_for_site(
         db.add(SitePlanningCell(planning_id=planning.id, **c))
     db.commit()
 
-    # 基于导入前后的 Cell 列表，构建更细粒度的 diff（字段级别变更）
+    # 基于导入前后的 Cell 列表，将更细粒度的 diff（字段级别变更）合并写入日志
     try:
-        cell_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
-        if cell_diff:
-            log_entry = (
-                db.query(PlanningChangeLog)
-                .filter(PlanningChangeLog.planning_id == planning.id)
-                .order_by(PlanningChangeLog.created_at.desc())
-                .first()
-            )
-            if log_entry:
-                merged = log_entry.diff or {}
-                # 合并 changed_fields
-                existing_cf = set(merged.get("changed_fields") or [])
-                for f in cell_diff.get("changed_fields") or []:
-                    existing_cf.add(f)
-                if existing_cf:
-                    merged["changed_fields"] = sorted(existing_cf)
-                # 合并 cell_changes
-                existing_cc = merged.get("cell_changes") or []
-                existing_cc.extend(cell_diff.get("cell_changes") or [])
-                if existing_cc:
-                    merged["cell_changes"] = existing_cc
-                log_entry.diff = merged
-                db.add(log_entry)
-                db.commit()
+        _merge_lld_cell_diff_into_planning_log(db, planning.id, cell_diff)
     except Exception:
         # diff 生成失败不影响主流程
         pass
@@ -2133,6 +2385,9 @@ async def get_lld_planning(
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
 
+    has_active_opening_wo = _has_active_opening_work_order(db, site_id)
+    edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
+
     planning = _get_current_planning(db, site_id)
     if not planning:
         raise HTTPException(status_code=404, detail="Planning not found for this site")
@@ -2157,6 +2412,7 @@ async def get_lld_planning(
         planning=planning_resp,
         cells=cell_models,
         summary=summary,
+        edit_policy=edit_policy,
     )
 
 
@@ -2236,6 +2492,20 @@ async def update_lld_planning(
         summary="Manual LLD planning update",
     )
 
+    # 复制当前版本的 Cell 明细到新版本，避免出现“新版本为空”的风险
+    old_cells = (
+        db.query(SitePlanningCell)
+        .filter(SitePlanningCell.planning_id == current.id)
+        .all()
+    )
+    for oc in old_cells:
+        db.add(SitePlanningCell(planning_id=new_planning.id, **_cell_kwargs_from_model(oc)))
+    db.flush()
+
+    all_cells = db.query(SitePlanningCell).filter(SitePlanningCell.planning_id == new_planning.id).all()
+    _sync_planning_from_cells(db, new_planning, all_cells)
+    db.commit()
+
     return await get_lld_planning(site_id, db, current_user)
 
 
@@ -2259,6 +2529,20 @@ async def create_lld_cell(
         raise HTTPException(status_code=404, detail="Site not found")
     _ensure_site_plannable(site)
 
+    has_active_opening_wo = _has_active_opening_work_order(db, site_id)
+    edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
+    if edit_policy.mode != "full":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "LLD_EDIT_MODE_RESTRICTED",
+                "message": "当前站点处于受限编辑状态，禁止新增 Cell",
+                "reason": edit_policy.reason,
+                "mode": edit_policy.mode,
+                "locked_fields": edit_policy.locked_fields,
+            },
+        )
+
     current = _get_current_planning(db, site_id)
     if not current:
         raise HTTPException(status_code=404, detail="No existing planning found for this site")
@@ -2281,8 +2565,13 @@ async def create_lld_cell(
     if conflicts:
         raise HTTPException(status_code=409, detail={"conflicts": conflicts})
 
+    old_cells = (
+        db.query(SitePlanningCell)
+        .filter(SitePlanningCell.planning_id == current.id)
+        .all()
+    )
+
     # 创建新规划版本
-    old_snapshot = _snapshot(current)
     data = SitePlanningBase(
         bands=current.bands or [],
         sector_count=current.sector_count or 0,
@@ -2327,25 +2616,47 @@ async def create_lld_cell(
         summary=f"Add new {cell_data.rat} cell: {cell_data.band_code}",
     )
 
+    # 复制旧版本的所有 Cell 到新版本
+    for oc in old_cells:
+        db.add(SitePlanningCell(planning_id=new_planning.id, **_cell_kwargs_from_model(oc)))
+
     # 创建新的 Cell
-    cell_data = cell_dict.copy()
-    if 'sheet_name' not in cell_data or not cell_data['sheet_name']:
-        cell_data['sheet_name'] = f"{cell_data.get('rat', 'UNKNOWN')}-{cell_data.get('band_code', 'UNKNOWN')}"
+    cell_payload = cell_dict.copy()
+    if 'sheet_name' not in cell_payload or not cell_payload['sheet_name']:
+        cell_payload['sheet_name'] = f"{cell_payload.get('rat', 'UNKNOWN')}-{cell_payload.get('band_code', 'UNKNOWN')}"
+    # TOWER ID 允许手动填写；未填写/空白则默认使用站点编码
+    tower_id = cell_payload.get("tower_id")
+    if tower_id is None or (isinstance(tower_id, str) and not tower_id.strip()):
+        cell_payload["tower_id"] = site.site_code
+    else:
+        cell_payload["tower_id"] = str(tower_id).strip()
+    # 补齐站点信息字段（便于导出/展示）
+    if not cell_payload.get("site_information"):
+        cell_payload["site_information"] = site.site_code
+    if not cell_payload.get("site_name"):
+        cell_payload["site_name"] = site.site_name
 
     cell = SitePlanningCell(
         planning_id=new_planning.id,
         site_id=site_id,
-        tower_id=site.site_code,
-        **cell_data
+        **cell_payload
     )
     db.add(cell)
-    db.commit()
-    db.refresh(cell)
+    db.flush()
 
     # 同步基础规划数据
     all_cells = db.query(SitePlanningCell).filter(SitePlanningCell.planning_id == new_planning.id).all()
     _sync_planning_from_cells(db, new_planning, all_cells)
     db.commit()
+    db.refresh(cell)
+
+    # 合并 Cell 级 diff 到日志，便于前端展示
+    try:
+        new_cells_dicts = [_cell_kwargs_from_model(oc) for oc in old_cells] + [_cell_kwargs_from_model(cell)]
+        cell_diff = _compute_lld_cells_diff(old_cells, new_cells_dicts)
+        _merge_lld_cell_diff_into_planning_log(db, new_planning.id, cell_diff)
+    except Exception:
+        pass
 
     return PlanningCell.model_validate(cell, from_attributes=True)
 
@@ -2370,6 +2681,9 @@ async def update_lld_cell(
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
     _ensure_site_plannable(site)
+
+    has_active_opening_wo = _has_active_opening_work_order(db, site_id)
+    edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
 
     current = _get_current_planning(db, site_id)
     if not current:
@@ -2399,7 +2713,42 @@ async def update_lld_cell(
     update_dict = cell_data.model_dump(exclude_unset=True)
     field_changes: List[Dict[str, Any]] = []
     if update_dict:
-        validation_errors = _validate_cell_data(update_dict, "update")
+        if edit_policy.mode == "limited":
+            attempted_locked = sorted({k for k in update_dict.keys() if k in LLD_LOCKED_FIELDS})
+            if attempted_locked:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "LLD_EDIT_LOCKED_FIELDS",
+                        "message": "当前站点处于受限编辑状态，禁止修改关键字段",
+                        "reason": edit_policy.reason,
+                        "mode": edit_policy.mode,
+                        "locked_fields": edit_policy.locked_fields,
+                        "attempted_fields": attempted_locked,
+                    },
+                )
+
+        # 关键字段不允许被清空（允许在 full 模式下修改为新的非空值）
+        required_errors: List[str] = []
+        for f, msg in [
+            ("rat", "RAT不能为空"),
+            ("band_code", "频段代码不能为空"),
+            ("local_cell_id", "Local Cell ID不能为空"),
+        ]:
+            if f in update_dict:
+                v = update_dict.get(f)
+                if v is None or (isinstance(v, str) and not str(v).strip()):
+                    required_errors.append(msg)
+
+        # tower_id 允许修改；若传空/空白则按“默认填充站点编码”处理
+        if "tower_id" in update_dict:
+            v = update_dict.get("tower_id")
+            if v is None or (isinstance(v, str) and not str(v).strip()):
+                update_dict["tower_id"] = site.site_code
+            else:
+                update_dict["tower_id"] = str(v).strip()
+
+        validation_errors = _validate_cell_data(update_dict, "update") + required_errors
         if validation_errors:
             raise HTTPException(status_code=400, detail={"errors": validation_errors})
 
@@ -2468,77 +2817,45 @@ async def update_lld_cell(
         summary=f"Update {existing_cell.rat} cell: {existing_cell.band_code}",
     )
 
-    # 复制所有现有的 Cell 到新版本
+    # 复制旧版本的所有 Cell 到新版本，并在目标 Cell 上应用更新（不破坏旧版本历史数据）
     old_cells = (
         db.query(SitePlanningCell)
         .filter(SitePlanningCell.planning_id == current.id)
         .all()
     )
-    for old_cell in old_cells:
-        if old_cell.id == cell_id:
-            # 更新目标 Cell
-            update_data = cell_data.model_dump(exclude_unset=True)
-            for key, value in update_data.items():
-                setattr(old_cell, key, value)
-            old_cell.planning_id = new_planning.id
-            db.add(old_cell)
-        else:
-            # 复制其他 Cell
-            db.add(SitePlanningCell(planning_id=new_planning.id, **_cell_kwargs_from_model(old_cell)))
 
-    db.commit()
+    new_cells_dicts: List[dict] = []
+    updated_cell_obj: Optional[SitePlanningCell] = None
+
+    for oc in old_cells:
+        kwargs = _cell_kwargs_from_model(oc)
+        if oc.id == cell_id:
+            kwargs.update(update_dict)
+        new_cells_dicts.append(kwargs)
+
+        new_cell = SitePlanningCell(planning_id=new_planning.id, **kwargs)
+        db.add(new_cell)
+        if oc.id == cell_id:
+            updated_cell_obj = new_cell
+
+    db.flush()
 
     # 同步基础规划数据
     all_cells = db.query(SitePlanningCell).filter(SitePlanningCell.planning_id == new_planning.id).all()
     _sync_planning_from_cells(db, new_planning, all_cells)
     db.commit()
 
-    # 将本次 Cell 级别字段变更补充写入规划变更日志的 diff 字段，
-    # 便于前端“日志”Tab 精确展示本次修改了哪些参数（例如 TAC、PCI 等）。
-    if field_changes:
-        log_entry = (
-            db.query(PlanningChangeLog)
-            .filter(PlanningChangeLog.planning_id == new_planning.id)
-            .order_by(PlanningChangeLog.created_at.desc())
-            .first()
-        )
-        if log_entry:
-            diff_obj: Dict[str, Any] = log_entry.diff or {}
-            # 更新 changed_fields：统一使用 cells.<field> 的形式，便于前端直接展示
-            changed_fields = set(diff_obj.get("changed_fields") or [])
-            changed_fields.add("cells")
-            for ch in field_changes:
-                changed_fields.add(f"cells.{ch['field']}")
-            diff_obj["changed_fields"] = sorted(changed_fields)
+    # 合并 Cell 级 diff 到日志，便于前端展示（包含增删/关键字段变更等场景）
+    try:
+        cell_diff = _compute_lld_cells_diff(old_cells, new_cells_dicts)
+        _merge_lld_cell_diff_into_planning_log(db, new_planning.id, cell_diff)
+    except Exception:
+        pass
 
-            # 追加 cell_changes 详细记录
-            cell_changes = diff_obj.get("cell_changes") or []
-            cell_changes.append(
-                {
-                    "cell_id": existing_cell.id,
-                    "rat": existing_cell.rat,
-                    "band_code": existing_cell.band_code,
-                    "local_cell_id": existing_cell.local_cell_id,
-                    "changes": field_changes,
-                }
-            )
-            diff_obj["cell_changes"] = cell_changes
-
-            log_entry.diff = diff_obj
-            db.add(log_entry)
-            db.commit()
-
-    # 返回更新后的 Cell
-    updated_cell = (
-        db.query(SitePlanningCell)
-        .filter(
-            SitePlanningCell.planning_id == new_planning.id,
-            SitePlanningCell.local_cell_id == existing_cell.local_cell_id,
-            SitePlanningCell.band_code == existing_cell.band_code,
-        )
-        .first()
-    )
-    return PlanningCell.model_validate(updated_cell, from_attributes=True)
+    if not updated_cell_obj:
+        raise HTTPException(status_code=500, detail="更新失败：未生成新的 Cell 记录")
+    db.refresh(updated_cell_obj)
+    return PlanningCell.model_validate(updated_cell_obj, from_attributes=True)
 
 
 @router.delete("/{site_id}/planning/lld/cells/{cell_id}")
@@ -2560,6 +2877,20 @@ async def delete_lld_cell(
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
     _ensure_site_plannable(site)
+
+    has_active_opening_wo = _has_active_opening_work_order(db, site_id)
+    edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
+    if edit_policy.mode != "full":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "LLD_EDIT_MODE_RESTRICTED",
+                "message": "当前站点处于受限编辑状态，禁止删除 Cell",
+                "reason": edit_policy.reason,
+                "mode": edit_policy.mode,
+                "locked_fields": edit_policy.locked_fields,
+            },
+        )
 
     current = _get_current_planning(db, site_id)
     if not current:
@@ -2882,6 +3213,10 @@ async def list_lld_planning(
         skip=skip,
         limit=limit,
     )
+
+    active_opening_sites = _active_opening_work_orders_site_ids(db, [i.site_id for i in items])
+    for it in items:
+        it.edit_policy = _compute_lld_edit_policy(it, it.site_id in active_opening_sites, current_user)
 
     page = (skip // limit) + 1 if limit else 1
     pages = math.ceil(total / limit) if limit else 1

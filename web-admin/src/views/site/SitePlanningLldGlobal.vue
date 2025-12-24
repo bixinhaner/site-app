@@ -69,6 +69,14 @@
                 <el-tag>{{ row.status }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="编辑权限" width="110">
+              <template #default="{ row }">
+                <el-tooltip v-if="policyReason(row)" :content="policyReason(row)" placement="top">
+                  <el-tag :type="policyTagType(row)">{{ policyText(row) }}</el-tag>
+                </el-tooltip>
+                <el-tag v-else :type="policyTagType(row)">{{ policyText(row) }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="planning_version" label="LLD 版本" width="100" />
             <el-table-column prop="bands" label="Bands" min-width="140">
               <template #default="{ row }">
@@ -91,11 +99,15 @@
             <el-table-column prop="planning_updated_at" label="规划更新时间" min-width="170" />
             <el-table-column prop="planning_created_at" label="规划创建时间" min-width="170" />
             <el-table-column prop="planning_notes" label="备注" min-width="160" show-overflow-tooltip />
-            <el-table-column label="操作" width="120" fixed="right">
+            <el-table-column label="操作" width="160" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="openDetail(row)">
-                  查看详情
-                </el-button>
+                <el-button link type="primary" size="small" @click="openDetail(row)">查看详情</el-button>
+                <el-tooltip v-if="!canEditRow(row)" :content="policyReason(row) || '当前不允许编辑'" placement="top">
+                  <span>
+                    <el-button link type="success" size="small" disabled>编辑规划</el-button>
+                  </span>
+                </el-tooltip>
+                <el-button v-else link type="success" size="small" @click="openEdit(row)">编辑规划</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -239,6 +251,25 @@ const downloadBlob = (blob, filename) => {
   window.URL.revokeObjectURL(url)
 }
 
+const policyText = (row) => {
+  const mode = row?.edit_policy?.mode
+  if (mode === 'full') return '可编辑'
+  if (mode === 'limited') return '受限'
+  if (mode === 'readonly') return '只读'
+  return '-'
+}
+
+const policyTagType = (row) => {
+  const mode = row?.edit_policy?.mode
+  if (mode === 'full') return 'success'
+  if (mode === 'limited') return 'warning'
+  if (mode === 'readonly') return 'info'
+  return 'info'
+}
+
+const policyReason = (row) => row?.edit_policy?.reason || ''
+const canEditRow = (row) => !!row?.edit_policy?.can_edit
+
 const buildParams = () => {
   const params = {
     status: statusFilter.value || undefined,
@@ -379,6 +410,11 @@ const onCellPageChange = (page) => {
 const openDetail = (row) => {
   if (!row?.site_id) return
   router.push({ name: 'SitePlanningLld', params: { id: row.site_id } })
+}
+
+const openEdit = (row) => {
+  if (!row?.site_id) return
+  router.push({ name: 'SitePlanningLld', params: { id: row.site_id }, query: { edit: '1' } })
 }
 
 onMounted(() => {

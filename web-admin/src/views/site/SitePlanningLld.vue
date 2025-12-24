@@ -3,10 +3,23 @@
     <div class="page-header">
       <h1>站点规划（LLD）</h1>
       <div class="header-actions">
-        <el-button v-if="hasEditPermission && planning" @click="toggleEditMode" :type="editMode ? 'warning' : 'primary'">
-          <el-icon><Edit v-if="!editMode" /><Check v-else /></el-icon>
-          {{ editMode ? '退出编辑' : '手动编辑' }}
-        </el-button>
+        <el-tooltip
+          v-if="planning"
+          :content="editPolicyReason"
+          placement="top"
+          :disabled="canEdit"
+        >
+          <span>
+            <el-button
+              :disabled="!canEdit"
+              @click="toggleEditMode"
+              :type="editMode ? 'warning' : (editPolicyMode === 'limited' ? 'info' : 'primary')"
+            >
+              <el-icon><Edit v-if="!editMode" /><Check v-else /></el-icon>
+              {{ editMode ? '退出编辑' : (editPolicyMode === 'limited' ? '手动编辑（受限）' : '手动编辑') }}
+            </el-button>
+          </span>
+        </el-tooltip>
         <el-button v-if="editMode && hasChanges" @click="saveChanges" type="success" :loading="saving">
           <el-icon><DocumentCopy /></el-icon>保存更改
         </el-button>
@@ -22,6 +35,16 @@
         <el-tag type="info">Site ID: {{ siteId }}</el-tag>
         <el-tag v-if="site" type="success">站点: {{ site.site_code }} / {{ site.site_name }}</el-tag>
         <el-tag v-if="planning" type="warning">当前版本: v{{ planning.version }}</el-tag>
+        <el-tooltip
+          v-if="editPolicy"
+          :content="editPolicy.reason || ''"
+          placement="top"
+          :disabled="!editPolicy.reason"
+        >
+          <el-tag :type="editPolicyMode === 'full' ? 'success' : editPolicyMode === 'limited' ? 'warning' : 'info'">
+            {{ editPolicyMode === 'full' ? '可编辑' : editPolicyMode === 'limited' ? '受限编辑' : '只读' }}
+          </el-tag>
+        </el-tooltip>
       </div>
       <div class="meta-row" v-if="summary">
         <el-tag type="info">Bands: {{ summary.bands && summary.bands.length ? summary.bands.join(', ') : '-' }}</el-tag>
@@ -48,13 +71,13 @@
         <el-button @click="downloadLldTemplate">
           <el-icon><Download /></el-icon>下载 LLD 模板
         </el-button>
-        <el-switch v-model="dryRun" active-text="试运行(dry run)" />
+        <el-switch v-model="dryRun" active-text="试运行(dry run)" :disabled="!canImport" />
         <el-upload
           :show-file-list="false"
           :before-upload="onBeforeUpload"
           :http-request="onUploadLld"
         >
-          <el-button type="success" :loading="importing">
+          <el-button type="success" :loading="importing" :disabled="!canImport">
             <el-icon><Upload /></el-icon>{{ dryRun ? '试运行导入' : '导入并保存' }}
           </el-button>
         </el-upload>
@@ -309,7 +332,16 @@
             <el-table-column v-if="editMode" label="操作" width="180" fixed="right">
               <template #default="{ row, $index }">
                 <el-button size="small" @click="editCell(row)">编辑</el-button>
-                <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                <template v-if="canDeleteCell">
+                  <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                </template>
+                <template v-else>
+                  <el-tooltip content="受限编辑：禁止删除 Cell" placement="top">
+                    <span>
+                      <el-button size="small" type="danger" disabled>删除</el-button>
+                    </span>
+                  </el-tooltip>
+                </template>
               </template>
             </el-table-column>
           </el-table>
@@ -518,7 +550,16 @@
                 <el-table-column v-if="editMode" label="操作" width="180" fixed="right">
                   <template #default="{ row, $index }">
                     <el-button size="small" @click="editCell(row)">编辑</el-button>
-                    <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                    <template v-if="canDeleteCell">
+                      <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                    </template>
+                    <template v-else>
+                      <el-tooltip content="受限编辑：禁止删除 Cell" placement="top">
+                        <span>
+                          <el-button size="small" type="danger" disabled>删除</el-button>
+                        </span>
+                      </el-tooltip>
+                    </template>
                   </template>
                 </el-table-column>
               </el-table>
@@ -551,7 +592,16 @@
                 <el-table-column v-if="editMode" label="操作" width="180" fixed="right">
                   <template #default="{ row, $index }">
                     <el-button size="small" @click="editCell(row)">编辑</el-button>
-                    <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                    <template v-if="canDeleteCell">
+                      <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                    </template>
+                    <template v-else>
+                      <el-tooltip content="受限编辑：禁止删除 Cell" placement="top">
+                        <span>
+                          <el-button size="small" type="danger" disabled>删除</el-button>
+                        </span>
+                      </el-tooltip>
+                    </template>
                   </template>
                 </el-table-column>
               </el-table>
@@ -602,39 +652,93 @@
       :close-on-click-modal="false"
     >
       <el-form :model="cellEditForm" label-width="140px" size="small">
-        <el-row :gutter="16">
-          <el-col :span="8">
-            <el-form-item label="RAT">
-              <el-select v-model="cellEditForm.rat" :disabled="!isEditingNewCell">
-                <el-option label="LTE" value="LTE" />
-                <el-option label="NR" value="NR" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="频段代码">
-              <el-input v-model="cellEditForm.band_code" :disabled="!isEditingNewCell" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="LOCAL CELL ID">
-              <el-input-number v-model="cellEditForm.local_cell_id" :min="1" :max="65535" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+	        <el-row :gutter="16">
+	          <el-col :span="8">
+	            <el-form-item label="RAT">
+	              <el-select v-model="cellEditForm.rat" :disabled="isLockedField('rat')">
+	                <el-option label="LTE" value="LTE" />
+	                <el-option label="NR" value="NR" />
+	              </el-select>
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="频段代码">
+	              <el-input v-model="cellEditForm.band_code" :disabled="isLockedField('band_code')" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="LOCAL CELL ID">
+	              <el-input-number v-model="cellEditForm.local_cell_id" :min="1" :max="65535" :disabled="isLockedField('local_cell_id')" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
 
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="CELL NAME">
-              <el-input v-model="cellEditForm.cell_name" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="PLMN">
-              <el-input v-model="cellEditForm.plmn" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+	        <el-row :gutter="16">
+	          <el-col :span="8">
+	            <el-form-item label="TOWER ID">
+	              <el-input v-model="cellEditForm.tower_id" :disabled="isLockedField('tower_id')" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="SiteCode">
+	              <el-input :model-value="site?.site_code || ''" disabled />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="SITE NAME">
+	              <el-input :model-value="site?.site_name || ''" disabled />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
+
+	        <el-row :gutter="16">
+	          <el-col :span="12">
+	            <el-form-item label="CELL NAME">
+	              <el-input v-model="cellEditForm.cell_name" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="12">
+	            <el-form-item label="PLMN">
+	              <el-input v-model="cellEditForm.plmn" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
+
+	        <el-row :gutter="16">
+	          <el-col :span="8">
+	            <el-form-item label="Work Mode">
+	              <el-input v-model="cellEditForm.work_mode" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="Duplex Mode">
+	              <el-input v-model="cellEditForm.duplex_mode" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="MIMO">
+	              <el-input v-model="cellEditForm.mimo" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
+
+	        <el-row :gutter="16">
+	          <el-col :span="8">
+	            <el-form-item label="Cell ID">
+	              <el-input v-model="cellEditForm.cell_id_in_file" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col v-if="cellEditForm.rat === 'LTE'" :span="8">
+	            <el-form-item label="SA">
+	              <el-input v-model="cellEditForm.sa" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col v-if="cellEditForm.rat === 'LTE'" :span="8">
+	            <el-form-item label="SSP">
+	              <el-input v-model="cellEditForm.ssp" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
 
         <el-row :gutter="16">
           <el-col :span="8">
@@ -644,7 +748,7 @@
           </el-col>
           <el-col :span="8">
             <el-form-item label="PCI">
-              <el-input-number v-model="cellEditForm.pci" :min="0" :max="503" />
+              <el-input-number v-model="cellEditForm.pci" :min="0" :max="503" :disabled="isLockedField('pci')" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -655,44 +759,88 @@
         </el-row>
 
         <!-- LTE 特有字段 -->
-        <el-divider v-if="cellEditForm.rat === 'LTE'">LTE 专用参数</el-divider>
-        <el-row v-if="cellEditForm.rat === 'LTE'" :gutter="16">
-          <el-col :span="8">
-            <el-form-item label="ENB ID">
-              <el-input-number v-model="cellEditForm.enb_id" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="ECI">
-              <el-input-number v-model="cellEditForm.eci" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="功率(dBm)">
-              <el-input-number v-model="cellEditForm.power_dbm" :min="-50" :max="80" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+	        <el-divider v-if="cellEditForm.rat === 'LTE'">LTE 专用参数</el-divider>
+	        <el-row v-if="cellEditForm.rat === 'LTE'" :gutter="16">
+	          <el-col :span="8">
+	            <el-form-item label="ENB ID">
+	              <el-input-number v-model="cellEditForm.enb_id" :disabled="isLockedField('enb_id')" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="ECI">
+	              <el-input-number v-model="cellEditForm.eci" :disabled="isLockedField('eci')" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="功率(dBm)">
+	              <el-input-number v-model="cellEditForm.power_dbm" :min="-50" :max="80" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
+
+	        <el-row v-if="cellEditForm.rat === 'LTE'" :gutter="16">
+	          <el-col :span="12">
+	            <el-form-item label="PA">
+	              <el-input v-model="cellEditForm.pa" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="12">
+	            <el-form-item label="PB">
+	              <el-input v-model="cellEditForm.pb" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
 
         <!-- 5G 特有字段 -->
-        <el-divider v-if="cellEditForm.rat === 'NR'">5G 专用参数</el-divider>
-        <el-row v-if="cellEditForm.rat === 'NR'" :gutter="16">
-          <el-col :span="8">
-            <el-form-item label="gNB ID">
-              <el-input-number v-model="cellEditForm.gnb_id" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="NCI">
-              <el-input-number v-model="cellEditForm.nci" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="功率(dBm)">
-              <el-input-number v-model="cellEditForm.power_dbm" :min="-50" :max="80" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+	        <el-divider v-if="cellEditForm.rat === 'NR'">5G 专用参数</el-divider>
+	        <el-row v-if="cellEditForm.rat === 'NR'" :gutter="16">
+	          <el-col :span="8">
+	            <el-form-item label="gNB ID">
+	              <el-input-number v-model="cellEditForm.gnb_id" :disabled="isLockedField('gnb_id')" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="Gnb length">
+	              <el-input-number v-model="cellEditForm.gnb_length" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="NCI">
+	              <el-input-number v-model="cellEditForm.nci" :disabled="isLockedField('nci')" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
+
+	        <el-row v-if="cellEditForm.rat === 'NR'" :gutter="16">
+	          <el-col :span="8">
+	            <el-form-item label="SSB Absolute Freq">
+	              <el-input v-model="cellEditForm.ssb_absolute_freq" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="DL SubCarrierSpacing">
+	              <el-input v-model="cellEditForm.dl_subcarrier_spacing" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="功率(dBm)">
+	              <el-input-number v-model="cellEditForm.power_dbm" :min="-50" :max="80" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
+
+	        <el-row v-if="cellEditForm.rat === 'NR'" :gutter="16">
+	          <el-col :span="12">
+	            <el-form-item label="DL Bandwidth">
+	              <el-input v-model="cellEditForm.dl_bandwidth" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="12">
+	            <el-form-item label="UL Bandwidth">
+	              <el-input v-model="cellEditForm.ul_bandwidth" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
 
         <el-row :gutter="16">
           <el-col :span="8">
@@ -748,18 +896,18 @@
           </el-col>
         </el-row>
 
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="Bandwidth">
-              <el-input v-model="cellEditForm.bandwidth" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="EARFCN">
-              <el-input-number v-model="cellEditForm.frequency" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+	        <el-row :gutter="16">
+	          <el-col v-if="cellEditForm.rat === 'LTE'" :span="12">
+	            <el-form-item label="Bandwidth">
+	              <el-input v-model="cellEditForm.bandwidth" :disabled="isLockedField('bandwidth')" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="cellEditForm.rat === 'LTE' ? 12 : 24">
+	            <el-form-item label="EARFCN">
+	              <el-input-number v-model="cellEditForm.frequency" :disabled="isLockedField('frequency')" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
 
         <el-row :gutter="16">
           <el-col :span="8">
@@ -780,86 +928,495 @@
         </el-row>
 
         <el-divider>覆盖信息</el-divider>
-        <el-row :gutter="16">
-          <el-col :span="8">
-            <el-form-item label="覆盖区域">
-              <el-input v-model="cellEditForm.coverage_area" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="覆盖场景">
-              <el-input v-model="cellEditForm.scenario" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="区域权重">
-              <el-input v-model="cellEditForm.coverage_weight" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+	        <el-row :gutter="16">
+	          <el-col :span="8">
+	            <el-form-item label="覆盖区域">
+	              <el-input v-model="cellEditForm.coverage_area" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="覆盖场景">
+	              <el-input v-model="cellEditForm.scenario" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="8">
+	            <el-form-item label="区域权重">
+	              <el-input v-model="cellEditForm.coverage_weight" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
 
-        <el-divider>备注信息</el-divider>
-        <el-form-item label="备注">
-          <el-input v-model="cellEditForm.remark" type="textarea" rows="2" />
-        </el-form-item>
+	        <el-row :gutter="16">
+	          <el-col :span="12">
+	            <el-form-item label="scenarios priority value">
+	              <el-input v-model="cellEditForm.scenario_weight" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="12">
+	            <el-form-item label="Priority Value">
+	              <el-input v-model="cellEditForm.weight" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
 
-        <!-- 5G 核心网字段 -->
-        <el-divider v-if="cellEditForm.rat === 'NR'">5G 核心网配置</el-divider>
-        <template v-if="cellEditForm.rat === 'NR'">
-          <el-row :gutter="16">
-            <el-col :span="12">
-              <el-form-item label="gNB WAN IP">
-                <el-input v-model="cellEditForm.gnb_wan_ip" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="MASTER OMC IP">
-                <el-input v-model="cellEditForm.master_omc_ip" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-row :gutter="16">
-            <el-col :span="12">
-              <el-form-item label="MASTER 5GC IP1">
-                <el-input v-model="cellEditForm.master_5gc_ip1" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="MASTER 5GC IP2">
-                <el-input v-model="cellEditForm.master_5gc_ip2" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-row :gutter="16">
-            <el-col :span="8">
-              <el-form-item label="NTP IP1">
-                <el-input v-model="cellEditForm.ntp_ip1" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="NTP IP2">
-                <el-input v-model="cellEditForm.ntp_ip2" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="Kssb">
-                <el-input-number v-model="cellEditForm.kssb" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-row :gutter="16">
-            <el-col :span="12">
-              <el-form-item label="Slot Config">
-                <el-input v-model="cellEditForm.slot_config" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="Offset to Point A">
-                <el-input v-model="cellEditForm.offset_to_point_a" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-        </template>
+	        <el-divider>OMC / NTP</el-divider>
+	        <el-row :gutter="16">
+	          <el-col :span="12">
+	            <el-form-item label="MASTER OMC IP">
+	              <el-input v-model="cellEditForm.master_omc_ip" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="12">
+	            <el-form-item label="BACKUP OMC IP">
+	              <el-input v-model="cellEditForm.backup_omc_ip" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
+	        <el-row :gutter="16">
+	          <el-col :span="12">
+	            <el-form-item label="NTP IP1">
+	              <el-input v-model="cellEditForm.ntp_ip1" />
+	            </el-form-item>
+	          </el-col>
+	          <el-col :span="12">
+	            <el-form-item label="NTP IP2">
+	              <el-input v-model="cellEditForm.ntp_ip2" />
+	            </el-form-item>
+	          </el-col>
+	        </el-row>
+
+	        <el-divider>备注信息</el-divider>
+	        <el-form-item label="备注">
+	          <el-input v-model="cellEditForm.remark" type="textarea" rows="2" />
+	        </el-form-item>
+
+	        <!-- 5G 核心网字段 -->
+	        <el-divider v-if="cellEditForm.rat === 'NR'">5G 核心网配置</el-divider>
+	        <template v-if="cellEditForm.rat === 'NR'">
+	          <el-row :gutter="16">
+	            <el-col :span="24">
+	              <el-form-item label="gNB WAN IP">
+	                <el-input v-model="cellEditForm.gnb_wan_ip" />
+	              </el-form-item>
+	            </el-col>
+	          </el-row>
+
+	          <el-row :gutter="16">
+	            <el-col :span="8">
+	              <el-form-item label="MASTER 5GC IP1">
+	                <el-input v-model="cellEditForm.master_5gc_ip1" />
+	              </el-form-item>
+	            </el-col>
+	            <el-col :span="8">
+	              <el-form-item label="MASTER 5GC IP2">
+	                <el-input v-model="cellEditForm.master_5gc_ip2" />
+	              </el-form-item>
+	            </el-col>
+	            <el-col :span="8">
+	              <el-form-item label="MASTER 5GC IP3">
+	                <el-input v-model="cellEditForm.master_5gc_ip3" />
+	              </el-form-item>
+	            </el-col>
+	          </el-row>
+
+	          <el-row :gutter="16">
+	            <el-col :span="8">
+	              <el-form-item label="BACKUP 5GC IP1">
+	                <el-input v-model="cellEditForm.backup_5gc_ip1" />
+	              </el-form-item>
+	            </el-col>
+	            <el-col :span="8">
+	              <el-form-item label="BACKUP 5GC IP2">
+	                <el-input v-model="cellEditForm.backup_5gc_ip2" />
+	              </el-form-item>
+	            </el-col>
+	            <el-col :span="8">
+	              <el-form-item label="BACKUP 5GC IP3">
+	                <el-input v-model="cellEditForm.backup_5gc_ip3" />
+	              </el-form-item>
+	            </el-col>
+	          </el-row>
+
+	          <el-row :gutter="16">
+	            <el-col :span="12">
+	              <el-form-item label="Kssb">
+	                <el-input-number v-model="cellEditForm.kssb" />
+	              </el-form-item>
+	            </el-col>
+	            <el-col :span="12">
+	              <el-form-item label="Offset to PointA">
+	                <el-input v-model="cellEditForm.offset_to_point_a" />
+	              </el-form-item>
+	            </el-col>
+	          </el-row>
+
+	          <el-row :gutter="16">
+	            <el-col :span="8">
+	              <el-form-item label="Slot config">
+	                <el-input v-model="cellEditForm.slot_config" />
+	              </el-form-item>
+	            </el-col>
+	            <el-col :span="8">
+	              <el-form-item label="Slot config DL/UL">
+	                <el-input v-model="cellEditForm.slot_config_dl_ul" />
+	              </el-form-item>
+	            </el-col>
+	            <el-col :span="8">
+	              <el-form-item label="Symbol config DL/UL">
+	                <el-input v-model="cellEditForm.symbol_config_dl_ul" />
+	              </el-form-item>
+	            </el-col>
+	          </el-row>
+	        </template>
+
+	        <el-collapse v-model="cellEditCollapseActive">
+	          <el-collapse-item name="template_extra" title="LLD 模板扩展字段">
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="Index">
+	                  <el-input v-model="cellEditForm.excel_index" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item :label="cellEditForm.rat === 'LTE' ? 'Province Region' : 'Province'">
+	                  <el-input v-if="cellEditForm.rat === 'LTE'" v-model="cellEditForm.province_region" />
+	                  <el-input v-else v-model="cellEditForm.province" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="City">
+	                  <el-input v-model="cellEditForm.city" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="County">
+	                  <el-input v-model="cellEditForm.county" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Town">
+	                  <el-input v-model="cellEditForm.town" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Address">
+	                  <el-input v-model="cellEditForm.address" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="Cluster">
+	                  <el-input v-model="cellEditForm.cluster" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="SN">
+	                  <el-input v-model="cellEditForm.sn" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="TOWER NAME">
+	                  <el-input v-model="cellEditForm.tower_name" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="Total Tilt">
+	                  <el-input v-model="cellEditForm.total_tilt" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Antenna modle">
+	                  <el-input v-model="cellEditForm.antenna_model" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Antenna Gain">
+	                  <el-input v-model="cellEditForm.antenna_gain" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="RET">
+	                  <el-input v-model="cellEditForm.ret" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Transmission Port">
+	                  <el-input v-model="cellEditForm.transmission_port" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Type">
+	                  <el-input v-model="cellEditForm.lld_type" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	          </el-collapse-item>
+
+	          <el-collapse-item name="oam" title="OAM / Control / User Plane">
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="oam IP Type">
+	                  <el-input v-model="cellEditForm.oam_ip_type" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="oam Ip address">
+	                  <el-input v-model="cellEditForm.oam_ip_address" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="oam Ip Submask">
+	                  <el-input v-model="cellEditForm.oam_ip_submask" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="oam Ip Gateway">
+	                  <el-input v-model="cellEditForm.oam_ip_gateway" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="oam Ip VLAN">
+	                  <el-input v-model="cellEditForm.oam_ip_vlan" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="oam Ip DNS">
+	                  <el-input v-model="cellEditForm.oam_ip_dns" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="OAM Binding port">
+	                  <el-input v-model="cellEditForm.oam_binding_port" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Control planet Ip Type">
+	                  <el-input v-model="cellEditForm.control_plane_ip_type" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Control planet address">
+	                  <el-input v-model="cellEditForm.control_plane_address" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="Control planet Submask">
+	                  <el-input v-model="cellEditForm.control_plane_submask" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Control planet Gateway">
+	                  <el-input v-model="cellEditForm.control_plane_gateway" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Control planet VLAN">
+	                  <el-input v-model="cellEditForm.control_plane_vlan" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="Control planet DNS">
+	                  <el-input v-model="cellEditForm.control_plane_dns" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="Control planet binding port">
+	                  <el-input v-model="cellEditForm.control_plane_binding_port" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="User planet Ip Type">
+	                  <el-input v-model="cellEditForm.user_plane_ip_type" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="User planet address">
+	                  <el-input v-model="cellEditForm.user_plane_address" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="User planet Submask">
+	                  <el-input v-model="cellEditForm.user_plane_submask" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="User planet Gateway">
+	                  <el-input v-model="cellEditForm.user_plane_gateway" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="User planet VLAN">
+	                  <el-input v-model="cellEditForm.user_plane_vlan" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="User planet DNS">
+	                  <el-input v-model="cellEditForm.user_plane_dns" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="User planet binding port">
+	                  <el-input v-model="cellEditForm.user_plane_binding_port" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	          </el-collapse-item>
+
+	          <el-collapse-item v-if="cellEditForm.rat === 'LTE'" name="lte_net" title="4G：X2 / MME">
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="X2 Ip Type">
+	                  <el-input v-model="cellEditForm.x2_ip_type" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="X2 address">
+	                  <el-input v-model="cellEditForm.x2_address" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="X2 Submask">
+	                  <el-input v-model="cellEditForm.x2_submask" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="X2 Gateway">
+	                  <el-input v-model="cellEditForm.x2_gateway" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="X2 VLAN">
+	                  <el-input v-model="cellEditForm.x2_vlan" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="X2 DNS">
+	                  <el-input v-model="cellEditForm.x2_dns" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="X2 binding port">
+	                  <el-input v-model="cellEditForm.x2_binding_port" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="MME IP 1">
+	                  <el-input v-model="cellEditForm.mme_ip_1" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="MME IP 2">
+	                  <el-input v-model="cellEditForm.mme_ip_2" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="MME IP 3">
+	                  <el-input v-model="cellEditForm.mme_ip_3" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="MME IP 4">
+	                  <el-input v-model="cellEditForm.mme_ip_4" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="MME IP 5">
+	                  <el-input v-model="cellEditForm.mme_ip_5" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="MME IP 6">
+	                  <el-input v-model="cellEditForm.mme_ip_6" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="MME IP 7">
+	                  <el-input v-model="cellEditForm.mme_ip_7" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="MME IP 8">
+	                  <el-input v-model="cellEditForm.mme_ip_8" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	          </el-collapse-item>
+
+	          <el-collapse-item v-if="cellEditForm.rat === 'NR'" name="nr_net" title="5G：XN">
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="XN Ip Type">
+	                  <el-input v-model="cellEditForm.xn_ip_type" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="XN address">
+	                  <el-input v-model="cellEditForm.xn_address" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="XN Submask">
+	                  <el-input v-model="cellEditForm.xn_submask" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="XN Gateway">
+	                  <el-input v-model="cellEditForm.xn_gateway" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="XN VLAN">
+	                  <el-input v-model="cellEditForm.xn_vlan" />
+	                </el-form-item>
+	              </el-col>
+	              <el-col :span="8">
+	                <el-form-item label="XN DNS">
+	                  <el-input v-model="cellEditForm.xn_dns" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	            <el-row :gutter="16">
+	              <el-col :span="8">
+	                <el-form-item label="XN binding port">
+	                  <el-input v-model="cellEditForm.xn_binding_port" />
+	                </el-form-item>
+	              </el-col>
+	            </el-row>
+	          </el-collapse-item>
+	        </el-collapse>
       </el-form>
 
       <template #footer>
@@ -872,20 +1429,9 @@
       </template>
     </el-dialog>
 
-    <!-- Cell 编辑对话框 -->
-    <el-dialog
-      v-model="cellEditDialogVisible"
-      :title="isEditingNewCell ? '新增Cell' : '编辑Cell'"
-      width="80%"
-      :close-on-click-modal="false"
-    >
-      <!-- 这里省略原有表单内容，保持不变 -->
-      <!-- …原有cellEditForm表单代码… -->
-    </el-dialog>
-
     <!-- 添加Cell按钮 -->
     <el-button
-      v-if="editMode"
+      v-if="editMode && canAddCell"
       type="primary"
       circle
       class="add-cell-btn"
@@ -983,10 +1529,6 @@ const route = useRoute()
 const router = useRouter()
 const siteId = Number(route.params.id)
 
-// 权限检查
-const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}')
-const hasEditPermission = ['admin', 'manager', 'planner', 'inspector'].includes(userInfo.role)
-
 const loading = ref(false)
 const importing = ref(false)
 const dryRun = ref(true)
@@ -1003,19 +1545,27 @@ const site = ref(null)
 const planning = ref(null)
 const summary = ref(null)
 const cells = ref([])
+const editPolicy = ref(null)
+const editingCellOriginal = ref(null)
 
 // Cell编辑对话框
 const cellEditDialogVisible = ref(false)
 const isEditingNewCell = ref(false)
 const editingCellId = ref(null)
 const savingCell = ref(false)
+const cellEditCollapseActive = ref(['template_extra'])
 const cellEditForm = reactive({
   rat: 'LTE',
   band_code: '',
+  tower_id: '',
   local_cell_id: null,
   cell_name: '',
   plmn: '',
   tac: '',
+  work_mode: '',
+  duplex_mode: '',
+  mimo: '',
+  cell_id_in_file: '',
   pci: null,
   zc_root_index: null,
   longitude: null,
@@ -1027,8 +1577,13 @@ const cellEditForm = reactive({
   band_in_file: '',
   frequency: null,
   bandwidth: '',
+  dl_bandwidth: '',
+  ul_bandwidth: '',
+  ssb_absolute_freq: '',
+  dl_subcarrier_spacing: '',
   mechanical_downtilt_deg: null,
   electrical_downtilt_deg: null,
+  total_tilt: '',
   azimuth_deg: null,
   tower_height: null,
   antenna_height: null,
@@ -1045,6 +1600,69 @@ const cellEditForm = reactive({
   scenario_weight: '',
   weight: '',
   remark: '',
+  // 模板扩展字段（地市区等）
+  excel_index: '',
+  province_region: '',
+  province: '',
+  city: '',
+  county: '',
+  address: '',
+  cluster: '',
+  sn: '',
+  sa: '',
+  ssp: '',
+  antenna_model: '',
+  antenna_gain: '',
+  ret: '',
+  transmission_port: '',
+  lld_type: '',
+  // OAM / Control / User Plane
+  oam_ip_type: '',
+  oam_ip_address: '',
+  oam_ip_submask: '',
+  oam_ip_gateway: '',
+  oam_ip_vlan: '',
+  oam_ip_dns: '',
+  oam_binding_port: '',
+  control_plane_ip_type: '',
+  control_plane_address: '',
+  control_plane_submask: '',
+  control_plane_gateway: '',
+  control_plane_vlan: '',
+  control_plane_dns: '',
+  control_plane_binding_port: '',
+  user_plane_ip_type: '',
+  user_plane_address: '',
+  user_plane_submask: '',
+  user_plane_gateway: '',
+  user_plane_vlan: '',
+  user_plane_dns: '',
+  user_plane_binding_port: '',
+  // X2（4G）
+  x2_ip_type: '',
+  x2_address: '',
+  x2_submask: '',
+  x2_gateway: '',
+  x2_vlan: '',
+  x2_dns: '',
+  x2_binding_port: '',
+  // XN（5G）
+  xn_ip_type: '',
+  xn_address: '',
+  xn_submask: '',
+  xn_gateway: '',
+  xn_vlan: '',
+  xn_dns: '',
+  xn_binding_port: '',
+  // MME（4G）
+  mme_ip_1: '',
+  mme_ip_2: '',
+  mme_ip_3: '',
+  mme_ip_4: '',
+  mme_ip_5: '',
+  mme_ip_6: '',
+  mme_ip_7: '',
+  mme_ip_8: '',
   // LTE 专用
   enb_id: null,
   eci: null,
@@ -1087,6 +1705,35 @@ const nrNciFilter = ref('')
 const nrKeyword = ref('')
 const nrViewMode = ref('basic')
 
+const editPolicyMode = computed(() => editPolicy.value?.mode || null)
+const editPolicyReason = computed(() => editPolicy.value?.reason || '当前账号无权限编辑规划')
+const canEdit = computed(() => !!editPolicy.value?.can_edit)
+const canImport = computed(() => !!editPolicy.value?.can_import)
+const canAddCell = computed(() => !!editPolicy.value?.can_add_cell)
+const canDeleteCell = computed(() => !!editPolicy.value?.can_delete_cell)
+
+const extractErrorMessage = (error, fallback = '操作失败') => {
+  const detail = error?.response?.data?.detail
+  if (!detail) return fallback
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.filter(Boolean).join('；') || fallback
+  if (typeof detail === 'object') {
+    const parts = []
+    if (detail.message) parts.push(detail.message)
+    if (detail.reason) parts.push(detail.reason)
+    if (Array.isArray(detail.attempted_fields) && detail.attempted_fields.length) {
+      parts.push(`尝试修改字段：${detail.attempted_fields.join('，')}`)
+    }
+    return parts.join('；') || fallback
+  }
+  return String(detail)
+}
+
+const isLockedField = (field) => {
+  if (editPolicyMode.value !== 'limited') return false
+  return (editPolicy.value?.locked_fields || []).includes(field)
+}
+
 const goBack = () => router.back()
 
 const loadSite = async () => {
@@ -1105,21 +1752,22 @@ const loadLldPlanning = async () => {
     planning.value = res.planning || null
     summary.value = res.summary || null
     cells.value = Array.isArray(res.cells) ? res.cells : []
+    editPolicy.value = res.edit_policy || null
 
-    // 添加调试信息
-    console.log('LLD规划加载结果:', {
-      planning: planning.value,
-      hasPlanning: !!planning.value,
-      summary: summary.value,
-      cellsCount: cells.value.length
-    })
+    if (route.query.edit === '1' && planning.value && canEdit.value && !editMode.value) {
+      originalCells.value = JSON.parse(JSON.stringify(cells.value))
+      editMode.value = true
+      hasChanges.value = false
+      if (editPolicyMode.value === 'limited' && editPolicy.value?.reason) {
+        ElMessage.info(editPolicy.value.reason)
+      }
+    }
   } catch (e) {
-    console.error('LLD规划加载失败:', e)
     planning.value = null
     summary.value = null
     cells.value = []
-    const msg = e?.response?.data?.detail || '加载 LLD 规划失败或尚未导入'
-    ElMessage.warning(msg)
+    editPolicy.value = null
+    ElMessage.warning(extractErrorMessage(e, '加载 LLD 规划失败或尚未导入'))
   } finally {
     loading.value = false
   }
@@ -1158,7 +1806,13 @@ const downloadLldTemplate = async () => {
   }
 }
 
-const onBeforeUpload = () => true
+const onBeforeUpload = () => {
+  if (!canImport.value) {
+    ElMessage.warning(editPolicyReason.value || '无权限执行导入')
+    return false
+  }
+  return true
+}
 
 const onUploadLld = async (opts) => {
   try {
@@ -1180,8 +1834,7 @@ const onUploadLld = async (opts) => {
     }
     opts.onSuccess(res)
   } catch (e) {
-    const msg = e?.response?.data?.detail || '导入失败'
-    importInfo.value = msg
+    importInfo.value = extractErrorMessage(e, '导入失败')
     opts.onError(e)
   } finally {
     importing.value = false
@@ -1216,6 +1869,10 @@ const filteredNrCells = computed(() => {
 
 // 编辑模式方法
 const toggleEditMode = () => {
+  if (!canEdit.value) {
+    ElMessage.warning(editPolicyReason.value || '无权限编辑规划')
+    return
+  }
   if (editMode.value) {
     // 退出编辑模式
     if (hasChanges.value) {
@@ -1237,6 +1894,9 @@ const toggleEditMode = () => {
     originalCells.value = JSON.parse(JSON.stringify(cells.value))
     editMode.value = true
     hasChanges.value = false
+    if (editPolicyMode.value === 'limited' && editPolicy.value?.reason) {
+      ElMessage.info(editPolicy.value.reason)
+    }
   }
 }
 
@@ -1272,8 +1932,7 @@ const saveChanges = async () => {
     hasChanges.value = false
     originalCells.value = []
   } catch (error) {
-    const errorMsg = error?.response?.data?.detail || '保存失败'
-    ElMessage.error(errorMsg)
+    ElMessage.error(extractErrorMessage(error, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -1281,13 +1940,20 @@ const saveChanges = async () => {
 
 // Cell编辑方法
 const addNewCell = () => {
+  if (!canAddCell.value) {
+    ElMessage.warning('受限编辑：禁止新增 Cell')
+    return
+  }
   isEditingNewCell.value = true
   editingCellId.value = null
+  editingCellOriginal.value = null
 
   // 重置表单
   Object.keys(cellEditForm).forEach(key => {
     cellEditForm[key] = key === 'rat' ? 'LTE' : (typeof cellEditForm[key] === 'string' ? '' : null)
   })
+  // 默认填充 TOWER ID
+  cellEditForm.tower_id = site.value?.site_code || ''
 
   cellEditDialogVisible.value = true
 }
@@ -1295,6 +1961,7 @@ const addNewCell = () => {
 const editCell = (row) => {
   isEditingNewCell.value = false
   editingCellId.value = row.id
+  editingCellOriginal.value = row
 
   // 填充表单
   Object.keys(cellEditForm).forEach(key => {
@@ -1304,6 +1971,10 @@ const editCell = (row) => {
       cellEditForm[key] = key === 'rat' ? 'LTE' : (typeof cellEditForm[key] === 'string' ? '' : null)
     }
   })
+  // 兜底：若历史数据缺失 TOWER ID，则默认回填站点编码
+  if (!cellEditForm.tower_id) {
+    cellEditForm.tower_id = site.value?.site_code || ''
+  }
 
   cellEditDialogVisible.value = true
 }
@@ -1312,13 +1983,88 @@ const saveCell = async () => {
   try {
     savingCell.value = true
 
+    const normalize = (v) => {
+      if (v === undefined) return null
+      if (typeof v === 'string') {
+        const s = v.trim()
+        return s === '' ? null : s
+      }
+      return v
+    }
+
+    const requiredKeys = ['rat', 'band_code', 'local_cell_id']
+
     // 构建要保存的数据
     const cellData = {}
-    Object.keys(cellEditForm).forEach(key => {
-      if (cellEditForm[key] !== null && cellEditForm[key] !== '') {
-        cellData[key] = cellEditForm[key]
+    if (isEditingNewCell.value) {
+      // 必填校验 + 默认填充
+      const rat = normalize(cellEditForm.rat)
+      const bandCode = normalize(cellEditForm.band_code)
+      const localCellId = cellEditForm.local_cell_id
+
+      if (!rat) {
+        ElMessage.warning('RAT不能为空')
+        return
       }
-    })
+      if (!bandCode) {
+        ElMessage.warning('Band不能为空')
+        return
+      }
+      if (localCellId === null || localCellId === undefined) {
+        ElMessage.warning('LOCAL CELL ID不能为空')
+        return
+      }
+
+      const towerId = normalize(cellEditForm.tower_id) || (site.value?.site_code || null)
+      if (!towerId) {
+        ElMessage.warning('TOWER ID不能为空')
+        return
+      }
+
+      Object.keys(cellEditForm).forEach(key => {
+        const v = normalize(cellEditForm[key])
+        if (v !== null) cellData[key] = v
+      })
+      // 确保 tower_id 总是有值（避免空白导致后端拒绝）
+      cellData.tower_id = towerId
+    } else {
+      const original = editingCellOriginal.value || {}
+      const attemptedLocked = []
+      const invalidRequired = []
+      Object.keys(cellEditForm).forEach(key => {
+        let newValue = normalize(cellEditForm[key])
+        const oldValue = normalize(original[key])
+
+        // tower_id 允许“清空→默认回填站点编码”
+        if (key === 'tower_id' && newValue === null) {
+          newValue = site.value?.site_code || null
+        }
+        if (oldValue === newValue) return
+
+        if (isLockedField(key)) {
+          attemptedLocked.push(key)
+          return
+        }
+
+        if (requiredKeys.includes(key) && newValue === null) {
+          invalidRequired.push(key)
+          return
+        }
+        cellData[key] = newValue
+      })
+      if (attemptedLocked.length) {
+        ElMessage.warning(`受限编辑：禁止修改关键字段（${attemptedLocked.join('，')}）`)
+        return
+      }
+      if (invalidRequired.length) {
+        ElMessage.warning(`关键字段不可清空：${invalidRequired.join('，')}`)
+        return
+      }
+      if (!Object.keys(cellData).length) {
+        ElMessage.info('未检测到任何修改')
+        return
+      }
+    }
 
     if (isEditingNewCell.value) {
       // 创建新Cell
@@ -1338,18 +2084,17 @@ const saveCell = async () => {
     await loadLogs()
 
   } catch (error) {
-    const errorMsg = error?.response?.data?.detail || '保存失败'
-
-    // 处理验证错误
     if (error?.response?.data?.errors) {
       const errors = error.response.data.errors
-      ElMessage.error(`验证失败: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
-    } else if (error?.response?.data?.conflicts) {
-      const conflicts = error.response.data.conflicts
-      ElMessage.warning(`数据冲突: ${Array.isArray(conflicts) ? conflicts.join(', ') : conflicts}`)
-    } else {
-      ElMessage.error(errorMsg)
+      ElMessage.error(`验证失败：${Array.isArray(errors) ? errors.join('；') : errors}`)
+      return
     }
+    if (error?.response?.data?.conflicts) {
+      const conflicts = error.response.data.conflicts
+      ElMessage.warning(`数据冲突：${Array.isArray(conflicts) ? conflicts.join('；') : conflicts}`)
+      return
+    }
+    ElMessage.error(extractErrorMessage(error, '保存失败'))
   } finally {
     savingCell.value = false
   }
@@ -1357,6 +2102,10 @@ const saveCell = async () => {
 
 const deleteCell = async (row) => {
   try {
+    if (!canDeleteCell.value) {
+      ElMessage.warning('受限编辑：禁止删除 Cell')
+      return
+    }
     await ElMessageBox.confirm(
       `确定要删除这个${row.rat} Cell (${row.band_code}, 扇区${row.local_cell_id}) 吗？`,
       '删除确认',
@@ -1379,8 +2128,7 @@ const deleteCell = async (row) => {
   } catch (error) {
     if (error === 'cancel') return
 
-    const errorMsg = error?.response?.data?.detail || '删除失败'
-    ElMessage.error(errorMsg)
+    ElMessage.error(extractErrorMessage(error, '删除失败'))
   }
 }
 
