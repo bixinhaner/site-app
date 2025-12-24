@@ -738,6 +738,7 @@ const messages = {
       noWorkOrder: '无关联工单',
       selectCheckoutWarehouse: '选择出库仓库',
       selectReturnWarehouse: '选择退入仓库',
+      checkoutWarehouseMissing: '设备未关联出库仓库，请联系管理员',
       returnPreview: '退库预览',
       choosePackage: '选择设备套装',
       suitableFor: '适用',

@@ -1289,6 +1289,7 @@ async def scan_return_receive(
                     last_updated_by=current_user.id,
                 )
                 db.add(inv_tgt)
+                db.flush()
             inv_tgt.current_stock += qty
             inv_tgt.available_stock += qty
             inv_tgt.last_updated_by = current_user.id
@@ -1706,9 +1707,10 @@ async def create_stock_in(
                 equipment_id=equipment_id,
                 current_stock=quantity,
                 available_stock=quantity,
-                last_updated_by=current_user.id
+                last_updated_by=current_user.id,
             )
             db.add(new_inventory)
+            db.flush()
     
     db.commit()
     
@@ -2054,12 +2056,14 @@ async def import_sn_batch(
                     main_inv = inventories[0]
                     if len(inventories) > 1:
                         for extra in inventories[1:]:
-                            main_inv.current_stock += extra.current_stock
-                            main_inv.available_stock += extra.available_stock
+                            main_inv.current_stock = (main_inv.current_stock or 0) + (extra.current_stock or 0)
+                            main_inv.available_stock = (main_inv.available_stock or 0) + (extra.available_stock or 0)
+                            main_inv.reserved_stock = (main_inv.reserved_stock or 0) + (extra.reserved_stock or 0)
+                            main_inv.allocated_stock = (main_inv.allocated_stock or 0) + (extra.allocated_stock or 0)
                             db.delete(extra)
                     # 然后再加上本次导入的 1 台
-                    main_inv.current_stock += 1
-                    main_inv.available_stock += 1
+                    main_inv.current_stock = (main_inv.current_stock or 0) + 1
+                    main_inv.available_stock = (main_inv.available_stock or 0) + 1
                     main_inv.last_updated_by = current_user.id
                 else:
                     new_inventory = Inventory(

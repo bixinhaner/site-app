@@ -3,7 +3,7 @@
 ## Rule
 - 回复语言必须使用简体中文
 - 接到需求后先整理详细的to-do列表，发送用户确认；若用户提出修改意见，需重新整理并确认。
-- 开发过程中若有任何不确定支出，必须主动向用户提问。
+- 开发过程中若有任何不确定，必须主动向用户提问。
 - Always do not generate .md file when running tasks if user do not ask.
 - If temporary verification and test scripts or code are generated during the task, please create them in the project's temp directory. If the directory does not exist, create it.Other temporary files or code that do not affect business operations during the task should also be placed in the temp directory.
 - python都是用虚拟环境运行的。

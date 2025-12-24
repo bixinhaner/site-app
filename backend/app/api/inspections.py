@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import List, Optional
 from datetime import datetime
 import os
@@ -2229,7 +2229,6 @@ async def bind_equipment_to_sector(
             )
 
         # 新增：阻止同一设备SN绑定到其他小区（跨检查记录全局唯一小区）
-        from sqlalchemy import or_, func
         from sqlalchemy.orm import joinedload
         conflict = db.query(InspectionCheckItem).options(
             joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.site),

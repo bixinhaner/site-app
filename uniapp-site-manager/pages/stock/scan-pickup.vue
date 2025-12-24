@@ -71,28 +71,6 @@
           </view>
         </view>
 
-        <!-- 工单选择 -->
-        <view v-if="availablePackages.length > 0" class="work-order-section">
-          <view class="section-title">{{ $t('stock.selectWorkOrderOptional') }}</view>
-          <picker @change="onWorkOrderChange" :value="selectedWorkOrderIndex" :range="workOrderOptions">
-            <view class="picker-input">
-              <text>{{ selectedWorkOrder ? selectedWorkOrder.title : $t('stock.noWorkOrder') }}</text>
-              <text class="picker-arrow">▼</text>
-            </view>
-          </picker>
-        </view>
-
-        <!-- 出库仓库选择 -->
-        <view v-if="availablePackages.length > 0" class="work-order-section">
-          <view class="section-title">{{ $t('stock.selectCheckoutWarehouse') }}</view>
-          <picker @change="onWarehouseChange" :value="selectedWarehouseIndex" :range="warehouseOptions">
-            <view class="picker-input">
-              <text>{{ selectedWarehouse ? selectedWarehouse.warehouse_name : $t('common.pleaseSelect') }}</text>
-              <text class="picker-arrow">▼</text>
-            </view>
-          </picker>
-        </view>
-
         <!-- 套装选择 -->
         <view v-if="availablePackages.length > 1" class="package-section">
           <view class="section-title">{{ $t('stock.choosePackage') }}</view>
@@ -606,13 +584,11 @@ export default {
     return {
       scanResult: '',
       parsedBarcode: null, // 解析后的条码信息
+      scannedEquipmentInstance: null,
       // 扫码领货区域折叠状态（默认折叠）
       scanSectionCollapsed: true,
       selectedPackageIndex: 0,
-      selectedWorkOrderIndex: 0,
-      selectedWarehouseIndex: 0,
       availablePackages: [],
-      myWorkOrders: [],
       warehouses: [],
       pickupHistory: [],
       loading: false,
@@ -660,27 +636,6 @@ export default {
       return this.availablePackages[this.selectedPackageIndex]
     },
     
-    selectedWorkOrder() {
-      // 如果选择索引为0，表示"无关联工单"，返回null
-      if (this.selectedWorkOrderIndex === 0) {
-        return null
-      }
-      // 否则返回对应的工单（需要减1，因为第0项是"无关联工单"）
-      return this.myWorkOrders[this.selectedWorkOrderIndex - 1]
-    },
-    
-    workOrderOptions() {
-      return [this.$t('stock.noWorkOrder'), ...this.myWorkOrders.map(workOrder => workOrder.title)]
-    },
-
-    warehouseOptions() {
-      return this.warehouses.map(w => w.warehouse_name)
-    },
-
-    selectedWarehouse() {
-      return this.warehouses[this.selectedWarehouseIndex] || null
-    },
-
     returnWarehouseOptions() {
       return this.warehouses.map(w => w.warehouse_name)
     },
@@ -783,7 +738,6 @@ export default {
       return
     }
 
-    this.loadMyWorkOrders()
     this.loadWarehouses()
     this.loadPickupHistory()
     this.getCurrentLocation()
@@ -1008,6 +962,7 @@ export default {
       console.log('查询用的SN:', parsedData.sn)
       
       this.loading = true
+      this.scannedEquipmentInstance = null
       
       try {
         // 使用解析后的SN查询设备信息
@@ -1035,6 +990,7 @@ export default {
         console.log('设备实例:', response.equipment_instance || response.data?.equipment_instance)
         
         const equipmentData = response.data || response
+        this.scannedEquipmentInstance = equipmentData.equipment_instance || null
         
         if (equipmentData.equipment && equipmentData.available_packages && equipmentData.available_packages.length > 0) {
           console.log('=== 查询成功 ===')
@@ -1105,17 +1061,28 @@ export default {
       this.selectedPackageIndex = index
     },
     
-    onWorkOrderChange(e) {
-      this.selectedWorkOrderIndex = e.detail.value
-    },
-
-    onWarehouseChange(e) {
-      this.selectedWarehouseIndex = Number(e.detail.value || 0)
+    async resolveCheckoutWarehouseId() {
+      const name = this.scannedEquipmentInstance?.warehouse_name
+      if (!name) return null
+      let list = this.warehouses || []
+      let matched = list.find(w => w.warehouse_name === name)
+      if (!matched) {
+        await this.loadWarehouses()
+        list = this.warehouses || []
+        matched = list.find(w => w.warehouse_name === name)
+      }
+      return matched?.id || null
     },
     
     async confirmPickup() {
       if (!this.selectedPackage) {
         uni.showToast({ title: this.$t('stock.pleaseSelectPackage'), icon: 'none' })
+        return
+      }
+
+      const warehouseId = await this.resolveCheckoutWarehouseId()
+      if (!warehouseId) {
+        uni.showToast({ title: this.$t('stock.checkoutWarehouseMissing'), icon: 'none' })
         return
       }
       
@@ -1126,8 +1093,7 @@ export default {
           barcode: this.scanResult,
           parsed_barcode: this.parsedBarcode, // 传递解析后的数据
           package_id: this.selectedPackage.id,
-          work_order_id: this.selectedWorkOrder?.id || null,
-          warehouse_id: this.selectedWarehouse?.id || 1,
+          warehouse_id: warehouseId,
           gps_location: this.userLocation
         }
         
@@ -1217,10 +1183,9 @@ export default {
       const collapse = !!options?.collapse
       this.scanResult = ''
       this.parsedBarcode = null
+      this.scannedEquipmentInstance = null
       this.availablePackages = []
       this.selectedPackageIndex = 0
-      this.selectedWorkOrderIndex = 0
-      this.selectedWarehouseIndex = 0
       if (collapse) this.scanSectionCollapsed = true
     },
     
@@ -1237,25 +1202,6 @@ export default {
       return formatMacAddress(mac)
     },
     
-    async loadMyWorkOrders() {
-      try {
-        const response = await new Promise((resolve, reject) => {
-          uni.request({
-            url: buildApiUrl('/api/work-orders/'),
-            method: 'GET',
-            header: getAuthHeaders(this.userStore.token),
-            data: { status_filter: 'ACTIVE' },
-            success: resolve,
-            fail: reject
-          })
-        })
-        this.myWorkOrders = response.data || []
-        console.log('加载工单列表成功:', this.myWorkOrders.length, '个工单')
-      } catch (error) {
-        console.error('加载工单列表失败:', error)
-      }
-    },
-
     async loadWarehouses() {
       try {
         const response = await new Promise((resolve, reject) => {
@@ -1268,7 +1214,6 @@ export default {
           })
         })
         this.warehouses = response.data?.warehouses || []
-        this.selectedWarehouseIndex = 0
       } catch (error) {
         console.error('加载仓库列表失败:', error)
       }

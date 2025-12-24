@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON, Boolean, Enum, Float, DECIMAL
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON, Boolean, Enum, Float, DECIMAL, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -175,6 +175,7 @@ class Warehouse(Base):
 class Inventory(Base):
     """库存统计表"""
     __tablename__ = "inventory"
+    __table_args__ = (UniqueConstraint("warehouse_id", "equipment_id", name="uq_inventory_warehouse_equipment"),)
     
     id = Column(Integer, primary_key=True, index=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False)
