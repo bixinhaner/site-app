@@ -3,6 +3,7 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -18,6 +19,7 @@ from app.models.system_config import SystemConfig
 from app.models.user import User
 from app.schemas.operation_log import (
     OperationLogCleanupPayload,
+    OperationLogItem,
     OperationLogDetail,
     OperationLogOptionsResponse,
     OperationLogPageResponse,
@@ -125,6 +127,30 @@ def _save_settings(db: Session, settings: dict) -> None:
         row.value = settings
         flag_modified(row, "value")
     db.commit()
+
+
+def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if not dt:
+        return dt
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _resolve_client_tz(tz_name: Optional[str], tz_offset: Optional[int]):
+    if tz_name:
+        try:
+            return ZoneInfo(str(tz_name))
+        except Exception:
+            pass
+    if tz_offset is not None:
+        try:
+            offset_minutes = int(tz_offset)
+            # JS: getTimezoneOffset() = UTC - local (minutes)
+            return timezone(timedelta(minutes=-offset_minutes))
+        except Exception:
+            pass
+    return None
 
 
 @router.get("/operation-logs/settings", response_model=OperationLogSettings)
@@ -331,7 +357,13 @@ async def page_operation_logs(
         .all()
     )
 
-    return OperationLogPageResponse(items=rows, total=total, page=page, page_size=page_size)
+    items = []
+    for r in rows:
+        item = OperationLogItem.model_validate(r)
+        item.occurred_at = _ensure_utc(item.occurred_at)
+        items.append(item)
+
+    return OperationLogPageResponse(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.post("/operation-logs/cleanup", response_model=dict)
@@ -413,11 +445,14 @@ async def export_operation_logs(
     object_id: Optional[str] = Query(None),
     date_from: Optional[datetime] = Query(None),
     date_to: Optional[datetime] = Query(None),
+    tz: Optional[str] = Query(None),
+    tz_offset: Optional[int] = Query(None),
     limit: int = Query(50000, ge=1, le=200000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_admin(current_user)
+    client_tz = _resolve_client_tz(tz, tz_offset)
 
     query = db.query(OperationLog)
 
@@ -488,9 +523,14 @@ async def export_operation_logs(
     ws.append(headers)
 
     for r in rows:
+        occurred_at = _ensure_utc(getattr(r, "occurred_at", None))
+        occurred_str = ""
+        if occurred_at:
+            local_dt = occurred_at.astimezone(client_tz) if client_tz else occurred_at
+            occurred_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
         ws.append(
             [
-                _safe_excel_cell(getattr(r, "occurred_at", None)),
+                _safe_excel_cell(occurred_str),
                 _safe_excel_cell(getattr(r, "user_id", None)),
                 _safe_excel_cell(getattr(r, "username", None)),
                 _safe_excel_cell(getattr(r, "user_role", None)),
@@ -536,4 +576,6 @@ async def get_operation_log_detail(
     row = db.query(OperationLog).filter(OperationLog.id == log_id).first()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="日志不存在")
-    return row
+    data = OperationLogDetail.model_validate(row)
+    data.occurred_at = _ensure_utc(data.occurred_at)
+    return data

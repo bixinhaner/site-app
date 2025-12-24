@@ -57,7 +57,6 @@
             range-separator="至"
             start-placeholder="开始时间"
             end-placeholder="结束时间"
-            value-format="YYYY-MM-DDTHH:mm:ss"
             @change="handleSearch"
           />
         </el-form-item>
@@ -243,7 +242,12 @@ const filters = ref({
 const detailVisible = ref(false)
 const detail = ref(null)
 
-const formatDateTime = (v) => v ? new Date(v).toLocaleString() : ''
+const formatDateTime = (v) => {
+  if (!v) return ''
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return String(v)
+  return d.toLocaleString()
+}
 
 const prettyJson = (obj) => {
   try {
@@ -272,8 +276,9 @@ const buildQueryParams = () => {
     is_success: filters.value.is_success === null ? undefined : filters.value.is_success,
   }
   if (Array.isArray(timeRange.value) && timeRange.value.length === 2) {
-    params.date_from = timeRange.value[0]
-    params.date_to = timeRange.value[1]
+    const [dateFrom, dateTo] = timeRange.value
+    if (dateFrom) params.date_from = new Date(dateFrom).toISOString()
+    if (dateTo) params.date_to = new Date(dateTo).toISOString()
   }
   return params
 }
@@ -403,6 +408,10 @@ const exportExcel = async () => {
     // 导出不带分页参数
     delete params.page
     delete params.page_size
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (tz) params.tz = tz
+    params.tz_offset = new Date().getTimezoneOffset()
 
     const blob = await operationLogsApi.exportExcel(params)
     const url = window.URL.createObjectURL(new Blob([blob]))
