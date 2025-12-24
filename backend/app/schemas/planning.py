@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 
 
 ALLOWED_BANDS = {"n41", "n78", "n1", "n3", "B1", "B3"}
@@ -323,6 +324,68 @@ class SitePlanningLldResponse(BaseModel):
     planning: Optional[SitePlanningResponse] = None
     cells: List[PlanningCell] = []
     summary: SitePlanningLldSummary
+
+
+class LldPlanningSummaryItem(BaseModel):
+    site_id: int
+    site_code: str
+    site_name: str
+    site_type: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
+    district: Optional[str] = None
+    status: Optional[str] = None
+
+    planning_id: int
+    planning_version: int
+    planning_created_at: Optional[datetime] = None
+    planning_updated_at: Optional[datetime] = None
+    planning_notes: Optional[str] = None
+
+    bands: List[str] = []
+    sector_count: int = 0
+    lte_cell_count: int = 0
+    nr_cell_count: int = 0
+    mechanical_downtilt_min: Optional[float] = None
+    mechanical_downtilt_max: Optional[float] = None
+    electrical_downtilt_min: Optional[float] = None
+    electrical_downtilt_max: Optional[float] = None
+
+
+class LldPlanningSummaryListResponse(BaseModel):
+    items: List[LldPlanningSummaryItem] = []
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+class LldPlanningCellItem(PlanningCell):
+    site_code: str
+    site_name: Optional[str] = None
+    site_status: Optional[str] = None
+    site_city: Optional[str] = None
+    planning_version: int
+    planning_created_at: Optional[datetime] = None
+    planning_updated_at: Optional[datetime] = None
+
+
+class LldPlanningCellListResponse(BaseModel):
+    items: List[LldPlanningCellItem] = []
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+class LldTemplateCellListResponse(BaseModel):
+    sheet: str
+    headers: List[str] = []
+    items: List[Dict[str, Any]] = []
+    total: int
+    page: int
+    size: int
+    pages: int
 
 
 class PlanningCellCreate(BaseModel):

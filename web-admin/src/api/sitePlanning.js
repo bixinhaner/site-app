@@ -37,6 +37,11 @@ export const sitePlanningApi = {
     return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
   getLldPlanning: (siteId) => request.get(`/api/sites/${siteId}/planning/lld`),
+  listLldPlanning: (params = {}) => request.get('/api/sites/planning/lld-list', { params }),
+  listLldCells: (params = {}) => request.get('/api/sites/planning/lld-cells', { params }),
+  listLldCellsTemplate: (params = {}) => request.get('/api/sites/planning/lld-cells/template', { params }),
+  exportLldPlanning: (params = {}) => request.get('/api/sites/planning/lld-list/export', { params, responseType: 'blob' }),
+  exportLldCells: (params = {}) => request.get('/api/sites/planning/lld-cells/export', { params, responseType: 'blob' }),
   // LLD 手动编辑API
   updateLldPlanning: (siteId, baseVersion) => request.put(`/api/sites/${siteId}/planning/lld?base_version=${baseVersion}`),
   createLldCell: (siteId, cellData, baseVersion) => request.post(`/api/sites/${siteId}/planning/lld/cells?base_version=${baseVersion}`, cellData),

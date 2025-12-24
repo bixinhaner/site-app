@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from typing import List, Optional, Dict, Any
+from sqlalchemy import func, case
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
+import math
 import io
+import json
 import re
 import pandas as pd
+from openpyxl import load_workbook
 
 from app.core.database import get_db
 from app.api.auth import get_current_user
@@ -34,10 +39,200 @@ from app.schemas.planning import (
     SitePlanningLldSummary,
     PlanningCellUpdate,
     PlanningCellCreate,
+    LldPlanningSummaryItem,
+    LldPlanningSummaryListResponse,
+    LldPlanningCellItem,
+    LldPlanningCellListResponse,
+    LldTemplateCellListResponse,
 )
 
 
 router = APIRouter()
+
+LLD_TEMPLATE_HEADER_TO_FIELD: Dict[str, str] = {
+    # base fields
+    "Tower Merchants": "tower_merchants",
+    "TOWER NAME": "tower_name",
+    "TOWER ID": "tower_id",
+    "Town": "town",
+    "Sector ID Local ID": "local_cell_id",
+    "Sector ID": "local_cell_id",
+    "CELL NAME": "cell_name",
+    "PLMN": "plmn",
+    "TAC": "tac",
+    "EARFCN": "frequency",
+    "Bandwidth": "bandwidth",
+    "Power": "power_dbm",
+    "Power（dbm）": "power_dbm",
+    "PA": "pa",
+    "PB": "pb",
+    "PCI": "pci",
+    "ZC Root Index": "zc_root_index",
+    "Longitude": "longitude",
+    "Latitude": "latitude",
+    "Tower Height": "tower_height",
+    "Antenna Height": "antenna_height",
+    "M-Tilt": "mechanical_downtilt_deg",
+    "E-Tilt": "electrical_downtilt_deg",
+    "Azimuth": "azimuth_deg",
+    "Band Combination": "band_combination",
+    "Cell Allocation": "cell_allocation",
+    "Coverage type": "cover_type",
+    "Coverage scenarios": "scenario",
+    "Area priority value": "coverage_weight",
+    "scenarios priority value": "scenario_weight",
+    "Priority Value": "weight",
+    "priority value": "weight",
+    # LTE specific
+    "ENB ID": "enb_id",
+    "ECI": "eci",
+    "MME IP 1": "mme_ip_1",
+    "MME IP 2": "mme_ip_2",
+    "MME IP 3": "mme_ip_3",
+    "MME IP 4": "mme_ip_4",
+    "MME IP 5": "mme_ip_5",
+    "MME IP 6": "mme_ip_6",
+    "MME IP 7": "mme_ip_7",
+    "MME IP 8": "mme_ip_8",
+    # NR specific
+    "gNB ID": "gnb_id",
+    "Gnb length": "gnb_length",
+    "NCI": "nci",
+    "Kssb": "kssb",
+    "Offset to PointA": "offset_to_point_a",
+    "Slot config": "slot_config",
+    "Slot config DL/UL": "slot_config_dl_ul",
+    "Symbol config DL/UL": "symbol_config_dl_ul",
+    "DL SubCarrierSpacing": "dl_subcarrier_spacing",
+    "MASTER 5GC IP1": "master_5gc_ip1",
+    "MASTER 5GC IP2": "master_5gc_ip2",
+    "MASTER 5GC IP3": "master_5gc_ip3",
+    "BACKUP 5GC IP1": "backup_5gc_ip1",
+    "BACKUP 5GC IP2": "backup_5gc_ip2",
+    "BACKUP 5GC IP3": "backup_5gc_ip3",
+    # Common IPs
+    "MASTER OMC IP": "master_omc_ip",
+    "BACKUP OMC IP": "backup_omc_ip",
+    "NTP IP1": "ntp_ip1",
+    "NTP IP2": "ntp_ip2",
+    "Remark": "remark",
+}
+
+# 反向映射：模板列名 -> cell 字段名
+for _field_name, _candidates in LLD_CELL_EXTRA_FIELD_CANDIDATES.items():
+    for _col in _candidates:
+        if _col:
+            LLD_TEMPLATE_HEADER_TO_FIELD.setdefault(str(_col), _field_name)
+
+
+def _parse_band_list(band: Optional[str]) -> List[str]:
+    if not band:
+        return []
+    items = [b.strip() for b in str(band).split(",") if str(b).strip()]
+    # 去重但保持顺序
+    seen = set()
+    result = []
+    for b in items:
+        if b in seen:
+            continue
+        seen.add(b)
+        result.append(b)
+    return result
+
+
+@lru_cache(maxsize=1)
+def _get_lld_template_path() -> Path:
+    base_dir = Path(__file__).resolve().parents[3]
+    return base_dir / "LLD templateV1.0.xlsx"
+
+
+@lru_cache(maxsize=1)
+def _get_lld_template_headers() -> Dict[str, List[str]]:
+    xlsx_path = _get_lld_template_path()
+    if not xlsx_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail="LLD 模板文件缺失：请在系统部署目录中放置 LLD templateV1.0.xlsx",
+        )
+    wb = load_workbook(xlsx_path, read_only=True, data_only=True)
+    headers: Dict[str, List[str]] = {}
+    for sheet in ("4G", "5G"):
+        if sheet not in wb.sheetnames:
+            continue
+        ws = wb[sheet]
+        first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        if not first_row:
+            headers[sheet] = []
+            continue
+        headers[sheet] = [str(v).strip() if v is not None else "" for v in list(first_row)]
+    return headers
+
+
+def _is_blank(v: object) -> bool:
+    return v is None or (isinstance(v, str) and not v.strip())
+
+
+def _get_obj_attr(obj: object, attr: str):
+    if not obj or not attr:
+        return None
+    v = getattr(obj, attr, None)
+    if _is_blank(v):
+        return None
+    return v
+
+
+def _to_excel_value(v: object):
+    if v is None:
+        return None
+    if isinstance(v, (dict, list)):
+        try:
+            return json.dumps(v, ensure_ascii=False)
+        except Exception:
+            return str(v)
+    return v
+
+
+def _get_lld_template_value(col: str, cell: SitePlanningCell, site: Site):
+    # 站点字段回填：Cell 优先，空值回退 Site
+    if col == "SiteCode":
+        return _get_obj_attr(cell, "site_information") or _get_obj_attr(site, "site_code")
+    if col == "SITE NAME":
+        return _get_obj_attr(cell, "site_name") or _get_obj_attr(site, "site_name")
+    if col == "Province Region":
+        return (
+            _get_obj_attr(cell, "province_region")
+            or _get_obj_attr(cell, "region")
+            or _get_obj_attr(site, "province")
+        )
+    if col == "Province":
+        return (
+            _get_obj_attr(cell, "province")
+            or _get_obj_attr(cell, "region")
+            or _get_obj_attr(site, "province")
+        )
+    if col == "City":
+        return _get_obj_attr(cell, "city") or _get_obj_attr(site, "city")
+    if col == "County":
+        return _get_obj_attr(cell, "county") or _get_obj_attr(site, "district")
+    if col == "Address":
+        return _get_obj_attr(cell, "address") or _get_obj_attr(site, "address")
+
+    # 关键字段：Band / DL带宽回退
+    if col in ("BAND", "Band"):
+        return _get_obj_attr(cell, "band_in_file") or _get_obj_attr(cell, "band_code")
+    if col == "DL Bandwidth":
+        return _get_obj_attr(cell, "dl_bandwidth") or _get_obj_attr(cell, "bandwidth")
+
+    field = LLD_TEMPLATE_HEADER_TO_FIELD.get(col)
+    if field:
+        return _get_obj_attr(cell, field)
+
+    # 未知字段：尝试从 extra_params 中取
+    extra = getattr(cell, "extra_params", None)
+    if isinstance(extra, dict) and col in extra and not _is_blank(extra.get(col)):
+        return extra.get(col)
+
+    return None
 
 
 def _get_current_planning(db: Session, site_id: int) -> Optional[SitePlanning]:
@@ -2454,3 +2649,501 @@ async def delete_lld_cell(
     db.commit()
 
     return {"message": "Cell deleted successfully", "deleted_cell_id": cell_id}
+
+
+def _build_lld_planning_query(
+    db: Session,
+    status: Optional[str],
+    band_list: List[str],
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+):
+    query = (
+        db.query(SitePlanning, Site)
+        .join(Site, SitePlanning.site_id == Site.id)
+        .filter(SitePlanning.is_current == True)
+    )
+
+    if status:
+        query = query.filter(Site.status == status)
+    if start_time:
+        query = query.filter(SitePlanning.updated_at >= start_time)
+    if end_time:
+        query = query.filter(SitePlanning.updated_at <= end_time)
+
+    if band_list:
+        band_subq = (
+            db.query(SitePlanningCell.planning_id)
+            .filter(SitePlanningCell.band_code.in_(band_list))
+            .distinct()
+            .subquery()
+        )
+        query = query.filter(SitePlanning.id.in_(band_subq))
+
+    return query
+
+
+def _collect_lld_planning_stats(
+    db: Session,
+    planning_ids: List[int],
+) -> Tuple[Dict[int, Any], Dict[int, List[str]]]:
+    stats_map: Dict[int, Any] = {}
+    bands_map: Dict[int, List[str]] = {}
+
+    if not planning_ids:
+        return stats_map, bands_map
+
+    stats_rows = (
+        db.query(
+            SitePlanningCell.planning_id.label("planning_id"),
+            func.sum(case((SitePlanningCell.rat == "LTE", 1), else_=0)).label("lte_count"),
+            func.sum(case((SitePlanningCell.rat == "NR", 1), else_=0)).label("nr_count"),
+            func.min(SitePlanningCell.mechanical_downtilt_deg).label("mechanical_min"),
+            func.max(SitePlanningCell.mechanical_downtilt_deg).label("mechanical_max"),
+            func.min(SitePlanningCell.electrical_downtilt_deg).label("electrical_min"),
+            func.max(SitePlanningCell.electrical_downtilt_deg).label("electrical_max"),
+        )
+        .filter(SitePlanningCell.planning_id.in_(planning_ids))
+        .group_by(SitePlanningCell.planning_id)
+        .all()
+    )
+    for row in stats_rows:
+        stats_map[row.planning_id] = row
+
+    band_rows = (
+        db.query(SitePlanningCell.planning_id, SitePlanningCell.band_code)
+        .filter(SitePlanningCell.planning_id.in_(planning_ids))
+        .distinct()
+        .all()
+    )
+    for pid, b in band_rows:
+        if not b:
+            continue
+        bands_map.setdefault(pid, []).append(str(b))
+
+    # 去重并排序
+    for pid, items in bands_map.items():
+        bands_map[pid] = sorted(list(dict.fromkeys(items)))
+
+    return stats_map, bands_map
+
+
+def _fetch_lld_planning_summary(
+    db: Session,
+    status: Optional[str],
+    band: Optional[str],
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+    skip: int = 0,
+    limit: Optional[int] = 50,
+) -> Tuple[List[LldPlanningSummaryItem], int]:
+    band_list = _parse_band_list(band)
+    query = _build_lld_planning_query(db, status, band_list, start_time, end_time)
+    total = query.count()
+
+    if limit is not None:
+        rows = (
+            query.order_by(SitePlanning.updated_at.desc(), SitePlanning.id.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+    else:
+        rows = query.order_by(SitePlanning.updated_at.desc(), SitePlanning.id.desc()).all()
+
+    planning_ids = [planning.id for planning, _ in rows]
+    stats_map, bands_map = _collect_lld_planning_stats(db, planning_ids)
+
+    items: List[LldPlanningSummaryItem] = []
+    for planning, site in rows:
+        stats = stats_map.get(planning.id)
+        bands = bands_map.get(planning.id) or planning.bands or []
+        if isinstance(bands, str):
+            bands = _parse_band_list(bands)
+
+        items.append(
+            LldPlanningSummaryItem(
+                site_id=site.id,
+                site_code=site.site_code,
+                site_name=site.site_name,
+                site_type=site.site_type,
+                province=site.province,
+                city=site.city,
+                district=site.district,
+                status=site.status,
+                planning_id=planning.id,
+                planning_version=planning.version,
+                planning_created_at=planning.created_at,
+                planning_updated_at=planning.updated_at,
+                planning_notes=planning.notes,
+                bands=bands,
+                sector_count=planning.sector_count or 0,
+                lte_cell_count=int(getattr(stats, "lte_count", 0) or 0),
+                nr_cell_count=int(getattr(stats, "nr_count", 0) or 0),
+                mechanical_downtilt_min=getattr(stats, "mechanical_min", None),
+                mechanical_downtilt_max=getattr(stats, "mechanical_max", None),
+                electrical_downtilt_min=getattr(stats, "electrical_min", None),
+                electrical_downtilt_max=getattr(stats, "electrical_max", None),
+            )
+        )
+
+    return items, total
+
+
+def _build_lld_cells_query(
+    db: Session,
+    status: Optional[str],
+    band_list: List[str],
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+):
+    query = (
+        db.query(SitePlanningCell, SitePlanning, Site)
+        .join(SitePlanning, SitePlanningCell.planning_id == SitePlanning.id)
+        .join(Site, SitePlanningCell.site_id == Site.id)
+        .filter(SitePlanning.is_current == True)
+    )
+
+    if status:
+        query = query.filter(Site.status == status)
+    if start_time:
+        query = query.filter(SitePlanning.updated_at >= start_time)
+    if end_time:
+        query = query.filter(SitePlanning.updated_at <= end_time)
+
+    if band_list:
+        query = query.filter(SitePlanningCell.band_code.in_(band_list))
+
+    return query
+
+
+def _fetch_lld_cells(
+    db: Session,
+    status: Optional[str],
+    band: Optional[str],
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+    skip: int = 0,
+    limit: Optional[int] = 50,
+) -> Tuple[List[LldPlanningCellItem], int]:
+    band_list = _parse_band_list(band)
+    query = _build_lld_cells_query(db, status, band_list, start_time, end_time)
+    total = query.count()
+
+    if limit is not None:
+        rows = (
+            query.order_by(SitePlanning.updated_at.desc(), SitePlanningCell.id.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+    else:
+        rows = query.order_by(SitePlanning.updated_at.desc(), SitePlanningCell.id.desc()).all()
+
+    items: List[LldPlanningCellItem] = []
+    for cell, planning, site in rows:
+        base = PlanningCell.model_validate(cell, from_attributes=True).model_dump()
+        base.update(
+            {
+                "site_code": site.site_code,
+                "site_name": site.site_name,
+                "site_status": site.status,
+                "site_city": site.city,
+                "planning_version": planning.version,
+                "planning_created_at": planning.created_at,
+                "planning_updated_at": planning.updated_at,
+            }
+        )
+        items.append(LldPlanningCellItem(**base))
+
+    return items, total
+
+
+@router.get("/planning/lld-list", response_model=LldPlanningSummaryListResponse)
+async def list_lld_planning(
+    status: Optional[str] = Query(None, description="站点状态"),
+    band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
+    start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
+    end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    skip: int = Query(0, ge=0, description="跳过记录数"),
+    limit: int = Query(50, ge=1, le=200, description="每页记录数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    items, total = _fetch_lld_planning_summary(
+        db=db,
+        status=status,
+        band=band,
+        start_time=start_time,
+        end_time=end_time,
+        skip=skip,
+        limit=limit,
+    )
+
+    page = (skip // limit) + 1 if limit else 1
+    pages = math.ceil(total / limit) if limit else 1
+
+    return LldPlanningSummaryListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=limit,
+        pages=pages,
+    )
+
+
+@router.get("/planning/lld-cells", response_model=LldPlanningCellListResponse)
+async def list_lld_cells(
+    status: Optional[str] = Query(None, description="站点状态"),
+    band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
+    start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
+    end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    skip: int = Query(0, ge=0, description="跳过记录数"),
+    limit: int = Query(50, ge=1, le=200, description="每页记录数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    items, total = _fetch_lld_cells(
+        db=db,
+        status=status,
+        band=band,
+        start_time=start_time,
+        end_time=end_time,
+        skip=skip,
+        limit=limit,
+    )
+
+    page = (skip // limit) + 1 if limit else 1
+    pages = math.ceil(total / limit) if limit else 1
+
+    return LldPlanningCellListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=limit,
+        pages=pages,
+    )
+
+
+@router.get("/planning/lld-cells/template", response_model=LldTemplateCellListResponse)
+async def list_lld_cells_template(
+    rat: str = Query(..., description="LTE|NR"),
+    status: Optional[str] = Query(None, description="站点状态"),
+    band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
+    start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
+    end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    skip: int = Query(0, ge=0, description="跳过记录数"),
+    limit: int = Query(50, ge=1, le=200, description="每页记录数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    rat_norm = (rat or "").strip().upper()
+    if rat_norm not in ["LTE", "NR"]:
+        raise HTTPException(status_code=400, detail="rat 仅支持 LTE|NR")
+
+    sheet = "4G" if rat_norm == "LTE" else "5G"
+    headers_map = _get_lld_template_headers()
+    headers = headers_map.get(sheet) or []
+
+    band_list = _parse_band_list(band)
+    query = _build_lld_cells_query(db, status, band_list, start_time, end_time).filter(SitePlanningCell.rat == rat_norm)
+    # 模板视图用于回导：过滤掉无法作为有效 key 的行
+    query = query.filter(SitePlanningCell.local_cell_id.isnot(None))
+    query = query.filter(SitePlanningCell.band_code.isnot(None))
+    query = query.filter(SitePlanningCell.band_code != "")
+
+    total = query.count()
+    rows = (
+        query.order_by(SitePlanning.updated_at.desc(), SitePlanningCell.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    items: List[Dict[str, Any]] = []
+    for cell, _planning, site in rows:
+        row_data: Dict[str, Any] = {}
+        for h in headers:
+            row_data[h] = _to_excel_value(_get_lld_template_value(h, cell, site))
+        items.append(row_data)
+
+    page = (skip // limit) + 1 if limit else 1
+    pages = math.ceil(total / limit) if limit else 1
+
+    return LldTemplateCellListResponse(
+        sheet=sheet,
+        headers=headers,
+        items=items,
+        total=total,
+        page=page,
+        size=limit,
+        pages=pages,
+    )
+
+
+@router.get("/planning/lld-list/export")
+async def export_lld_planning(
+    status: Optional[str] = Query(None, description="站点状态"),
+    band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
+    start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
+    end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from fastapi.responses import StreamingResponse
+
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    items, _ = _fetch_lld_planning_summary(
+        db=db,
+        status=status,
+        band=band,
+        start_time=start_time,
+        end_time=end_time,
+        skip=0,
+        limit=None,
+    )
+
+    def format_range(min_val: Optional[float], max_val: Optional[float]) -> str:
+        if min_val is None or max_val is None:
+            return "-"
+        return f"{min_val}° ~ {max_val}°"
+
+    def format_dt(value: Optional[datetime]) -> str:
+        if not value:
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        return str(value)
+
+    columns = [
+        ("站点编码", "site_code"),
+        ("站点名称", "site_name"),
+        ("类型", "site_type"),
+        ("城市", "city"),
+        ("状态", "status"),
+        ("LLD 版本", "planning_version"),
+        ("Bands", "bands"),
+        ("扇区数", "sector_count"),
+        ("4G Cells", "lte_cell_count"),
+        ("5G Cells", "nr_cell_count"),
+        ("机械下倾", "mechanical_range"),
+        ("电子下倾", "electrical_range"),
+        ("规划更新时间", "planning_updated_at"),
+        ("规划创建时间", "planning_created_at"),
+        ("备注", "planning_notes"),
+    ]
+
+    rows: List[Dict[str, Any]] = []
+    for item in items:
+        bands = item.bands or []
+        bands_text = ", ".join(bands) if bands else "-"
+        row = {
+            "站点编码": item.site_code,
+            "站点名称": item.site_name,
+            "类型": item.site_type or "",
+            "城市": item.city or "",
+            "状态": item.status or "",
+            "LLD 版本": item.planning_version,
+            "Bands": bands_text,
+            "扇区数": item.sector_count,
+            "4G Cells": item.lte_cell_count,
+            "5G Cells": item.nr_cell_count,
+            "机械下倾": format_range(item.mechanical_downtilt_min, item.mechanical_downtilt_max),
+            "电子下倾": format_range(item.electrical_downtilt_min, item.electrical_downtilt_max),
+            "规划更新时间": format_dt(item.planning_updated_at),
+            "规划创建时间": format_dt(item.planning_created_at),
+            "备注": item.planning_notes or "",
+        }
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=[col[0] for col in columns])
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="LLD汇总", index=False)
+    output.seek(0)
+
+    headers = {"Content-Disposition": "attachment; filename=lld_planning_summary.xlsx"}
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
+
+
+@router.get("/planning/lld-cells/export")
+async def export_lld_cells(
+    status: Optional[str] = Query(None, description="站点状态"),
+    band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
+    start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
+    end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from fastapi.responses import StreamingResponse
+
+    if current_user.role not in ["admin", "manager", "planner"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    template_path = _get_lld_template_path()
+    if not template_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail="LLD 模板文件缺失：请在系统部署目录中放置 LLD templateV1.0.xlsx",
+        )
+
+    headers_map = _get_lld_template_headers()
+    headers_4g = headers_map.get("4G") or []
+    headers_5g = headers_map.get("5G") or []
+
+    wb = load_workbook(template_path)
+    if "4G" not in wb.sheetnames or "5G" not in wb.sheetnames:
+        raise HTTPException(status_code=500, detail="LLD 模板缺少 4G/5G Sheet")
+    ws_4g = wb["4G"]
+    ws_5g = wb["5G"]
+
+    band_list = _parse_band_list(band)
+    query = _build_lld_cells_query(db, status, band_list, start_time, end_time)
+    # 导出用于回导：过滤掉无法作为有效 key 的行
+    query = query.filter(SitePlanningCell.local_cell_id.isnot(None))
+    query = query.filter(SitePlanningCell.band_code.isnot(None))
+    query = query.filter(SitePlanningCell.band_code != "")
+
+    rows = query.order_by(SitePlanning.updated_at.desc(), SitePlanningCell.id.desc()).all()
+
+    for cell, _planning, site in rows:
+        rat = (cell.rat or "").strip().upper()
+        if rat == "LTE":
+            values = [
+                _to_excel_value(_get_lld_template_value(h, cell, site))
+                for h in headers_4g
+            ]
+            ws_4g.append(values)
+        elif rat == "NR":
+            values = [
+                _to_excel_value(_get_lld_template_value(h, cell, site))
+                for h in headers_5g
+            ]
+            ws_5g.append(values)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    headers = {"Content-Disposition": "attachment; filename=site_planning_lld_export.xlsx"}
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
