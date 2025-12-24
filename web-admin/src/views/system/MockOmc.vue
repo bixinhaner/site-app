@@ -84,7 +84,7 @@ const dialogVisible = ref(false)
 const saving = ref(false)
 const editing = ref(false)
 const form = ref({ sn: '', online: false, activated: false, description: '' })
-const baseURL = import.meta.env.VITE_MOCK_OMC_BASE || 'http://127.0.0.1:9000'
+const baseURL = import.meta.env.VITE_MOCK_OMC_BASE || '/api/mock-omc'
 
 const filtered = computed(() => {
   if (!keyword.value) return items.value

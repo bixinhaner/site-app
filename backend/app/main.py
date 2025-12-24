@@ -27,6 +27,7 @@ from app.models import app_version as _app_version_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
 from app.api import operation_logs, app_version
+from app.api import mock_omc_proxy
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
 from app.middleware.operation_log import OperationLogMiddleware
@@ -106,6 +107,7 @@ app.include_router(ssv_archives.router, prefix="/api/ssv-archives", tags=["SSV�
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表盘"])
 app.include_router(omc.router, prefix="/api/omc", tags=["OMC配置"])
 app.include_router(omc_push.router, prefix="/api/omc", tags=["OMC状态上报告"])
+app.include_router(mock_omc_proxy.router, prefix="/api/mock-omc", tags=["Mock OMC"])
 app.include_router(system_backup.router, prefix="/api/system/backup", tags=["系统备份"])
 app.include_router(app_version.router, prefix="/api/app-version", tags=["App版本管理"])
 

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     
     # CORS 配置
     ALLOWED_HOSTS_STR: str = "*"
+
+    # Mock OMC 代理配置（用于前端无法直连 9000 的部署场景）
+    MOCK_OMC_BASE_URL: str = os.getenv("MOCK_OMC_BASE_URL", "http://127.0.0.1:9000")
+    MOCK_OMC_TIMEOUT_SECONDS: int = int(os.getenv("MOCK_OMC_TIMEOUT_SECONDS", "10"))
     
     # 动态属性
     @property
