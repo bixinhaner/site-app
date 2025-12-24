@@ -1658,8 +1658,8 @@
 			content: $t('inspection.confirmDeleteContent'),
 			success: async (res) => {
 				if (res.confirm) {
-					// 如果是已上传的照片（服务器路径），需要调用后端API删除
-					if (photo.file_path && photo.file_path.startsWith('uploads/') && photo.id) {
+					// 如果是已上传的照片（有photo.id），需要调用后端API删除
+					if (photo && photo.id) {
 						uni.showLoading({ title: $t('messages.deletingPhoto') })
 						
 						try {
@@ -1956,24 +1956,25 @@
 				uni.showLoading({ title: $t('messages.uploadingPhoto') })
 				
 				try {
-					for (const photo of currentItem.value.photos) {
+					for (let i = 0; i < currentItem.value.photos.length; i++) {
+						const photo = currentItem.value.photos[i]
 						console.log('检查照片路径:', photo.file_path)
 						
-						// 跳过已上传的照片（服务器路径通常以uploads/开头）
-						if (photo.file_path && photo.file_path.startsWith('uploads/')) {
-							console.log('跳过已上传的照片（服务器路径）:', photo.file_path)
+						// 跳过已上传的照片（有photo.id或已是服务器路径）
+						if (
+							photo?.id ||
+							(photo.file_path && (
+								photo.file_path.startsWith('uploads/') ||
+								photo.file_path.startsWith('/uploads') ||
+								photo.file_path.startsWith('http')
+							))
+						) {
+							console.log('跳过已上传的照片:', photo.file_path, photo?.id)
 							continue
 						}
 						
-						// 上传新拍摄的临时文件
-						// UniApp的临时文件路径通常包含 temp、tmp、_tmp_ 等标识
-						if (photo.file_path && (
-							photo.file_path.includes('temp') || 
-							photo.file_path.includes('tmp') ||
-							photo.file_path.includes('_tmp_') ||
-							photo.file_path.includes('wxfile://') ||
-							!photo.uploaded // 如果有uploaded标记，则跳过已上传的
-						)) {
+						// 上传新拍摄/选择的本地文件
+						if (photo.file_path) {
 							console.log('开始上传照片:', photo.file_path)
 							
 							// 构建照片上传数据，只传递有效字段（过滤undefined）
@@ -2011,11 +2012,10 @@
 								throw new Error(uploadResult.error || $t('inspection.photoUploadFailed'))
 							}
 							
-							// 标记为已上传
-							photo.uploaded = true
-							
+							// 用后端返回结果替换本地占位，确保后续删除/展示使用photo.id与服务器路径
+							currentItem.value.photos[i] = uploadResult.data
 						} else {
-							console.log('跳过照片（已上传或非临时文件）:', photo.file_path)
+							console.log('跳过照片（无有效路径）:', photo.file_path)
 						}
 					}
 				} catch (photoError) {
@@ -2036,21 +2036,28 @@
 				inspectionId.value, 
 				currentItem.value.id, 
 				updateData
-			)
-			
-			if (result.success) {
-				// 更新本地数据
-				const itemIndex = checkItems.value.findIndex(item => item.id === currentItem.value.id)
-				if (itemIndex > -1) {
-					checkItems.value[itemIndex] = {
-						...checkItems.value[itemIndex],
-						...currentItem.value,
-						...updateData
-					}
-				}
+				)
 				
-				// 更新检查进度
-				await updateInspectionProgress()
+				if (result.success) {
+					const updatedItem = result.data || {}
+					// 更新本地数据
+					const itemIndex = checkItems.value.findIndex(item => item.id === currentItem.value.id)
+					if (itemIndex > -1) {
+						checkItems.value[itemIndex] = {
+							...checkItems.value[itemIndex],
+							...updatedItem,
+							// 保留前端编辑态字段（后端不一定返回）
+							dataFields: currentItem.value.dataFields,
+							notes: currentItem.value.notes,
+							checked_at: updateData.checked_at,
+							validation_result: currentItem.value.validation_result,
+							// 确保照片使用后端最新结果（含photo.id、服务器路径）
+							photos: updatedItem.photos || currentItem.value.photos || []
+						}
+					}
+					
+					// 更新检查进度
+					await updateInspectionProgress()
 				
 				// 清除自动保存的数据（保存成功后）
 				clearAutoSavedData(currentItem.value.id)
