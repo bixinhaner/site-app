@@ -23,6 +23,18 @@ def _ensure_admin_or_manager(user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
 
 
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    将数据库取出的 naive datetime 视为 UTC，并规范为 tz-aware UTC。
+    FastAPI 序列化 tz-aware datetime 时会带上 +00:00，从而让前端按浏览器本地时区展示。
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _parse_iso_datetime(value: str, tzinfo) -> Optional[datetime]:
     try:
         dt = datetime.fromisoformat(value)
@@ -115,10 +127,10 @@ def list_geocode_cache_entries(
             address=row.address,
             sematic_description=row.sematic_description,
             hit_count=int(row.hit_count or 0),
-            last_hit_at=row.last_hit_at,
-            expires_at=row.expires_at,
-            updated_at=row.updated_at,
-            created_at=row.created_at,
+            last_hit_at=_as_utc(row.last_hit_at),
+            expires_at=_as_utc(row.expires_at),
+            updated_at=_as_utc(row.updated_at),
+            created_at=_as_utc(row.created_at),
         )
         for row in rows
     ]
