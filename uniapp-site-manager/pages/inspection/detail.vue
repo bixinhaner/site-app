@@ -205,7 +205,7 @@
 										<text class="status-icon">{{ getStatusIcon(item.status) }}</text>
 									</view>
 									<view class="item-info">
-										<text class="item-name">{{ item.item_name }}</text>
+										<text class="item-name">{{ getCheckItemDisplayTitle(item) }}</text>
 										<view class="item-meta">
 											<text class="item-category">{{ item.category_name }}</text>
 											<text class="item-sector" v-if="item.sector_id">{{ $t('inspection.sector') }}{{ item.sector_id }}</text>
@@ -1205,8 +1205,25 @@
 		return typeMap[type] || $t('inspection.unknown')
 	}
 
+	const getDisplayItemName = (name) => {
+		// 依赖当前语言，确保切换语言后能更新显示
+		const _ = languageStore.currentLocale
+		const raw = String(name || '').trim()
+		if (!raw) return ''
+
+		const sectorLabel = $t('inspection.sector')
+		const deviceLabel = $t('inspection.device')
+		const cellLabel = $t('inspection.cell')
+
+		return raw
+			.replace(/-\s*扇区\s*/g, `- ${sectorLabel} `)
+			.replace(/-\s*设备\s*/g, `- ${deviceLabel} `)
+			.replace(/-\s*小区\s*/g, `- ${cellLabel} `)
+			.trim()
+	}
+
 	const getCheckItemDisplayTitle = (item) => {
-		const name = String(item?.item_name || '').trim()
+		const name = getDisplayItemName(item?.item_name)
 		// 若 item_name 异常（例如 field_...），尝试从 fields 中找一个可读的 label 作为标题
 		if (!name || /^field_\\d+/.test(name)) {
 			const fields = item?.fields

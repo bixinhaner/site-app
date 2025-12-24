@@ -20,7 +20,7 @@
 				</cover-view>
 				
 				<cover-view class="toolbar-center">
-					<cover-text class="toolbar-title">{{ checkItem?.item_name || $t('inspection.photoInspection') }}</cover-text>
+					<cover-text class="toolbar-title">{{ getDisplayItemName(checkItem?.item_name) || $t('inspection.photoInspection') }}</cover-text>
 					<cover-text class="toolbar-subtitle" v-if="currentSite">{{ currentSite.site_name }}</cover-text>
 				</cover-view>
 				
@@ -200,6 +200,21 @@ export default {
 		// 依赖当前语言，确保切换语言后能更新显示
 		const _ = languageStore.currentLocale
 		return $t(key, params)
+	}
+
+	const getDisplayItemName = (name) => {
+		const raw = String(name || '').trim()
+		if (!raw) return ''
+
+		const sectorLabel = t('inspection.sector')
+		const deviceLabel = t('inspection.device')
+		const cellLabel = t('inspection.cell')
+
+		return raw
+			.replace(/-\s*扇区\s*/g, `- ${sectorLabel} `)
+			.replace(/-\s*设备\s*/g, `- ${deviceLabel} `)
+			.replace(/-\s*小区\s*/g, `- ${cellLabel} `)
+			.trim()
 	}
 	
 	// URL参数 (在UniApp中通过onLoad接收)

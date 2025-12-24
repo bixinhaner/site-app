@@ -80,7 +80,7 @@
 							<text class="status-icon">{{ getStatusIcon(item.status) }}</text>
 						</view>
 						<view class="item-info">
-							<text class="item-name">{{ item.item_name }}</text>
+							<text class="item-name">{{ getDisplayItemName(item.item_name) }}</text>
 							<text class="item-id" v-if="item.sector_id">{{ $t('inspection.sector') }} {{ item.sector_id }}</text>
 
 							<!-- 问题项提示（审核不通过/警告/现场不合格） -->
@@ -176,7 +176,7 @@
 		<view class="item-modal-overlay" v-if="currentItem" @click="closeItemModal">
 			<view class="item-modal" @click.stop>
 				<view class="modal-header">
-					<text class="modal-title">{{ currentItem.item_name }}</text>
+					<text class="modal-title">{{ getDisplayItemName(currentItem.item_name) }}</text>
 					<view class="modal-close" @click="closeItemModal">
 						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
 					</view>
@@ -521,7 +521,7 @@
 						  v-for="item in preSubmitUnboundList" 
 						  :key="item.id">
 						<view class="checklist-item-info">
-							<text class="checklist-item-name">{{ item.item_name }}</text>
+							<text class="checklist-item-name">{{ getDisplayItemName(item.item_name) }}</text>
 							<text class="checklist-item-cell">{{ item.cell_id || `${item.sector_id}_${item.band}` }}</text>
 						</view>
 						<button class="bind-quick-btn" @click="quickBindDevice(item)">
@@ -567,7 +567,27 @@
 	
 	// 获取翻译函数
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
-	
+
+	const t = (key, params = {}) => {
+		const _ = languageStore.currentLocale
+		return $t(key, params)
+	}
+
+	const getDisplayItemName = (name) => {
+		const raw = String(name || '').trim()
+		if (!raw) return ''
+
+		const sectorLabel = t('inspection.sector')
+		const deviceLabel = t('inspection.device')
+		const cellLabel = t('inspection.cell')
+
+		return raw
+			.replace(/-\s*扇区\s*/g, `- ${sectorLabel} `)
+			.replace(/-\s*设备\s*/g, `- ${deviceLabel} `)
+			.replace(/-\s*小区\s*/g, `- ${cellLabel} `)
+			.trim()
+	}
+		
 	// 页面参数
 	const inspectionId = ref('')
 	
