@@ -24,12 +24,15 @@ from app.models import system_config as _system_config_models  # noqa: F401
 from app.models import geocode_cache as _geocode_cache_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.models import app_version as _app_version_models  # noqa: F401
+from app.models import mobile_client_log as _mobile_client_log_models  # noqa: F401
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
 from app.api import operation_logs, app_version
+from app.api import mobile_client_logs
 from app.api import mock_omc_proxy
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
+from app.services.mobile_client_log_retention_scheduler import start_mobile_client_log_retention_scheduler
 from app.middleware.operation_log import OperationLogMiddleware
 
 # 创建数据库表
@@ -98,6 +101,7 @@ app.include_router(site_planning.router, prefix="/api/sites", tags=["站点规�
 app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单管理"])
 app.include_router(logs.router, prefix="/api", tags=["用户日志"])
 app.include_router(operation_logs.router, prefix="/api", tags=["操作日志"])
+app.include_router(mobile_client_logs.router, prefix="/api", tags=["移动端日志"])
 app.include_router(mobile_settings.router, prefix="/api/system", tags=["系统配置"])
 app.include_router(geocode_cache.router, prefix="/api/system", tags=["地理编码缓存"])
 app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])
@@ -126,6 +130,14 @@ def _startup_backup_scheduler():
   启动数据备份定时任务调度线程。
   """
   start_backup_scheduler()
+
+
+@app.on_event("startup")
+def _startup_mobile_log_retention_scheduler():
+  """
+  启动移动端日志保留清理线程（按配置 retention_days 定期删除过期数据）。
+  """
+  start_mobile_client_log_retention_scheduler()
 
 @app.get("/")
 async def root():

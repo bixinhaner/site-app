@@ -195,6 +195,12 @@ const routes = [
             meta: { title: '操作日志', icon: 'Document', roles: ['admin', 'manager'] }
           },
           {
+            path: 'mobile-logs',
+            name: 'MobileClientLogs',
+            component: () => import('../views/system/MobileClientLogs.vue'),
+            meta: { title: '移动端日志', icon: 'Document', roles: ['admin', 'manager'] }
+          },
+          {
             path: 'app-version',
             name: 'AppVersionManage',
             component: () => import('../views/system/AppVersionManage.vue'),

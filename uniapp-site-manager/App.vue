@@ -15,6 +15,7 @@
 	import { useUpgradeStore } from '@/stores/upgrade'
 	import { initInterceptors } from '@/utils/api-interceptor'
 	import { initLocationMode } from '@/utils/locationStrategy.js'
+	import { flush } from '@/utils/mobileLogReporter.js'
 	// UpdateDialog已移至home.vue渲染，因为App.vue的template在UniApp App端不会渲染
 	
 	const globalLoading = ref(false)
@@ -173,6 +174,8 @@
 	onHide(() => {
 		console.log('App Hide')
 		console.log('⚠️ Logger calls temporarily disabled in onHide for debugging')
+		// 尽量在切后台时补传一次，减少因进程被杀导致的遗漏
+		flush().catch(() => {})
 		// logger.logAction('APP_HIDE', {
 		// 	timestamp: new Date().toISOString()
 		// })

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { buildApiUrl, API_ENDPOINTS, createRequestConfig } from '@/config/api.js'
 import { setLocationMode, setAllowLocalPhotoUpload, setLocalUploadWatermarkWithGeo } from '@/utils/locationStrategy.js'
+import { flush, startMobileLogReporter, stopMobileLogReporter } from '@/utils/mobileLogReporter.js'
 
 export const useUserStore = defineStore('user', () => {
 	const token = ref(uni.getStorageSync('token') || '')
@@ -67,6 +68,13 @@ export const useUserStore = defineStore('user', () => {
 				if (refresh_token) uni.setStorageSync('refreshToken', refresh_token)
 				uni.setStorageSync('userInfo', user)
 
+				// 登录后开始采集并上报日志（不采集未登录阶段）
+				try {
+					await startMobileLogReporter()
+				} catch (e) {
+					// ignore
+				}
+
 				// 登录成功后，根据当前用户刷新移动端配置（例如定位模式、本地上传开关）
 				try {
 					const settingsRes = await uni.request({
@@ -125,6 +133,18 @@ export const useUserStore = defineStore('user', () => {
 
 	// 退出登录
 	const logout = () => {
+		// 尽量在清除 token 前尝试上报一次；失败则保留在本地队列中
+		try {
+			flush().catch(() => {})
+		} catch (e) {
+			// ignore
+		}
+		try {
+			stopMobileLogReporter().catch(() => {})
+		} catch (e) {
+			// ignore
+		}
+
 		token.value = ''
 		refreshToken.value = ''
 		userInfo.value = null
@@ -224,6 +244,13 @@ export const useUserStore = defineStore('user', () => {
 			if (response.statusCode === 200) {
 				userInfo.value = response.data
 				uni.setStorageSync('userInfo', response.data)
+
+				// Token 验证通过后开始采集并上报日志（不采集未登录阶段）
+				try {
+					await startMobileLogReporter()
+				} catch (e) {
+					// ignore
+				}
 
 				// 验证通过后，同步一次当前用户的移动端配置（例如定位模式、本地上传开关）
 				try {
