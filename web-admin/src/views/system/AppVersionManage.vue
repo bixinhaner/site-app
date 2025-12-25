@@ -916,15 +916,51 @@ const copyDownloadUrl = async (row) => {
     ElMessage.warning('该版本暂无下载链接')
     return
   }
-  const url = row.download_url.startsWith('http') 
-    ? row.download_url 
+  const url = row.download_url.startsWith('http')
+    ? row.download_url
     : config.API_BASE_URL + row.download_url
-  
+
+  // 方法1: 使用现代 Clipboard API (HTTPS only)
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(url)
+      ElMessage.success('下载链接已复制')
+      return
+    } catch (err) {
+      console.warn('Clipboard API 失败，尝试备用方法:', err)
+    }
+  }
+
+  // 方法2: 兼容HTTP环境的备用方案
   try {
-    await navigator.clipboard.writeText(url)
-    ElMessage.success('下载链接已复制')
-  } catch {
-    ElMessage.error('复制失败，请手动复制')
+    const textArea = document.createElement('textarea')
+    textArea.value = url
+    textArea.style.position = 'fixed'
+    textArea.style.left = '-999999px'
+    textArea.style.top = '-999999px'
+    document.body.appendChild(textArea)
+    textArea.focus()
+    textArea.select()
+
+    const successful = document.execCommand('copy')
+    document.body.removeChild(textArea)
+
+    if (successful) {
+      ElMessage.success('下载链接已复制')
+    } else {
+      throw new Error('execCommand 失败')
+    }
+  } catch (err) {
+    console.error('复制失败:', err)
+    // 显示链接并提示用户手动复制
+    ElMessageBox.alert(
+      `<div style="word-break: break-all; color: #409EFF; cursor: pointer;" onclick="navigator.clipboard?.writeText('${url}')">${url}</div>`,
+      '请手动复制以下链接',
+      {
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '关闭'
+      }
+    )
   }
 }
 
