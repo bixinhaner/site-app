@@ -21,7 +21,7 @@
 - Caddy：
   - 监听 `:80`、`:443`
   - 路由：
-    - `/api/*`、`/uploads/*`、`/docs` 等转发到后端 `127.0.0.1:8000`
+    - `/api/*`、`/uploads/*`、`/health` 等转发到后端 `127.0.0.1:8000`
     - 其余路径由静态站点 `/usr/local/site-app/web-admin/dist` 提供（SPA 回退 `index.html`）
 
 ---
@@ -127,7 +127,13 @@ cat > /usr/local/site-app/Caddyfile <<'EOF'
 siteapp.indonesiacentral.cloudapp.azure.com {
   encode zstd gzip
 
-  @backend path /api/* /uploads/* /docs* /redoc* /openapi.json /health
+  # 安全建议：对公网隐藏 API 文档（需要时可临时注释）
+  @apidocs path /docs* /redoc* /openapi.json
+  handle @apidocs {
+    respond 404
+  }
+
+  @backend path /api/* /uploads/* /health
   handle @backend {
     reverse_proxy 127.0.0.1:8000
   }
@@ -187,10 +193,7 @@ curl -I https://siteapp.indonesiacentral.cloudapp.azure.com
 # 3) 后端健康检查（走同域 /health）
 curl -sS https://siteapp.indonesiacentral.cloudapp.azure.com/health
 
-# 4) API 文档
-curl -I https://siteapp.indonesiacentral.cloudapp.azure.com/docs
-
-# 5) 查看服务状态/日志
+# 4) 查看服务状态/日志
 pm2 status
 pm2 logs site-backend --lines 80
 pm2 logs site-caddy --lines 120
@@ -273,3 +276,68 @@ cd /usr/local/site-app/backend
 常见原因：管理员邮箱使用了 `@xxx.local` 之类保留域名，触发后端响应模型 `EmailStr` 校验失败。  
 解决：将管理员邮箱改为合法邮箱（如 `admin@example.com`）。后端启动逻辑会自动修复非法邮箱。
 
+---
+
+## 5. 安全加固（建议）
+
+### 5.1 基线检查（确认无意外暴露）
+
+```bash
+# 仅应看到 80/443 对外监听；后端应仅监听 127.0.0.1:8000
+ss -lntp | egrep ':(80|443|8000)\b' || true
+
+pm2 status
+```
+
+### 5.2 关闭/隐藏 API 文档（D1：对公网 404）
+
+> 本项目 API 文档默认路径通常为 `/docs`、`/openapi.json`。生产环境建议对公网隐藏，减少接口暴露面。
+
+本仓库默认部署示例已包含以下配置（见上方 Caddyfile）。如果你已有旧 Caddyfile，可按下面方式手工补上：
+
+```caddyfile
+@apidocs path /docs* /redoc* /openapi.json
+handle @apidocs {
+  respond 404
+}
+```
+
+应用配置：
+
+```bash
+pm2 restart site-caddy
+```
+
+### 5.3 pm2 日志轮转（防止磁盘被日志写满）
+
+```bash
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 50M
+pm2 set pm2-logrotate:retain 100
+pm2 set pm2-logrotate:compress true
+pm2 restart all
+```
+
+### 5.4 SSH 防爆破（Fail2ban）
+
+> 说明：你当前 SSH 已禁用密码登录（`PasswordAuthentication no`）是正确做法；Fail2ban 用于降低扫描/爆破噪音并自动封禁异常 IP。
+
+```bash
+apt install -y fail2ban
+
+# 自动识别 SSH 端口（也可手工改成你的端口）
+SSH_PORT="$(sshd -T | awk '/^port /{print $2; exit}')"
+echo "SSH_PORT=${SSH_PORT}"
+
+cat > /etc/fail2ban/jail.d/sshd.local <<EOF
+[sshd]
+enabled = true
+port = ${SSH_PORT}
+maxretry = 5
+findtime = 10m
+bantime = 1h
+EOF
+
+systemctl enable --now fail2ban
+fail2ban-client status sshd
+```
