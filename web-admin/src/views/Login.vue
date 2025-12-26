@@ -6,7 +6,31 @@
         <div class="login-header">
           <div class="logo-section">
             <div class="logo-icon">
-              <el-icon size="40" color="#f97316"><Box /></el-icon>
+              <svg class="logo-svg" viewBox="0 0 64 64" aria-hidden="true">
+                <g
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="3.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <!-- 信号波纹 -->
+                  <path d="M20 18 C10 26 10 38 20 46" />
+                  <path d="M24 22 C17 27 17 37 24 42" />
+                  <path d="M44 18 C54 26 54 38 44 46" />
+                  <path d="M40 22 C47 27 47 37 40 42" />
+
+                  <!-- 天线塔 -->
+                  <circle cx="32" cy="14" r="3" />
+                  <path d="M32 17 L32 24" />
+                  <path d="M32 18 L24 54" />
+                  <path d="M32 18 L40 54" />
+                  <path d="M22 54 L42 54" />
+                  <path d="M28 30 L36 30" />
+                  <path d="M27 40 L37 40" />
+                  <path d="M26 48 L38 48" />
+                </g>
+              </svg>
             </div>
             <h1 class="system-title">站点信息管理系统</h1>
           </div>
@@ -27,6 +51,8 @@
               placeholder="用户名"
               :prefix-icon="User"
               clearable
+              autocomplete="username"
+              :disabled="loading"
             />
           </el-form-item>
 
@@ -38,6 +64,8 @@
               :prefix-icon="Lock"
               show-password
               @keyup.enter="handleLogin"
+              autocomplete="current-password"
+              :disabled="loading"
             />
           </el-form-item>
 
@@ -45,6 +73,7 @@
             <el-button
               type="primary"
               :loading="loading"
+              :disabled="loading"
               @click="handleLogin"
               class="login-button"
             >
@@ -52,28 +81,11 @@
             </el-button>
           </el-form-item>
         </el-form>
-
-        <!-- 测试账号提示 -->
-        <div class="test-accounts">
-          <el-divider content-position="center">
-            <span class="divider-text">测试账号</span>
-          </el-divider>
-          <div class="account-tips">
-            <div class="account-item" @click="quickLogin('admin', 'admin123')">
-              <el-tag type="danger" size="small">管理员</el-tag>
-              <span>admin / admin123</span>
-            </div>
-            <div class="account-item" @click="quickLogin('inspector', 'inspector123')">
-              <el-tag type="info" size="small">检查员</el-tag>
-              <span>inspector / inspector123</span>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- 页面底部 -->
       <div class="login-footer">
-        <p>&copy; 2024 Baicells Trae - 站点信息管理系统</p>
+        <p>&copy; {{ currentYear }} Baicells Technologies Co., Ltd. All Rights Reserved.</p>
       </div>
     </div>
   </div>
@@ -83,14 +95,15 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import { ElMessage, ElLoading } from 'element-plus'
-import { User, Lock, Box } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { User, Lock } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 
 const loginFormRef = ref()
 const loading = ref(false)
+const currentYear = new Date().getFullYear()
 
 const loginForm = reactive({
   username: '',
@@ -117,7 +130,11 @@ const handleLogin = async () => {
     if (!isValid) return
     
     loading.value = true
-    const result = await userStore.login(loginForm)
+    const credentials = {
+      username: String(loginForm.username || '').trim(),
+      password: loginForm.password,
+    }
+    const result = await userStore.login(credentials)
     
     if (result.success) {
       ElMessage.success('登录成功！')
@@ -127,28 +144,24 @@ const handleLogin = async () => {
     }
   } catch (error) {
     console.error('登录错误:', error)
-    ElMessage.error('登录失败: ' + error.message)
+    ElMessage.error('登录失败，请稍后重试')
   } finally {
     loading.value = false
   }
-}
-
-// 快速登录
-const quickLogin = (username, password) => {
-  loginForm.username = username
-  loginForm.password = password
-  handleLogin()
 }
 </script>
 
 <style scoped lang="scss">
 .login-page {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background:
+    radial-gradient(1100px 600px at 10% 10%, rgba(249, 115, 22, 0.12), transparent 55%),
+    radial-gradient(900px 520px at 90% 20%, rgba(59, 130, 246, 0.10), transparent 58%),
+    var(--bg-color);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 24px;
   
   &::before {
     content: '';
@@ -157,51 +170,60 @@ const quickLogin = (username, password) => {
     left: 0;
     right: 0;
     bottom: 0;
-    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
-    opacity: 0.3;
+    background-image: radial-gradient(rgba(17, 24, 39, 0.06) 1px, transparent 1px);
+    background-size: 24px 24px;
+    opacity: 0.35;
+    pointer-events: none;
   }
 }
 
 .login-container {
   position: relative;
   z-index: 1;
-  max-width: 450px;
+  max-width: 420px;
   width: 100%;
 }
 
 .login-card {
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
   border-radius: 16px;
-  padding: 40px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 40px 40px 32px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-color);
 }
 
 .login-header {
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 32px;
   
   .logo-section {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
     
     .logo-icon {
-      width: 80px;
-      height: 80px;
-      background: linear-gradient(45deg, var(--primary-color), var(--primary-light));
-      border-radius: 20px;
+      width: 64px;
+      height: 64px;
+      background: #fff7ed;
+      border-radius: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 8px 24px rgba(249, 115, 22, 0.3);
+      color: var(--primary-color);
+      border: 1px solid rgba(249, 115, 22, 0.25);
+      box-shadow: 0 8px 20px rgba(17, 24, 39, 0.06);
+    }
+
+    .logo-svg {
+      width: 40px;
+      height: 40px;
+      display: block;
     }
     
     .system-title {
       color: var(--text-primary);
-      font-size: 28px;
+      font-size: 24px;
       font-weight: 700;
       margin: 0;
       letter-spacing: -0.5px;
@@ -210,19 +232,19 @@ const quickLogin = (username, password) => {
   
   .login-subtitle {
     color: var(--text-secondary);
-    font-size: 16px;
+    font-size: 14px;
     margin: 8px 0 0 0;
   }
 }
 
 .login-form {
   .el-form-item {
-    margin-bottom: 24px;
+    margin-bottom: 18px;
     
     :deep(.el-input__inner) {
       height: 48px;
       border-radius: 8px;
-      border: 2px solid #f1f5f9;
+      border: 1px solid var(--border-color);
       transition: all 0.3s ease;
       
       &:focus {
@@ -242,52 +264,13 @@ const quickLogin = (username, password) => {
     font-size: 16px;
     font-weight: 600;
     border-radius: 8px;
-    background: linear-gradient(45deg, var(--primary-color), var(--primary-light));
+    background: var(--primary-color);
     border: none;
     transition: all 0.3s ease;
     
     &:hover {
-      background: linear-gradient(45deg, var(--primary-dark), var(--primary-color));
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(249, 115, 22, 0.4);
-    }
-  }
-}
-
-.test-accounts {
-  margin-top: 32px;
-  
-  .divider-text {
-    color: var(--text-light);
-    font-size: 14px;
-  }
-  
-  .account-tips {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    
-    .account-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 16px;
-      background: #f8fafc;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      border: 1px solid #e2e8f0;
-      
-      &:hover {
-        background: #f1f5f9;
-        border-color: var(--primary-color);
-        transform: translateY(-1px);
-      }
-      
-      span {
-        color: var(--text-secondary);
-        font-size: 14px;
-      }
+      background: var(--primary-dark);
+      box-shadow: 0 8px 18px rgba(249, 115, 22, 0.25);
     }
   }
 }
@@ -297,8 +280,8 @@ const quickLogin = (username, password) => {
   margin-top: 32px;
   
   p {
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 14px;
+    color: var(--text-secondary);
+    font-size: 12px;
     margin: 0;
   }
 }
@@ -310,20 +293,20 @@ const quickLogin = (username, password) => {
   }
   
   .login-card {
-    padding: 32px 24px;
+    padding: 28px 20px 22px;
   }
   
   .login-header {
-    margin-bottom: 32px;
+    margin-bottom: 24px;
     
     .logo-section {
       .logo-icon {
-        width: 64px;
-        height: 64px;
+        width: 56px;
+        height: 56px;
       }
       
       .system-title {
-        font-size: 24px;
+        font-size: 22px;
       }
     }
     
