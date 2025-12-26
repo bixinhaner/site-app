@@ -2,9 +2,11 @@
 App版本管理Pydantic模式
 用于请求/响应数据验证
 """
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, field_serializer
 from typing import Optional, List, Literal
 from datetime import datetime
+
+from app.utils.timezone import to_utc_iso
 
 
 # ============ 基础模式 ============
@@ -64,6 +66,11 @@ class AppVersionInfo(BaseModel):
     release_notes_en: Optional[str] = None
     show_release_notes: bool = False
     published_at: Optional[datetime] = None
+
+    @field_serializer("published_at")
+    def _serialize_published_at(self, dt: Optional[datetime]) -> Optional[str]:
+        # published_at 历史上可能由 datetime.now() 写入（服务器本地时间，naive），这里统一按本地时间解释并转为 UTC 输出
+        return to_utc_iso(dt, assume_local=True)
 
     class Config:
         from_attributes = True
@@ -125,6 +132,16 @@ class AppVersionResponse(AppVersionBase):
     created_at: datetime
     published_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_serializer("created_at", "updated_at")
+    def _serialize_utc_fields(self, dt: Optional[datetime]) -> Optional[str]:
+        # 约定：数据库中的 naive datetime 视为 UTC
+        return to_utc_iso(dt)
+
+    @field_serializer("published_at")
+    def _serialize_published_at(self, dt: Optional[datetime]) -> Optional[str]:
+        # published_at 历史上可能由 datetime.now() 写入（服务器本地时间，naive），这里统一按本地时间解释并转为 UTC 输出
+        return to_utc_iso(dt, assume_local=True)
 
     class Config:
         from_attributes = True
