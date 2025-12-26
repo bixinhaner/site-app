@@ -54,7 +54,11 @@
             </el-space>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column prop="created_at" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="200">
           <template #default="{ row }">
             <el-button
@@ -251,6 +255,13 @@ const formatWarehouseDisplay = (row) => {
     return '已出库'
   }
   return row.warehouse_name || row.last_warehouse_name || '-'
+}
+
+const formatDateTime = (val) => {
+  if (!val) return '-'
+  const d = new Date(val)
+  if (Number.isNaN(d.getTime())) return String(val)
+  return d.toLocaleString('zh-CN')
 }
 
 const loadEquipments = async () => {

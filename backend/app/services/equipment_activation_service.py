@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.site import Site
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum
 from app.models.equipment import EquipmentInstance
+from app.utils.timezone import to_utc_iso
 import asyncio
 import httpx
 from datetime import datetime, timedelta
@@ -81,12 +82,12 @@ class EquipmentActivationService:
                 "equipment_name": equipment["equipment_name"],
                 "serial_number": equipment["serial_number"],
                 "activated": is_activated,
-                "check_time": datetime.utcnow().isoformat()
+                "check_time": to_utc_iso(datetime.utcnow())
             }
             
             if is_activated:
                 activated_equipment += 1
-                detail["last_heartbeat"] = datetime.utcnow().isoformat()
+                detail["last_heartbeat"] = to_utc_iso(datetime.utcnow())
             else:
                 detail["reason"] = f"设备状态: {equipment['status']}, 需要online状态"
                 failed_equipment.append({
@@ -108,7 +109,7 @@ class EquipmentActivationService:
             "total_equipment": total_equipment,
             "activated_equipment": activated_equipment,
             "failed_equipment": failed_equipment,
-            "check_time": datetime.utcnow().isoformat(),
+            "check_time": to_utc_iso(datetime.utcnow()),
             "details": details
         }
     
@@ -138,7 +139,7 @@ class EquipmentActivationService:
             wo.extra_data = {}
         
         wo.extra_data["activation_check"] = check_result
-        wo.extra_data["activation_check_time"] = datetime.utcnow().isoformat()
+        wo.extra_data["activation_check_time"] = to_utc_iso(datetime.utcnow())
         
         # 根据检测结果更新工单状态
         if check_result["all_activated"]:

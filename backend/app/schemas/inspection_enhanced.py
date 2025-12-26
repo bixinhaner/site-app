@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_serializer
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, date, time
 from enum import Enum
+
+from app.utils.timezone import to_utc_iso
 
 # 字段类型枚举
 class FieldTypeEnum(str, Enum):
@@ -88,6 +90,10 @@ class InspectionTemplateResponse(BaseModel):
     status: InspectionStatusEnum
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer('created_at', 'updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True
@@ -160,7 +166,7 @@ class CheckItemDataValue(BaseModel):
         json_encoders = {
             date: lambda v: v.isoformat(),
             time: lambda v: v.isoformat(),
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: to_utc_iso(v)
         }
 
 class InspectionCheckItemUpdate(BaseModel):
@@ -197,6 +203,10 @@ class InspectionPhotoResponse(BaseModel):
     has_watermark: bool
     review_status: Optional[str]
     created_at: datetime
+
+    @field_serializer('taken_at', 'created_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True
@@ -227,6 +237,10 @@ class InspectionCheckItemResponse(BaseModel):
     photos: List[InspectionPhotoResponse] = []
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer('checked_at', 'reviewed_at', 'created_at', 'updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True
@@ -265,6 +279,17 @@ class SiteInspectionResponse(BaseModel):
     photos: List[InspectionPhotoResponse] = []
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer(
+        'start_time',
+        'end_time',
+        'submitted_at',
+        'reviewed_at',
+        'created_at',
+        'updated_at',
+    )
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True
@@ -282,6 +307,10 @@ class InspectionSummary(BaseModel):
     completion_rate: float
     score: Optional[float]
     created_at: datetime
+
+    @field_serializer('start_time', 'created_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
 # 审核相关Schema
 class InspectionReviewRequest(BaseModel):
@@ -301,6 +330,10 @@ class InspectionAuditLogResponse(BaseModel):
     operator_name: Optional[str]
     comments: Optional[str]
     created_at: datetime
+
+    @field_serializer('created_at')
+    def _serialize_created_at(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True
@@ -324,6 +357,10 @@ class OfflineInspectionDataResponse(BaseModel):
     last_sync_attempt: Optional[datetime]
     sync_error: Optional[str]
     created_at: datetime
+
+    @field_serializer('last_sync_attempt', 'created_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True

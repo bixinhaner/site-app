@@ -60,7 +60,7 @@ async def get_equipment_list(
             "unit": eq.unit,
             "barcode_prefix": eq.barcode_prefix,
             "status": eq.status,
-            "created_at": eq.created_at.isoformat() if eq.created_at else None
+            "created_at": to_utc_iso(eq.created_at) if eq.created_at else None
         }
         for eq in equipment_list
     ]
@@ -211,7 +211,7 @@ async def get_equipment_packages(
             "description": package.description,
             "status": package.status,  # 添加状态字段
             "items": items,
-            "created_at": package.created_at.isoformat() if package.created_at else None
+            "created_at": to_utc_iso(package.created_at) if package.created_at else None
         })
     
     return result
@@ -296,7 +296,7 @@ async def get_package_detail(
         "site_type": package.site_type,
         "description": package.description,
         "items": items,
-        "created_at": package.created_at.isoformat() if package.created_at else None
+        "created_at": to_utc_iso(package.created_at) if package.created_at else None
     }
 
 @router.put("/packages/{package_id}")

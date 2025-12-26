@@ -16,6 +16,7 @@ from app.services.opening_archive_service import (
     reindex_kv,
 )
 from app.utils.file_handler import save_uploaded_file, calculate_file_hash, extract_exif, compress_image, add_text_watermark_inline
+from app.utils.timezone import to_utc_iso
 from datetime import datetime
 import os
 import io
@@ -90,7 +91,7 @@ def page_archives(
             "inspector_name": getattr(getattr(a.inspection, 'inspector', None), 'full_name', None),
             "reviewer_name": getattr(getattr(a.inspection, 'reviewer', None), 'full_name', None),
             "current_version": a.current_version,
-            "updated_at": a.updated_at,
+            "updated_at": to_utc_iso(a.updated_at) if a.updated_at else None,
         })
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -114,7 +115,7 @@ def get_archive(
         "template_version": a.template_version,
         "current_version": a.current_version,
         "content": a.content,
-        "updated_at": a.updated_at,
+        "updated_at": to_utc_iso(a.updated_at) if a.updated_at else None,
     }
 
 
@@ -271,7 +272,7 @@ async def export_archive_zip(
             "template_id": a.template_id,
             "template_version": a.template_version,
             "current_version": a.current_version,
-            "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+            "updated_at": to_utc_iso(a.updated_at) if a.updated_at else None,
         }
         import json as _json
         zf.writestr("overview.json", _json.dumps(overview, ensure_ascii=False, indent=2))

@@ -262,7 +262,7 @@ async def scan_equipment_checkout(
                 "transaction_id": existing_pickup.transaction_id,
                 "pickup_record_id": existing_pickup.id,
                 "serial_number": serial_number,
-                "picked_at": existing_pickup.pickup_time.isoformat() if existing_pickup.pickup_time else None
+                "picked_at": to_utc_iso(existing_pickup.pickup_time, assume_local=True) if existing_pickup.pickup_time else None
             }
 
     # 若设备实例已被他人领料，则禁止重复领料

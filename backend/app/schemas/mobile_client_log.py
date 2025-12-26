@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, field_serializer
+
+from app.utils.timezone import to_utc_iso
 
 
 class MobileClientLogCreate(BaseModel):
@@ -39,7 +41,10 @@ class MobileClientLogCreate(BaseModel):
             # 兼容 2020-01-01T00:00:00Z
             if s.endswith("Z"):
                 s = s[:-1] + "+00:00"
-            return datetime.fromisoformat(s)
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
         return v
 
     @field_validator("level", mode="before")
@@ -81,6 +86,10 @@ class MobileClientLogItem(BaseModel):
     api_status: Optional[int] = None
     duration_ms: Optional[int] = None
     error_msg: Optional[str] = None
+
+    @field_serializer('occurred_at', 'created_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
     class Config:
         from_attributes = True

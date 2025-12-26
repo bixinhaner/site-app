@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -24,6 +24,7 @@ from app.services.omc_client import (
 )
 from app.services.omc_state import upsert_omc_device_state
 from app.services.omc_monitor import advance_opening_work_orders_by_ever
+from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
 
@@ -69,6 +70,10 @@ class OmcDeviceStateItem(BaseModel):
   current_site_id: Optional[int] = None
   current_site_code: Optional[str] = None
   current_site_name: Optional[str] = None
+
+  @field_serializer("first_online_at", "first_activated_at", "last_seen_at")
+  def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+    return to_utc_iso(dt)
 
 
 class OmcDeviceStateListResponse(BaseModel):

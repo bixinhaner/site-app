@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import Site, WorkOrder, SiteInspection, InspectionTemplate, InspectionCheckItem, InspectionPhoto
 from app.models.work_order import WorkOrderTypeEnum
 from app.models.ssv_archive import SiteSSVArchive, SiteSSVArchiveVersion, SiteSSVArchiveKVIndex
+from app.utils.timezone import to_utc_iso
 
 try:
     import jsonpatch  # type: ignore
@@ -20,7 +21,7 @@ Snapshot = Dict[str, Any]
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return to_utc_iso(datetime.utcnow())
 
 
 def _strip_suffix(item_id: Optional[str]) -> str:
@@ -112,7 +113,7 @@ def _build_snapshot(db: Session, inspection: SiteInspection, template: Inspectio
                 "longitude": p.longitude,
                 "gps_accuracy": p.gps_accuracy,
                 "address": p.address,
-                "taken_at": p.taken_at.isoformat() if p.taken_at else None,
+                "taken_at": to_utc_iso(p.taken_at) if p.taken_at else None,
                 "hash_value": getattr(p, "hash_value", None),
                 "uploaded_by": p.uploaded_by,
             }

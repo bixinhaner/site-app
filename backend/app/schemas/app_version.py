@@ -191,6 +191,10 @@ class DownloadLogResponse(BaseModel):
     username: Optional[str] = None
     user_role: Optional[str] = None
 
+    @field_serializer("started_at", "completed_at")
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
+
     class Config:
         from_attributes = True
 
@@ -263,6 +267,10 @@ class ReleaseNoteItemResponse(ReleaseNoteItemBase):
     release_note_id: int
     created_at: Optional[datetime] = None
 
+    @field_serializer("created_at")
+    def _serialize_created_at(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
+
     class Config:
         from_attributes = True
 
@@ -294,6 +302,10 @@ class ReleaseNoteResponse(ReleaseNoteBase):
     items: List[ReleaseNoteItemResponse] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_serializer("created_at", "updated_at")
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
     class Config:
         from_attributes = True

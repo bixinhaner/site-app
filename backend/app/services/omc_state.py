@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.omc_state import OmcDeviceState
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+from app.utils.timezone import to_utc_iso
 
 
 def upsert_omc_device_state(
@@ -159,7 +160,7 @@ def summarize_site_omc_state(db: Session, site_id: int) -> Dict:
         omc_online_raw = state.omc_online_raw if state else None
         omc_active_raw = state.omc_active_raw if state else None
         last_seen_at_str = (
-            state.last_seen_at.isoformat() if state and state.last_seen_at else None
+            to_utc_iso(state.last_seen_at) if state and state.last_seen_at else None
         )
 
         devices.append(

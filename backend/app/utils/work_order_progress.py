@@ -7,6 +7,7 @@
 from sqlalchemy.orm import Session
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.models.inspection import InspectionCheckItem, CheckItemStatusEnum
+from app.utils.timezone import to_utc_iso
 
 class WorkOrderProgressCalculator:
     """工单进度计算器"""
@@ -135,13 +136,13 @@ class WorkOrderProgressCalculator:
                 "activated_equipment": activation_check.get("activated_equipment", 0),
                 "failed_equipment_count": len(activation_check.get("failed_equipment", [])),
                 "check_time": activation_check.get("check_time"),
-                "activated_at": work_order.activated_at.isoformat() if work_order.activated_at else None
+                "activated_at": to_utc_iso(work_order.activated_at) if work_order.activated_at else None
             }
         else:
             return {
                 "activation_status": "activated",
                 "message": "设备已成功开通",
-                "activated_at": work_order.activated_at.isoformat() if work_order.activated_at else None
+                "activated_at": to_utc_iso(work_order.activated_at) if work_order.activated_at else None
             }
     
     @classmethod

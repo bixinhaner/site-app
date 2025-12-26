@@ -4,7 +4,9 @@
 
 from typing import Optional, List, Any, Dict
 from datetime import datetime
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_serializer
+
+from app.utils.timezone import to_utc_iso
 
 
 
@@ -104,6 +106,10 @@ class TemplateBindingResponse(BaseModel):
     template_name: Optional[str] = None
     site_name: Optional[str] = None
     creator_name: Optional[str] = None
+
+    @field_serializer('valid_from', 'valid_to', 'created_at', 'updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
     class Config:
         from_attributes = True
@@ -240,6 +246,10 @@ class InspectionTemplateResponse(BaseModel):
     active_bindings_count: int = 0
     work_orders_count: int = 0
     active_work_orders_count: int = 0
+
+    @field_serializer('created_at', 'updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
     class Config:
         from_attributes = True

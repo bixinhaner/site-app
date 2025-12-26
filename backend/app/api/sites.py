@@ -924,7 +924,7 @@ async def get_basic_import_history_detail(
         "operator_id": e.operator_id,
         "operator_name": getattr(e.operator, "username", None) if getattr(e, "operator", None) else None,
         "file_name": (e.details or {}).get("file_name"),
-        "created_at": e.created_at,
+        "created_at": to_utc_iso(e.created_at) if e.created_at else None,
         "summary": e.details or {},
         # 目前仅存汇总，若后期需要详细逐行结果，可扩展单独持久化
     }

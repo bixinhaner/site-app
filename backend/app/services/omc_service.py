@@ -12,6 +12,7 @@ from app.schemas.task import OMCDeviceStatusRequest, OMCDeviceStatusResponse, OM
 import uuid
 import json
 import random
+from app.utils.timezone import to_utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -332,7 +333,7 @@ class OMCSystemService:
                         "alarm_id": f"ALM_{random.randint(1000, 9999)}",
                         "severity": random.choice(["critical", "major", "minor", "warning"]),
                         "message": "模拟告警信息",
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": to_utc_iso(datetime.utcnow())
                     } for _ in range(random.randint(0, 3))
                 ]
             }

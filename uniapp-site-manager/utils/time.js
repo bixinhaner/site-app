@@ -10,10 +10,13 @@
 export function parseUTCTime(timeStr) {
 	if (!timeStr) return null
 	
-	let timeString = timeStr
-	// 如果没有时区标记，添加Z表示UTC时间
-	if (!timeString.includes('Z') && !timeString.includes('+')) {
-		timeString = timeString.replace(' ', 'T') + 'Z'
+	let timeString = String(timeStr).trim()
+	timeString = timeString.replace(' ', 'T')
+
+	// 如果没有时区标记，添加 Z 表示 UTC 时间（兼容 -05:00 / +0800 等偏移写法）
+	const hasTzSuffix = /Z$|[+-]\\d{2}:\\d{2}$|[+-]\\d{4}$/.test(timeString)
+	if (!hasTzSuffix) {
+		timeString = timeString + 'Z'
 	}
 	
 	return new Date(timeString)

@@ -112,8 +112,16 @@
                   {{ formatRange(row.electrical_downtilt_min, row.electrical_downtilt_max) }}
                 </template>
               </el-table-column>
-              <el-table-column prop="planning_updated_at" label="规划更新时间" min-width="170" />
-              <el-table-column prop="planning_created_at" label="规划创建时间" min-width="170" />
+              <el-table-column prop="planning_updated_at" label="规划更新时间" min-width="170">
+                <template #default="{ row }">
+                  {{ formatDateTime(row.planning_updated_at) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="planning_created_at" label="规划创建时间" min-width="170">
+                <template #default="{ row }">
+                  {{ formatDateTime(row.planning_created_at) }}
+                </template>
+              </el-table-column>
               <el-table-column prop="planning_notes" label="备注" min-width="160" show-overflow-tooltip />
               <el-table-column label="操作" width="160" fixed="right">
                 <template #default="{ row }">
@@ -348,6 +356,20 @@ const formatRange = (minVal, maxVal) => {
   return `${minVal}° ~ ${maxVal}°`
 }
 
+const formatDateTime = (val) => {
+  if (!val) return '-'
+  const d = new Date(val)
+  if (Number.isNaN(d.getTime())) return String(val)
+  return d.toLocaleString('zh-CN')
+}
+
+const toUtcIsoParam = (val) => {
+  if (!val) return undefined
+  const d = val instanceof Date ? val : new Date(val)
+  if (Number.isNaN(d.getTime())) return undefined
+  return d.toISOString()
+}
+
 const formatExportDate = () => {
   const now = new Date()
   const year = now.getFullYear()
@@ -394,8 +416,12 @@ const buildParams = () => {
     band: bandFilter.value?.length ? bandFilter.value.join(',') : undefined,
   }
   if (Array.isArray(timeRange.value) && timeRange.value.length === 2) {
-    params.start_time = timeRange.value[0]
-    params.end_time = timeRange.value[1]
+    const start = toUtcIsoParam(timeRange.value[0])
+    const end = toUtcIsoParam(timeRange.value[1])
+    if (start && end) {
+      params.start_time = start
+      params.end_time = end
+    }
   }
   return params
 }

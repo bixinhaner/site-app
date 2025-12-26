@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
+
+from app.utils.timezone import to_utc_iso
 
 
 class OperationLogItem(BaseModel):
@@ -25,6 +27,10 @@ class OperationLogItem(BaseModel):
     status_code: Optional[int] = None
     is_success: bool = True
     operation_desc: Optional[str] = None
+
+    @field_serializer("occurred_at")
+    def _serialize_occurred_at(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
     class Config:
         from_attributes = True

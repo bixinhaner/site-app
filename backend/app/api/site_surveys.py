@@ -22,6 +22,7 @@ from app.schemas.site_survey import (
     SiteSurveySummary,
 )
 from app.utils.file_handler import save_uploaded_file, calculate_file_hash, extract_exif, compress_image, add_text_watermark_inline
+from app.utils.timezone import to_utc_iso
 
 
 router = APIRouter()
@@ -74,7 +75,7 @@ def _audit(
 def _jsonify_val(v):
     if isinstance(v, datetime):
         try:
-            return v.isoformat()
+            return to_utc_iso(v)
         except Exception:
             return str(v)
     return v
@@ -103,7 +104,7 @@ def _fmt_val(v):
         try:
             return v.strftime('%Y-%m-%d %H:%M')
         except Exception:
-            return v.isoformat()
+            return to_utc_iso(v)
     if isinstance(v, float):
         return round(v, 6)
     if v is None:
@@ -718,7 +719,7 @@ async def export_survey_zip(
             "site_id": survey.site_id,
             "site_code": survey.site.site_code if survey.site else None,
             "site_name": survey.site.site_name if survey.site else None,
-            "survey_date": survey.survey_date.isoformat() if survey.survey_date else None,
+            "survey_date": to_utc_iso(survey.survey_date) if survey.survey_date else None,
             "surveyor_name": survey.surveyor_name,
             "surveyor_phone": survey.surveyor_phone,
             "feasibility": survey.feasibility,
@@ -769,7 +770,7 @@ async def export_survey_zip(
                 fw.writerow([
                     p.id, p.category, p.mime_type, base_name, arcname,
                     (os.path.getsize(p.file_path) if os.path.exists(p.file_path) else None),
-                    (p.taken_at.isoformat() if p.taken_at else None), p.latitude, p.longitude
+                    (to_utc_iso(p.taken_at) if p.taken_at else None), p.latitude, p.longitude
                 ])
         zf.writestr("files.csv", files_csv.getvalue())
 
@@ -831,7 +832,7 @@ async def export_batch_zip(
                     "site_id": s.site_id,
                     "site_code": site_code,
                     "site_name": site_name,
-                    "survey_date": s.survey_date.isoformat() if s.survey_date else None,
+                    "survey_date": to_utc_iso(s.survey_date) if s.survey_date else None,
                     "surveyor_name": s.surveyor_name,
                     "surveyor_phone": s.surveyor_phone,
                     "feasibility": s.feasibility,
@@ -882,7 +883,7 @@ async def export_batch_zip(
                     fw.writerow([
                         p.id, p.category, p.mime_type, base, rel,
                         (os.path.getsize(p.file_path) if p.file_path and os.path.exists(p.file_path) else None),
-                        (p.taken_at.isoformat() if p.taken_at else None), p.latitude, p.longitude
+                        (to_utc_iso(p.taken_at) if p.taken_at else None), p.latitude, p.longitude
                     ])
                 zf.writestr(f"{survey_folder}/files.csv", files_csv.getvalue())
 
@@ -917,7 +918,7 @@ async def get_survey_audit_logs(
             "operator_name": (op.full_name or op.username) if op else None,
             "comments": ev.comments,
             "details": ev.details,
-            "created_at": ev.created_at,
+            "created_at": to_utc_iso(ev.created_at) if ev.created_at else None,
         })
     return data
 
@@ -941,7 +942,7 @@ async def update_photo_metadata(
     survey = db.query(SiteSurvey).filter(SiteSurvey.id == p.survey_id).first()
     if not _can_edit(db, current_user, survey):
         raise HTTPException(status_code=403, detail="无权限调整该照片")
-    before = {"category": p.category, "taken_at": p.taken_at.isoformat() if p.taken_at else None, "sort_order": p.sort_order}
+    before = {"category": p.category, "taken_at": to_utc_iso(p.taken_at) if p.taken_at else None, "sort_order": p.sort_order}
     # 以 form 值优先；若缺失则使用 JSON 值
     eff_category = category if category is not None else category_json
     eff_sort = sort_order if sort_order is not None else sort_order_json
@@ -957,7 +958,7 @@ async def update_photo_metadata(
             pass
     db.commit()
     db.refresh(p)
-    after = {"category": p.category, "taken_at": p.taken_at.isoformat() if p.taken_at else None, "sort_order": p.sort_order}
+    after = {"category": p.category, "taken_at": to_utc_iso(p.taken_at) if p.taken_at else None, "sort_order": p.sort_order}
     try:
         # Build changed list for readability
         changed = []

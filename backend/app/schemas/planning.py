@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_serializer
 from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
+
+from app.utils.timezone import to_utc_iso
 
 
 ALLOWED_BANDS = {"n41", "n78", "n1", "n3", "B1", "B3"}
@@ -363,6 +365,10 @@ class LldPlanningSummaryItem(BaseModel):
     electrical_downtilt_max: Optional[float] = None
     edit_policy: Optional[LldEditPolicy] = None
 
+    @field_serializer('planning_created_at', 'planning_updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
+
 
 class LldPlanningSummaryListResponse(BaseModel):
     items: List[LldPlanningSummaryItem] = []
@@ -380,6 +386,10 @@ class LldPlanningCellItem(PlanningCell):
     planning_version: int
     planning_created_at: Optional[datetime] = None
     planning_updated_at: Optional[datetime] = None
+
+    @field_serializer('planning_created_at', 'planning_updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
 
 class LldPlanningCellListResponse(BaseModel):

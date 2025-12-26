@@ -1,6 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+
+from app.utils.timezone import to_utc_iso
 
 class InspectionBase(BaseModel):
     site_id: int
@@ -42,6 +44,10 @@ class InspectionResponse(InspectionBase):
     recommendations: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer('start_time', 'end_time', 'created_at', 'updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True

@@ -7,6 +7,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.utils.timezone import to_utc_iso
 
 
 class UserLog(Base):
@@ -59,7 +60,7 @@ class UserLog(Base):
             'session_id': self.session_id,
             'user_id': self.user_id,
             'username': self.username,
-            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'timestamp': to_utc_iso(self.timestamp) if self.timestamp else None,
             'action': self.action,
             'level': self.level,
             'page_route': self.page_route,
@@ -72,7 +73,7 @@ class UserLog(Base):
             'error_message': self.error_message,
             'error_stack': self.error_stack,
             'error_context': self.error_context,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': to_utc_iso(self.created_at) if self.created_at else None
         }
     
     @classmethod

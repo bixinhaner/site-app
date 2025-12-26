@@ -2,9 +2,11 @@
 用户日志相关的Pydantic模型
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+
+from app.utils.timezone import to_utc_iso
 
 
 class UserLogCreate(BaseModel):
@@ -44,6 +46,10 @@ class UserLogResponse(BaseModel):
     error_stack: Optional[str]
     error_context: Optional[Dict[str, Any]]
     created_at: datetime
+
+    @field_serializer('timestamp', 'created_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
     class Config:
         from_attributes = True
@@ -86,3 +92,7 @@ class UserActivitySummary(BaseModel):
     top_actions: List[Dict[str, int]]
     most_visited_pages: List[Dict[str, int]]
     error_count: int
+
+    @field_serializer('first_action', 'last_action')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)

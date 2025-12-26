@@ -1,6 +1,8 @@
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, validator, field_serializer
 from typing import Optional, List
 from datetime import datetime
+
+from app.utils.timezone import to_utc_iso
 
 class UserBase(BaseModel):
     username: str
@@ -78,6 +80,10 @@ class UserResponse(UserBase):
     avatar: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+    @field_serializer('created_at', 'updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True

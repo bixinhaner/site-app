@@ -1,6 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import Optional, List
 from datetime import datetime
+
+from app.utils.timezone import to_utc_iso
 
 class SiteBase(BaseModel):
     site_code: str
@@ -48,6 +50,10 @@ class SiteResponse(SiteBase):
     created_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer('survey_skipped_at', 'created_at', 'updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
     
     class Config:
         from_attributes = True
@@ -83,6 +89,10 @@ class BasicImportHistoryItem(BaseModel):
     total_rows: Optional[int] = None
     success_count: Optional[int] = None
     failed_count: Optional[int] = None
+
+    @field_serializer('created_at')
+    def _serialize_created_at(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
 
 class SiteListResponse(BaseModel):

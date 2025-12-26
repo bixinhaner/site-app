@@ -1,8 +1,10 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_serializer
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from enum import Enum
 import json
+
+from app.utils.timezone import to_utc_iso
 
 # Import for photos
 if True:  # Avoid circular import
@@ -120,6 +122,14 @@ class WorkOrderItemResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_serializer(
+        'reviewed_at',
+        'created_at',
+        'updated_at',
+    )
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
+
     class Config:
         from_attributes = True
 
@@ -163,6 +173,19 @@ class WorkOrderResponse(BaseModel):
         return v
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer(
+        'assigned_at',
+        'accepted_at',
+        'submitted_at',
+        'reviewed_at',
+        'completed_at',
+        'due_date',
+        'created_at',
+        'updated_at',
+    )
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
     class Config:
         from_attributes = True

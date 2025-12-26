@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+
+from app.utils.timezone import to_utc_iso
 
 
 class SiteSurveyFeasibilityEnum(str):
@@ -117,6 +119,10 @@ class SiteSurveyPhotoResponse(BaseModel):
     has_watermark: Optional[bool] = None
     created_at: datetime
 
+    @field_serializer('taken_at', 'created_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
+
     class Config:
         from_attributes = True
 
@@ -171,6 +177,10 @@ class SiteSurveyResponse(BaseModel):
     updated_at: Optional[datetime] = None
     photos: List[SiteSurveyPhotoResponse] = []
 
+    @field_serializer('survey_date', 'created_at', 'updated_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
+
     class Config:
         from_attributes = True
 
@@ -184,3 +194,7 @@ class SiteSurveySummary(BaseModel):
     surveyor_name: str
     feasibility: str
     created_at: datetime
+
+    @field_serializer('survey_date', 'created_at')
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)

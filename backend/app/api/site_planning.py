@@ -26,6 +26,7 @@ from app.models.planning import (
     SitePlanningCell,
 )
 from app.utils.planning_schema import LLD_CELL_EXTRA_FIELD_CANDIDATES
+from app.utils.timezone import to_utc_iso
 from app.schemas.planning import (
     SitePlanningResponse,
     SitePlanningUpdate,
@@ -823,11 +824,11 @@ def _sanitize_excel_value(v):
     try:
         import pandas as _pd
         if isinstance(v, _pd.Timestamp):
-            return v.to_pydatetime().isoformat()
+            return to_utc_iso(v.to_pydatetime())
     except Exception:
         pass
     if isinstance(v, datetime):
-        return v.isoformat()
+        return to_utc_iso(v)
     # numpy scalar
     if hasattr(v, "item") and callable(getattr(v, "item")):
         try:
@@ -1523,7 +1524,7 @@ async def list_versions(site_id: int, db: Session = Depends(get_db), current_use
             version=p.version,
             is_current=p.is_current,
             created_by=p.created_by,
-            created_at=p.created_at.isoformat() if p.created_at else None,
+            created_at=to_utc_iso(p.created_at) if p.created_at else None,
             notes=p.notes,
         )
         for p in plans
@@ -1849,7 +1850,7 @@ async def get_change_logs(
                 actor_id=l.actor_id,
                 actor_name=getattr(l.actor, "username", None),
                 summary=l.summary,
-                created_at=l.created_at.isoformat() if l.created_at else "",
+                created_at=to_utc_iso(l.created_at) if l.created_at else "",
                 diff=diff,
             )
         )

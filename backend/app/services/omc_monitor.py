@@ -7,6 +7,7 @@ from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
+from app.utils.timezone import to_utc_iso
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
 from app.models.site import Site
 from app.models.work_order import (
@@ -146,7 +147,7 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
       "activated": {},
       "all_online": False,
       "all_activated": False,
-      "checked_at": datetime.utcnow().isoformat(),
+      "checked_at": to_utc_iso(datetime.utcnow()),
     }
   else:
     online_map, activated_map = _check_site_devices_status(db, client, sns)
@@ -159,7 +160,7 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
       "activated": activated_map,
       "all_online": bool(all_online),
       "all_activated": bool(all_activated),
-      "checked_at": datetime.utcnow().isoformat(),
+      "checked_at": to_utc_iso(datetime.utcnow()),
     }
 
   # 基于 SN 聚合表的 ever 状态进行站点/工单状态推进

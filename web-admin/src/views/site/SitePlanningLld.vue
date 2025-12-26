@@ -618,7 +618,11 @@
                 {{ row.actor_name || row.actor_id || '-' }}
               </template>
             </el-table-column>
-            <el-table-column prop="created_at" label="时间" width="200" />
+            <el-table-column prop="created_at" label="时间" width="200">
+              <template #default="{ row }">
+                {{ formatDateTime(row.created_at) }}
+              </template>
+            </el-table-column>
             <el-table-column label="变更字段" min-width="260">
               <template #default="{ row }">
                 <el-tag
@@ -1534,6 +1538,13 @@ const importing = ref(false)
 const dryRun = ref(true)
 const importInfo = ref('')
 const activeTab = ref('overview')
+
+const formatDateTime = (val) => {
+  if (!val) return '-'
+  const d = new Date(val)
+  if (Number.isNaN(d.getTime())) return String(val)
+  return d.toLocaleString('zh-CN')
+}
 
 // 编辑模式相关
 const editMode = ref(false)

@@ -30,6 +30,7 @@ from app.services.template_resolver import (
 )
 from app.utils.template_validator import validate_template_changes, summarize_changes
 from app.utils.template_cascader import cascade_update_check_items
+from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
 
@@ -283,7 +284,7 @@ async def get_template_usage(
             "site_name": insp.site.site_name if insp.site else "未知",
             "status": insp.status.value,
             "inspector": insp.inspector.full_name if insp.inspector else "未知",
-            "created_at": insp.created_at.isoformat()
+            "created_at": to_utc_iso(insp.created_at)
         }
         for insp in inspections
     ]
@@ -328,11 +329,11 @@ async def export_template(
         "template_id": template.id,
         "created_by": template.created_by,
         "creator_name": template.creator.full_name if template.creator else None,
-        "created_at": template.created_at.isoformat() if template.created_at else None,
-        "updated_at": template.updated_at.isoformat() if template.updated_at else None,
+        "created_at": to_utc_iso(template.created_at) if template.created_at else None,
+        "updated_at": to_utc_iso(template.updated_at) if template.updated_at else None,
         "exported_by": current_user.id,
         "exported_username": current_user.username,
-        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "exported_at": to_utc_iso(datetime.utcnow()),
         "version": "1.0",
     }
 
@@ -555,9 +556,9 @@ async def update_template(
             "modified_names": change_summary['modified_names'],
             "modified_descriptions": change_summary['modified_descriptions'],
             "modified_labels": change_summary['modified_labels'],
-            "modified_constraints": change_summary['modified_constraints']
+        "modified_constraints": change_summary['modified_constraints']
         },
-        "updated_at": template.updated_at.isoformat()
+        "updated_at": to_utc_iso(template.updated_at)
     }
 
 

@@ -18,7 +18,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="operator_name" label="操作人" width="140" />
-        <el-table-column prop="created_at" label="时间" width="180" />
+        <el-table-column prop="created_at" label="时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
         <el-table-column label="统计" min-width="220">
           <template #default="{ row }">
             共 {{ row.total_rows || 0 }} / 成功 {{ row.success_count || 0 }} / 失败 {{ row.failed_count || 0 }}
@@ -52,6 +56,13 @@ const page = ref(1)
 const pageSize = ref(20)
 
 const goBack = () => router.back()
+
+const formatDateTime = (val) => {
+  if (!val) return '-'
+  const d = new Date(val)
+  if (Number.isNaN(d.getTime())) return String(val)
+  return d.toLocaleString('zh-CN')
+}
 
 const loadData = async () => {
   try {

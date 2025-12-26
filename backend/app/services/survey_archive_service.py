@@ -21,6 +21,7 @@ from app.models.survey_archive import (
     SiteSurveyArchiveVersion,
     SiteSurveyArchiveKVIndex,
 )
+from app.utils.timezone import to_utc_iso
 
 try:
     import jsonpatch  # type: ignore
@@ -32,7 +33,7 @@ Snapshot = Dict[str, Any]
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return to_utc_iso(datetime.utcnow())
 
 
 def _normalize(s: Optional[str]) -> str:
@@ -176,7 +177,7 @@ def _build_snapshot(
                 "longitude": p.longitude,
                 "gps_accuracy": p.gps_accuracy,
                 "address": p.address,
-                "taken_at": p.taken_at.isoformat() if p.taken_at else None,
+                "taken_at": to_utc_iso(p.taken_at) if p.taken_at else None,
                 "hash_value": getattr(p, "hash_value", None),
                 "uploaded_by": p.uploaded_by,
             }

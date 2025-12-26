@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.models.geocode_cache import GeocodeCache
 from app.models.system_config import SystemConfig
 from app.models.user import User
+from app.utils.timezone import to_utc_iso
 
 
 router = APIRouter()
@@ -64,6 +65,10 @@ class GeocodeCacheEntry(BaseModel):
     expires_at: datetime
     updated_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+
+    @field_serializer("last_hit_at", "expires_at", "updated_at", "created_at")
+    def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
 
 
 class GeocodeCacheEntriesResponse(BaseModel):
@@ -164,7 +169,7 @@ def geocode_cache_stats(
         reason = row.value.get("reason")
         if disabled_until and datetime.now(tz_bj) < disabled_until:
             breaker.disabled = True
-            breaker.disabled_until = disabled_until.isoformat()
+            breaker.disabled_until = to_utc_iso(disabled_until)
             breaker.reason = str(reason) if reason else None
 
     # 进程内统计（命中/调用次数等）
