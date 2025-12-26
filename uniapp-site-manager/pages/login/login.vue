@@ -1,7 +1,26 @@
 <template>
 	<view class="login-container">
-		<!-- 语言切换按钮 -->
-		<view class="language-switch">
+		<view v-if="showServerMenu" class="server-mask" @click="closeServerMenu"></view>
+
+		<!-- 右上角：服务器切换 + 语言切换 -->
+		<view class="top-actions" :style="{ top: topActionsOffset + 'px' }">
+			<view class="server-wrapper">
+				<view class="server-btn" @click.stop="toggleServerMenu">
+					<image class="flag-icon" :src="currentServer.flagIcon" mode="aspectFit" />
+				</view>
+				
+				<view v-if="showServerMenu" class="server-menu" @click.stop>
+					<view
+						v-for="server in otherServers"
+						:key="server.key"
+						class="server-option"
+						@click="handleServerSelect(server)"
+					>
+						<image class="flag-icon" :src="server.flagIcon" mode="aspectFit" />
+					</view>
+				</view>
+			</view>
+			
 			<text @click="toggleLanguage" class="language-btn">
 				{{ languageStore.currentLanguageName }}
 			</text>
@@ -68,11 +87,12 @@
 </template>
 
 <script setup>
-	import { ref, reactive, onMounted, getCurrentInstance } from 'vue'
+	import { ref, reactive, onMounted, getCurrentInstance, computed } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
 	import { env, getVersion } from '@/config/env.js'
+	import { API_SERVERS, getApiBaseUrl, setApiBaseUrl } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const logger = useLoggerStore()
@@ -82,10 +102,103 @@
 	const loading = ref(false)
 	const appVersion = ref(env.APP_VERSION)
 	const rememberPassword = ref(false)
+	const showServerMenu = ref(false)
+	const currentBaseUrl = ref(getApiBaseUrl())
+	const topActionsOffset = ref(16)
+	
+	const currentServer = computed(() => {
+		const baseUrl = currentBaseUrl.value
+		const hit = (API_SERVERS || []).find(s => s.baseUrl === baseUrl)
+		return hit || API_SERVERS[0]
+	})
+	
+	const otherServers = computed(() => {
+		const currentKey = currentServer.value?.key
+		return (API_SERVERS || []).filter(s => s.key !== currentKey)
+	})
+	
 	const loginForm = reactive({
 		username: '',
 		password: ''
 	})
+	
+	const toggleServerMenu = () => {
+		showServerMenu.value = !showServerMenu.value
+	}
+
+	const closeServerMenu = () => {
+		showServerMenu.value = false
+	}
+	
+	const clearServerSensitiveStorage = () => {
+		try {
+			// 认证信息
+			uni.removeStorageSync('token')
+			uni.removeStorageSync('refreshToken')
+			uni.removeStorageSync('userInfo')
+			
+			// 离线队列/数据
+			uni.removeStorageSync('offlineQueue')
+			
+			// 日志队列
+			uni.removeStorageSync('user_logs')
+			
+			// 批量清理前缀 key
+			const keys = uni.getStorageInfoSync?.()?.keys || []
+			const prefixes = [
+				'mobile_client_log_queue_v1',
+				'inspection_',
+				'checkitem_',
+				'photo_'
+			]
+			
+			keys.forEach((key) => {
+				if (prefixes.some(prefix => key.startsWith(prefix))) {
+					uni.removeStorageSync(key)
+				}
+			})
+			
+			// H5 可能存在 IndexedDB（失败不影响）
+			try {
+				if (typeof indexedDB !== 'undefined' && typeof indexedDB.deleteDatabase === 'function') {
+					indexedDB.deleteDatabase('SiteInspectionDB')
+				}
+			} catch (e) {
+				// ignore
+			}
+		} catch (e) {
+			// ignore
+		}
+	}
+	
+	const handleServerSelect = (server) => {
+		try {
+			if (!server?.baseUrl) return
+			
+			const next = server.baseUrl
+			const current = currentBaseUrl.value
+			if (next === current) {
+				closeServerMenu()
+				return
+			}
+			
+			// 切换服务器前先清理跨服数据（保留 savedCredentials）
+			clearServerSensitiveStorage()
+			
+			setApiBaseUrl(next)
+			currentBaseUrl.value = getApiBaseUrl()
+			
+			closeServerMenu()
+			
+			uni.showToast({
+				title: $t('messages.serverSwitched'),
+				icon: 'none',
+				duration: 2000
+			})
+		} catch (e) {
+			closeServerMenu()
+		}
+	}
 	
 	// 读取保存的登录凭据
 	const loadSavedCredentials = () => {
@@ -139,6 +252,18 @@
 		
 		// 加载保存的登录凭据
 		loadSavedCredentials()
+		
+		// 初始化当前服务器（用于显示国旗）
+		currentBaseUrl.value = getApiBaseUrl()
+		
+		// 适配状态栏高度，避免右上角按钮遮挡
+		try {
+			const sysInfo = uni.getSystemInfoSync?.()
+			const statusBarHeight = Number(sysInfo?.statusBarHeight || 0)
+			topActionsOffset.value = statusBarHeight > 0 ? (statusBarHeight + 12) : 16
+		} catch (e) {
+			topActionsOffset.value = 16
+		}
 	})
 	
 	// 处理登录
@@ -245,6 +370,7 @@
 	
 	// 切换语言
 	const toggleLanguage = () => {
+		closeServerMenu()
 		languageStore.toggleLocale()
 	}
 	
@@ -278,11 +404,24 @@
 		position: relative;
 	}
 	
-	.language-switch {
+	.top-actions {
 		position: absolute;
-		top: calc(env(safe-area-inset-top) + 16px);
+		top: 16px;
 		right: 30px;
 		z-index: 100;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
+	.server-mask {
+		position: fixed;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		background: transparent;
+		z-index: 90;
 	}
 	
 	.language-btn {
@@ -296,6 +435,59 @@
 		font-size: 14px;
 		border: 1px solid rgba(255, 255, 255, 0.32);
 		transition: transform 0.15s ease, background-color 0.2s ease, opacity 0.2s ease;
+		
+		&:active {
+			transform: scale(0.96);
+			background: rgba(255, 255, 255, 0.28);
+		}
+	}
+	
+	.server-wrapper { position: relative; }
+	
+	.server-btn {
+		width: 44px;
+		height: 44px;
+		border-radius: 22px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(255, 255, 255, 0.22);
+		border: 1px solid rgba(255, 255, 255, 0.32);
+		transition: transform 0.15s ease, background-color 0.2s ease, opacity 0.2s ease;
+		
+		&:active {
+			transform: scale(0.96);
+			background: rgba(255, 255, 255, 0.28);
+		}
+	}
+	
+	.flag-icon {
+		width: 26px;
+		height: 18px;
+		border-radius: 3px;
+		overflow: hidden;
+	}
+	
+	.server-menu {
+		position: absolute;
+		top: 52px;
+		right: 0;
+		padding: 0;
+		background: transparent;
+		border: none;
+		border-radius: 0;
+		backdrop-filter: none;
+	}
+	
+	.server-option {
+		width: 44px;
+		height: 44px;
+		border-radius: 22px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(255, 255, 255, 0.22);
+		border: 1px solid rgba(255, 255, 255, 0.32);
 		
 		&:active {
 			transform: scale(0.96);

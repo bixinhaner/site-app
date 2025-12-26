@@ -787,7 +787,7 @@
 		
 		try {
 			const response = await uni.request({
-				url: `${API_BASE_URL}/api/inspections/binding-history/${item.id}`,
+				url: buildApiUrl(`/api/inspections/binding-history/${item.id}`),
 				method: 'GET',
 				header: {
 					'Authorization': `Bearer ${userStore.token}`

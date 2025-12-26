@@ -5,9 +5,97 @@
 
 import { env, log } from './env.js'
 
+const API_BASE_URL_STORAGE_KEY = 'api_base_url'
+
+export const API_SERVERS = [
+  {
+    key: 'id',
+    name: 'Indonesia',
+    baseUrl: 'https://siteapp.indonesiacentral.cloudapp.azure.com',
+    flagIcon: '/static/flags/id.svg',
+  },
+  {
+    key: 'cn',
+    name: 'China',
+    baseUrl: 'http://113.45.25.135',
+    flagIcon: '/static/flags/cn.svg',
+  },
+]
+
+export const DEFAULT_API_SERVER_KEY = 'id'
+
+const safeGetStorageSync = (key) => {
+  try {
+    if (typeof uni === 'undefined' || typeof uni.getStorageSync !== 'function') return ''
+    return uni.getStorageSync(key)
+  } catch (e) {
+    return ''
+  }
+}
+
+const safeSetStorageSync = (key, value) => {
+  try {
+    if (typeof uni === 'undefined' || typeof uni.setStorageSync !== 'function') return
+    uni.setStorageSync(key, value)
+  } catch (e) {
+    // ignore
+  }
+}
+
+const safeRemoveStorageSync = (key) => {
+  try {
+    if (typeof uni === 'undefined' || typeof uni.removeStorageSync !== 'function') return
+    uni.removeStorageSync(key)
+  } catch (e) {
+    // ignore
+  }
+}
+
+export const normalizeApiBaseUrl = (rawUrl) => {
+  let url = String(rawUrl || '').trim()
+  if (!url) return ''
+
+  url = url.replace(/\/+$/, '')
+  url = url.replace(/\/api$/, '')
+  url = url.replace(/\/+$/, '')
+
+  return url
+}
+
+export const getApiBaseUrl = () => {
+  const stored = normalizeApiBaseUrl(safeGetStorageSync(API_BASE_URL_STORAGE_KEY))
+  if (stored) return stored
+
+  const defaultServer = API_SERVERS.find((s) => s.key === DEFAULT_API_SERVER_KEY) || API_SERVERS[0]
+  return normalizeApiBaseUrl(defaultServer?.baseUrl)
+}
+
+export const setApiBaseUrl = (baseUrl) => {
+  const normalized = normalizeApiBaseUrl(baseUrl)
+  if (!normalized) {
+    safeRemoveStorageSync(API_BASE_URL_STORAGE_KEY)
+    return
+  }
+  safeSetStorageSync(API_BASE_URL_STORAGE_KEY, normalized)
+}
+
+export const getCurrentApiServer = () => {
+  const baseUrl = getApiBaseUrl()
+  const hit = API_SERVERS.find((s) => normalizeApiBaseUrl(s.baseUrl) === baseUrl)
+  return hit || API_SERVERS.find((s) => s.key === DEFAULT_API_SERVER_KEY) || API_SERVERS[0]
+}
+
+export const setCurrentApiServer = (serverKey) => {
+  const hit = API_SERVERS.find((s) => s.key === serverKey)
+  if (!hit) return
+  setApiBaseUrl(hit.baseUrl)
+}
+
 // API基础配置
 export const API_CONFIG = {
-  BASE_URL: env.API_BASE_URL,
+  get BASE_URL() {
+    return getApiBaseUrl()
+  },
   TIMEOUT: 30000, // 增加到30秒
 
   // 请求头配置
@@ -129,6 +217,8 @@ export const API_ENDPOINTS = {
  * @returns {string} 完整的URL
  */
 export const buildApiUrl = (endpoint) => {
+  if (!endpoint) return API_CONFIG.BASE_URL
+  if (String(endpoint).startsWith('http')) return endpoint
   const url = `${API_CONFIG.BASE_URL}${endpoint}`
   log('Building API URL:', url)
   return url
@@ -203,7 +293,7 @@ export const createRequestConfig = (options = {}) => {
 // 导出配置信息用于调试
 export const getApiInfo = () => {
   return {
-    baseUrl: API_CONFIG.BASE_URL,
+    baseUrl: getApiBaseUrl(),
     environment: env.DEBUG ? 'development' : 'production',
     version: env.APP_VERSION
   }

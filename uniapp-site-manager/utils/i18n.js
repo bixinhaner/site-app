@@ -850,6 +850,7 @@ const messages = {
     messages: {
       loginSuccess: '登录成功',
       loginFailed: '登录失败',
+      serverSwitched: '已切换服务器，请重新登录',
       success: '成功',
       invalidCredentials: '用户名或密码错误',
       networkTimeout: '请求超时，请检查网络连接',
@@ -1782,6 +1783,7 @@ const messages = {
     messages: {
       loginSuccess: 'Login success',
       loginFailed: 'Login failed',
+      serverSwitched: 'Server switched. Please login again',
       success: 'Success',
       invalidCredentials: 'Invalid username or password',
       networkTimeout: 'Request timeout, please check your network connection',

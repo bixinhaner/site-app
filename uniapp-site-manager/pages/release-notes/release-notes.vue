@@ -84,7 +84,7 @@
 import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useLanguageStore } from '@/stores/language'
-import { API_ENDPOINTS, buildApiUrl, createRequestConfig } from '@/config/api.js'
+import { API_ENDPOINTS, buildApiUrl, buildImageUrl, createRequestConfig } from '@/config/api.js'
 import { env } from '@/config/env.js'
 
 const languageStore = useLanguageStore()
@@ -197,7 +197,7 @@ const formatDate = (dateString) => {
 const getFullImageUrl = (url) => {
 	if (!url) return ''
 	if (url.startsWith('http')) return url
-	return env.API_BASE_URL + url
+	return buildImageUrl(url)
 }
 
 const handleImageError = (e) => {
