@@ -341,3 +341,107 @@ EOF
 systemctl enable --now fail2ban
 fail2ban-client status sshd
 ```
+
+---
+
+## 6. 版本管理迁移（旧服 → 新服，仅 App 版本管理）
+
+适用场景：
+- 旧服与新服均使用 SQLite（`backend/site_manager.db`）
+- 版本包与发布说明图片存放在本机目录（`backend/uploads/apk`、`backend/uploads/release-notes`）
+- 仅迁移“版本管理”数据，不迁移其他业务数据/日志
+
+不迁移范围（默认）：
+- `app_version_download_logs`、`app_version_usage_logs` 等统计/日志表
+
+### 6.1 旧服导出（生成 2 个迁移文件）
+
+> 建议先停掉旧服后端服务，避免导出过程中仍有写入。
+
+在旧服项目根目录（与 `backend/` 同级）执行：
+
+```bash
+mkdir -p temp
+
+# 导出：仅 3 张版本管理表
+sqlite3 backend/site_manager.db <<'SQL'
+.output temp/app_version_data.sql
+.print 'BEGIN;'
+.print 'DELETE FROM app_version_release_note_items;'
+.print 'DELETE FROM app_version_release_notes;'
+.print 'DELETE FROM app_versions;'
+.mode insert app_versions
+select * from app_versions;
+.mode insert app_version_release_notes
+select * from app_version_release_notes;
+.mode insert app_version_release_note_items
+select * from app_version_release_note_items;
+.print 'COMMIT;'
+.output stdout
+SQL
+
+# 打包：版本包(apk) + 发布说明图片(release-notes)
+tar -czf temp/app_version_uploads.tgz -C backend/uploads apk release-notes
+```
+
+导出后应得到：
+- `temp/app_version_data.sql`
+- `temp/app_version_uploads.tgz`
+
+### 6.2 传到新服（scp 示例）
+
+先在新服创建接收目录（如无权限请加 `sudo` 或切换 root 执行）：
+
+```bash
+chmod 600 Surge-app_key.pem
+ssh -i Surge-app_key.pem -p 50533 baicells@70.153.137.18 "sudo mkdir -p /usr/local/site-app/temp && sudo chown -R baicells:baicells /usr/local/site-app/temp"
+```
+
+方式 A：旧服直接推送到新服（需要旧服也能使用 `Surge-app_key.pem` 连接新服；在旧服执行）：
+
+```bash
+scp -i Surge-app_key.pem -P 50533 \
+  temp/app_version_data.sql temp/app_version_uploads.tgz \
+  baicells@70.153.137.18:/usr/local/site-app/temp/
+```
+
+方式 B：本机中转（推荐；在你的本机执行，旧服 SSH 参数请替换）：
+
+```bash
+# 1) 先从旧服拉到本机（将 <OLD_...> 替换为旧服实际信息）
+mkdir -p ./temp
+scp -P <OLD_PORT> <OLD_USER>@<OLD_HOST>:<OLD_ROOT>/temp/app_version_data.sql ./temp/
+scp -P <OLD_PORT> <OLD_USER>@<OLD_HOST>:<OLD_ROOT>/temp/app_version_uploads.tgz ./temp/
+
+# 2) 再从本机推到新服
+scp -i Surge-app_key.pem -P 50533 \
+  ./temp/app_version_data.sql ./temp/app_version_uploads.tgz \
+  baicells@70.153.137.18:/usr/local/site-app/temp/
+```
+
+### 6.3 新服导入（写入 SQLite + 解压文件）
+
+> 建议先停掉新服后端服务，避免导入过程中仍有写入。
+
+在新服项目根目录执行：
+
+```bash
+cd /usr/local/site-app
+
+# 如新服是全新环境，需先启动一次后端让表结构自动创建，然后立刻停服再继续：
+# python3 start_backend.py
+
+cp backend/site_manager.db backend/site_manager.db.bak.$(date +%Y%m%d%H%M%S)
+
+sqlite3 backend/site_manager.db < temp/app_version_data.sql
+mkdir -p backend/uploads
+tar -xzf temp/app_version_uploads.tgz -C backend/uploads
+
+# 校验：应能看到版本列表
+sqlite3 backend/site_manager.db "select id,version_name,version_code,is_latest,download_url from app_versions order by id;"
+```
+
+### 6.4 注意事项
+
+- 本项目版本包下载路径通常为 `/uploads/apk/...`（对应 `backend/uploads/apk`）；发布说明图片通常为 `/uploads/release-notes/...`（对应 `backend/uploads/release-notes`），两者都需要迁移。
+- 如 `app_versions.download_url` 为空，迁移后下载链接仍为空（属于数据本身问题，需要在后台补齐或删除该版本记录）。

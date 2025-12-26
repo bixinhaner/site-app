@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime
 import uuid
@@ -11,13 +12,18 @@ from app.models.user import User
 from app.models.site import Site
 from app.models.work_order import (
     WorkOrder,
+    WorkOrderItem,
     WorkOrderStatusEnum,
     WorkOrderTypeEnum,
     WorkOrderPriorityEnum,
     AuditEvent,
 )
 from app.models.inspection import SiteInspection, InspectionStatusEnum, InspectionTypeEnum, InspectionTemplate, InspectionCheckItem, CheckItemStatusEnum
-from app.models.survey import SiteSurveyPhoto
+from app.models.survey import SiteSurvey, SiteSurveyPhoto
+from app.models.survey_archive import SiteSurveyArchive
+from app.models.opening_archive import SiteOpeningArchive
+from app.models.ssv_archive import SiteSSVArchive
+from app.models.equipment import StockTransaction, PickupRecord
 from app.schemas.work_order import (
     WorkOrderCreate,
     WorkOrderUpdate,
@@ -708,44 +714,108 @@ async def delete_work_order(
 
     # 记录原始状态用于审计
     old_status = wo.status
+    old_wo_type = wo.type
+    old_site_id = wo.site_id
 
-    # 如果有关联的检查记录，需要同时删除
-    inspections_to_delete = []
-    seen_inspection_ids = set()
+    # 若存在出入库/领料等库存业务数据，禁止删除（避免破坏库存链路）
+    if db.query(PickupRecord).filter(PickupRecord.work_order_id == wo.id).first():
+        raise HTTPException(status_code=409, detail="该工单已产生领料记录，无法删除；请先撤销领料/出库相关记录")
+    if db.query(StockTransaction).filter(StockTransaction.work_order_id == wo.id).first():
+        raise HTTPException(status_code=409, detail="该工单已关联出入库单据，无法删除；请先撤销相关出入库单据")
 
-    # 1) 通过 work_orders.inspection_id 关联的检查
-    if wo.inspection_id:
-        inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
-        if inspection:
-            inspections_to_delete.append(inspection)
-            seen_inspection_ids.add(inspection.id)
+    # 若已生成档案，禁止删除（保证可追溯性）
+    if db.query(SiteSurveyArchive).filter(SiteSurveyArchive.work_order_id == wo.id).first():
+        raise HTTPException(status_code=409, detail="该工单已生成勘察档案，无法删除")
+    if db.query(SiteOpeningArchive).filter(SiteOpeningArchive.work_order_id == wo.id).first():
+        raise HTTPException(status_code=409, detail="该工单已生成开站档案，无法删除")
+    if db.query(SiteSSVArchive).filter(SiteSSVArchive.work_order_id == wo.id).first():
+        raise HTTPException(status_code=409, detail="该工单已生成 SSV 档案，无法删除")
 
-    # 2) 通过 site_inspections.work_order_id 反向关联的检查（可能存在多条）
-    extra_inspections = db.query(SiteInspection).filter(SiteInspection.work_order_id == wo.id).all()
-    for insp in extra_inspections:
-        if insp.id not in seen_inspection_ids:
-            inspections_to_delete.append(insp)
-            seen_inspection_ids.add(insp.id)
+    # 删除安装工单时：若是该站点最后一条安装工单，则回滚站点状态到 planned
+    remaining_opening_orders = None
+    if old_wo_type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        remaining_opening_orders = db.query(WorkOrder).filter(
+            WorkOrder.site_id == old_site_id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.id != wo.id,
+        ).count()
 
-    # 先打断双向外键关联，避免 SQLAlchemy 计算删除依赖时出现环形依赖
-    if inspections_to_delete:
-        for insp in inspections_to_delete:
-            insp.work_order_id = None
-        wo.inspection_id = None
-        # 先 flush 一次更新外键，再标记删除
-        db.flush()
-        for insp in inspections_to_delete:
-            db.delete(insp)
+    try:
+        # 如果有关联的检查记录，需要同时删除
+        inspections_to_delete = []
+        seen_inspection_ids = set()
 
-    # 最后删除工单本身
-    db.delete(wo)
-    db.commit()
+        # 1) 通过 work_orders.inspection_id 关联的检查
+        if wo.inspection_id:
+            inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+            if inspection:
+                inspections_to_delete.append(inspection)
+                seen_inspection_ids.add(inspection.id)
 
-    # 记录审计日志
-    _audit(db, "work_order", work_order_id, "delete", current_user.id,
-           from_status=old_status.value, to_status="deleted")
-    
-    return {"message": "工单删除成功"}
+        # 2) 通过 site_inspections.work_order_id 反向关联的检查（可能存在多条）
+        extra_inspections = db.query(SiteInspection).filter(SiteInspection.work_order_id == wo.id).all()
+        for insp in extra_inspections:
+            if insp.id not in seen_inspection_ids:
+                inspections_to_delete.append(insp)
+                seen_inspection_ids.add(insp.id)
+
+        # 删除/解绑与工单相关的勘察草稿（SiteSurvey）
+        surveys = db.query(SiteSurvey).filter(SiteSurvey.work_order_id == wo.id).all()
+        for s in surveys:
+            db.delete(s)
+
+        # 删除可能遗留的 work_order_items（历史表）
+        db.query(WorkOrderItem).filter(WorkOrderItem.work_order_id == wo.id).delete(synchronize_session=False)
+
+        # 先打断双向外键关联，避免 SQLAlchemy 计算删除依赖时出现环形依赖
+        if inspections_to_delete:
+            for insp in inspections_to_delete:
+                insp.work_order_id = None
+            wo.inspection_id = None
+            # 先 flush 一次更新外键，再标记删除
+            db.flush()
+            for insp in inspections_to_delete:
+                db.delete(insp)
+
+        # 最后删除工单本身
+        db.delete(wo)
+
+        # 站点状态回滚：删除安装工单且不存在其它安装工单
+        if old_wo_type == WorkOrderTypeEnum.OPENING_INSPECTION and remaining_opening_orders == 0:
+            site = db.query(Site).filter(Site.id == old_site_id).first()
+            if site and site.status != "planned":
+                old_site_status = site.status
+                site.status = "planned"
+                _audit_site_status_change(
+                    db,
+                    old_site_id,
+                    old_site_status,
+                    site.status,
+                    "删除安装工单，站点状态回滚至 planned",
+                )
+
+        db.commit()
+
+        # 记录审计日志
+        _audit(
+            db,
+            "work_order",
+            work_order_id,
+            "delete",
+            current_user.id,
+            from_status=old_status.value,
+            to_status="deleted",
+        )
+
+        return {"message": "工单删除成功"}
+    except HTTPException:
+        raise
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="删除失败：该工单存在关联数据，请先处理关联记录后再删除")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="删除失败：服务器内部错误")
 
 
 @router.post("/{work_order_id}/accept")

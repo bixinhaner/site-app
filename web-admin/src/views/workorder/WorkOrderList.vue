@@ -210,14 +210,13 @@
   <el-dialog v-model="editVisible" title="编辑工单" width="560px">
     <el-form :model="editForm" label-width="96px" :rules="rules" ref="editFormRef">
       <el-form-item label="站点" prop="site_id">
-        <el-select v-model="editForm.site_id" filterable placeholder="选择站点" style="width: 100%" @visible-change="v=> v && loadSites()">
-          <el-option v-for="s in siteOptions" :key="s.id" :label="s.site_name + ' ('+ s.site_code +')'" :value="s.id" />
-        </el-select>
+        <el-input :model-value="editSiteDisplay" disabled />
       </el-form-item>
       <el-form-item label="类型" prop="type">
-        <el-select v-model="editForm.type" placeholder="选择类型" style="width: 100%">
-          <el-option v-for="t in editTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
-        </el-select>
+        <el-input :model-value="typeText(editForm.type)" disabled />
+      </el-form-item>
+      <el-form-item label="检查模板">
+        <el-input :model-value="editTemplateDisplay" disabled />
       </el-form-item>
       <el-form-item label="分配给" prop="assigned_to">
         <el-select v-model="editForm.assigned_to" filterable placeholder="选择人员" style="width: 100%" @visible-change="v=> v && loadUsers()">
@@ -387,16 +386,17 @@ const statuses = [
   { label: '已驳回', value: 'REJECTED' },
   { label: '已完成', value: 'COMPLETED' }
 ]
-// 类型显示映射（用于表格/详情友好显示历史类型）
-	const typeLabelMap = {
-	  'opening_inspection': '新站安装',
-  'maintenance': '维护检查',
-  'power_issue': '断电问题',
-  'transmission_issue': '传输问题',
-	  'gps_issue': 'GPS问题',
-	  'signal_issue': '信号问题',
-	  'site_survey': '站点勘查'
-	}
+	// 类型显示映射（用于表格/详情友好显示历史类型）
+		const typeLabelMap = {
+		  'opening_inspection': '新站安装',
+	  'maintenance': '维护检查',
+	  'power_issue': '断电问题',
+	  'transmission_issue': '传输问题',
+		  'gps_issue': 'GPS问题',
+		  'signal_issue': '信号问题',
+		  'site_survey': '站点勘查',
+		  'ssv': 'SSV 验收'
+		}
 	
 // 创建工单可选类型
 const createTypes = [
@@ -471,21 +471,13 @@ const editVisible = ref(false)
 const updating = ref(false)
 const editForm = ref({ id: '', site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '' })
 const editFormRef = ref()
-// 编辑对话框类型选项：在仅两项基础上，额外包含当前工单类型以避免值缺失
-const editTypeOptions = computed(() => {
-  const base = [...createTypes]
-  const current = editForm.value?.type
-  if (current && !base.some(t => t.value === current)) {
-    base.push({ label: typeLabelMap[current] || current, value: current })
-  }
-  return base
-})
-const rules = {
-  site_id: [{ required: true, message: '请选择站点', trigger: 'change' }],
-  type: [{ required: true, message: '请选择类型', trigger: 'change' }],
-  assigned_to: [{ required: true, message: '请选择分配对象', trigger: 'change' }],
-  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
-}
+	// 编辑对话框类型选项：在仅两项基础上，额外包含当前工单类型以避免值缺失
+	const rules = {
+	  site_id: [{ required: true, message: '请选择站点', trigger: 'change' }],
+	  type: [{ required: true, message: '请选择类型', trigger: 'change' }],
+	  assigned_to: [{ required: true, message: '请选择分配对象', trigger: 'change' }],
+	  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
+	}
 
 const openCreate = () => {
   // reset form
@@ -626,7 +618,54 @@ const canDelete = (row) => {
 }
 
 // 编辑功能
+const editSiteName = ref('')
+const editSiteCode = ref('')
+const editTemplateId = ref('')
+const editTemplateName = ref('')
+const editTemplateLoading = ref(false)
+const editSiteDisplay = computed(() => {
+  if (editSiteName.value && editSiteCode.value) return `${editSiteName.value} (${editSiteCode.value})`
+  return editSiteName.value || editSiteCode.value || (editForm.value?.site_id ?? '-')
+})
+const editTemplateDisplay = computed(() => {
+  if (editTemplateLoading.value) return '加载中...'
+  return editTemplateName.value || '-'
+})
+
+const loadEditTemplate = async (row) => {
+  editTemplateId.value = ''
+  editTemplateName.value = ''
+  editTemplateLoading.value = true
+  try {
+    let templateId = row?.extra_data?.template_id
+    let inspectionId = row?.inspection_id
+    if (!templateId && !inspectionId && row?.id) {
+      const wo = await request.get(`/api/work-orders/${row.id}`)
+      templateId = wo?.extra_data?.template_id
+      inspectionId = wo?.inspection_id
+    }
+    if (!templateId && inspectionId) {
+      const insp = await request.get(`/api/inspections/detail/${inspectionId}`)
+      templateId = insp?.template_id
+    }
+    if (!templateId) {
+      editTemplateName.value = '-'
+      return
+    }
+    editTemplateId.value = templateId
+    const tpl = await request.get(`/api/inspections/templates/${templateId}`)
+    editTemplateName.value = tpl?.template_name || templateId
+  } catch (e) {
+    console.error(e)
+    editTemplateName.value = '加载失败'
+  } finally {
+    editTemplateLoading.value = false
+  }
+}
+
 const openEdit = (row) => {
+  editSiteName.value = row?.site_name || ''
+  editSiteCode.value = row?.site_code || ''
   editForm.value = {
     id: row.id,
     site_id: row.site_id,
@@ -635,9 +674,10 @@ const openEdit = (row) => {
     title: row.title,
     priority: row.priority,
     due_date: row.due_date ? new Date(row.due_date) : null,
-    description: row.description || ''
+    description: row.description || '',
   }
   editVisible.value = true
+  loadEditTemplate(row)
 }
 
 const submitUpdate = () => {
@@ -647,6 +687,9 @@ const submitUpdate = () => {
       updating.value = true
       const payload = { ...editForm.value }
       delete payload.id // 移除id字段
+      // 后端更新接口不支持修改站点/类型（编辑弹窗仅展示且置灰）
+      delete payload.site_id
+      delete payload.type
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
       await request.put(`/api/work-orders/${editForm.value.id}`, payload)
       ElMessage.success('更新成功')
