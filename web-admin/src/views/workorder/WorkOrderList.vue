@@ -329,13 +329,14 @@
 
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Edit, Delete, Search, Refresh, Plus, Sort } from '@element-plus/icons-vue'
 import { createDebouncedTracker } from '@/utils/operationTrack'
 
+const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const items = ref([])
@@ -484,6 +485,74 @@ const openCreate = () => {
   createForm.value = { site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '', template_id: null }
   templateOptions.value = []
   createVisible.value = true
+}
+
+const _firstQueryValue = (v) => (Array.isArray(v) ? v[0] : v)
+
+const ensureSiteOption = async (siteId) => {
+  if (!siteId) return
+  const exists = siteOptions.value.some(s => s.id === siteId)
+  if (exists) return
+  try {
+    const s = await request.get(`/api/sites/${siteId}`)
+    if (s && s.id != null) {
+      siteOptions.value.push(s)
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+const openCreateWithPreset = async ({ siteId, type, title } = {}) => {
+  openCreate()
+  if (siteId) createForm.value.site_id = siteId
+  if (type) createForm.value.type = type
+  if (title) createForm.value.title = title
+
+  // preload options for better UX
+  await Promise.allSettled([loadSites(), loadUsers()])
+  if (siteId) await ensureSiteOption(siteId)
+  await onTypeOrSiteChange()
+}
+
+let applyCreatePrefillBusy = false
+const applyCreatePrefillFromRoute = async () => {
+  if (applyCreatePrefillBusy) return
+  const q = route.query || {}
+  if (String(_firstQueryValue(q.create) || '') !== '1') return
+
+  const siteId = Number(_firstQueryValue(q.site_id))
+  if (!Number.isFinite(siteId) || siteId <= 0) return
+
+  const type = String(_firstQueryValue(q.type) || 'site_survey')
+  const isResurvey = String(_firstQueryValue(q.resurvey) || '') === '1'
+
+  applyCreatePrefillBusy = true
+  try {
+    // 尝试获取站点信息用于拼标题/展示（即使失败也不阻塞创建）
+    let s = null
+    try {
+      s = await request.get(`/api/sites/${siteId}`)
+    } catch (e) {
+      s = null
+    }
+    const siteCode = s?.site_code ? String(s.site_code) : ''
+    const baseTitle = type === 'site_survey' ? '站点勘查' : '工单'
+    const prefix = isResurvey ? '补勘-' : ''
+    const title = siteCode ? `${prefix}${baseTitle}-${siteCode}` : `${prefix}${baseTitle}`
+
+    await openCreateWithPreset({ siteId, type, title })
+
+    // 清理 query，避免刷新/返回时重复弹窗
+    const nextQuery = { ...q }
+    delete nextQuery.create
+    delete nextQuery.site_id
+    delete nextQuery.type
+    delete nextQuery.resurvey
+    router.replace({ query: nextQuery })
+  } finally {
+    applyCreatePrefillBusy = false
+  }
 }
 
 const loadSites = async () => {
@@ -914,6 +983,10 @@ const executeBatchPriority = async () => {
 }
 
 onMounted(load)
+
+watch(() => route.query, () => {
+  applyCreatePrefillFromRoute()
+}, { immediate: true })
 
 // 动态筛选/排序：变化时回到第 1 页并刷新
 watch([searchKeyword, statusFilter, typeFilter], () => {

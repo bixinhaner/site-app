@@ -6,15 +6,18 @@
         <el-button @click="$router.back()"><el-icon><Back /></el-icon>返回</el-button>
         <el-button @click="openSurveys"><el-icon><PictureFilled /></el-icon>勘察档案</el-button>
         <el-button @click="openOpeningArchives"><el-icon><DocumentAdd /></el-icon>开站档案</el-button>
-        <el-tooltip
-          v-if="site && site.survey_required === false"
-          content="该站点无需勘察（已跳过勘察阶段）"
-          placement="top"
-        >
-          <span>
-            <el-button type="success" disabled><el-icon><Plus /></el-icon>新建勘察</el-button>
-          </span>
-        </el-tooltip>
+        <template v-if="site && site.survey_required === false">
+          <el-tooltip
+            v-if="!canManageSite"
+            content="该站点已跳过勘察，仅管理员/经理可发起补勘工单"
+            placement="top"
+          >
+            <span>
+              <el-button type="success" disabled><el-icon><Plus /></el-icon>新建补勘</el-button>
+            </span>
+          </el-tooltip>
+          <el-button v-else type="success" @click="createResurvey"><el-icon><Plus /></el-icon>新建补勘</el-button>
+        </template>
         <el-button v-else type="success" @click="createSurvey"><el-icon><Plus /></el-icon>新建勘察</el-button>
       </div>
     </div>
@@ -82,6 +85,18 @@
             <el-tag :type="site.survey_required === false ? 'info' : 'warning'">
               {{ site.survey_required === false ? '无需勘察' : '需要勘察' }}
             </el-tag>
+          </span>
+        </div>
+        <div
+          v-if="site.survey_skipped_at || site.survey_skip_reason || site.survey_skipped_by"
+          class="item"
+        >
+          <span class="label">跳过记录</span>
+          <span class="value">
+            <el-tag type="info">曾跳过</el-tag>
+            <span v-if="site.survey_skipped_at" style="margin-left: 8px;">时间：{{ formatDate(site.survey_skipped_at) }}</span>
+            <span v-if="site.survey_skipped_by" style="margin-left: 8px;">操作人：{{ getUserName(site.survey_skipped_by) }}</span>
+            <span v-if="site.survey_skip_reason" style="margin-left: 8px;">原因：{{ site.survey_skip_reason }}</span>
           </span>
         </div>
         <div class="item"><span class="label">SSV</span><span class="value"><el-tag :type="site.ssv_passed ? 'success' : 'info'">{{ site.ssv_passed ? '已通过' : '未通过' }}</el-tag></span></div>
@@ -892,7 +907,27 @@ const openOpeningArchives = async () => {
 }
 
 const createSurvey = () => {
-  router.push({ name: 'SiteSurveyNew', query: { site_id: route.params.id } })
+  router.push({ name: 'WorkOrderList', query: { create: '1', site_id: route.params.id, type: 'site_survey' } })
+}
+
+const createResurvey = async () => {
+  if (!site.value) return
+  const parts = []
+  if (site.value.survey_skipped_at) parts.push(`跳过时间：${formatDate(site.value.survey_skipped_at)}`)
+  if (site.value.survey_skipped_by) parts.push(`操作人：${getUserName(site.value.survey_skipped_by)}`)
+  if (site.value.survey_skip_reason) parts.push(`原因：${site.value.survey_skip_reason}`)
+  const skipInfo = parts.length ? `\n\n${parts.join('\n')}` : ''
+
+  try {
+    await ElMessageBox.confirm(
+      `确认新建补勘工单？创建成功后将自动把站点恢复为需要勘察（保留跳过记录）。${skipInfo}`,
+      '新建补勘',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+    )
+    router.push({ name: 'WorkOrderList', query: { create: '1', site_id: route.params.id, type: 'site_survey', resurvey: '1' } })
+  } catch (e) {
+    // cancel/close
+  }
 }
 </script>
 
