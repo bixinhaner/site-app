@@ -99,3 +99,21 @@ class MobileClientLogPageResponse(BaseModel):
 
 class MobileClientLogSettings(BaseModel):
     retention_days: int = Field(7, ge=1, le=3650)
+
+
+class MobileClientLogCleanupPayload(BaseModel):
+    retention_days: Optional[int] = Field(None, ge=1, le=3650)
+
+    keyword: Optional[str] = None
+    level: Optional[str] = None
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+    device_id: Optional[str] = None
+    route: Optional[str] = None
+    tag: Optional[str] = None
+    app_version_code: Optional[int] = None
+    api_status: Optional[int] = None
+    api_url: Optional[str] = None
+
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None

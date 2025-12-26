@@ -460,27 +460,6 @@
       </el-collapse>
     </el-card>
 
-    <!-- 卡片 4：移动端日志 -->
-    <el-card class="mb16" v-loading="loading">
-      <template #header>
-        <div class="card-header">
-          <span>移动端日志</span>
-        </div>
-      </template>
-
-      <el-form :model="form" label-width="140px" :disabled="!canEdit">
-        <el-form-item label="保留天数">
-          <el-input-number v-model="form.mobile_log_retention_days" :min="1" :max="3650" />
-        </el-form-item>
-        <el-form-item label="说明">
-          <ul class="hint-list">
-            <li>该配置用于 web-admin “系统配置 / 移动端日志”的历史查询与排障数据保留策略。</li>
-            <li>后台会按该天数定期自动清理过期日志（以服务端入库时间为准）。</li>
-          </ul>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
     <el-card>
       <template #header>
         <div class="card-header">
@@ -500,7 +479,6 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Document } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { mobileSettingsApi } from '@/api/system'
-import { mobileClientLogsApi } from '@/api/mobileClientLogs'
 import { userAPI } from '@/api/user'
 
 const userStore = useUserStore()
@@ -542,7 +520,6 @@ const form = ref({
     },
     per_user: [],
   },
-  mobile_log_retention_days: 7,
 })
 
 const newLocationUserRule = ref({
@@ -644,10 +621,7 @@ const buildBoolRulePayload = (formRule) => {
 const loadConfig = async () => {
   try {
     loading.value = true
-    const [res, logSettings] = await Promise.all([
-      mobileSettingsApi.getMobileSettings(),
-      mobileClientLogsApi.getSettings(),
-    ])
+    const res = await mobileSettingsApi.getMobileSettings()
     const raw = res || {}
     const lm = raw.location_mode || {}
     const perRole = lm.per_role || {}
@@ -685,9 +659,6 @@ const loadConfig = async () => {
       true,
     )
 
-    if (logSettings && typeof logSettings.retention_days === 'number') {
-      form.value.mobile_log_retention_days = logSettings.retention_days
-    }
   } catch (e) {
     console.error(e)
     const detail = e?.response?.data?.detail
@@ -741,9 +712,6 @@ const save = async () => {
     )
 
     await mobileSettingsApi.updateMobileSettings(payload)
-    await mobileClientLogsApi.updateSettings({
-      retention_days: Number(form.value.mobile_log_retention_days || 7),
-    })
 
     ElMessage.success('保存成功')
   } catch (e) {

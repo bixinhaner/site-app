@@ -13,43 +13,8 @@
       class="mb16"
     />
 
-    <el-card class="mb16" v-loading="settingsLoading">
-      <template #header>
-        <div class="card-header">
-          <span>操作 / 筛选</span>
-          <div class="header-actions">
-            <el-button @click="refresh" :loading="loading || settingsLoading">
-              <el-icon><Refresh /></el-icon>刷新
-            </el-button>
-            <el-button type="primary" @click="exportExcel" :loading="exporting">
-              <el-icon><Download /></el-icon>导出Excel
-            </el-button>
-          </div>
-        </div>
-      </template>
-
-      <el-form :inline="true" class="filter-form">
-        <el-form-item label="保留天数">
-          <el-input-number v-model="retentionDays" :min="1" :max="3650" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :disabled="!canView" @click="saveSettings">保存设置</el-button>
-        </el-form-item>
-        <el-form-item>
-          <el-button
-            type="danger"
-            plain
-            :disabled="!canView"
-            :loading="cleaningByRetention"
-            @click="cleanupByRetention"
-          >
-            按保留天数清理
-          </el-button>
-        </el-form-item>
-      </el-form>
-
-      <el-divider content-position="left">筛选</el-divider>
-      <el-form :inline="true" class="filter-form">
+    <el-card class="filter-card mb16" v-loading="settingsLoading">
+      <el-form :inline="true" class="filter-form" size="small">
         <el-form-item label="时间范围">
           <el-date-picker
             v-model="timeRange"
@@ -86,84 +51,97 @@
             v-model="filters.keyword"
             clearable
             placeholder="用户名/描述/对象/路径"
-            style="width: 260px"
+            style="width: 240px"
             @keyup.enter="handleSearch"
             @clear="handleSearch"
-          >
-            <template #append>
-              <el-button @click="handleSearch">
-                <el-icon><Search /></el-icon>
-              </el-button>
-            </template>
-          </el-input>
+          />
         </el-form-item>
-        <el-form-item>
-          <el-button :disabled="loading" @click="resetFilters">重置</el-button>
-        </el-form-item>
-        <el-form-item>
-          <el-button
-            type="danger"
-            plain
-            :disabled="!canView"
-            :loading="cleaningByFilters"
-            @click="cleanupByFilters"
-          >
-            按当前筛选条件清理
+
+        <el-form-item class="filter-actions">
+          <el-button type="primary" :disabled="loading" @click="handleSearch">
+            <el-icon><Search /></el-icon>查询
           </el-button>
+          <el-button :disabled="loading" @click="resetFilters">重置</el-button>
+
+          <el-dropdown trigger="click" @command="handleMoreCommand">
+            <el-button :disabled="loading || settingsLoading" size="small">
+              <el-icon><MoreFilled /></el-icon>更多
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="settings" :disabled="!canView">保留天数设置</el-dropdown-item>
+                <el-dropdown-item
+                  command="cleanupRetention"
+                  divided
+                  :disabled="!canView || cleaningByRetention"
+                >
+                  按保留天数清理
+                </el-dropdown-item>
+                <el-dropdown-item command="cleanupFilters" :disabled="!canView || cleaningByFilters">
+                  按当前筛选条件清理
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </el-form-item>
       </el-form>
-
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="说明：日志记录“功能动作级”描述与提交的变更值（请求体/参数）；密码与令牌字段会自动排除。"
-      />
     </el-card>
 
     <el-card v-loading="loading">
       <template #header>
         <div class="card-header">
-          <span>日志列表</span>
-          <span class="hint">共 {{ total }} 条</span>
+          <div class="card-header-left">
+            <span>日志列表</span>
+            <span class="hint">共 {{ total }} 条</span>
+          </div>
+          <div class="header-actions">
+            <el-button size="small" @click="refresh" :loading="loading || settingsLoading">
+              <el-icon><Refresh /></el-icon>刷新
+            </el-button>
+            <el-button size="small" type="primary" @click="exportExcel" :loading="exporting">
+              <el-icon><Download /></el-icon>导出Excel
+            </el-button>
+          </div>
         </div>
       </template>
 
-      <el-table :data="items" size="small" stripe border style="width: 100%">
-        <el-table-column label="时间" width="170">
-          <template #default="{ row }">
-            {{ formatDateTime(row.occurred_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="username" label="用户" width="120" show-overflow-tooltip />
-        <el-table-column prop="user_role" label="角色" width="90" show-overflow-tooltip />
-        <el-table-column prop="ip" label="IP" width="130" show-overflow-tooltip />
-        <el-table-column prop="client" label="来源端" width="100" show-overflow-tooltip />
-        <el-table-column prop="module" label="模块" width="110" show-overflow-tooltip />
-        <el-table-column prop="action" label="动作" width="110" show-overflow-tooltip />
-        <el-table-column label="结果" width="80">
-          <template #default="{ row }">
-            <el-tag v-if="row.is_success" type="success">成功</el-tag>
-            <el-tag v-else type="danger">失败</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="operation_desc" label="可读描述" min-width="280" show-overflow-tooltip />
-        <el-table-column label="操作" width="80" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openDetail(row.id)">详情</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="table-wheel-area" @wheel.capture="handleTableWheel">
+        <el-table :data="items" size="small" stripe border style="width: 100%">
+          <el-table-column label="时间" width="170">
+            <template #default="{ row }">
+              {{ formatDateTime(row.occurred_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="username" label="用户" width="120" show-overflow-tooltip />
+          <el-table-column prop="user_role" label="角色" width="90" show-overflow-tooltip />
+          <el-table-column prop="ip" label="IP" width="130" show-overflow-tooltip />
+          <el-table-column prop="client" label="来源端" width="100" show-overflow-tooltip />
+          <el-table-column prop="module" label="模块" width="110" show-overflow-tooltip />
+          <el-table-column prop="action" label="动作" width="110" show-overflow-tooltip />
+          <el-table-column label="结果" width="80">
+            <template #default="{ row }">
+              <el-tag v-if="row.is_success" type="success">成功</el-tag>
+              <el-tag v-else type="danger">失败</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="operation_desc" label="可读描述" min-width="280" show-overflow-tooltip />
+          <el-table-column label="操作" width="80" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openDetail(row.id)">详情</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
-      <div class="pagination" v-if="total > pageSize">
-        <el-pagination
-          background
-          layout="prev, pager, next, jumper"
-          :page-size="pageSize"
-          :current-page="page"
-          :total="total"
-          @current-change="handlePageChange"
-        />
+        <div class="pagination" v-if="total > pageSize">
+          <el-pagination
+            background
+            layout="prev, pager, next, jumper"
+            :page-size="pageSize"
+            :current-page="page"
+            :total="total"
+            @current-change="handlePageChange"
+          />
+        </div>
       </div>
     </el-card>
 
@@ -202,13 +180,33 @@
         </el-collapse>
       </div>
     </el-drawer>
+
+    <el-dialog
+      v-model="settingsDialogVisible"
+      title="保留天数设置"
+      width="420px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="90px" size="small">
+        <el-form-item label="保留天数">
+          <el-input-number v-model="retentionDays" :min="1" :max="3650" />
+        </el-form-item>
+        <div class="dialog-hint">
+          后台会按保留天数定期清理过期日志（以服务端记录时间为准）。
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button size="small" @click="settingsDialogVisible = false">取消</el-button>
+        <el-button size="small" type="primary" :loading="savingSettings" @click="saveSettings">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download, Refresh, Search } from '@element-plus/icons-vue'
+import { Download, MoreFilled, Refresh, Search } from '@element-plus/icons-vue'
 import { operationLogsApi } from '@/api/operationLogs'
 import { useUserStore } from '@/stores/user'
 
@@ -218,6 +216,7 @@ const canView = computed(() => userStore.isAdmin)
 const loading = ref(false)
 const exporting = ref(false)
 const settingsLoading = ref(false)
+const savingSettings = ref(false)
 const cleaningByRetention = ref(false)
 const cleaningByFilters = ref(false)
 
@@ -242,6 +241,8 @@ const filters = ref({
 const detailVisible = ref(false)
 const detail = ref(null)
 
+const settingsDialogVisible = ref(false)
+
 const formatDateTime = (v) => {
   if (!v) return ''
   const d = new Date(v)
@@ -255,6 +256,49 @@ const prettyJson = (obj) => {
   } catch (e) {
     return String(obj ?? '')
   }
+}
+
+const isScrollableY = (el) => {
+  if (!el || !(el instanceof HTMLElement)) return false
+  const style = window.getComputedStyle(el)
+  const overflowY = style.overflowY
+  if (overflowY !== 'auto' && overflowY !== 'scroll') return false
+  return el.scrollHeight > el.clientHeight + 1
+}
+
+const findScrollableWithin = (startEl, stopEl) => {
+  let el = startEl instanceof Element ? startEl : null
+  while (el && el !== stopEl && el !== document.body) {
+    if (isScrollableY(el)) return el
+    el = el.parentElement
+  }
+  return null
+}
+
+const handleTableWheel = (e) => {
+  if (e.ctrlKey) return
+  const absX = Math.abs(e.deltaX || 0)
+  const absY = Math.abs(e.deltaY || 0)
+  if (absY <= absX) return
+
+  const currentTarget = e.currentTarget
+  if (!currentTarget || !(currentTarget instanceof HTMLElement)) return
+
+  const internalScrollable = findScrollableWithin(e.target, currentTarget)
+  if (internalScrollable) return
+
+  const scrollEl = currentTarget.closest('.layout-main')
+  if (!scrollEl) return
+
+  const maxTop = scrollEl.scrollHeight - scrollEl.clientHeight
+  if (maxTop <= 0) return
+
+  const prev = scrollEl.scrollTop
+  const next = Math.max(0, Math.min(maxTop, prev + e.deltaY))
+  if (next === prev) return
+
+  scrollEl.scrollTop = next
+  e.preventDefault()
 }
 
 const buildObjectText = (row) => {
@@ -338,26 +382,53 @@ const resetFilters = async () => {
   await handleSearch()
 }
 
+const handleMoreCommand = async (cmd) => {
+  if (cmd === 'settings') {
+    settingsDialogVisible.value = true
+    return
+  }
+  if (cmd === 'cleanupRetention') {
+    try {
+      await cleanupByRetention()
+    } catch (e) {
+      // ignore
+    }
+    return
+  }
+  if (cmd === 'cleanupFilters') {
+    try {
+      await cleanupByFilters()
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
 const saveSettings = async () => {
   if (!canView.value) return
-  settingsLoading.value = true
+  savingSettings.value = true
   try {
     await operationLogsApi.updateSettings({ retention_days: retentionDays.value })
     ElMessage.success('已保存')
+    settingsDialogVisible.value = false
   } catch (e) {
     ElMessage.error('保存失败')
   } finally {
-    settingsLoading.value = false
+    savingSettings.value = false
   }
 }
 
 const cleanupByRetention = async () => {
   if (!canView.value) return
-  await ElMessageBox.confirm(
-    `确认清理超过 ${retentionDays.value} 天的操作日志？`,
-    '提示',
-    { type: 'warning' },
-  )
+  try {
+    await ElMessageBox.confirm(
+      `确认清理超过 ${retentionDays.value} 天的操作日志？`,
+      '提示',
+      { type: 'warning' },
+    )
+  } catch (e) {
+    return
+  }
 
   cleaningByRetention.value = true
   try {
@@ -374,11 +445,15 @@ const cleanupByRetention = async () => {
 const cleanupByFilters = async () => {
   if (!canView.value) return
   const params = buildQueryParams()
-  await ElMessageBox.confirm(
-    '确认按当前筛选条件清理日志？此操作不可恢复。',
-    '提示',
-    { type: 'warning' },
-  )
+  try {
+    await ElMessageBox.confirm(
+      '确认按当前筛选条件清理日志？此操作不可恢复。',
+      '提示',
+      { type: 'warning' },
+    )
+  } catch (e) {
+    return
+  }
 
   cleaningByFilters.value = true
   try {
@@ -452,19 +527,52 @@ onMounted(refresh)
   display: flex;
   align-items: center;
   margin-bottom: 12px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.page-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+}
+.mb16 {
+  margin-bottom: 12px;
 }
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
+.card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .header-actions {
   display: flex;
   gap: 8px;
   align-items: center;
 }
+.filter-card :deep(.el-card__body) {
+  padding: 12px 12px 10px;
+}
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
 .filter-form :deep(.el-form-item) {
-  margin-bottom: 10px;
+  margin: 0;
+}
+.filter-form :deep(.el-form-item__label) {
+  padding-right: 6px;
+}
+.filter-actions {
+  margin-left: auto;
+}
+.table-wheel-area {
+  width: 100%;
 }
 .hint {
   color: #909399;
@@ -477,6 +585,12 @@ onMounted(refresh)
 }
 .detail {
   padding-bottom: 12px;
+}
+.dialog-hint {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 0 4px;
 }
 .json-view {
   background: #0b1021;

@@ -5,5 +5,5 @@ export const mobileClientLogsApi = {
   detail: (id) => request.get(`/api/mobile-logs/${id}`),
   getSettings: () => request.get('/api/mobile-logs/settings'),
   updateSettings: (data) => request.put('/api/mobile-logs/settings', data),
+  cleanup: (data) => request.post('/api/mobile-logs/cleanup', data),
 }
-

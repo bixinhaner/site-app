@@ -11,12 +11,14 @@ from app.models.mobile_client_log import MobileClientLog
 from app.models.user import User
 from app.schemas.mobile_client_log import (
     MobileClientLogBatchCreate,
+    MobileClientLogCleanupPayload,
     MobileClientLogDetail,
     MobileClientLogItem,
     MobileClientLogPageResponse,
     MobileClientLogSettings,
 )
 from app.services.mobile_client_log_service import (
+    cleanup_mobile_client_logs_by_filters,
     load_mobile_client_log_settings,
     save_mobile_client_log_settings,
 )
@@ -177,6 +179,34 @@ async def get_mobile_logs_page(
 
     items = [MobileClientLogItem.model_validate(r) for r in rows]
     return MobileClientLogPageResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.post("/mobile-logs/cleanup", response_model=dict)
+async def cleanup_mobile_logs(
+    payload: MobileClientLogCleanupPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_admin(current_user)
+
+    deleted_count = cleanup_mobile_client_logs_by_filters(
+        db,
+        retention_days=payload.retention_days,
+        keyword=payload.keyword,
+        level=payload.level,
+        user_id=payload.user_id,
+        username=payload.username,
+        device_id=payload.device_id,
+        route=payload.route,
+        tag=payload.tag,
+        app_version_code=payload.app_version_code,
+        api_status=payload.api_status,
+        api_url=payload.api_url,
+        date_from=payload.date_from,
+        date_to=payload.date_to,
+    )
+
+    return {"success": True, "deleted_count": deleted_count}
 
 
 @router.get("/mobile-logs/{log_id}", response_model=MobileClientLogDetail)
