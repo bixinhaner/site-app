@@ -13,26 +13,16 @@
       class="mb16"
     />
 
-    <el-card class="mb16">
-      <template #header>
-        <div class="card-header">
-          <span>筛选</span>
-          <div class="header-actions">
-            <el-button @click="refresh" :loading="loading">
-              <el-icon><Refresh /></el-icon>刷新
-            </el-button>
-          </div>
-        </div>
-      </template>
-
-      <el-form :inline="true" class="filter-form">
-        <el-form-item label="时间范围">
+    <el-card class="filter-card mb16">
+      <el-form :inline="true" class="filter-form" size="small">
+        <el-form-item label="时间">
           <el-date-picker
             v-model="timeRange"
             type="datetimerange"
             range-separator="至"
             start-placeholder="开始时间"
             end-placeholder="结束时间"
+            style="width: 360px"
             @change="handleSearch"
           />
         </el-form-item>
@@ -42,7 +32,7 @@
             v-model="filters.user_id"
             clearable
             placeholder="例如 1"
-            style="width: 140px"
+            style="width: 120px"
             @keyup.enter="handleSearch"
             @clear="handleSearch"
           />
@@ -53,7 +43,7 @@
             v-model="filters.route"
             clearable
             placeholder="pages/home/home"
-            style="width: 220px"
+            style="width: 200px"
             @keyup.enter="handleSearch"
             @clear="handleSearch"
           />
@@ -64,36 +54,33 @@
             v-model="filters.keyword"
             clearable
             placeholder="内容/位置/页面"
-            style="width: 320px"
+            style="width: 260px"
             @keyup.enter="handleSearch"
             @clear="handleSearch"
-          >
-            <template #append>
-              <el-button @click="handleSearch">
-                <el-icon><Search /></el-icon>
-              </el-button>
-            </template>
-          </el-input>
+          />
         </el-form-item>
 
-        <el-form-item>
+        <el-form-item class="filter-actions">
+          <el-button type="primary" :disabled="loading" @click="handleSearch">
+            <el-icon><Search /></el-icon>查询
+          </el-button>
           <el-button :disabled="loading" @click="resetFilters">重置</el-button>
         </el-form-item>
       </el-form>
-
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="说明：该页面展示移动端（UniApp）上报的 console 日志（uni.__log__），用于历史查询与排障。"
-      />
     </el-card>
 
     <el-card v-loading="loading">
       <template #header>
         <div class="card-header">
-          <span>日志列表</span>
-          <span class="hint">共 {{ total }} 条</span>
+          <div class="card-header-left">
+            <span>日志列表</span>
+            <span class="hint">共 {{ total }} 条</span>
+          </div>
+          <div class="header-actions">
+            <el-button size="small" @click="refresh" :loading="loading">
+              <el-icon><Refresh /></el-icon>刷新
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -283,14 +270,86 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.page {
+  padding: 24px;
+}
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.page-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+}
+.mb16 {
+  margin-bottom: 12px;
+}
+.mt12 {
+  margin-top: 12px;
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hint {
+  color: #909399;
+  font-size: 12px;
+}
+.filter-card :deep(.el-card__body) {
+  padding: 12px 12px 10px;
+}
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.filter-form :deep(.el-form-item) {
+  margin: 0;
+}
+.filter-form :deep(.el-form-item__label) {
+  padding-right: 6px;
+}
+.filter-actions {
+  margin-left: auto;
+}
+.pagination {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+.msg {
+  max-width: 100%;
+}
 .msg-main {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .msg-at {
   color: #6b7280;
   font-size: 12px;
   margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 .json-view {
   white-space: pre-wrap;
