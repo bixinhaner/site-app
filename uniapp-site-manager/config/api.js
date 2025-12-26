@@ -6,6 +6,7 @@
 import { env, log } from './env.js'
 
 const API_BASE_URL_STORAGE_KEY = 'api_base_url'
+const API_SERVER_KEY_STORAGE_KEY = 'api_server_key'
 
 export const API_SERVERS = [
   {
@@ -17,7 +18,7 @@ export const API_SERVERS = [
   {
     key: 'cn',
     name: 'China',
-    baseUrl: 'http://113.45.25.135',
+    baseUrl: 'http://113.45.25.135/api',
     flagIcon: '/static/flags/cn.svg',
   },
 ]
@@ -56,38 +57,98 @@ export const normalizeApiBaseUrl = (rawUrl) => {
   if (!url) return ''
 
   url = url.replace(/\/+$/, '')
-  url = url.replace(/\/api$/, '')
   url = url.replace(/\/+$/, '')
 
   return url
 }
 
+export const normalizeApiBaseUrlForMatch = (rawUrl) => {
+  let url = normalizeApiBaseUrl(rawUrl)
+  url = url.replace(/\/api$/, '')
+  url = url.replace(/\/+$/, '')
+  return url
+}
+
+const resolveServerByKey = (serverKey) => {
+  if (!serverKey) return null
+  return API_SERVERS.find((s) => s.key === serverKey) || null
+}
+
+const resolveServerByBaseUrlForMatch = (rawUrl) => {
+  const match = normalizeApiBaseUrlForMatch(rawUrl)
+  if (!match) return null
+  return API_SERVERS.find((s) => normalizeApiBaseUrlForMatch(s.baseUrl) === match) || null
+}
+
+export const getApiServerKey = () => {
+  const key = String(safeGetStorageSync(API_SERVER_KEY_STORAGE_KEY) || '').trim()
+  return key || DEFAULT_API_SERVER_KEY
+}
+
+export const setApiServerKey = (serverKey) => {
+  const key = String(serverKey || '').trim()
+  if (!key) {
+    safeRemoveStorageSync(API_SERVER_KEY_STORAGE_KEY)
+    return
+  }
+  safeSetStorageSync(API_SERVER_KEY_STORAGE_KEY, key)
+}
+
 export const getApiBaseUrl = () => {
+  // 优先使用已选择的 server key（避免 baseUrl 旧值导致路由不一致）
+  const storedKey = String(safeGetStorageSync(API_SERVER_KEY_STORAGE_KEY) || '').trim()
+  const serverByKey = resolveServerByKey(storedKey)
+  if (serverByKey?.baseUrl) {
+    const canonical = normalizeApiBaseUrl(serverByKey.baseUrl)
+    // 统一写回 baseUrl，便于调试与兼容历史逻辑
+    if (canonical) safeSetStorageSync(API_BASE_URL_STORAGE_KEY, canonical)
+    return canonical
+  }
+
+  // 兼容历史：仅存了 baseUrl 的情况
   const stored = normalizeApiBaseUrl(safeGetStorageSync(API_BASE_URL_STORAGE_KEY))
-  if (stored) return stored
+  if (stored) {
+    const matched = resolveServerByBaseUrlForMatch(stored)
+    if (matched?.baseUrl) {
+      const canonical = normalizeApiBaseUrl(matched.baseUrl)
+      // 记住 server key，并把 baseUrl 规范成当前 server 配置（例如 CN 需要 /api 前缀）
+      setApiServerKey(matched.key)
+      if (canonical && canonical !== stored) safeSetStorageSync(API_BASE_URL_STORAGE_KEY, canonical)
+      return canonical
+    }
+    return stored
+  }
 
   const defaultServer = API_SERVERS.find((s) => s.key === DEFAULT_API_SERVER_KEY) || API_SERVERS[0]
-  return normalizeApiBaseUrl(defaultServer?.baseUrl)
+  const canonical = normalizeApiBaseUrl(defaultServer?.baseUrl)
+  if (defaultServer?.key) setApiServerKey(defaultServer.key)
+  if (canonical) safeSetStorageSync(API_BASE_URL_STORAGE_KEY, canonical)
+  return canonical
 }
 
 export const setApiBaseUrl = (baseUrl) => {
   const normalized = normalizeApiBaseUrl(baseUrl)
   if (!normalized) {
     safeRemoveStorageSync(API_BASE_URL_STORAGE_KEY)
+    safeRemoveStorageSync(API_SERVER_KEY_STORAGE_KEY)
     return
   }
+  const matched = resolveServerByBaseUrlForMatch(normalized)
+  if (matched?.key) safeSetStorageSync(API_SERVER_KEY_STORAGE_KEY, matched.key)
   safeSetStorageSync(API_BASE_URL_STORAGE_KEY, normalized)
 }
 
 export const getCurrentApiServer = () => {
   const baseUrl = getApiBaseUrl()
-  const hit = API_SERVERS.find((s) => normalizeApiBaseUrl(s.baseUrl) === baseUrl)
+  const normalized = normalizeApiBaseUrlForMatch(baseUrl)
+  const hit = API_SERVERS.find((s) => normalizeApiBaseUrlForMatch(s.baseUrl) === normalized)
   return hit || API_SERVERS.find((s) => s.key === DEFAULT_API_SERVER_KEY) || API_SERVERS[0]
 }
 
 export const setCurrentApiServer = (serverKey) => {
   const hit = API_SERVERS.find((s) => s.key === serverKey)
   if (!hit) return
+  setApiServerKey(hit.key)
   setApiBaseUrl(hit.baseUrl)
 }
 
@@ -219,7 +280,10 @@ export const API_ENDPOINTS = {
 export const buildApiUrl = (endpoint) => {
   if (!endpoint) return API_CONFIG.BASE_URL
   if (String(endpoint).startsWith('http')) return endpoint
-  const url = `${API_CONFIG.BASE_URL}${endpoint}`
+  const baseUrl = normalizeApiBaseUrl(API_CONFIG.BASE_URL)
+  let path = String(endpoint || '')
+
+  const url = `${baseUrl}${path}`
   log('Building API URL:', url)
   return url
 }

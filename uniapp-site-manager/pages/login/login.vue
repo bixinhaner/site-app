@@ -92,7 +92,7 @@
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
 	import { env, getVersion } from '@/config/env.js'
-	import { API_SERVERS, getApiBaseUrl, setApiBaseUrl } from '@/config/api.js'
+		import { API_SERVERS, getApiBaseUrl, normalizeApiBaseUrlForMatch, setApiBaseUrl } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const logger = useLoggerStore()
@@ -106,11 +106,12 @@
 	const currentBaseUrl = ref(getApiBaseUrl())
 	const topActionsOffset = ref(16)
 	
-	const currentServer = computed(() => {
-		const baseUrl = currentBaseUrl.value
-		const hit = (API_SERVERS || []).find(s => s.baseUrl === baseUrl)
-		return hit || API_SERVERS[0]
-	})
+		const currentServer = computed(() => {
+			const baseUrl = currentBaseUrl.value
+			const normalized = normalizeApiBaseUrlForMatch(baseUrl)
+			const hit = (API_SERVERS || []).find(s => normalizeApiBaseUrlForMatch(s.baseUrl) === normalized)
+			return hit || API_SERVERS[0]
+		})
 	
 	const otherServers = computed(() => {
 		const currentKey = currentServer.value?.key
