@@ -32,6 +32,7 @@ from app.schemas.work_order import (
     WorkOrderItemResponse,
     WorkOrderStatusChangeRequest,
     WorkOrderReviewRequest,
+    WorkOrderOmcManualConfirmRequest,
     ItemReviewRequest,
     ReviewSummary,
     WorkOrderBatchOperation,
@@ -42,7 +43,9 @@ from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.work_order_sync import get_work_order_sync_service
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
-from app.services.omc_monitor import run_omc_check_for_work_order
+from app.services.omc_monitor import run_omc_check_for_work_order, advance_opening_work_orders_by_ever
+from app.services.omc_client import get_omc_manual_confirm_enabled
+from app.services.omc_state import get_bound_sns_for_site, upsert_omc_device_state
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -1527,6 +1530,12 @@ async def final_review(
                 run_omc_check_for_work_order(wo.id)
             except Exception as exc:  # pragma: no cover
                 print(f"[OMC] 审核后立即检查失败 work_order_id={wo.id}: {exc}")
+            # 若已存在“ever”达标（例如提前手工确认），尝试直接推进（不依赖 OMC 实时查询）
+            try:
+                db.flush()
+                advance_opening_work_orders_by_ever(db, wo.site_id)
+            except Exception as exc:  # pragma: no cover
+                print(f"[OMC] 基于 ever 推进失败 site_id={wo.site_id}: {exc}")
         # 审核通过时建立/追加档案快照
         try:
             if wo.inspection_id:
@@ -1574,6 +1583,105 @@ async def final_review(
     db.commit()
     _audit(db, "work_order", work_order_id, "final_review", current_user.id, from_status=old.value, to_status=wo.status.value, comments=req.comments)
     return {"message": "审核完成", "work_order": _enrich_work_order_response(db, wo)}
+
+
+@router.post("/{work_order_id}/omc/manual-confirm")
+async def manual_confirm_opening_omc_status(
+    work_order_id: str,
+    payload: WorkOrderOmcManualConfirmRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """开站设备在线/激活状态：手工确认。
+
+    仅在 OMC API 配置开启手工确认开关后可用。
+
+    - confirm_online: 标注该 SN 已上线
+    - confirm_activated: 标注该 SN 已激活（同时隐式标注已上线）
+    """
+    if current_user.role not in ["admin", "manager", "reviewer"]:
+        raise HTTPException(status_code=403, detail="没有权限进行手工确认")
+
+    if not get_omc_manual_confirm_enabled(db):
+        raise HTTPException(status_code=403, detail="手工确认功能未开启，请在 OMC API 配置中开启")
+
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    if wo.type != WorkOrderTypeEnum.OPENING_INSPECTION:
+        raise HTTPException(status_code=400, detail="仅开站工单支持手工确认设备状态")
+    if wo.status in (WorkOrderStatusEnum.REJECTED, WorkOrderStatusEnum.COMPLETED):
+        raise HTTPException(status_code=409, detail=f"当前工单状态不允许手工确认：{wo.status}")
+
+    sn = (payload.sn or "").strip()
+    if not sn:
+        raise HTTPException(status_code=400, detail="设备 SN 不能为空")
+
+    confirm_activated = bool(payload.confirm_activated)
+    confirm_online = bool(payload.confirm_online) or confirm_activated
+    if not confirm_online and not confirm_activated:
+        raise HTTPException(status_code=400, detail="请至少选择确认“已上线”或“已激活”")
+
+    # 校验：只能对当前站点已绑定的设备 SN 进行确认
+    bound_sns = get_bound_sns_for_site(db, wo.site_id)
+    if sn not in bound_sns:
+        raise HTTPException(status_code=400, detail="该设备 SN 未绑定到当前站点，无法确认")
+
+    old_status = wo.status
+
+    status_payload = {
+        "manual_confirm": True,
+        "work_order_id": wo.id,
+        "site_id": wo.site_id,
+        "operator_id": current_user.id,
+        "confirm_online": bool(confirm_online),
+        "confirm_activated": bool(confirm_activated),
+        "confirmed_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+    upsert_omc_device_state(
+        db=db,
+        sn=sn,
+        online_raw=True if confirm_online else None,
+        activated_raw=True if confirm_activated else None,
+        source="manual_confirm",
+        status_payload=status_payload,
+    )
+
+    # autoflush=False：需要显式 flush，保证后续汇总/推进能读到最新写入
+    db.flush()
+
+    advance_result = {}
+    try:
+        advance_result = advance_opening_work_orders_by_ever(db, wo.site_id)
+    except Exception as exc:  # pragma: no cover
+        print(f"[OMC] 手工确认后推进工单/站点失败 site_id={wo.site_id}: {exc}")
+
+    # 审计日志（记录手工确认行为，并捕获可能的状态变化）
+    audit = AuditEvent(
+        id=str(uuid.uuid4()),
+        resource_type="work_order",
+        resource_id=work_order_id,
+        action="omc_manual_confirm",
+        from_status=str(getattr(old_status, "value", old_status)),
+        to_status=str(getattr(wo.status, "value", wo.status)),
+        operator_id=current_user.id,
+        comments=None,
+        details={
+            "sn": sn,
+            "confirm_online": bool(confirm_online),
+            "confirm_activated": bool(confirm_activated),
+            "advance_result": advance_result,
+        },
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "message": "手工确认成功",
+        "work_order": _enrich_work_order_response(db, wo),
+        "advance_result": advance_result,
+    }
 
 
 def _update_work_order_result(db: Session, work_order_id: str):

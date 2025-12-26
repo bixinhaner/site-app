@@ -33,12 +33,14 @@ class OmcConfigPayload(BaseModel):
   username: str
   password: Optional[str] = None
   timeout_seconds: Optional[int] = 10
+  manual_confirm_enabled: Optional[bool] = False
 
 
 class OmcConfigResponse(BaseModel):
   base_url: Optional[str] = None
   username: Optional[str] = None
   timeout_seconds: int = 10
+  manual_confirm_enabled: bool = False
 
 
 class OmcTestResponse(BaseModel):
@@ -91,6 +93,7 @@ def _load_omc_config(db: Session) -> OmcConfigResponse:
     base_url=data.get("base_url"),
     username=data.get("username"),
     timeout_seconds=int(data.get("timeout_seconds") or 10),
+    manual_confirm_enabled=bool(data.get("manual_confirm_enabled") or False),
   )
 
 
@@ -125,6 +128,7 @@ async def update_omc_config(
   username = payload.username.strip()
   new_password = (payload.password or "").strip()
   timeout = payload.timeout_seconds or 10
+  manual_confirm_enabled = bool(payload.manual_confirm_enabled or False)
 
   row = db.query(SystemConfig).filter(SystemConfig.key == "omc_api").first()
   if not row:
@@ -133,6 +137,7 @@ async def update_omc_config(
       "username": username,
       "password": new_password,
       "timeout_seconds": timeout,
+      "manual_confirm_enabled": manual_confirm_enabled,
     }
     row = SystemConfig(key="omc_api", value=data)
     db.add(row)
@@ -141,6 +146,7 @@ async def update_omc_config(
     data["base_url"] = base_url
     data["username"] = username
     data["timeout_seconds"] = timeout
+    data["manual_confirm_enabled"] = manual_confirm_enabled
     # 只有在传入非空 password 时才更新存储的密码
     if new_password:
       data["password"] = new_password
@@ -154,6 +160,7 @@ async def update_omc_config(
     base_url=base_url,
     username=username,
     timeout_seconds=timeout,
+    manual_confirm_enabled=manual_confirm_enabled,
   )
 
 

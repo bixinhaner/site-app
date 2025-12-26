@@ -27,6 +27,8 @@ def upsert_omc_device_state(
         raise ValueError("sn is required")
 
     now = datetime.utcnow()
+    newly_online = False
+    newly_activated = False
 
     state: Optional[OmcDeviceState] = (
         db.query(OmcDeviceState).filter(OmcDeviceState.sn == sn).first()
@@ -43,18 +45,20 @@ def upsert_omc_device_state(
 
     if online_raw is not None:
         state.omc_online_raw = bool(online_raw)
-        # 里程碑：曾经在线
-        if online_raw and not state.ever_online:
-            state.ever_online = True
+        # 里程碑：曾经在线（只升不降）
+        if online_raw:
+            if not state.ever_online:
+                state.ever_online = True
             if not state.first_online_at:
                 state.first_online_at = now
                 newly_online = True
 
     if activated_raw is not None:
         state.omc_active_raw = bool(activated_raw)
-        # 里程碑：曾经激活
-        if activated_raw and not state.ever_activated:
-            state.ever_activated = True
+        # 里程碑：曾经激活（只升不降）
+        if activated_raw:
+            if not state.ever_activated:
+                state.ever_activated = True
             if not state.first_activated_at:
                 state.first_activated_at = now
                 newly_activated = True

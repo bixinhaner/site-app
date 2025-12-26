@@ -135,6 +135,20 @@ def load_omc_config(db: Session) -> Optional[dict]:
   }
 
 
+def get_omc_manual_confirm_enabled(db: Session) -> bool:
+  """
+  获取“开站设备状态手工确认”开关。
+
+  该开关存储在 system_config.key = "omc_api" 的 JSON 中，
+  与 OMC base_url/username/password 是否配置无关。
+  """
+  row = db.query(SystemConfig).filter(SystemConfig.key == "omc_api").first()
+  if not row or not row.value:
+    return False
+  data = row.value or {}
+  return bool(data.get("manual_confirm_enabled") or False)
+
+
 def get_omc_client(db: Session) -> Optional[OmcClient]:
   cfg = load_omc_config(db)
   if not cfg:

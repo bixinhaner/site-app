@@ -33,6 +33,7 @@ from app.models.opening_archive import SiteOpeningArchive
 from app.models.ssv_archive import SiteSSVArchive
 from app.services.omc_client import (
     get_omc_client,
+    get_omc_manual_confirm_enabled,
     parse_online_flag,
     parse_activated_flag,
     is_success_status_payload,
@@ -1289,7 +1290,12 @@ async def get_site_omc_devices(
         )
 
     if not devices:
-        return {"site_id": site_id, "checked_at": None, "devices": []}
+        return {
+            "site_id": site_id,
+            "checked_at": None,
+            "devices": [],
+            "manual_confirm_enabled": get_omc_manual_confirm_enabled(db),
+        }
 
     sns = [d["sn"] for d in devices]
 
@@ -1376,7 +1382,12 @@ async def get_site_omc_devices(
         d["ever_activated"] = bool(ever_info.get("ever_activated")) if ever_info else False
         d["ever_last_seen_at"] = ever_info.get("last_seen_at") if ever_info else None
 
-    return {"site_id": site_id, "checked_at": checked_at, "devices": devices}
+    return {
+        "site_id": site_id,
+        "checked_at": checked_at,
+        "devices": devices,
+        "manual_confirm_enabled": get_omc_manual_confirm_enabled(db),
+    }
 
 
 @router.get("/{site_id}/omc/devices/ever", response_model=SiteOmcEverSummary)

@@ -97,6 +97,30 @@
                 {{ formatDateTime(row.bound_at) }}
               </template>
             </el-table-column>
+            <el-table-column v-if="canShowManualConfirm" label="手工确认" width="220">
+              <template #default="{ row }">
+                <el-space>
+                  <el-button
+                    size="small"
+                    type="success"
+                    plain
+                    :disabled="manualConfirmSubmitting || row.ever_online"
+                    @click="manualConfirm(row, 'online')"
+                  >
+                    确认上线
+                  </el-button>
+                  <el-button
+                    size="small"
+                    type="warning"
+                    plain
+                    :disabled="manualConfirmSubmitting || row.ever_activated"
+                    @click="manualConfirm(row, 'activated')"
+                  >
+                    确认激活
+                  </el-button>
+                </el-space>
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
         <div class="section-header">
@@ -446,8 +470,10 @@ import request from '@/utils/request'
 import config from '../../config/env.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right } from '@element-plus/icons-vue'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
+const userStore = useUserStore()
 const loading = ref(false)
 const order = ref(null)
 const items = ref([])
@@ -474,6 +500,8 @@ const expandedLogDetails = ref({})
 const deviceStatusLoading = ref(false)
 const devices = ref([])
 const deviceStatusCheckedAt = ref(null)
+const manualConfirmEnabled = ref(false)
+const manualConfirmSubmitting = ref(false)
 
 const statuses = [
   { label: '待分配', value: 'PENDING' },
@@ -861,6 +889,54 @@ const everActiveText = (val) => (val ? '曾激活' : '未曾激活')
 const deviceRefreshCooldown = ref(0)
 let deviceCooldownTimer = null
 
+const canShowManualConfirm = computed(() => {
+  const role = userStore.user?.role
+  return manualConfirmEnabled.value && ['admin', 'manager', 'reviewer'].includes(role)
+})
+
+const manualConfirm = async (row, action) => {
+  const id = route.query.id
+  const sn = (row?.sn || '').toString().trim()
+  if (!id || !sn) return
+  if (!canShowManualConfirm.value) {
+    ElMessage.error('当前未开启手工确认功能或无权限操作')
+    return
+  }
+  if (manualConfirmSubmitting.value) return
+
+  const isActivate = action === 'activated'
+  const title = isActivate ? '确认已激活' : '确认已上线'
+  const msg = isActivate
+    ? `确认设备 SN ${sn} 已激活？该操作不可撤销，将同时确认“已上线”，并可能触发工单状态推进。`
+    : `确认设备 SN ${sn} 已上线？该操作不可撤销，且可能触发工单状态推进。`
+
+  try {
+    await ElMessageBox.confirm(msg, title, {
+      type: 'warning',
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+    })
+  } catch (e) {
+    return
+  }
+
+  try {
+    manualConfirmSubmitting.value = true
+    await request.post(`/api/work-orders/${id}/omc/manual-confirm`, {
+      sn,
+      confirm_online: !isActivate,
+      confirm_activated: isActivate,
+    })
+    ElMessage.success('手工确认成功')
+    await refresh()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '手工确认失败')
+  } finally {
+    manualConfirmSubmitting.value = false
+  }
+}
+
 const loadDeviceStatus = async (refresh = false) => {
   if (refresh && deviceRefreshCooldown.value > 0) {
     ElMessage.warning(`请等待 ${deviceRefreshCooldown.value}s 后再刷新设备状态`)
@@ -870,6 +946,7 @@ const loadDeviceStatus = async (refresh = false) => {
   if (!order.value || order.value.type !== 'opening_inspection') {
     devices.value = []
     deviceStatusCheckedAt.value = null
+    manualConfirmEnabled.value = false
     return
   }
   try {
@@ -879,6 +956,7 @@ const loadDeviceStatus = async (refresh = false) => {
     })
     devices.value = Array.isArray(res.devices) ? res.devices : []
     deviceStatusCheckedAt.value = res.checked_at || null
+    manualConfirmEnabled.value = !!res.manual_confirm_enabled
 
     if (refresh) {
       startDeviceCooldown()
@@ -886,6 +964,7 @@ const loadDeviceStatus = async (refresh = false) => {
   } catch (e) {
     console.error(e)
     ElMessage.error(e?.response?.data?.detail || '加载设备状态失败')
+    manualConfirmEnabled.value = false
   } finally {
     deviceStatusLoading.value = false
   }
@@ -938,7 +1017,8 @@ const getActionText = (action, source) => {
     // 绑定相关
     'bind': '绑定设备',
     'unbind': '解绑设备',
-    'rebind': '重新绑定设备'
+    'rebind': '重新绑定设备',
+    'omc_manual_confirm': '手工确认设备状态',
   }
   return actionMap[action] || action
 }

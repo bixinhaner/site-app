@@ -52,6 +52,16 @@
         <el-form-item label="超时时间(秒)">
           <el-input-number v-model="form.timeout_seconds" :min="3" :max="60" />
         </el-form-item>
+        <el-form-item label="手工确认开关">
+          <el-switch
+            v-model="form.manual_confirm_enabled"
+            active-text="开启"
+            inactive-text="关闭"
+          />
+          <div class="tip">
+            开启后，工单审核台将显示“手工确认已上线/已激活”按钮（适用于项目服务器无法与 OMC 通信的场景）。
+          </div>
+        </el-form-item>
       </el-form>
     </el-card>
   </div>
@@ -73,6 +83,7 @@ const form = ref({
   username: '',
   password: '',
   timeout_seconds: 10,
+  manual_confirm_enabled: false,
 })
 
 const isAdmin = computed(() => userStore.user?.role === 'admin')
@@ -85,6 +96,7 @@ const loadConfig = async () => {
     form.value.username = res.username || ''
     form.value.password = ''
     form.value.timeout_seconds = res.timeout_seconds || 10
+    form.value.manual_confirm_enabled = !!res.manual_confirm_enabled
   } catch (e) {
     console.error(e)
     ElMessage.error(e?.response?.data?.detail || '加载 OMC 配置失败')
@@ -105,6 +117,7 @@ const save = async () => {
       username: form.value.username,
       password: form.value.password || undefined,
       timeout_seconds: form.value.timeout_seconds || 10,
+      manual_confirm_enabled: !!form.value.manual_confirm_enabled,
     }
     await request.put('/api/omc/config', payload)
     ElMessage.success('保存成功')

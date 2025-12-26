@@ -89,6 +89,12 @@ class WorkOrderReviewRequest(BaseModel):
     require_recheck: Optional[bool] = False
 
 
+class WorkOrderOmcManualConfirmRequest(BaseModel):
+    sn: str
+    confirm_online: Optional[bool] = False
+    confirm_activated: Optional[bool] = False
+
+
 class ItemReviewRequest(BaseModel):
     action: str = Field(..., pattern="^(pass|fail|warning)$")
     comments: Optional[str] = None
