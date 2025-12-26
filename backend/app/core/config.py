@@ -8,6 +8,13 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "your-secret-key-change-in-production"
     DEBUG: bool = True
+
+    # 启动自检：默认管理员（仅首次创建；已存在不会重置密码）
+    AUTO_CREATE_ADMIN: bool = True
+    DEFAULT_ADMIN_USERNAME: str = "admin"
+    DEFAULT_ADMIN_PASSWORD: str = "admin123"
+    DEFAULT_ADMIN_EMAIL: str = "admin@example.com"
+    DEFAULT_ADMIN_FULL_NAME: str = "系统管理员"
     
     # 数据库配置
     DATABASE_URL: str = "sqlite:///./site_manager.db"  # 开发环境使用 SQLite

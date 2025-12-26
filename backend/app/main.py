@@ -2,9 +2,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+from sqlalchemy.exc import IntegrityError
+from email_validator import EmailNotValidError, validate_email
 
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, SessionLocal
+from app.core.security import get_password_hash
 from app.utils.stock_schema import ensure_stock_schema
 from app.utils.geocode_schema import ensure_geocode_schema
 from app.utils.site_schema import ensure_site_schema
@@ -25,6 +28,7 @@ from app.models import geocode_cache as _geocode_cache_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.models import app_version as _app_version_models  # noqa: F401
 from app.models import mobile_client_log as _mobile_client_log_models  # noqa: F401
+from app.models.user import User
 from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
 from app.api import operation_logs, app_version
@@ -114,6 +118,84 @@ app.include_router(omc_push.router, prefix="/api/omc", tags=["OMC状态上报告
 app.include_router(mock_omc_proxy.router, prefix="/api/mock-omc", tags=["Mock OMC"])
 app.include_router(system_backup.router, prefix="/api/system/backup", tags=["系统备份"])
 app.include_router(app_version.router, prefix="/api/app-version", tags=["App版本管理"])
+
+def _is_valid_email(value: str) -> bool:
+    try:
+        if not value:
+            return False
+        validate_email(value, check_deliverability=False)
+        return True
+    except EmailNotValidError:
+        return False
+
+
+def _ensure_default_admin_user() -> None:
+    """启动时确保存在默认管理员账号。
+
+    - 仅当用户不存在时创建；
+    - 已存在时不会重置密码；
+    - 若管理员邮箱不合法（会导致响应模型 EmailStr 校验 500），则自动修复。
+    """
+    if not settings.AUTO_CREATE_ADMIN:
+        return
+
+    username = (settings.DEFAULT_ADMIN_USERNAME or "admin").strip() or "admin"
+    password = settings.DEFAULT_ADMIN_PASSWORD or "admin123"
+    full_name = settings.DEFAULT_ADMIN_FULL_NAME or "系统管理员"
+    admin_email = settings.DEFAULT_ADMIN_EMAIL or "admin@example.com"
+    if not _is_valid_email(admin_email):
+        admin_email = "admin@example.com"
+
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.username == username).first()
+        if existing is None:
+            if password == "admin123":
+                print("⚠️ DEFAULT_ADMIN_PASSWORD 使用默认值 admin123，生产环境请在 backend/.env 中显式修改。")
+
+            user = User(
+                username=username,
+                email=admin_email,
+                hashed_password=get_password_hash(password),
+                full_name=full_name,
+                role="admin",
+                is_active=True,
+            )
+            db.add(user)
+            db.commit()
+            print(f"✅ 默认管理员已创建: {username}")
+            return
+
+        # 已存在：admin 不重置密码；仅修复不合法邮箱，避免响应模型校验失败导致 500
+        if existing.email and not _is_valid_email(existing.email):
+            target_email = admin_email
+            # 若默认邮箱已被其他用户占用，生成一个唯一兜底邮箱
+            occupied = (
+                db.query(User)
+                .filter(User.email == target_email, User.id != existing.id)
+                .first()
+            )
+            if occupied is not None:
+                target_email = f"{username}.{existing.id}@example.com"
+                if not _is_valid_email(target_email):
+                    target_email = "admin@example.com"
+
+            existing.email = target_email
+            db.commit()
+            print(f"⚠️ 已修复管理员邮箱为: {existing.email}")
+    except IntegrityError as e:
+        db.rollback()
+        print(f"❌ 默认管理员初始化失败（IntegrityError）: {e}")
+    except Exception as e:
+        db.rollback()
+        print(f"❌ 默认管理员初始化失败: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def _startup_ensure_default_admin():
+    _ensure_default_admin_user()
 
 
 @app.on_event("startup")
