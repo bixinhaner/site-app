@@ -1,6 +1,6 @@
 <template>
 	<view class="login-container">
-		<view v-if="showServerMenu" class="server-mask" @click="closeServerMenu"></view>
+		<view v-if="showMenuMask" class="server-mask" @click="closeAllMenus"></view>
 
 		<!-- 右上角：服务器切换 + 语言切换 -->
 		<view class="top-actions" :style="{ top: topActionsOffset + 'px' }">
@@ -21,9 +21,20 @@
 				</view>
 			</view>
 			
-			<text @click="toggleLanguage" class="language-btn">
-				{{ languageStore.currentLanguageName }}
-			</text>
+			<view class="language-wrapper">
+				<text class="language-btn" @click.stop="toggleLanguageMenu">{{ languageStore.currentLanguageName }}</text>
+
+				<view v-if="showLanguageMenu" class="language-menu" @click.stop>
+					<view
+						v-for="lang in otherLanguages"
+						:key="lang.code"
+						class="language-option"
+						@click="handleLanguageSelect(lang.code)"
+					>
+						<text>{{ lang.name }}</text>
+					</view>
+				</view>
+			</view>
 		</view>
 		
 		<view class="login-header">
@@ -103,6 +114,7 @@
 	const appVersion = ref(env.APP_VERSION)
 	const rememberPassword = ref(false)
 	const showServerMenu = ref(false)
+	const showLanguageMenu = ref(false)
 	const currentBaseUrl = ref(getApiBaseUrl())
 	const topActionsOffset = ref(16)
 	
@@ -117,6 +129,13 @@
 		const currentKey = currentServer.value?.key
 		return (API_SERVERS || []).filter(s => s.key !== currentKey)
 	})
+
+	const otherLanguages = computed(() => {
+		const currentLocale = languageStore.currentLocale
+		return (languageStore.supportedLocales || []).filter(l => l.code !== currentLocale)
+	})
+
+	const showMenuMask = computed(() => showServerMenu.value || showLanguageMenu.value)
 	
 	const loginForm = reactive({
 		username: '',
@@ -124,11 +143,22 @@
 	})
 	
 	const toggleServerMenu = () => {
+		showLanguageMenu.value = false
 		showServerMenu.value = !showServerMenu.value
 	}
 
 	const closeServerMenu = () => {
 		showServerMenu.value = false
+	}
+
+	const toggleLanguageMenu = () => {
+		closeServerMenu()
+		showLanguageMenu.value = !showLanguageMenu.value
+	}
+
+	const closeAllMenus = () => {
+		showServerMenu.value = false
+		showLanguageMenu.value = false
 	}
 	
 	const clearServerSensitiveStorage = () => {
@@ -179,7 +209,7 @@
 			const next = server.baseUrl
 			const current = currentBaseUrl.value
 			if (next === current) {
-				closeServerMenu()
+				closeAllMenus()
 				return
 			}
 			
@@ -189,7 +219,7 @@
 			setApiBaseUrl(next)
 			currentBaseUrl.value = getApiBaseUrl()
 			
-			closeServerMenu()
+			closeAllMenus()
 			
 			uni.showToast({
 				title: $t('messages.serverSwitched'),
@@ -197,7 +227,7 @@
 				duration: 2000
 			})
 		} catch (e) {
-			closeServerMenu()
+			closeAllMenus()
 		}
 	}
 	
@@ -369,10 +399,12 @@
 		}
 	}
 	
-	// 切换语言
-	const toggleLanguage = () => {
-		closeServerMenu()
-		languageStore.toggleLocale()
+	const handleLanguageSelect = async (locale) => {
+		try {
+			await languageStore.setLocale(locale)
+		} finally {
+			closeAllMenus()
+		}
 	}
 	
 	// 初始化语言和版本号
@@ -437,6 +469,37 @@
 		border: 1px solid rgba(255, 255, 255, 0.32);
 		transition: transform 0.15s ease, background-color 0.2s ease, opacity 0.2s ease;
 		
+		&:active {
+			transform: scale(0.96);
+			background: rgba(255, 255, 255, 0.28);
+		}
+	}
+
+	.language-wrapper { position: relative; }
+
+	.language-menu {
+		position: absolute;
+		top: 52px;
+		right: 0;
+		background: transparent;
+		border: none;
+		border-radius: 0;
+		backdrop-filter: none;
+	}
+
+	.language-option {
+		min-height: 44px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 16px;
+		border-radius: 22px;
+		background: rgba(255, 255, 255, 0.22);
+		border: 1px solid rgba(255, 255, 255, 0.32);
+		color: #fff;
+		font-size: 14px;
+		white-space: nowrap;
+
 		&:active {
 			transform: scale(0.96);
 			background: rgba(255, 255, 255, 0.28);
