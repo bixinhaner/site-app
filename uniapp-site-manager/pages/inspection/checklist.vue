@@ -241,11 +241,14 @@
 						</view>
 					</view>
 					
-					<!-- 照片部分 -->
-					<view class="modal-section" v-if="['photo', 'both'].includes(currentItem.required_type)">
-						<view class="section-header">
-							<text class="section-label">{{ $t('inspection.photos') }} ({{ currentItem.photos?.length || 0 }})</text>
-							<button class="add-photo-btn" @click="takePhoto">
+						<!-- 照片部分（字段未启用拍照时走“未关联照片”模式） -->
+						<view
+							class="modal-section"
+							v-if="currentItem.required_type === 'photo' || (currentItem.required_type === 'both' && !isFieldPhotoMode())"
+						>
+							<view class="section-header">
+								<text class="section-label">{{ $t('inspection.photos') }} ({{ currentItem.photos?.length || 0 }})</text>
+								<button class="add-photo-btn" @click="takePhoto">
 								<text class="btn-icon">📷</text>
 								<text class="btn-text">{{ $t('inspection.takePhoto') }}</text>
 							</button>
@@ -284,14 +287,26 @@
 								v-show="shouldShowField(dataField)"
 							>
 								<view class="form-label-row">
-									<text class="form-label">
-										{{ dataField.label }}
-										<text v-if="dataField.required" class="required-mark">*</text>
-									</text>
-									<!-- 显示约束提示 -->
-									<text class="form-hint-inline" v-if="dataField.min !== undefined || dataField.max !== undefined">
-										({{ dataField.min }} - {{ dataField.max }}{{ dataField.unit || '' }})
-									</text>
+									<view class="form-label-left">
+										<text class="form-label">
+											{{ dataField.label }}
+											<text v-if="dataField.required" class="required-mark">*</text>
+										</text>
+										<!-- 显示约束提示 -->
+										<text class="form-hint-inline" v-if="dataField.min !== undefined || dataField.max !== undefined">
+											({{ dataField.min }} - {{ dataField.max }}{{ dataField.unit || '' }})
+										</text>
+									</view>
+									<button
+										v-if="isFieldPhotoMode() && dataField.allow_photo === true"
+										class="field-photo-btn"
+										@click.stop="() => takePhotoForField(dataField)"
+									>
+										<text class="btn-icon">📷</text>
+										<text class="btn-text">{{ $t('inspection.takePhoto') }}</text>
+										<text v-if="dataField.photo_required" class="photo-required-mark">*</text>
+										<text class="btn-count" v-if="getPhotosForField(dataField).length > 0">{{ getPhotosForField(dataField).length }}</text>
+									</button>
 								</view>
 								
 								<view class="form-input-row">
@@ -449,16 +464,61 @@
 									⚠️ {{ dataField.error }}
 								</text>
 								
-								<!-- 字段帮助提示 -->
-								<text class="field-hint" v-if="getFieldHint(dataField)">
-									💡 {{ getFieldHint(dataField) }}
-								</text>
+									<!-- 字段帮助提示 -->
+									<text class="field-hint" v-if="getFieldHint(dataField)">
+										💡 {{ getFieldHint(dataField) }}
+									</text>
+
+									<!-- 字段照片（按 field_id 归属） -->
+									<view
+										class="photo-grid field-photo-grid"
+										v-if="isFieldPhotoMode() && getPhotosForField(dataField).length > 0"
+									>
+										<view
+											class="photo-item"
+											v-for="(photo, pIndex) in getPhotosForField(dataField)"
+											:key="photo.id || pIndex"
+											@click="previewPhoto(photo)"
+										>
+											<image class="photo-thumb" :src="buildImageUrl(photo.file_path)" mode="aspectFill"></image>
+											<view class="photo-info">
+												<text class="photo-time">{{ formatTime(photo.taken_at) }}</text>
+												<view class="photo-actions">
+													<text class="delete-photo" @click.stop="deletePhoto(photo)">🗑️</text>
+												</view>
+											</view>
+										</view>
+									</view>
+								</view>
 							</view>
-						</view>
-						
-						<!-- 验证结果 -->
-						<view class="validation-result" v-if="currentItem.validation_result">
-							<view class="result-header">
+
+							<!-- 未关联字段的历史照片（只读展示/可删除） -->
+							<view
+								class="unlinked-photos"
+								v-if="isFieldPhotoMode() && getUnlinkedPhotos().length > 0"
+							>
+								<text class="section-label">未关联照片 ({{ getUnlinkedPhotos().length }})</text>
+								<view class="photo-grid">
+									<view
+										class="photo-item"
+										v-for="(photo, pIndex) in getUnlinkedPhotos()"
+										:key="photo.id || pIndex"
+										@click="previewPhoto(photo)"
+									>
+										<image class="photo-thumb" :src="buildImageUrl(photo.file_path)" mode="aspectFill"></image>
+										<view class="photo-info">
+											<text class="photo-time">{{ formatTime(photo.taken_at) }}</text>
+											<view class="photo-actions">
+												<text class="delete-photo" @click.stop="deletePhoto(photo)">🗑️</text>
+											</view>
+										</view>
+									</view>
+								</view>
+							</view>
+							
+							<!-- 验证结果 -->
+							<view class="validation-result" v-if="currentItem.validation_result">
+								<view class="result-header">
 								<text class="result-title">{{ $t('inspection.validationResult') }}</text>
 								<text 
 									class="result-status"
@@ -530,20 +590,20 @@
 					</view>
 				</scroll-view>
 				
-				<view class="modal-actions">
-					<button class="cancel-btn" @click="showPreSubmitCheckModal = false">
-						{{ $t('inspection.backToCheck') }}
-					</button>
-					<button class="force-submit-btn" @click="forceSubmitWithWarning">
-						{{ $t('inspection.ignoreAndSubmit') }}
-					</button>
+					<view class="modal-actions">
+						<button class="cancel-btn" @click="showPreSubmitCheckModal = false">
+							{{ $t('inspection.backToCheck') }}
+						</button>
+						<button class="force-submit-btn" @click="forceSubmitWithWarning">
+							{{ $t('inspection.ignoreAndSubmit') }}
+						</button>
+					</view>
 				</view>
 			</view>
 		</view>
-	</view>
-</template>
+	</template>
 
-<script setup>
+	<script setup>
 	import { ref, computed, onMounted, watch, getCurrentInstance } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
@@ -813,7 +873,9 @@
 						unit: normalizeUnit(field.unit || ''),
 						placeholder,
 						value: '',
-						field_id: field.field_id ?? mapping?.fieldId
+						field_id: field.field_id ?? mapping?.fieldId,
+						allow_photo: field.allow_photo === true,
+						photo_required: field.photo_required === true
 					}
 
 					if (!field.field_id && mapping) dataField.legacyLabel = rawLabel
@@ -897,6 +959,8 @@
 					placeholder: buildPlaceholder(label),
 					value: '',
 					field_id: mapping?.fieldId,
+					allow_photo: false,
+					photo_required: false,
 					legacyLabel: String(legacyLabel || '').trim()
 				}
 				if (min !== undefined) field.min = min
@@ -1087,11 +1151,86 @@
 		}
 	}
 	
-	const closeItemModal = () => {
-		currentItem.value = null
+		const closeItemModal = () => {
+			currentItem.value = null
+		}
+
+		// 字段拍照模式：仅 required_type=both 且至少存在一个 allow_photo=true 的字段时启用
+		const isFieldPhotoMode = () => {
+			if (!currentItem.value) return false
+			if (currentItem.value.required_type !== 'both') return false
+			const fields = currentItem.value.dataFields || []
+			return fields.some(f => f?.allow_photo === true)
+		}
+
+		const getAllowedPhotoFieldIdSet = () => {
+			const set = new Set()
+			if (!currentItem.value) return set
+			const fields = currentItem.value.dataFields || []
+			fields.forEach(f => {
+				if (f?.allow_photo !== true) return
+				const fid = f?.field_id
+				if (fid === undefined || fid === null || String(fid).trim() === '') return
+				set.add(String(fid))
+			})
+			return set
+		}
+		
+		const getPhotosForField = (dataField) => {
+			if (!currentItem.value || !dataField) return []
+			const fid = dataField.field_id
+		if (fid === undefined || fid === null || String(fid).trim() === '') return []
+		const photos = currentItem.value.photos || []
+		return photos.filter(p => p && p.field_id !== undefined && p.field_id !== null && String(p.field_id) === String(fid))
 	}
-	
+
+	const getUnlinkedPhotos = () => {
+		if (!currentItem.value) return []
+		const photos = currentItem.value.photos || []
+		const known = new Set(
+			(currentItem.value.dataFields || [])
+				.map(f => f?.field_id)
+				.filter(v => v !== undefined && v !== null && String(v).trim() !== '')
+				.map(v => String(v))
+		)
+		return photos.filter(p => {
+			const fid = p?.field_id
+			if (fid === undefined || fid === null || String(fid).trim() === '') return true
+			return !known.has(String(fid))
+		})
+		}
+
+		const takePhotoForField = async (dataField) => {
+			if (dataField?.allow_photo !== true) {
+				uni.showToast({
+					title: '该字段禁止拍照',
+					icon: 'none',
+					duration: 2500
+				})
+				return
+			}
+
+			const fid = dataField?.field_id
+			if (fid === undefined || fid === null || String(fid).trim() === '') {
+				uni.showToast({
+					title: '该字段缺少字段ID，无法关联照片',
+				icon: 'none',
+				duration: 2500
+			})
+			return
+		}
+
+		await takePhotoInternal({
+			fieldId: String(fid),
+			fieldLabel: dataField?.label
+		})
+	}
+
 	const takePhoto = async () => {
+		await takePhotoInternal()
+	}
+
+	const takePhotoInternal = async ({ fieldId = null, fieldLabel = '' } = {}) => {
 		// 根据移动端配置决定是否允许本地上传
 		const { getAllowLocalPhotoUpload, getLocalUploadWatermarkWithGeo } = await import('@/utils/locationStrategy.js')
 		const allowAlbum = getAllowLocalPhotoUpload()
@@ -1168,13 +1307,17 @@
 											}
 										}
 										const watermarkTool = getWatermarkTool()
+										const wmFieldLabel = String(fieldLabel || '').trim()
+										const wmItemName = wmFieldLabel
+											? `${currentItem.value.item_name || $t('inspection.checkItem')} - ${wmFieldLabel}`
+											: (currentItem.value.item_name || $t('inspection.checkItem'))
 										finalImagePath = await watermarkTool.addWatermark(
 											finalImagePath,
 											gpsUsed.latitude,
 											gpsUsed.longitude,
 											gpsUsed.address,
 											userStore.userInfo?.username || $t('messages.unknownInspector'),
-											currentItem.value.item_name || $t('inspection.checkItem'),
+											wmItemName,
 											gpsUsed,
 											(!isCamera && !localUploadWatermarkWithGeo)
 												? { skipLocation: true, localUploadNote: $t('messages.localUploadPhotoWatermark') }
@@ -1201,6 +1344,7 @@
 									
 									// 创建照片对象
 									const photo = {
+										field_id: (fieldId !== undefined && fieldId !== null && String(fieldId).trim() !== '') ? String(fieldId) : undefined,
 										file_path: finalImagePath,
 										taken_at: new Date().toISOString(),
 										latitude: gpsUsed.latitude,
@@ -1639,7 +1783,16 @@
 		})
 	}
 	
-	const deletePhoto = async (index) => {
+	const deletePhoto = async (photoOrIndex) => {
+		if (!currentItem.value || !currentItem.value.photos || currentItem.value.photos.length === 0) return
+
+		const index = (typeof photoOrIndex === 'number')
+			? photoOrIndex
+			: currentItem.value.photos.findIndex(p =>
+				(photoOrIndex?.id && p?.id && p.id === photoOrIndex.id) || p === photoOrIndex
+			)
+		if (index < 0) return
+
 		const photo = currentItem.value.photos[index]
 		
 		uni.showModal({
@@ -1882,8 +2035,8 @@
 			console.error('清除自动保存数据失败:', e)
 		}
 	}
-	
-	const saveCurrentItem = async () => {
+		
+		const saveCurrentItem = async () => {
 		// 设备级检查项必须先绑定设备，防止误保存
 		if (isDeviceLevelItem(currentItem.value) && !currentItem.value?.equipment_sn) {
 			uni.showModal({
@@ -1921,25 +2074,46 @@
 						return true
 					})
 			
-			// 确定状态
-			let status = 'pending'
-			const hasRequiredPhotos = currentItem.value.required_type === 'data' || 
-									 (currentItem.value.photos && currentItem.value.photos.length > 0)
-			const hasRequiredData = currentItem.value.required_type === 'photo' || 
-								   dataValue.length > 0
-			
-			if (currentItem.value.required_type === 'both') {
-				if (hasRequiredPhotos && hasRequiredData) {
-					status = currentItem.value.validation_result?.valid !== false ? 'completed' : 'failed'
-				} else {
-					status = 'in_progress'
+				// 确定状态
+				let status = 'pending'
+				const reqType = currentItem.value.required_type
+
+				let hasRequiredPhotos = reqType === 'data' ||
+					(currentItem.value.photos && currentItem.value.photos.length > 0)
+				let hasRequiredData = reqType === 'photo' || dataValue.length > 0
+
+				if (reqType === 'both') {
+					hasRequiredData = dataValue.length > 0
+
+					// both + 字段拍照模式：按 allow_photo / photo_required 判断
+					if (isFieldPhotoMode()) {
+						const visibleRequiredPhotoFields = (currentItem.value.dataFields || [])
+							.filter(f => f?.allow_photo === true && f?.photo_required === true && shouldShowField(f))
+
+						if (visibleRequiredPhotoFields.length > 0) {
+							hasRequiredPhotos = visibleRequiredPhotoFields.every(f => getPhotosForField(f).length > 0)
+						} else {
+							const allowedPhotoFields = (currentItem.value.dataFields || []).filter(f => f?.allow_photo === true)
+							const linkedTotal = allowedPhotoFields.reduce((sum, f) => sum + getPhotosForField(f).length, 0)
+							hasRequiredPhotos = linkedTotal > 0
+						}
+					} else {
+						// both 但字段未启用拍照：走“未关联照片”模式
+						hasRequiredPhotos = currentItem.value.photos && currentItem.value.photos.length > 0
+					}
+
+					if (hasRequiredPhotos && hasRequiredData) {
+						status = currentItem.value.validation_result?.valid !== false ? 'completed' : 'failed'
+					} else {
+						status = 'in_progress'
+					}
+				} else if (reqType === 'photo') {
+					status = hasRequiredPhotos ? 'completed' : 'pending'
+				} else if (reqType === 'data') {
+					status = hasRequiredData
+						? (currentItem.value.validation_result?.valid !== false ? 'completed' : 'failed')
+						: 'pending'
 				}
-			} else if (currentItem.value.required_type === 'photo') {
-				status = hasRequiredPhotos ? 'completed' : 'pending'
-			} else if (currentItem.value.required_type === 'data') {
-				status = hasRequiredData ? 
-					(currentItem.value.validation_result?.valid !== false ? 'completed' : 'failed') : 'pending'
-			}
 			
 			// 更新检查项
 			const updateData = {
@@ -1955,10 +2129,13 @@
 				console.log('开始上传照片，照片数量:', currentItem.value.photos.length)
 				uni.showLoading({ title: $t('messages.uploadingPhoto') })
 				
-				try {
-					for (let i = 0; i < currentItem.value.photos.length; i++) {
-						const photo = currentItem.value.photos[i]
-						console.log('检查照片路径:', photo.file_path)
+					try {
+						const fieldPhotoMode = isFieldPhotoMode()
+						const allowedPhotoFieldIdSet = fieldPhotoMode ? getAllowedPhotoFieldIdSet() : new Set()
+
+						for (let i = 0; i < currentItem.value.photos.length; i++) {
+							const photo = currentItem.value.photos[i]
+							console.log('检查照片路径:', photo.file_path)
 						
 						// 跳过已上传的照片（有photo.id或已是服务器路径）
 						if (
@@ -1983,12 +2160,24 @@
 								has_watermark: photo.has_watermark || false
 							}
 
-							if (photo.local_upload_without_geo) {
-								photoData.local_upload_without_geo = true
-							}
-							
-							// 只在有效时添加GPS相关字段
-							if (photo.latitude !== undefined && photo.latitude !== null) {
+								if (photo.local_upload_without_geo) {
+									photoData.local_upload_without_geo = true
+								}
+
+								// 字段级照片：仅在“字段拍照模式”下才允许传 field_id（且必须属于 allow_photo=true 的字段）
+								if (fieldPhotoMode) {
+									const fidStr = (photo.field_id !== undefined && photo.field_id !== null) ? String(photo.field_id).trim() : ''
+									if (!fidStr) {
+										throw new Error('字段照片缺少field_id，无法上传')
+									}
+									if (!allowedPhotoFieldIdSet.has(fidStr)) {
+										throw new Error('field_id无效或该字段禁止拍照')
+									}
+									photoData.field_id = fidStr
+								}
+								
+								// 只在有效时添加GPS相关字段
+								if (photo.latitude !== undefined && photo.latitude !== null) {
 								photoData.gps_latitude = photo.latitude
 							}
 							if (photo.longitude !== undefined && photo.longitude !== null) {
@@ -3207,6 +3396,55 @@
 		border: none;
 		border-radius: 22rpx;
 		font-size: 26rpx;
+	}
+
+	.form-label-left {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 12rpx;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.field-photo-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 10rpx;
+		padding: 0 18rpx;
+		min-height: 64rpx;
+		background: rgba(var(--color-primary-rgb), 0.08);
+		color: var(--color-primary);
+		border: 2rpx solid rgba(var(--color-primary-rgb), 0.25);
+		border-radius: 16rpx;
+		font-size: 24rpx;
+	}
+
+	.field-photo-btn .btn-count {
+		margin-left: 4rpx;
+		padding: 0 10rpx;
+		min-width: 32rpx;
+		height: 32rpx;
+		line-height: 32rpx;
+		text-align: center;
+		border-radius: 16rpx;
+		background: var(--color-primary);
+		color: #fff;
+		font-size: 22rpx;
+	}
+
+	.field-photo-grid {
+		margin-top: 10rpx;
+	}
+
+	.unlinked-photos {
+		margin-top: 24rpx;
+	}
+
+	.photo-required-mark {
+		color: #ff4757;
+		margin-left: 2rpx;
+		font-weight: bold;
 	}
 	
 	.info-grid {

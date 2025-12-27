@@ -132,6 +132,9 @@
         </div>
         <el-table :data="inspection.photos || []" size="small" stripe>
           <el-table-column prop="original_name" label="文件名" min-width="200" />
+          <el-table-column label="所属字段" min-width="180">
+            <template #default="{ row }">{{ resolvePhotoFieldLabel(row) }}</template>
+          </el-table-column>
           <el-table-column prop="taken_at" label="拍摄时间" width="180">
             <template #default="{ row }">{{ formatDateTime(row.taken_at) }}</template>
           </el-table-column>
@@ -208,6 +211,17 @@ const doReview = async (action) => {
 }
 
 const formatDateTime = (val) => val ? new Date(val).toLocaleString() : '-'
+
+const resolvePhotoFieldLabel = (photo) => {
+  const checkItemId = photo?.check_item_id
+  const fieldId = photo?.field_id
+  if (!checkItemId) return '-'
+  if (!fieldId) return '未关联'
+  const item = allItems.value.find(it => it.id === checkItemId)
+  const fields = item?.fields || []
+  const field = fields.find(f => String(f?.field_id) === String(fieldId))
+  return field?.label || String(fieldId)
+}
 
 const copyToClipboard = (text) => {
   navigator.clipboard.writeText(text).then(() => {

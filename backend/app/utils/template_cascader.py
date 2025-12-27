@@ -165,6 +165,17 @@ def update_field_configs(old_fields: List[Dict], new_fields: List[Dict]) -> List
             
             if 'default_value' in new_field:
                 updated_field['default_value'] = new_field['default_value']
+
+            # 字段级照片配置（非结构性变更）
+            if 'allow_photo' in new_field:
+                updated_field['allow_photo'] = bool(new_field.get('allow_photo'))
+                # 禁止拍照时，必拍也应一并关闭
+                if not updated_field['allow_photo']:
+                    updated_field['photo_required'] = False
+
+            if 'photo_required' in new_field:
+                # 仅在允许拍照时才允许必拍
+                updated_field['photo_required'] = bool(new_field.get('photo_required')) if bool(updated_field.get('allow_photo')) else False
             
             # required 从 true 改为 false 允许（放宽限制）
             old_required = old_field.get('required', False)

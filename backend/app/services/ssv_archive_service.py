@@ -106,6 +106,7 @@ def _build_snapshot(db: Session, inspection: SiteInspection, template: Inspectio
         p_list = [
             {
                 "id": p.id,
+                "field_id": getattr(p, "field_id", None),
                 "file_path": p.file_path,
                 "file_size": p.file_size,
                 "mime_type": p.mime_type,

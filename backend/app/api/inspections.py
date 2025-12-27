@@ -51,6 +51,151 @@ def _ensure_surveyor_inspection_type(db: Session, u, inspection: SiteInspection)
         if not wo or wo.type != WorkOrderTypeEnum.SITE_SURVEY:
             raise HTTPException(status_code=403, detail="仅可操作勘察检查")
 
+def _truthy(v) -> bool:
+    if v is True:
+        return True
+    if v is False or v is None:
+        return False
+    if isinstance(v, (int, float)):
+        return v == 1
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes", "y")
+    return False
+
+
+def _coerce_float(v) -> Optional[float]:
+    try:
+        if v is None or v == "":
+            return None
+        return float(v)
+    except Exception:
+        return None
+
+
+def _eval_dependency_condition(value, condition: Optional[dict]) -> bool:
+    """评估字段依赖条件（与 UniApp 端 field-dependency.js 行为保持一致的子集）。"""
+    if not condition or not isinstance(condition, dict):
+        return True
+
+    operator = condition.get("operator")
+    cond_value = condition.get("value")
+
+    if operator in ("==", "equals"):
+        a = _coerce_float(value)
+        b = _coerce_float(cond_value)
+        if a is not None and b is not None:
+            return a == b
+        return str(value) == str(cond_value)
+    if operator in ("===", "strict_equals"):
+        return type(value) is type(cond_value) and value == cond_value
+    if operator in ("!=", "not_equals"):
+        a = _coerce_float(value)
+        b = _coerce_float(cond_value)
+        if a is not None and b is not None:
+            return a != b
+        return str(value) != str(cond_value)
+    if operator in (">", "greater_than"):
+        a = _coerce_float(value); b = _coerce_float(cond_value)
+        return a is not None and b is not None and a > b
+    if operator in (">=", "greater_or_equal"):
+        a = _coerce_float(value); b = _coerce_float(cond_value)
+        return a is not None and b is not None and a >= b
+    if operator in ("<", "less_than"):
+        a = _coerce_float(value); b = _coerce_float(cond_value)
+        return a is not None and b is not None and a < b
+    if operator in ("<=", "less_or_equal"):
+        a = _coerce_float(value); b = _coerce_float(cond_value)
+        return a is not None and b is not None and a <= b
+    if operator in ("in", "includes"):
+        return isinstance(cond_value, list) and value in cond_value
+    if operator in ("not_in", "not_includes"):
+        return not isinstance(cond_value, list) or value not in cond_value
+    if operator == "contains":
+        if isinstance(value, list):
+            return cond_value in value
+        return str(cond_value) in str(value)
+    if operator == "not_contains":
+        if isinstance(value, list):
+            return cond_value not in value
+        return str(cond_value) not in str(value)
+    if operator == "empty":
+        return not value or value == "" or (isinstance(value, list) and len(value) == 0)
+    if operator == "not_empty":
+        return bool(value) and value != "" and (not isinstance(value, list) or len(value) > 0)
+    if operator == "true":
+        return value is True or value == "true"
+    if operator == "false":
+        return value is False or value == "false"
+
+    print(f"WARNING: 未知的依赖条件操作符: {operator}")
+    return False
+
+
+def _is_field_visible(field: dict, field_values: dict) -> bool:
+    """根据字段依赖判断字段是否可见（与 UniApp 端 shouldShowField + processFieldDependencies 保持一致）。"""
+    hidden = bool(field.get("hidden", False))
+    deps = field.get("dependencies")
+    if isinstance(deps, list):
+        for dep in deps:
+            if not isinstance(dep, dict):
+                continue
+            if str(dep.get("type") or "").lower() != "visibility":
+                continue
+            source_field = dep.get("source_field")
+            source_value = field_values.get(source_field)
+            condition_met = _eval_dependency_condition(source_value, dep.get("condition") if isinstance(dep.get("condition"), dict) else None)
+            if condition_met:
+                effect = dep.get("effect") if isinstance(dep.get("effect"), dict) else {}
+                visible = effect.get("visible", True)
+                hidden = not bool(visible)
+            else:
+                # removeDependencyEffect: visibility -> hidden = false
+                hidden = False
+    return not hidden
+
+
+def _build_field_values_from_data_value(data_value) -> dict:
+    values = {}
+    if isinstance(data_value, dict):
+        for k, v in data_value.items():
+            values[str(k)] = v
+        return values
+    if not isinstance(data_value, list):
+        return values
+    for dv in data_value:
+        d = dv.dict() if hasattr(dv, "dict") else (dv or {})
+        if not isinstance(d, dict):
+            continue
+        raw_name = d.get("field_name") or d.get("field_id") or d.get("key") or d.get("field") or d.get("name")
+        if not raw_name:
+            continue
+        values[str(raw_name)] = d.get("value")
+    return values
+
+
+def _extract_photo_field_rules(fields) -> tuple[set, set, dict, dict]:
+    """从检查项字段配置提取拍照规则：允许拍照字段、必拍字段、label 映射、字段配置映射。"""
+    allowed: set = set()
+    required: set = set()
+    labels: dict = {}
+    by_id: dict = {}
+    if not isinstance(fields, list):
+        return allowed, required, labels, by_id
+    for f in fields:
+        if not isinstance(f, dict):
+            continue
+        fid = str(f.get("field_id") or "").strip()
+        if not fid:
+            continue
+        by_id[fid] = f
+        labels[fid] = str(f.get("label") or fid)
+        allow_photo = _truthy(f.get("allow_photo"))
+        if allow_photo:
+            allowed.add(fid)
+            if _truthy(f.get("photo_required")):
+                required.add(fid)
+    return allowed, required, labels, by_id
+
 
 def _touch_check_item_and_clear_review(check_item: InspectionCheckItem, now: datetime) -> bool:
     """检查项内容有变更时：更新时间，并清空该检查项的审核结果（若已审核过）。
@@ -672,6 +817,7 @@ async def upload_inspection_photo(
     inspection_id: str,
     file: UploadFile = File(...),
     check_item_id: Optional[str] = Form(None),
+    field_id: Optional[str] = Form(None),
     gps_latitude: float = Form(0),
     gps_longitude: float = Form(0),
     gps_accuracy: Optional[float] = Form(None),
@@ -687,6 +833,7 @@ async def upload_inspection_photo(
     print(f"DEBUG: 照片上传接口调用")
     print(f"  inspection_id: {inspection_id}")
     print(f"  check_item_id: {check_item_id} (type: {type(check_item_id)})")
+    print(f"  field_id: {field_id} (type: {type(field_id)})")
     print(f"  gps_latitude: {gps_latitude} (type: {type(gps_latitude)})")
     print(f"  gps_longitude: {gps_longitude} (type: {type(gps_longitude)})")
     print(f"  gps_accuracy: {gps_accuracy} (type: {type(gps_accuracy)})")
@@ -742,8 +889,49 @@ async def upload_inspection_photo(
         InspectionCheckItem.id == check_item_id,
         InspectionCheckItem.inspection_id == inspection_id
     ).first()
-    if check_item:
-        _touch_check_item_and_clear_review(check_item, datetime.utcnow())
+    if not check_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="检查项不存在"
+        )
+
+    # 字段级照片归属：按字段 allow_photo 控制
+    # - 若该检查项存在 allow_photo=True 的字段，则照片必须带 field_id 且必须属于“允许拍照”的字段集合
+    # - 若不存在任何 allow_photo=True 字段，则走“未关联照片”模式（允许上传但不允许传入 field_id）
+    normalized_field_id: Optional[str] = None
+    allowed_field_id_set = set()
+    # 字段拍照仅对 required_type=both 生效（字段来源于 dataFields）
+    if str(getattr(check_item, "required_type", None) or "") == "both":
+        if isinstance(check_item.fields, list) and check_item.fields:
+            for f in check_item.fields:
+                if not isinstance(f, dict):
+                    continue
+                fid_str = str(f.get("field_id") or "").strip()
+                if not fid_str:
+                    continue
+                if _truthy(f.get("allow_photo")):
+                    allowed_field_id_set.add(fid_str)
+
+    if allowed_field_id_set:
+        if not field_id or str(field_id).strip() == "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="field_id 不能为空，照片必须关联到允许拍照的检查字段"
+            )
+        normalized_field_id = str(field_id).strip()
+        if normalized_field_id not in allowed_field_id_set:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="field_id 无效或该字段禁止拍照"
+            )
+    else:
+        if field_id and str(field_id).strip() != "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该检查项未启用字段拍照，请勿传入field_id"
+            )
+
+    _touch_check_item_and_clear_review(check_item, datetime.utcnow())
     
     # 验证文件类型
     if not file.content_type.startswith("image/"):
@@ -762,10 +950,15 @@ async def upload_inspection_photo(
     # 执行照片替换逻辑（仅在明确指定时）
     if should_replace and check_item_id:
         # 删除同一检查项的已有照片
-        existing_photos = db.query(InspectionPhoto).filter(
+        existing_photos_query = db.query(InspectionPhoto).filter(
             InspectionPhoto.inspection_id == inspection_id,
             InspectionPhoto.check_item_id == check_item_id
-        ).all()
+        )
+        # 字段级：仅替换同一字段下的照片；无字段配置时保持历史行为（整项替换）
+        if normalized_field_id is not None:
+            existing_photos_query = existing_photos_query.filter(InspectionPhoto.field_id == normalized_field_id)
+
+        existing_photos = existing_photos_query.all()
         
         # 删除旧照片文件和数据库记录
         for old_photo in existing_photos:
@@ -823,6 +1016,7 @@ async def upload_inspection_photo(
         id=str(uuid.uuid4()),
         inspection_id=inspection_id,
         check_item_id=check_item_id,
+        field_id=normalized_field_id,
         original_name=file.filename,
         file_path=watermarked_path,
         file_size=file.size,
@@ -1037,6 +1231,7 @@ async def batch_inspection_photo_operations(
     - file_data: base64编码的文件数据 (replace/add时必需)
     - filename: 文件名 (replace/add时必需)
     - check_item_id: 检查项ID (add时必需)
+    - field_id: 字段ID (add时可选；若该检查项存在fields则必需)
     - gps_latitude, gps_longitude, gps_accuracy: GPS信息 (replace/add时可选)
     - has_watermark: 是否已有水印 (replace/add时可选)
     """
@@ -1185,7 +1380,47 @@ async def batch_inspection_photo_operations(
                     results.append({"index": i, "action": "add", "success": False, "error": "缺少file_data或check_item_id"})
                     continue
 
-                affected_check_item_ids.add(operation.get("check_item_id"))
+                check_item_id = operation.get("check_item_id")
+
+                # 校验检查项存在且属于该检查
+                check_item = db.query(InspectionCheckItem).filter(
+                    InspectionCheckItem.id == check_item_id,
+                    InspectionCheckItem.inspection_id == inspection_id
+                ).first()
+                if not check_item:
+                    results.append({"index": i, "action": "add", "success": False, "error": "检查项不存在"})
+                    continue
+
+                # 字段级校验：按字段 allow_photo 控制
+                normalized_field_id: Optional[str] = None
+                allowed_field_id_set = set()
+                # 字段拍照仅对 required_type=both 生效（字段来源于 dataFields）
+                if str(getattr(check_item, "required_type", None) or "") == "both":
+                    if isinstance(check_item.fields, list) and check_item.fields:
+                        for f in check_item.fields:
+                            if not isinstance(f, dict):
+                                continue
+                            fid_str = str(f.get("field_id") or "").strip()
+                            if not fid_str:
+                                continue
+                            if _truthy(f.get("allow_photo")):
+                                allowed_field_id_set.add(fid_str)
+
+                raw_field_id = operation.get("field_id")
+                if allowed_field_id_set:
+                    if not raw_field_id or str(raw_field_id).strip() == "":
+                        results.append({"index": i, "action": "add", "success": False, "error": "缺少field_id"})
+                        continue
+                    normalized_field_id = str(raw_field_id).strip()
+                    if normalized_field_id not in allowed_field_id_set:
+                        results.append({"index": i, "action": "add", "success": False, "error": "field_id无效或字段禁止拍照"})
+                        continue
+                else:
+                    if raw_field_id and str(raw_field_id).strip() != "":
+                        results.append({"index": i, "action": "add", "success": False, "error": "该检查项未启用字段拍照，不能指定field_id"})
+                        continue
+
+                affected_check_item_ids.add(check_item_id)
                 
                 # 处理文件数据
                 try:
@@ -1239,7 +1474,8 @@ async def batch_inspection_photo_operations(
                     new_photo = InspectionPhoto(
                         id=str(uuid.uuid4()),
                         inspection_id=inspection_id,
-                        check_item_id=operation["check_item_id"],
+                        check_item_id=check_item_id,
+                        field_id=normalized_field_id,
                         original_name=filename,
                         file_path=watermarked_path,
                         file_size=len(file_data),
@@ -1328,16 +1564,20 @@ async def cleanup_duplicate_inspection_photos(
     # 获取所有照片，按检查项分组
     photos = query.order_by(InspectionPhoto.created_at.desc()).all()
     
-    # 按检查项分组
+    # 按检查项 + 字段分组（字段级照片允许同一检查项下多组同时存在）
     photos_by_item = defaultdict(list)
     for photo in photos:
-        key = photo.check_item_id or "inspection_level"
+        key = (
+            photo.check_item_id or "inspection_level",
+            getattr(photo, "field_id", None) or "__unlinked__",
+        )
         photos_by_item[key].append(photo)
     
     deleted_count = 0
     kept_count = 0
+    affected_check_item_ids = set()
     
-    for item_key, item_photos in photos_by_item.items():
+    for (item_id, field_id_key), item_photos in photos_by_item.items():
         if len(item_photos) <= 1:
             kept_count += len(item_photos)
             continue
@@ -1354,20 +1594,25 @@ async def cleanup_duplicate_inspection_photos(
                 # 删除数据库记录
                 db.delete(old_photo)
                 deleted_count += 1
-                print(f"清理累积检查照片: {old_photo.id} (检查项: {item_key})")
+                print(f"清理累积检查照片: {old_photo.id} (检查项: {item_id}, 字段: {field_id_key})")
             except Exception as e:
                 print(f"清理检查照片失败 {old_photo.id}: {e}")
         
         # 照片删除属于检查项内容变更：触发对应检查项回到待审核（仅清空该项，不影响其他项）
-        if item_key and item_key != "inspection_level" and photos_to_delete:
+        if item_id and item_id != "inspection_level" and photos_to_delete:
+            affected_check_item_ids.add(item_id)
+
+        kept_count += 1  # 保留的最新照片
+
+    if affected_check_item_ids:
+        now = datetime.utcnow()
+        for cid in affected_check_item_ids:
             check_item = db.query(InspectionCheckItem).filter(
-                InspectionCheckItem.id == item_key,
+                InspectionCheckItem.id == cid,
                 InspectionCheckItem.inspection_id == inspection_id
             ).first()
             if check_item:
-                _touch_check_item_and_clear_review(check_item, datetime.utcnow())
-
-        kept_count += 1  # 保留的最新照片
+                _touch_check_item_and_clear_review(check_item, now)
     
     db.commit()
     
@@ -1692,6 +1937,66 @@ async def update_inspection_item(
     # 内容变更：清空该检查项既有审核结果（若已审核过），以便增量复审
     if content_changed:
         _touch_check_item_and_clear_review(check_item, now)
+
+    # 字段级照片校验：
+    # - 若检查项要求照片(photo/both)，且本次要标记为完成，则校验：
+    #   1) 若存在 allow_photo=True 且 photo_required=True 的可见字段：每个字段至少 1 张照片
+    #   2) 否则：若存在 allow_photo=True 的字段：至少 1 张“字段照片”(带 field_id)
+    #   3) 否则：走“未关联照片”模式：至少 1 张照片
+    if check_item.status == CheckItemStatusEnum.COMPLETED and str(check_item.required_type) in ("photo", "both"):
+        req_type = str(check_item.required_type)
+        photos = db.query(InspectionPhoto).filter(
+            InspectionPhoto.inspection_id == inspection_id,
+            InspectionPhoto.check_item_id == check_item.id
+        ).all()
+
+        # photo 类型：只要求至少 1 张照片（不做字段级归属约束）
+        if req_type == "photo":
+            if len(photos) <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="该检查项需要至少上传1张照片"
+                )
+        else:
+            # both 类型：字段级规则生效（allow_photo / photo_required）
+            allowed_field_ids, required_field_ids, field_labels, field_by_id = _extract_photo_field_rules(check_item.fields)
+
+            counts = {}
+            for p in photos:
+                fid = str(getattr(p, "field_id", None) or "").strip()
+                if not fid:
+                    continue
+                counts[fid] = counts.get(fid, 0) + 1
+
+            field_values = _build_field_values_from_data_value(check_item.data_value)
+            visible_required = set()
+            for fid in required_field_ids:
+                fcfg = field_by_id.get(fid) or {}
+                if _is_field_visible(fcfg, field_values):
+                    visible_required.add(fid)
+
+            if visible_required:
+                missing = [fid for fid in sorted(visible_required) if counts.get(fid, 0) <= 0]
+                if missing:
+                    missing_labels = [field_labels.get(fid, fid) for fid in missing]
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"缺少必拍字段照片: {', '.join(missing_labels)}"
+                    )
+            else:
+                if allowed_field_ids:
+                    linked_total = sum(counts.get(fid, 0) for fid in allowed_field_ids)
+                    if linked_total <= 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="该检查项需要至少上传1张字段照片"
+                        )
+                else:
+                    if len(photos) <= 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="该检查项需要至少上传1张照片"
+                        )
     
     # 如果检查项已完成且绑定了设备，更新设备状态为"已检查"
     if (check_item.status == CheckItemStatusEnum.COMPLETED and 

@@ -205,6 +205,8 @@ class InspectionPhoto(Base):
     id = Column(String(32), primary_key=True)
     inspection_id = Column(String(32), ForeignKey("site_inspections.id"), nullable=False)
     check_item_id = Column(String(32), ForeignKey("inspection_check_items.id"))
+    # 字段级照片归属：对应检查项 fields 中的 field_id；无 dataFields 的检查项可为空
+    field_id = Column(String(100))
     
     # 照片信息
     original_name = Column(String(255))

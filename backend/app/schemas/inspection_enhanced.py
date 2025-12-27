@@ -150,6 +150,10 @@ class FieldDefinition(BaseModel):
     label: str
     type: FieldTypeEnum
     required: bool = False
+    # 字段级照片控制：默认不允许拍照；当 allow_photo=True 时才允许为该字段上传照片
+    allow_photo: bool = False
+    # 字段级照片必拍：仅在 allow_photo=True 时生效；表示该字段至少需要 1 张照片
+    photo_required: bool = False
     options: Optional[List[FieldOption]] = None  # 用于select_single和select_multi
     constraints: Optional[FieldConstraints] = None
     default_value: Optional[Any] = None
@@ -179,6 +183,7 @@ class InspectionCheckItemUpdate(BaseModel):
 class InspectionPhotoCreate(BaseModel):
     """创建检查照片"""
     check_item_id: Optional[str] = None
+    field_id: Optional[str] = None
     original_name: str
     file_path: str
     file_size: int
@@ -193,6 +198,7 @@ class InspectionPhotoResponse(BaseModel):
     id: str
     inspection_id: str
     check_item_id: Optional[str]
+    field_id: Optional[str] = None
     original_name: str
     file_path: str
     file_size: int

@@ -293,6 +293,23 @@
                             >
                               必填
                             </el-checkbox>
+                            <el-checkbox
+                              v-model="field.allow_photo"
+                              style="margin-left:12px;"
+                              :disabled="isFieldDisabled('field', 'allow_photo') || item.required_type !== 'both'"
+                              :title="item.required_type !== 'both' ? '仅“数据+照片(both)”类型支持字段拍照' : getFieldTooltip('field', 'allow_photo')"
+                              @change="(val) => { if (!val) field.photo_required = false }"
+                            >
+                              允许拍照
+                            </el-checkbox>
+                            <el-checkbox
+                              v-model="field.photo_required"
+                              style="margin-left:12px;"
+                              :disabled="!field.allow_photo || isFieldDisabled('field', 'photo_required') || item.required_type !== 'both'"
+                              :title="!field.allow_photo ? '需先开启“允许拍照”' : (item.required_type !== 'both' ? '仅“数据+照片(both)”类型支持字段拍照' : getFieldTooltip('field', 'photo_required'))"
+                            >
+                              必须拍照*
+                            </el-checkbox>
                             <el-button 
                               size="small" 
                               type="danger" 
@@ -851,7 +868,16 @@ const removeItem = async (categoryIndex, itemIndex) => {
 const addField = (categoryIndex, itemIndex) => {
   const item = templateData.check_categories[categoryIndex].items[itemIndex]
   if (!item.fields) item.fields = []
-  item.fields.push({ field_id: `field_${Date.now()}`, label: '新字段', type: 'text', required: false, options: [], constraints: {} })
+  item.fields.push({
+    field_id: `field_${Date.now()}`,
+    label: '新字段',
+    type: 'text',
+    required: false,
+    allow_photo: false,
+    photo_required: false,
+    options: [],
+    constraints: {},
+  })
 }
 
 const removeField = (categoryIndex, itemIndex, fieldIndex) => {
