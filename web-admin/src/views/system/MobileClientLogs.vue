@@ -104,6 +104,15 @@
             <el-button size="small" @click="refresh" :loading="loading">
               <el-icon><Refresh /></el-icon>刷新
             </el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="!canView || loading"
+              :loading="exporting"
+              @click="exportExcel"
+            >
+              <el-icon><Download /></el-icon>导出Excel
+            </el-button>
           </div>
         </div>
       </template>
@@ -198,7 +207,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { MoreFilled, Refresh, Search } from '@element-plus/icons-vue'
+import { Download, MoreFilled, Refresh, Search } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { mobileClientLogsApi } from '@/api/mobileClientLogs'
 
@@ -206,6 +215,7 @@ const userStore = useUserStore()
 const canView = computed(() => userStore.isAdmin)
 
 const loading = ref(false)
+const exporting = ref(false)
 const settingsLoading = ref(false)
 const savingSettings = ref(false)
 const cleaningByRetention = ref(false)
@@ -357,6 +367,44 @@ const loadPage = async () => {
 const refresh = async () => {
   page.value = 1
   await Promise.all([loadSettings(), loadPage()])
+}
+
+const exportExcel = async () => {
+  if (!canView.value) return
+  exporting.value = true
+  try {
+    const params = buildParams()
+    // 导出不带分页参数
+    delete params.page
+    delete params.page_size
+    params.limit = Math.min(total.value || 50000, 200000)
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (tz) params.tz = tz
+    params.tz_offset = new Date().getTimezoneOffset()
+
+    const blob = await mobileClientLogsApi.exportExcel(params)
+    const url = window.URL.createObjectURL(new Blob([blob]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `mobile_logs_${Date.now()}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    let detailMsg = e?.response?.data?.detail
+    if (!detailMsg && e?.response?.data instanceof Blob) {
+      try {
+        detailMsg = JSON.parse(await e.response.data.text())?.detail
+      } catch (err) {
+        // ignore
+      }
+    }
+    ElMessage.error(detailMsg || '导出失败')
+  } finally {
+    exporting.value = false
+  }
 }
 
 const handleSearch = () => {
