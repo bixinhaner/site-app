@@ -11,7 +11,8 @@ export const useLanguageStore = defineStore('language', {
     currentLocale: uni.getStorageSync('locale') || 'zh',
     supportedLocales: [
       { code: 'zh', name: '中文' },
-      { code: 'en', name: 'English' }
+      { code: 'en', name: 'English' },
+      { code: 'id', name: 'Bahasa Indonesia' }
     ]
   }),
 
@@ -20,6 +21,12 @@ export const useLanguageStore = defineStore('language', {
       const lang = this.supportedLocales.find(l => l.code === this.currentLocale)
       return lang ? lang.name : '中文'
     },
+
+    currentLocaleTag() {
+      if (this.currentLocale === 'zh') return 'zh-CN'
+      if (this.currentLocale === 'id') return 'id-ID'
+      return 'en-US'
+    },
     
     isZh() {
       return this.currentLocale === 'zh'
@@ -27,6 +34,10 @@ export const useLanguageStore = defineStore('language', {
     
     isEn() {
       return this.currentLocale === 'en'
+    },
+
+    isId() {
+      return this.currentLocale === 'id'
     }
   },
 
@@ -72,7 +83,8 @@ export const useLanguageStore = defineStore('language', {
         // 测试页面
         'pages/test/logging-test': t('test.logging.title'),
         'pages/test-location-plugin/test-location-plugin': t('test.locationPlugin.title'),
-        'pages/test-location-builtin/test-location-builtin': t('test.locationBuiltin.title')
+        'pages/test-location-builtin/test-location-builtin': t('test.locationBuiltin.title'),
+        'pages/test/watermark-test': t('test.watermark.title')
       }
       
       const title = titleMap[route]
@@ -107,8 +119,16 @@ export const useLanguageStore = defineStore('language', {
         }
         
         const toastTitle = i18nInstance
-          ? i18nInstance.global.t(locale === 'zh' ? 'messages.languageSwitchedToZh' : 'messages.languageSwitchedToEn')
-          : (locale === 'zh' ? '语言已切换为中文' : 'Language switched to English')
+          ? i18nInstance.global.t(
+            locale === 'zh' ? 'messages.languageSwitchedToZh' :
+            locale === 'en' ? 'messages.languageSwitchedToEn' :
+            'messages.languageSwitchedToId'
+          )
+          : (
+            locale === 'zh' ? '语言已切换为中文' :
+            locale === 'en' ? 'Language switched to English' :
+            'Bahasa telah diganti ke Bahasa Indonesia'
+          )
         uni.showToast({
           title: toastTitle,
           icon: 'none',
@@ -118,7 +138,9 @@ export const useLanguageStore = defineStore('language', {
     },
 
     toggleLocale() {
-      const newLocale = this.currentLocale === 'zh' ? 'en' : 'zh'
+      const locales = ['zh', 'en', 'id']
+      const currentIndex = locales.indexOf(this.currentLocale)
+      const newLocale = locales[(currentIndex + 1) % locales.length]
       this.setLocale(newLocale)
     },
 
@@ -139,7 +161,12 @@ export const useLanguageStore = defineStore('language', {
         }
       } else {
         const systemLocale = uni.getSystemInfoSync().language || 'zh'
-        const locale = systemLocale.startsWith('en') ? 'en' : 'zh'
+        let locale = 'zh'  // 默认中文
+        if (systemLocale.startsWith('en')) {
+          locale = 'en'
+        } else if (systemLocale.startsWith('id')) {
+          locale = 'id'
+        }
         this.setLocale(locale)
       }
     }

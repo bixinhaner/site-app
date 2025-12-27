@@ -5,21 +5,21 @@
 			<view class="navbar-left" @click="goBack">
 				<text class="back-icon">←</text>
 			</view>
-			<text class="navbar-title">{{ t('title') }}</text>
+			<text class="navbar-title">{{ $t('releaseNotes.title') }}</text>
 			<view class="navbar-right"></view>
 		</view>
 		
 		<!-- 加载中 -->
 		<view v-if="loading" class="loading-container">
 			<view class="loading-spinner"></view>
-			<text class="loading-text">{{ t('loading') }}</text>
+			<text class="loading-text">{{ $t('releaseNotes.loading') }}</text>
 		</view>
 		
 		<!-- 错误状态 -->
 		<view v-else-if="error" class="error-container">
 			<text class="error-icon">😔</text>
 			<text class="error-text">{{ error }}</text>
-			<button class="retry-btn" @click="loadData">{{ t('retry') }}</button>
+			<button class="retry-btn" @click="loadData">{{ $t('releaseNotes.retry') }}</button>
 		</view>
 		
 		<!-- 内容区域 -->
@@ -39,7 +39,7 @@
 			
 			<!-- 更新项目列表 -->
 			<view class="items-container">
-				<text class="section-title">{{ t('updateContent') }}</text>
+				<text class="section-title">{{ $t('releaseNotes.updateContent') }}</text>
 				<view 
 					v-for="(item, index) in releaseNote?.items || []" 
 					:key="item.id"
@@ -74,7 +74,7 @@
 			
 			<!-- 底部信息 -->
 			<view class="footer-info">
-				<text>{{ t('thankYou') }}</text>
+				<text>{{ $t('releaseNotes.thankYou') }}</text>
 			</view>
 		</scroll-view>
 	</view>
@@ -86,6 +86,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { useLanguageStore } from '@/stores/language'
 import { API_ENDPOINTS, buildApiUrl, buildImageUrl, createRequestConfig } from '@/config/api.js'
 import { env } from '@/config/env.js'
+import i18nInstance from '@/utils/i18n.js'
 
 const languageStore = useLanguageStore()
 
@@ -96,38 +97,13 @@ const releaseNote = ref(null)
 const versionId = ref(null)
 const versionName = ref('')
 
-// 国际化
-const translations = {
-	zh: {
-		title: '版本更新详情',
-		loading: '加载中...',
-		retry: '重试',
-		updateContent: '更新内容',
-		thankYou: '感谢您使用我们的应用！如有问题请联系技术支持。',
-		loadFailed: '加载失败，请稍后重试',
-		noData: '暂无更新说明'
-	},
-	en: {
-		title: 'Release Notes',
-		loading: 'Loading...',
-		retry: 'Retry',
-		updateContent: 'What\'s New',
-		thankYou: 'Thank you for using our app! Contact support if you need help.',
-		loadFailed: 'Failed to load, please try again',
-		noData: 'No release notes available'
-	}
-}
-
-const t = (key) => {
-	const locale = languageStore.currentLocale || 'zh'
-	return translations[locale]?.[key] || key
-}
+const t = (key, params) => i18nInstance.global.t(`releaseNotes.${key}`, params)
 
 // 计算属性
 const localizedTitle = computed(() => {
 	if (!releaseNote.value) return ''
 	const locale = languageStore.currentLocale
-	return locale === 'en'
+	return locale === 'en' || locale === 'id'
 		? (releaseNote.value.title_en || releaseNote.value.title || '')
 		: (releaseNote.value.title || releaseNote.value.title_en || '')
 })
@@ -135,7 +111,7 @@ const localizedTitle = computed(() => {
 const localizedSubtitle = computed(() => {
 	if (!releaseNote.value) return ''
 	const locale = languageStore.currentLocale
-	return locale === 'en'
+	return locale === 'en' || locale === 'id'
 		? (releaseNote.value.subtitle_en || releaseNote.value.subtitle || '')
 		: (releaseNote.value.subtitle || releaseNote.value.subtitle_en || '')
 })
@@ -143,21 +119,21 @@ const localizedSubtitle = computed(() => {
 // 方法
 const getLocalizedContent = (item) => {
 	const locale = languageStore.currentLocale
-	return locale === 'en'
+	return locale === 'en' || locale === 'id'
 		? (item.content_en || item.content || '')
 		: (item.content || item.content_en || '')
 }
 
 const getLocalizedCaption = (item) => {
 	const locale = languageStore.currentLocale
-	return locale === 'en'
+	return locale === 'en' || locale === 'id'
 		? (item.image_caption_en || item.image_caption || '')
 		: (item.image_caption || item.image_caption_en || '')
 }
 
 const getLocalizedImageCaption = (img) => {
 	const locale = languageStore.currentLocale
-	return locale === 'en'
+	return locale === 'en' || locale === 'id'
 		? (img.image_caption_en || img.image_caption || '')
 		: (img.image_caption || img.image_caption_en || '')
 }
@@ -186,8 +162,7 @@ const getItemImages = (item) => {
 const formatDate = (dateString) => {
 	if (!dateString) return ''
 	const date = new Date(dateString)
-	const locale = languageStore.currentLocale
-	return date.toLocaleDateString(locale === 'en' ? 'en-US' : 'zh-CN', {
+	return date.toLocaleDateString(languageStore.currentLocaleTag, {
 		year: 'numeric',
 		month: 'long',
 		day: 'numeric'

@@ -148,7 +148,7 @@
 					v-else-if="recentActivities.length === 0"
 					icon="📋"
 					:title="$t('messages.noData')"
-					:description="$t('home.noRecentActivities') || '暂无最近活动'"
+					:description="$t('home.noRecentActivities')"
 					:compact="true"
 				/>
 				

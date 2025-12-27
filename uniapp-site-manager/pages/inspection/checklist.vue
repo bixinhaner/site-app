@@ -568,14 +568,57 @@
 	// 获取翻译函数
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 
-	const t = (key, params = {}) => {
-		const _ = languageStore.currentLocale
-		return $t(key, params)
-	}
+		const t = (key, params = {}) => {
+			const _ = languageStore.currentLocale
+			return $t(key, params)
+		}
 
-	const getDisplayItemName = (name) => {
-		const raw = String(name || '').trim()
-		if (!raw) return ''
+		const hasChinese = (value) => /[\u4e00-\u9fff]/.test(String(value || ''))
+
+		const normalizeUnit = (unit) => {
+			const raw = String(unit || '').trim()
+			if (!raw) return ''
+			if (raw === '度') return '°'
+			if (raw === '米') return 'm'
+			return raw
+		}
+
+		const getKnownFieldMapping = (rawLabel) => {
+			const label = String(rawLabel || '').trim()
+			const map = {
+				'铁塔编号': { labelKey: 'inspection.fields.towerId', fieldId: 'tower_id' },
+				'纬度': { labelKey: 'site.latitude', fieldId: 'latitude' },
+				'经度': { labelKey: 'site.longitude', fieldId: 'longitude' },
+				'天线型号': { labelKey: 'inspection.fields.antennaModel', fieldId: 'antenna_model' },
+				'安装高度': { labelKey: 'inspection.fields.installHeight', fieldId: 'install_height' },
+				'下倾角': { labelKey: 'site.downtilt', fieldId: 'downtilt' },
+				'方位角': { labelKey: 'site.azimuth', fieldId: 'azimuth' },
+				'天线挂高': { labelKey: 'inspection.fields.antennaHeight', fieldId: 'antenna_height' },
+				'驻波比': { labelKey: 'inspection.fields.vswr', fieldId: 'vswr' },
+				'机柜温度': { labelKey: 'inspection.fields.cabinetTemperature', fieldId: 'cabinet_temperature' },
+				'湿度': { labelKey: 'inspection.fields.humidity', fieldId: 'humidity' },
+				'空开容量': { labelKey: 'inspection.fields.airBreakerCapacity', fieldId: 'air_breaker_capacity' },
+				'整流器容量': { labelKey: 'inspection.fields.rectifierCapacity', fieldId: 'rectifier_capacity' },
+				'检查结果': { labelKey: 'inspection.checkResult', fieldId: 'check_result' }
+			}
+			return map[label] || null
+		}
+
+		const translateFieldLabel = (rawLabel) => {
+			const label = String(rawLabel || '').trim()
+			const mapping = getKnownFieldMapping(label)
+			if (mapping) return t(mapping.labelKey)
+			return label
+		}
+
+		const buildPlaceholder = (labelText) => {
+			const label = String(labelText || '').trim()
+			return label ? t('common.pleaseEnterField', { field: label }) : t('common.pleaseEnter')
+		}
+
+		const getDisplayItemName = (name) => {
+			const raw = String(name || '').trim()
+			if (!raw) return ''
 
 		const sectorLabel = t('inspection.sector')
 		const deviceLabel = t('inspection.device')
@@ -753,15 +796,27 @@
 			console.log(`使用后端返回的fields配置: ${item.item_name}`, item.fields)
 			
 			// 将后端fields格式转换为前端dataFields格式
-			const fields = item.fields.map(field => {
-				const dataField = {
-					label: field.label || '',
-					type: field.type || 'text',
-					unit: field.unit || '',
-					placeholder: field.placeholder || `请输入${field.label || ''}`,
-					value: '',
-					field_id: field.field_id
-				}
+				const fields = item.fields.map(field => {
+					const rawLabel = String(field.label || '').trim()
+					const mapping = getKnownFieldMapping(rawLabel)
+					const label = mapping ? t(mapping.labelKey) : rawLabel
+
+					const rawPlaceholder = String(field.placeholder || '').trim()
+					const placeholder =
+						rawPlaceholder && !hasChinese(rawPlaceholder)
+							? rawPlaceholder
+							: buildPlaceholder(label)
+
+					const dataField = {
+						label,
+						type: field.type || 'text',
+						unit: normalizeUnit(field.unit || ''),
+						placeholder,
+						value: '',
+						field_id: field.field_id ?? mapping?.fieldId
+					}
+
+					if (!field.field_id && mapping) dataField.legacyLabel = rawLabel
 				
 				// 处理约束条件
 				if (field.constraints) {
@@ -802,23 +857,23 @@
 					dataField.required = field.required
 				}
 				
-				return dataField
-			})
-			
-			// 从已有数据中恢复值
-			if (item.data_value && item.data_value.length > 0) {
-				item.data_value.forEach(dataItem => {
-					// 优先按 field_id 匹配（后端会把 field_name 规范化为 field_id）
-					const field = fields.find(f =>
-						f.field_id !== undefined &&
-						f.field_id !== null &&
-						String(f.field_id) === String(dataItem.field_name)
-					) || fields.find(f => f.label === dataItem.field_name)
-					if (field) {
-						field.value = dataItem.value
-					}
+					return dataField
 				})
-			}
+			
+				// 从已有数据中恢复值
+				if (item.data_value && item.data_value.length > 0) {
+					item.data_value.forEach(dataItem => {
+						// 优先按 field_id 匹配（后端会把 field_name 规范化为 field_id）
+						const field = fields.find(f =>
+							f.field_id !== undefined &&
+							f.field_id !== null &&
+							String(f.field_id) === String(dataItem.field_name)
+						) || fields.find(f => f.legacyLabel && f.legacyLabel === dataItem.field_name) || fields.find(f => f.label === dataItem.field_name)
+						if (field) {
+							field.value = dataItem.value
+						}
+					})
+				}
 			
 			return fields
 		}
@@ -827,165 +882,94 @@
 		return generateDataFieldsFallback(item)
 	}
 	
-	const generateDataFieldsFallback = (item) => {
-		// 根据检查项类型生成数据字段
-		const fields = []
-		
-		switch (item.item_id) {
-			// 基本信息检查
-			case 'tower_id':
-				fields.push({
-					label: '铁塔编号',
-					type: 'text',
-					unit: '',
-					placeholder: '请输入铁塔编号',
-					value: ''
-				})
-				break
-			case 'site_coordinates':
-				fields.push(
-					{
-						label: '纬度',
-						type: 'number',
-						unit: '度',
-						placeholder: '请输入纬度坐标',
-						value: ''
-					},
-					{
-						label: '经度',
-						type: 'number',
-						unit: '度',
-						placeholder: '请输入经度坐标',
-						value: ''
-					}
-				)
-				break
-			
-			// 天线相关检查
-			case 'antenna_installation':
-				fields.push(
-					{
-						label: '天线型号',
-						type: 'text',
-						unit: '',
-						placeholder: '请输入天线型号',
-						value: ''
-					},
-					{
-						label: '安装高度',
-						type: 'number',
-						unit: '米',
-						placeholder: '请输入安装高度',
-						value: ''
-					}
-				)
-				break
-			case 'antenna_downtilt':
-				fields.push({
-					label: '下倾角',
-					type: 'number',
-					unit: '度',
-					placeholder: '请输入下倾角度数',
+		const generateDataFieldsFallback = (item) => {
+			// 根据检查项类型生成数据字段
+			const fields = []
+
+			const makeField = (legacyLabel, { type = 'text', unit = '', min, max } = {}) => {
+				const mapping = getKnownFieldMapping(legacyLabel)
+				const label = mapping ? t(mapping.labelKey) : String(legacyLabel || '').trim()
+
+				const field = {
+					label,
+					type,
+					unit,
+					placeholder: buildPlaceholder(label),
 					value: '',
-					min: 0,
-					max: 20
-				})
-				break
-			case 'azimuth_check':
-				fields.push({
-					label: '方位角',
-					type: 'number',
-					unit: '度',
-					placeholder: '请输入方位角度数',
-					value: '',
-					min: 0,
-					max: 360
-				})
-				break
-			case 'tower_height_check':
-				fields.push({
-					label: '天线挂高',
-					type: 'number',
-					unit: '米',
-					placeholder: '请输入天线挂高',
-					value: '',
-					min: 0,
-					max: 100
-				})
-				break
-			case 'vswr_check':
-				fields.push({
-					label: '驻波比',
-					type: 'number',
-					unit: '',
-					placeholder: '请输入驻波比值',
-					value: '',
-					min: 1.0,
-					max: 2.0
-				})
-				break
-			
-			// 设备检查
-			case 'cabinet_environment':
-				fields.push(
-					{
-						label: '机柜温度',
-						type: 'number',
-						unit: '℃',
-						placeholder: '请输入机柜温度',
-						value: ''
-					},
-					{
-						label: '湿度',
-						type: 'number',
-						unit: '%',
-						placeholder: '请输入湿度',
-						value: ''
-					}
-				)
-				break
-			case 'air_breaker':
-				fields.push({
-					label: '空开容量',
-					type: 'text',
-					unit: 'A',
-					placeholder: '请输入空开容量',
-					value: ''
-				})
-				break
-			case 'rectifier_capacity':
-				fields.push({
-					label: '整流器容量',
-					type: 'text',
-					unit: 'A',
-					placeholder: '请输入整流器容量',
-					value: ''
-				})
-				break
-			
-			// 通用数据字段 - 对于未明确定义的检查项，如果需要数据输入，提供通用字段
-			default:
-				if (item.required_type === 'data' || item.required_type === 'both') {
-					fields.push({
-						label: '检查结果',
-						type: 'text',
-						unit: '',
-						placeholder: '请输入检查结果',
-						value: ''
-					})
+					field_id: mapping?.fieldId,
+					legacyLabel: String(legacyLabel || '').trim()
 				}
-				break
-		}
-		
-		// 从已有数据中恢复值
-		if (item.data_value && item.data_value.length > 0) {
-			item.data_value.forEach(dataItem => {
-				const field = fields.find(f => f.label === dataItem.field_name)
-				if (field) {
-					field.value = dataItem.value
-				}
-			})
-		}
+				if (min !== undefined) field.min = min
+				if (max !== undefined) field.max = max
+				return field
+			}
+			
+			switch (item.item_id) {
+				// 基本信息检查
+				case 'tower_id':
+					fields.push(makeField('铁塔编号', { type: 'text' }))
+					break
+				case 'site_coordinates':
+					fields.push(
+						makeField('纬度', { type: 'number', unit: '°' }),
+						makeField('经度', { type: 'number', unit: '°' })
+					)
+					break
+				
+				// 天线相关检查
+				case 'antenna_installation':
+					fields.push(
+						makeField('天线型号', { type: 'text' }),
+						makeField('安装高度', { type: 'number', unit: 'm' })
+					)
+					break
+				case 'antenna_downtilt':
+					fields.push(makeField('下倾角', { type: 'number', unit: '°', min: 0, max: 20 }))
+					break
+				case 'azimuth_check':
+					fields.push(makeField('方位角', { type: 'number', unit: '°', min: 0, max: 360 }))
+					break
+				case 'tower_height_check':
+					fields.push(makeField('天线挂高', { type: 'number', unit: 'm', min: 0, max: 100 }))
+					break
+				case 'vswr_check':
+					fields.push(makeField('驻波比', { type: 'number', min: 1.0, max: 2.0 }))
+					break
+				
+				// 设备检查
+				case 'cabinet_environment':
+					fields.push(
+						makeField('机柜温度', { type: 'number', unit: '℃' }),
+						makeField('湿度', { type: 'number', unit: '%' })
+					)
+					break
+				case 'air_breaker':
+					fields.push(makeField('空开容量', { type: 'text', unit: 'A' }))
+					break
+				case 'rectifier_capacity':
+					fields.push(makeField('整流器容量', { type: 'text', unit: 'A' }))
+					break
+				
+				// 通用数据字段 - 对于未明确定义的检查项，如果需要数据输入，提供通用字段
+				default:
+					if (item.required_type === 'data' || item.required_type === 'both') {
+						fields.push(makeField('检查结果', { type: 'text' }))
+					}
+					break
+			}
+			
+			// 从已有数据中恢复值
+			if (item.data_value && item.data_value.length > 0) {
+				item.data_value.forEach(dataItem => {
+					const field =
+						fields.find(f => f.field_id && String(f.field_id) === String(dataItem.field_name)) ||
+						fields.find(f => f.legacyLabel && f.legacyLabel === dataItem.field_name) ||
+						fields.find(f => f.label === dataItem.field_name)
+					if (field) {
+						field.value = dataItem.value
+					}
+				})
+			}
 		
 		return fields
 	}
@@ -1189,7 +1173,7 @@
 											gpsUsed.latitude,
 											gpsUsed.longitude,
 											gpsUsed.address,
-											userStore.userInfo?.username || $t('inspection.unknownInspector'),
+											userStore.userInfo?.username || $t('messages.unknownInspector'),
 											currentItem.value.item_name || $t('inspection.checkItem'),
 											gpsUsed,
 											(!isCamera && !localUploadWatermarkWithGeo)
@@ -1229,7 +1213,7 @@
 											timestamp: new Date().toISOString(),
 											coordinates: (!isCamera && !localUploadWatermarkWithGeo) ? '' : `${gpsUsed.latitude},${gpsUsed.longitude}`,
 											accuracy: (!isCamera && !localUploadWatermarkWithGeo) ? undefined : gpsUsed.accuracy,
-										inspector: userStore.userInfo?.username || $t('inspection.unknownInspector'),
+										inspector: userStore.userInfo?.username || $t('messages.unknownInspector'),
 										item_name: currentItem.value.item_name || $t('inspection.checkItem')
 										} : null
 									}
@@ -1507,10 +1491,10 @@
 					const siteName = inspectionData.value?.site_name || 
 									 inspectionData.value?.site?.site_name || 
 									 inspectionData.value?.work_order?.site_name ||
-									 $t('inspection.watermarkSiteFallback')
+									 $t('site.unknownSite')
 					
 					const watermarkData = {
-						inspector: inspector || userStore.userInfo?.username || $t('inspection.unknownInspector'),
+						inspector: inspector || userStore.userInfo?.username || $t('messages.unknownInspector'),
 						checkItem: itemName || currentItem.value?.item_name || $t('inspection.checkItem'),
 						siteName: siteName
 					}
@@ -2305,13 +2289,13 @@
 	const formatDateTime = (dateTime) => {
 		if (!dateTime) return ''
 		const date = new Date(dateTime)
-		return date.toLocaleString('zh-CN')
+		return date.toLocaleString(languageStore.currentLocaleTag)
 	}
 	
 	const formatTime = (dateTime) => {
 		if (!dateTime) return ''
 		const date = new Date(dateTime)
-		return date.toLocaleTimeString('zh-CN', {
+		return date.toLocaleTimeString(languageStore.currentLocaleTag, {
 			hour: '2-digit',
 			minute: '2-digit'
 		})

@@ -400,7 +400,7 @@
 	// 格式化时间
 	const formatTime = (timeStr) => {
 		const date = new Date(timeStr)
-		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		const locale = languageStore.currentLocaleTag
 		return date.toLocaleString(locale, {
 			month: '2-digit',
 			day: '2-digit',

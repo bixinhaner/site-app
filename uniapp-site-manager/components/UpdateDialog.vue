@@ -84,6 +84,7 @@
 import { computed, watch } from 'vue'
 import { useUpgradeStore } from '@/stores/upgrade'
 import { useLanguageStore } from '@/stores/language'
+import i18nInstance from '@/utils/i18n.js'
 
 const props = defineProps({
   visible: {
@@ -98,43 +99,12 @@ const upgradeStore = useUpgradeStore()
 const languageStore = useLanguageStore()
 
 // ============ 国际化翻译 ============
-// 翻译字典
-const translations = {
-  zh: {
-    newVersionFound: '发现新版本',
-    updateSize: '更新大小',
-    releaseNotes: '更新内容',
-    downloading: '正在下载...',
-    downloadComplete: '下载完成',
-    retry: '重试',
-    installNow: '立即安装',
-    updateNow: '立即更新',
-    later: '稍后提醒',
-    viewDetails: '查看详情',
-    forceUpdateTip: '此版本为重要更新，必须升级后才能使用',
-    pleaseUpdate: '请先完成更新'
-  },
-  en: {
-    newVersionFound: 'New Version Available',
-    updateSize: 'Update Size',
-    releaseNotes: 'What\'s New',
-    downloading: 'Downloading...',
-    downloadComplete: 'Download Complete',
-    retry: 'Retry',
-    installNow: 'Install Now',
-    updateNow: 'Update Now',
-    later: 'Later',
-    viewDetails: 'View Details',
-    forceUpdateTip: 'This is a critical update. Please update to continue using the app.',
-    pleaseUpdate: 'Please complete the update first'
-  }
-}
-
 // 响应式翻译函数 - 使用 computed 确保语言切换时自动更新
-const t = (key) => {
+const t = (key, params) => {
   return computed(() => {
-    const locale = languageStore.currentLocale || 'zh'
-    return translations[locale]?.[key] || key
+    // 显式依赖 locale，确保切换语言时重新计算
+    const _locale = languageStore.currentLocale
+    return i18nInstance.global.t(`upgrade.${key}`, params)
   })
 }
 
@@ -173,8 +143,8 @@ const releaseNotes = computed(() => {
   if (!versionInfo.value) return ''
   
   // 根据当前语言选择对应的更新说明
-  if (languageStore.currentLocale === 'en') {
-    // 英文环境：优先显示英文说明，如果没有则显示中文
+  if (languageStore.currentLocale === 'en' || languageStore.currentLocale === 'id') {
+    // 英文/印尼语：优先显示英文说明，如果没有则显示中文
     return versionInfo.value.release_notes_en || versionInfo.value.release_notes || ''
   } else {
     // 中文环境：优先显示中文说明，如果没有则显示英文

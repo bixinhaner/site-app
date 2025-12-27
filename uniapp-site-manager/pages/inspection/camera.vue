@@ -509,7 +509,7 @@ export default {
 	
 	const updateCurrentTime = () => {
 		const now = new Date()
-		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		const locale = languageStore.currentLocaleTag
 		currentTime.value = now.toLocaleString(locale, {
 			year: 'numeric',
 			month: '2-digit',

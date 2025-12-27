@@ -287,6 +287,14 @@
 						<text class="language-name">{{ $t('profile.english') }}</text>
 						<text class="language-check" v-if="languageStore.currentLocale === 'en'">✓</text>
 					</view>
+					<view
+						class="language-option"
+						:class="{ active: languageStore.currentLocale === 'id' }"
+						@click="setLanguage('id')"
+					>
+						<text class="language-name">{{ $t('profile.indonesian') }}</text>
+						<text class="language-check" v-if="languageStore.currentLocale === 'id'">✓</text>
+					</view>
 				</view>
 			</view>
 		</view>
@@ -516,7 +524,7 @@ const isAdmin = computed(() => userStore.isAdmin)
 
 	const formatDateTime = (val) => {
 		if (!val) return ''
-		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		const locale = languageStore.currentLocaleTag
 		return new Date(val).toLocaleString(locale)
 	}
 

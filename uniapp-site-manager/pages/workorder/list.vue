@@ -59,9 +59,9 @@
         <EmptyState 
           v-else-if="orders.length === 0"
           :icon="searchKeyword || status ? '🔍' : '📋'"
-          :title="searchKeyword || status ? $t('messages.noSearchResults') || '未找到相关结果' : $t('messages.noData')"
-          :description="searchKeyword || status ? $t('messages.tryDifferentKeyword') || '试试其他关键词或筛选条件' : $t('workorder.noWorkOrders') || '暂无工单'"
-          :actionText="searchKeyword ? $t('common.clearSearch') || '清除搜索' : ''"
+          :title="searchKeyword || status ? $t('messages.noSearchResults') : $t('messages.noData')"
+          :description="searchKeyword || status ? $t('messages.tryDifferentKeyword') : $t('workorder.noWorkOrders')"
+          :actionText="searchKeyword ? $t('common.clearSearch') : ''"
           @action="clearSearch"
         />
         

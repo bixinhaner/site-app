@@ -243,7 +243,7 @@
 			title,
 			message,
 			success,
-			timestamp: new Date().toLocaleString(languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US')
+			timestamp: new Date().toLocaleString(languageStore.currentLocaleTag)
 		})
 		
 		// 限制结果数量

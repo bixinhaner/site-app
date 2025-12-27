@@ -78,6 +78,7 @@
 		const lat = latitude.value
 		const lon = longitude.value
 		const name = encodeURIComponent(locationName.value)
+		const sourceName = encodeURIComponent(t('login.title'))
 		
 		if (mapType.value === 'google') {
 			// 谷歌地图 URL
@@ -87,7 +88,7 @@
 			// 高德地图 URI API scheme（不需要key）
 			// 格式：https://uri.amap.com/marker?position=经度,纬度&name=名称&src=appname&coordinate=gaode&callnative=0
 			// callnative=0 表示不调用客户端，直接在网页中打开
-			return `https://uri.amap.com/marker?position=${lon},${lat}&name=${name}&src=站点管理&coordinate=gaode&callnative=0`
+			return `https://uri.amap.com/marker?position=${lon},${lat}&name=${name}&src=${sourceName}&coordinate=gaode&callnative=0`
 		}
 	})
 	

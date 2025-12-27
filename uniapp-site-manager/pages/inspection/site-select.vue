@@ -390,13 +390,11 @@
 	const selectSite = async (site) => {
 		try {
 			// 创建新的检查记录
-			const inspectionData = {
-				site_id: site.id,
-				inspection_type: inspectionType.value.toUpperCase(), // 转换为大写
-				location: site.location,
-				weather: '晴天', // 可以后续集成天气API
-				temperature: '25°C'
-			}
+				const inspectionData = {
+					site_id: site.id,
+					inspection_type: inspectionType.value.toUpperCase(), // 转换为大写
+					location: site.location
+				}
 			
 			// 如果有GPS坐标，添加到检查数据
 			if (site.coordinates) {
@@ -549,7 +547,7 @@
 	const formatDate = (dateStr) => {
 		if (!dateStr) return ''
 		const date = new Date(dateStr)
-		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		const locale = languageStore.currentLocaleTag
 		return date.toLocaleDateString(locale)
 	}
 </script>

@@ -63,9 +63,9 @@
 				<EmptyState 
 					v-else-if="filteredSites.length === 0"
 					:icon="searchText || currentFilter !== 'all' ? '🔍' : '📍'"
-					:title="searchText || currentFilter !== 'all' ? $t('messages.noSearchResults') || '未找到相关结果' : $t('messages.noData')"
-					:description="searchText ? $t('messages.tryDifferentKeyword') || '试试其他关键词' : $t('site.noSites') || '暂无站点'"
-					:actionText="searchText ? $t('common.clearSearch') || '清除搜索' : ''"
+					:title="searchText || currentFilter !== 'all' ? $t('messages.noSearchResults') : $t('messages.noData')"
+					:description="searchText ? $t('messages.tryDifferentKeyword') : $t('site.noSites')"
+					:actionText="searchText ? $t('common.clearSearch') : ''"
 					@action="clearSearch"
 				/>
 				
@@ -331,7 +331,7 @@
 		const date = new Date(timeStr)
 		const now = new Date()
 		const diff = now - date
-		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		const locale = languageStore.currentLocaleTag
 		
 		if (diff < 86400000) { // 24小时内
 			return date.toLocaleTimeString(locale, { 

@@ -1116,7 +1116,7 @@
 	// 获取检查员姓名
 	const getInspectorName = () => {
 		if (inspectorInfo.value) {
-			return inspectorInfo.value.full_name || inspectorInfo.value.username || $t('inspection.unknownInspector')
+			return inspectorInfo.value.full_name || inspectorInfo.value.username || $t('messages.unknownInspector')
 		}
 		if (workOrderData.value && workOrderData.value.assigned_to_name) {
 			return workOrderData.value.assigned_to_name
@@ -1151,12 +1151,12 @@
 		const typeMap = {
 			opening_inspection: $t('inspection.opening'),
 			maintenance: $t('inspection.maintenance'),
-			power_issue: $t('workorder.typePowerIssue'),
-			transmission_issue: $t('workorder.typeTransmissionIssue'),
-			gps_issue: $t('workorder.typeGPSIssue'),
-			signal_issue: $t('workorder.typeSignalIssue')
+			power_issue: $t('workorder.types.power_issue'),
+			transmission_issue: $t('workorder.types.transmission_issue'),
+			gps_issue: $t('workorder.types.gps_issue'),
+			signal_issue: $t('workorder.types.signal_issue')
 		}
-		return typeMap[taskType] || $t('workorder.typeOther')
+		return typeMap[taskType] || $t('workorder.types.other')
 	}
 
 	const getStatusText = (status) => {
@@ -1266,7 +1266,7 @@
 	const formatDateTime = (dateTime) => {
 		if (!dateTime) return ''
 		const date = new Date(dateTime)
-		const locale = languageStore.currentLocale === 'zh' ? 'zh-CN' : 'en-US'
+		const locale = languageStore.currentLocaleTag
 		return date.toLocaleString(locale)
 	}
 	

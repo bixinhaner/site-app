@@ -59,7 +59,7 @@
 		{
 			pagePath: 'pages/workorder/list',
 			icon: 'workorder',
-			text: 'navigation.inspection',
+			text: 'navigation.workorders',
 			roles: ALL_ROLES
 		},
 		{
