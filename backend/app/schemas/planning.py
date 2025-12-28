@@ -156,7 +156,7 @@ class PlanningCell(BaseModel):
     band_code: str
     sheet_name: Optional[str] = None
 
-    tower_id: str
+    tower_id: Optional[str] = None
     site_information: Optional[str] = None
     site_name: Optional[str] = None
 
