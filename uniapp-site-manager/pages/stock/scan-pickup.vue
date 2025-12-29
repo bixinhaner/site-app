@@ -963,6 +963,8 @@ export default {
       
       this.loading = true
       this.scannedEquipmentInstance = null
+      this.availablePackages = []
+      this.selectedPackageIndex = 0
       
       try {
         // 使用解析后的SN查询设备信息
@@ -990,7 +992,54 @@ export default {
         console.log('设备实例:', response.equipment_instance || response.data?.equipment_instance)
         
         const equipmentData = response.data || response
+        const statusCode = response.statusCode || response.status || 0
         this.scannedEquipmentInstance = equipmentData.equipment_instance || null
+
+        const showIdentifyModal = (titleKey, hintKey, prefixLine = '') => {
+          let message = ''
+          if (prefixLine) message += `${prefixLine}\n`
+          message += `${this.$t('stock.serialNumber')}: ${parsedData.sn}`
+          if (parsedData.mac1) {
+            message += `\n${this.$t('stock.macAddress1')}: ${this.formatMacAddress(parsedData.mac1)}`
+          }
+          if (parsedData.mac2) {
+            message += `\n${this.$t('stock.macAddress2')}: ${this.formatMacAddress(parsedData.mac2)}`
+          }
+          message += `\n\n${this.$t(hintKey)}`
+
+          uni.showModal({
+            title: this.$t(titleKey),
+            content: message,
+            showCancel: true,
+            confirmText: this.$t('stock.rescan'),
+            cancelText: this.$t('stock.copySn'),
+            success: (res) => {
+              if (res.confirm) {
+                this.resetScan()
+              } else {
+                uni.setClipboardData({
+                  data: parsedData.sn,
+                  success: () => {
+                    uni.showToast({ title: this.$t('stock.copySn'), icon: 'success' })
+                  }
+                })
+              }
+            }
+          })
+        }
+
+        if (statusCode && statusCode !== 200) {
+          const detail = equipmentData?.detail || equipmentData?.message || this.$t('messages.requestFailedWithCode', { code: statusCode })
+          if (statusCode === 404) {
+            showIdentifyModal('stock.deviceNotInInventoryTitle', 'stock.deviceNotInInventoryHint')
+          } else {
+            uni.showToast({
+              title: this.$t('messages.operationFailed') + ': ' + detail,
+              icon: 'none'
+            })
+          }
+          return
+        }
         
         if (equipmentData.equipment && equipmentData.available_packages && equipmentData.available_packages.length > 0) {
           console.log('=== 查询成功 ===')
@@ -1004,42 +1053,19 @@ export default {
             title: this.$t('stock.deviceRecognizedToast', { name: equipmentData.equipment.name }),
             icon: 'success'
           })
+        } else if (equipmentData.equipment && equipmentData.available_packages && equipmentData.available_packages.length === 0) {
+          console.log('=== 查询失败：未配置套装 ===')
+          showIdentifyModal(
+            'stock.packageNotConfiguredTitle',
+            'stock.packageNotConfiguredHint',
+            this.$t('stock.deviceRecognizedToast', { name: equipmentData.equipment.name })
+          )
         } else {
           console.log('=== 查询失败 ===')
           console.log('设备存在?:', !!equipmentData.equipment)
           console.log('套装存在?:', !!equipmentData.available_packages)
           console.log('套装数量:', equipmentData.available_packages ? equipmentData.available_packages.length : 0)
-          
-          // 显示详细的设备识别信息
-	          let message = `${this.$t('stock.deviceNotRegisteredTitle')}\n${this.$t('stock.serialNumber')}: ${parsedData.sn}`
-	          if (parsedData.mac1) {
-	            message += `\n${this.$t('stock.macAddress1')}: ${this.formatMacAddress(parsedData.mac1)}`
-	          }
-	          if (parsedData.mac2) {
-	            message += `\n${this.$t('stock.macAddress2')}: ${this.formatMacAddress(parsedData.mac2)}`
-	          }
-	          message += `\n\n${this.$t('stock.deviceNotRegisteredHint')}`
-          
-          uni.showModal({
-            title: this.$t('stock.deviceNotRegisteredTitle'),
-            content: message,
-            showCancel: true,
-            confirmText: this.$t('stock.rescan'),
-            cancelText: this.$t('stock.copySn'),
-            success: (res) => {
-              if (res.confirm) {
-                this.resetScan()
-              } else {
-                // 复制SN到剪贴板
-                uni.setClipboardData({
-                  data: parsedData.sn,
-                  success: () => {
-                    uni.showToast({ title: this.$t('stock.copySn'), icon: 'success' })
-                  }
-                })
-              }
-            }
-          })
+          showIdentifyModal('stock.deviceNotInInventoryTitle', 'stock.deviceNotInInventoryHint')
         }
       } catch (error) {
         console.error('=== API请求失败 ===')
