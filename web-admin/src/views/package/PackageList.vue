@@ -259,25 +259,32 @@
             <h4>设备明细</h4>
             <el-button type="primary" size="small" @click="addEquipmentItem">
               <el-icon><Plus /></el-icon>
-              添加设备
+              添加辅材明细
             </el-button>
           </div>
 
           <el-table :data="packageForm.items" style="width: 100%" size="small">
             <el-table-column label="设备" min-width="200">
               <template #default="{ row, $index }">
+                <el-input
+                  v-if="isMainEquipmentItem(row)"
+                  :model-value="getEquipmentDisplayText(row.equipment_id) || '-'"
+                  disabled
+                />
                 <el-select
+                  v-else
                   v-model="row.equipment_id"
-                  placeholder="选择设备"
+                  placeholder="选择辅材"
                   style="width: 100%"
                   filterable
                   @change="updateEquipmentInfo(row, $index)"
                 >
                   <el-option
-                    v-for="eq in availableEquipment"
+                    v-for="eq in auxiliaryEquipmentOptions"
                     :key="eq.id"
                     :label="`${eq.equipment_name} (${eq.equipment_code})`"
                     :value="eq.id"
+                    :disabled="isEquipmentOptionDisabled(eq.id, $index)"
                   />
                 </el-select>
               </template>
@@ -291,6 +298,7 @@
                   :max="999"
                   style="width: 100%"
                   size="small"
+                  :disabled="isMainEquipmentItem(row)"
                 />
               </template>
             </el-table-column>
@@ -298,12 +306,13 @@
             <el-table-column prop="unit" label="单位" width="80" />
             
             <el-table-column label="操作" width="80">
-              <template #default="{ $index }">
+              <template #default="{ row, $index }">
                 <el-button
                   type="danger"
                   size="small"
                   @click="removeEquipmentItem($index)"
                   link
+                  :disabled="isMainEquipmentItem(row)"
                 >
                   <el-icon><Delete /></el-icon>
                 </el-button>
@@ -312,7 +321,7 @@
           </el-table>
 
           <div v-if="!packageForm.items.length" class="empty-items">
-            <p>暂无设备明细，请点击"添加设备"按钮添加</p>
+            <p>暂无设备明细，请点击"添加辅材明细"按钮添加</p>
           </div>
         </div>
       </el-form>
@@ -330,7 +339,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { equipmentApi } from '../../api/equipment'
 import { trackOperation } from '@/utils/operationTrack'
@@ -356,6 +365,9 @@ const filterStatus = ref('')
 // 设备选项
 const mainEquipmentList = ref([])
 const availableEquipment = ref([])
+const auxiliaryEquipmentOptions = computed(() =>
+  (availableEquipment.value || []).filter((eq) => eq.category === 'auxiliary'),
+)
 
 // 表单数据
 const packageFormRef = ref()
@@ -403,6 +415,59 @@ const getSiteTypeColor = (type) => {
     'indoor': 'warning'
   }
   return colorMap[type] || 'info'
+}
+
+const getEquipmentById = (equipmentId) => {
+  if (!equipmentId) return null
+  return (availableEquipment.value || []).find((eq) => eq.id === equipmentId) || null
+}
+
+const getEquipmentDisplayText = (equipmentId) => {
+  const eq = getEquipmentById(equipmentId)
+  if (!eq) return ''
+  return `${eq.equipment_name} (${eq.equipment_code})`
+}
+
+const isMainEquipmentItem = (item) => {
+  if (!item) return false
+  return item.equipment_id === packageForm.main_equipment_id
+}
+
+const syncMainEquipmentItem = (newMainId = null, oldMainId = null) => {
+  const mainId = newMainId ?? packageForm.main_equipment_id
+  if (!mainId) return
+
+  let mainIndex = packageForm.items.findIndex((it) => it.equipment_id === mainId)
+  if (mainIndex === -1 && oldMainId) {
+    const oldIndex = packageForm.items.findIndex((it) => it.equipment_id === oldMainId)
+    if (oldIndex !== -1) {
+      packageForm.items[oldIndex].equipment_id = mainId
+      mainIndex = oldIndex
+    }
+  }
+
+  if (mainIndex === -1) {
+    packageForm.items.unshift({
+      equipment_id: mainId,
+      quantity: 1,
+      unit: getEquipmentById(mainId)?.unit || '台',
+    })
+    mainIndex = 0
+  }
+
+  const mainItem = packageForm.items[mainIndex]
+  mainItem.quantity = 1
+  mainItem.unit = getEquipmentById(mainId)?.unit || mainItem.unit || '台'
+
+  if (mainIndex !== 0) {
+    packageForm.items.splice(mainIndex, 1)
+    packageForm.items.unshift(mainItem)
+  }
+}
+
+const isEquipmentOptionDisabled = (equipmentId, rowIndex) => {
+  if (!equipmentId) return false
+  return packageForm.items.some((it, idx) => idx !== rowIndex && it.equipment_id === equipmentId)
 }
 
 // 加载套装列表
@@ -500,6 +565,7 @@ const handleEdit = (packageData) => {
       unit: item.unit
     })) || []
   })
+  nextTick(() => syncMainEquipmentItem())
   showCreateDialog.value = true
 }
 
@@ -516,18 +582,44 @@ const handleCopy = (packageData) => {
       unit: item.unit
     })) || []
   })
+  nextTick(() => syncMainEquipmentItem())
   showCreateDialog.value = true
 }
 
 // 提交表单
 const handleSubmit = async () => {
   try {
+    syncMainEquipmentItem()
     const isValid = await packageFormRef.value.validate()
     if (!isValid) return
     
     if (!packageForm.items.length) {
       ElMessage.warning('请至少添加一个设备明细')
       return
+    }
+
+    const mainId = packageForm.main_equipment_id
+    const seen = new Set()
+    for (const item of packageForm.items) {
+      if (!item.equipment_id) {
+        ElMessage.error('请完善辅材明细：设备不能为空')
+        return
+      }
+      if (seen.has(item.equipment_id)) {
+        ElMessage.error(`设备明细不允许重复：${getEquipmentDisplayText(item.equipment_id) || item.equipment_id}`)
+        return
+      }
+      seen.add(item.equipment_id)
+
+      if (item.equipment_id === mainId) {
+        item.quantity = 1
+      } else {
+        const eq = getEquipmentById(item.equipment_id)
+        if (eq && eq.category !== 'auxiliary') {
+          ElMessage.error('设备明细仅允许添加辅材')
+          return
+        }
+      }
     }
     
     submitting.value = true
@@ -642,6 +734,11 @@ const addEquipmentItem = () => {
 
 // 移除设备明细
 const removeEquipmentItem = (index) => {
+  const item = packageForm.items[index]
+  if (isMainEquipmentItem(item)) {
+    ElMessage.error('主设备明细不允许删除')
+    return
+  }
   packageForm.items.splice(index, 1)
 }
 
@@ -671,6 +768,14 @@ const resetForm = () => {
     packageFormRef.value.clearValidate()
   }
 }
+
+watch(
+  () => packageForm.main_equipment_id,
+  (newId, oldId) => {
+    if (!newId) return
+    syncMainEquipmentItem(newId, oldId)
+  }
+)
 
 onMounted(async () => {
   await loadEquipmentOptions()

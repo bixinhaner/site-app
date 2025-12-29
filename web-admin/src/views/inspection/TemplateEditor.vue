@@ -329,7 +329,7 @@
                               <el-input v-model="field._newOptionValue" size="small" placeholder="值" style="width: 160px; margin-left:8px;" />
                               <el-button size="small" @click="addOption(field)">添加</el-button>
                               <div class="option-list" v-if="field.options && field.options.length">
-                                <el-tag 
+                                <el-tag
                                   v-for="(opt, oi) in field.options" :key="oi" closable @close="removeOption(field, oi)" style="margin:4px;">
                                   {{ opt.label || opt }} ({{ opt.value || opt }})
                                 </el-tag>
@@ -347,6 +347,20 @@
                                 <el-input-number v-model="(field.constraints || (field.constraints={})).max_length" :step="1" size="small" placeholder="最长" style="margin-left:8px;" />
                                 <el-input v-model="(field.constraints || (field.constraints={})).pattern" size="small" placeholder="正则表达式" style="width: 220px; margin-left:8px;" />
                               </template>
+                            </div>
+                            <!-- 描述/注意事项（字段级） -->
+                            <div class="help-text">
+                              <el-tag type="info" size="small">描述/注意事项</el-tag>
+                              <el-input
+                                v-model="field.help_text"
+                                type="textarea"
+                                :autosize="{ minRows: 2, maxRows: 6 }"
+                                placeholder="描述/注意事项（可选）"
+                                size="small"
+                                style="width: 420px; margin-left:8px;"
+                                :disabled="isFieldDisabled('field', 'help_text')"
+                                :title="getFieldTooltip('field', 'help_text')"
+                              />
                             </div>
                           </div>
                         </div>
@@ -873,6 +887,7 @@ const addField = (categoryIndex, itemIndex) => {
     label: '新字段',
     type: 'text',
     required: false,
+    help_text: '',
     allow_photo: false,
     photo_required: false,
     options: [],
@@ -1155,6 +1170,7 @@ onMounted(() => {
 .field-advanced { padding-left: 0; margin-top: 8px; }
 .constraints { margin-top: 6px; display:flex; align-items:center; gap:8px; }
 .options-line { margin-top: 6px; display:flex; align-items:center; flex-wrap: wrap; }
+.help-text { margin-top: 6px; display:flex; align-items:flex-start; gap:8px; flex-wrap: wrap; }
 .empty-fields { color:#999; padding: 8px 0; }
 
 .item-basic {

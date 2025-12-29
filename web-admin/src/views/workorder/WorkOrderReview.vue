@@ -268,16 +268,35 @@
         </el-descriptions>
 
         <!-- 数据内容 -->
-        <div v-if="selectedItem.data_value && selectedItem.data_value.length > 0" style="margin-top: 20px;">
+        <div v-if="itemDetailFieldRows.length > 0" style="margin-top: 20px;">
           <h4>填写数据</h4>
-          <el-table :data="selectedItem.data_value" size="small" border>
-            <el-table-column label="字段名称" width="200">
+          <el-table :data="itemDetailFieldRows" size="small" border>
+            <el-table-column label="字段名称" min-width="260">
               <template #default="{ row }">
-                {{ resolveFieldLabel(row.field_name) }}
+                <div class="field-name-cell">
+                  <span>{{ row.label }}</span>
+                  <span v-if="row.required" class="field-required-mark">*</span>
+                  <el-popover
+                    v-if="row.help_text"
+                    placement="top-start"
+                    trigger="click"
+                    width="360"
+                    :title="`${row.label} 描述/注意事项`"
+                  >
+                    <template #reference>
+                      <el-icon class="field-help-icon" :title="`${row.label} 描述/注意事项`">
+                        <QuestionFilled />
+                      </el-icon>
+                    </template>
+                    <div class="field-help-text">{{ row.help_text }}</div>
+                  </el-popover>
+                </div>
               </template>
             </el-table-column>
-            <el-table-column prop="value" label="填写值" min-width="150" />
-            <el-table-column prop="unit" label="单位" width="100" />
+            <el-table-column prop="display_value" label="填写值" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="unit" label="单位" width="120">
+              <template #default="{ row }">{{ row.unit || '-' }}</template>
+            </el-table-column>
           </el-table>
         </div>
 
@@ -309,7 +328,7 @@
         </div>
 
         <!-- 如果没有内容 -->
-        <div v-if="(!selectedItem.data_value || selectedItem.data_value.length === 0) && (!selectedItem.photos || selectedItem.photos.length === 0)" style="margin-top: 20px;">
+        <div v-if="(!selectedItem.photos || selectedItem.photos.length === 0) && itemDetailFieldRows.length === 0" style="margin-top: 20px;">
           <el-empty description="该检查项暂无提交内容" />
         </div>
       </div>
@@ -469,7 +488,7 @@ import { useRoute } from 'vue-router'
 import request from '@/utils/request'
 import config from '../../config/env.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right } from '@element-plus/icons-vue'
+import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -692,22 +711,22 @@ const reviewItem = async (row, action) => {
     }
 
     // 如果工单有关联的检查，调用检查项审核API
-	    if (order.value && order.value.inspection_id) {
-	      await request.post(`/api/inspections/detail/${order.value.inspection_id}/items/${row.id}/review`, { action, comments: value || undefined })
-	    } else {
-	      // 否则调用工单项审核API
-	      await request.post(`/api/work-orders/${id}/items/${row.id}/review`, { action, comments: value || undefined })
-	    }
-	    ElMessage.success('已提交')
-	    // 审核成功后自动关闭“检查项详情”弹窗（不切换下一条）
-	    itemDetailVisible.value = false
-	    await Promise.all([loadItems(), loadSummary()])
-	  } catch (e) {
-	    if (e === 'cancel') return
-	    console.error(e)
-	    ElMessage.error(e?.response?.data?.detail || '提交失败')
-	  }
-	}
+    if (order.value && order.value.inspection_id) {
+      await request.post(`/api/inspections/detail/${order.value.inspection_id}/items/${row.id}/review`, { action, comments: value || undefined })
+    } else {
+      // 否则调用工单项审核API
+      await request.post(`/api/work-orders/${id}/items/${row.id}/review`, { action, comments: value || undefined })
+    }
+    ElMessage.success('已提交')
+    // 审核成功后自动关闭“检查项详情”弹窗（不切换下一条）
+    itemDetailVisible.value = false
+    await Promise.all([loadItems(), loadSummary()])
+  } catch (e) {
+    if (e === 'cancel') return
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '提交失败')
+  }
+}
 
 const finalReview = async (action) => {
   const id = route.query.id
@@ -731,16 +750,88 @@ const getImageUrl = (filePath) => {
   return filePath
 }
 
-// 将后端存储的 field_name（通常是字段ID）转换为可读的显示名称
-const resolveFieldLabel = (fieldName) => {
-  const item = selectedItem.value
-  if (!item || !Array.isArray(item.fields)) {
-    // 没有字段定义时，退回显示原始字段名
-    return fieldName
+const normalizeText = (val) => String(val ?? '').trim()
+
+const formatFieldValueForReview = (val) => {
+  if (val === null || val === undefined || val === '') return '-'
+  if (typeof val === 'boolean') return val ? '是' : '否'
+  if (Array.isArray(val)) {
+    if (val.length === 0) return '-'
+    return val.map((x) => {
+      if (x === null || x === undefined || x === '') return '-'
+      if (typeof x === 'boolean') return x ? '是' : '否'
+      if (typeof x === 'object') return JSON.stringify(x)
+      return String(x)
+    }).join(', ')
   }
-  const def = item.fields.find(f => f.field_id === fieldName || f.label === fieldName)
-  return def?.label || fieldName
+  if (typeof val === 'object') return JSON.stringify(val)
+  return String(val)
 }
+
+const buildItemDetailFieldRows = (item) => {
+  if (!item) return []
+  const defs = Array.isArray(item.fields) ? item.fields : []
+  const dataList = Array.isArray(item.data_value) ? item.data_value : []
+
+  const dvByName = new Map()
+  dataList.forEach((dv) => {
+    const key = normalizeText(dv?.field_name)
+    if (!key) return
+    if (!dvByName.has(key)) dvByName.set(key, dv)
+  })
+
+  const usedFieldNames = new Set()
+  const rows = []
+
+  const pickDataValue = (def) => {
+    const fid = normalizeText(def?.field_id)
+    if (fid && dvByName.has(fid)) return dvByName.get(fid)
+    const lbl = normalizeText(def?.label)
+    if (lbl && dvByName.has(lbl)) return dvByName.get(lbl)
+    return null
+  }
+
+  defs.forEach((def) => {
+    const label = normalizeText(def?.label) || normalizeText(def?.field_id)
+    if (!label) return
+    const dv = pickDataValue(def)
+    if (dv) usedFieldNames.add(normalizeText(dv.field_name))
+    const helpText = normalizeText(def?.help_text)
+
+    rows.push({
+      key: normalizeText(def?.field_id) || label,
+      label,
+      required: def?.required === true,
+      help_text: helpText,
+      display_value: formatFieldValueForReview(dv ? dv.value : null),
+      unit: normalizeText(dv?.unit) || '',
+      is_defined: true,
+    })
+  })
+
+  // 追加未在字段定义中出现的数据（兼容历史/异常数据）
+  dataList.forEach((dv) => {
+    const fieldName = normalizeText(dv?.field_name)
+    if (!fieldName) return
+    if (usedFieldNames.has(fieldName)) return
+    const matched = defs.some((def) => normalizeText(def?.field_id) === fieldName || normalizeText(def?.label) === fieldName)
+    if (matched) return
+
+    rows.push({
+      key: `__extra__${fieldName}`,
+      label: fieldName,
+      required: false,
+      help_text: '',
+      display_value: formatFieldValueForReview(dv?.value),
+      unit: normalizeText(dv?.unit) || '',
+      is_defined: false,
+    })
+  })
+
+  return rows
+}
+
+const itemDetailFieldRows = computed(() => buildItemDetailFieldRows(selectedItem.value))
 
 const viewItemDetail = (item) => {
   selectedItem.value = item
@@ -1147,6 +1238,29 @@ onMounted(refresh)
   font-size: 12px;
   line-height: 1;
   cursor: help;
+}
+
+.field-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-required-mark {
+  color: #f56c6c;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+.field-help-icon {
+  cursor: pointer;
+  color: #909399;
+  font-size: 14px;
+}
+
+.field-help-text {
+  white-space: pre-line;
+  line-height: 1.6;
 }
 
 /* 审核历史样式 */

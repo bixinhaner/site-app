@@ -337,10 +337,6 @@ export function getFieldHint(field) {
 	}
 	
 	// 帮助文本
-	if (field.help_text) {
-		hints.push(field.help_text)
-	}
-	
 	return hints.join(' | ')
 }
 

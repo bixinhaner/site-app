@@ -297,6 +297,13 @@
 											({{ dataField.min }} - {{ dataField.max }}{{ dataField.unit || '' }})
 										</text>
 									</view>
+									<view
+										v-if="dataField.help_text && String(dataField.help_text).trim() !== ''"
+										class="field-help-icon"
+										@click.stop="() => showFieldHelp(dataField)"
+									>
+										<uni-icons type="help" size="32rpx" color="#999" />
+									</view>
 									<button
 										v-if="isFieldPhotoMode() && dataField.allow_photo === true"
 										class="field-photo-btn"
@@ -2602,9 +2609,9 @@
 		return Array.isArray(values) && values.includes(targetValue)
 	}
 	
-	// 获取字段帮助提示
-	const getFieldHint = (field) => {
-		const hints = []
+		// 获取字段帮助提示
+		const getFieldHint = (field) => {
+			const hints = []
 		
 		// 数字约束提示
 		if (field.type === 'number' && field.constraints) {
@@ -2624,13 +2631,20 @@
 			}
 		}
 		
-		// 帮助文本
-		if (field.help_text) {
-			hints.push(field.help_text)
+			return hints.join(' | ')
 		}
-		
-		return hints.join(' | ')
-	}
+
+		const showFieldHelp = (field) => {
+			const content = String(field?.help_text || '').trim()
+			if (!content) return
+			const title = `${field?.label || field?.field_id || $t('inspection.dataEntry')} 描述/注意事项`
+			uni.showModal({
+				title,
+				content,
+				showCancel: false,
+				confirmText: $t('common.ok')
+			})
+		}
 	
 	// 扫码绑定设备功能
 	const scanEquipmentForBinding = async (item = null) => {
@@ -3405,6 +3419,13 @@
 		gap: 12rpx;
 		flex: 1;
 		min-width: 0;
+	}
+
+	.field-help-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 6rpx;
 	}
 
 	.field-photo-btn {

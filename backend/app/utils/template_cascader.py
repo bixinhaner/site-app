@@ -156,6 +156,9 @@ def update_field_configs(old_fields: List[Dict], new_fields: List[Dict]) -> List
             
             if 'placeholder' in new_field:
                 updated_field['placeholder'] = new_field['placeholder']
+
+            if 'help_text' in new_field:
+                updated_field['help_text'] = new_field.get('help_text')
             
             if 'constraints' in new_field:
                 updated_field['constraints'] = new_field['constraints']

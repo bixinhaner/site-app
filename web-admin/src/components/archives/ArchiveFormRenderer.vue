@@ -44,7 +44,23 @@
         <!-- 站点级字段 -->
         <div v-if="(it.fields || []).length" class="fields">
           <div v-for="fd in (it.fields || [])" :key="fd.field_id" class="field">
-            <label>{{ fd.label || fd.field_id }}</label>
+            <label class="field-label">
+              <span class="field-label__text">{{ fd.label || fd.field_id }}</span>
+              <el-popover
+                v-if="String(fd?.help_text || '').trim()"
+                placement="top-start"
+                trigger="click"
+                width="360"
+                :title="`${fd.label || fd.field_id} 描述/注意事项`"
+              >
+                <template #reference>
+                  <el-icon class="field-help-icon" :title="`${fd.label || fd.field_id} 描述/注意事项`">
+                    <QuestionFilled />
+                  </el-icon>
+                </template>
+                <div class="field-help-text">{{ fd.help_text }}</div>
+              </el-popover>
+            </label>
             <!-- number -->
             <el-input-number
               v-if="(fd.type || 'text').toLowerCase() === 'number'"
@@ -171,6 +187,7 @@
 <script setup>
 import { reactive, watch } from 'vue'
 import config from '@/config/env.js'
+import { QuestionFilled } from '@element-plus/icons-vue'
 
 const props = defineProps({
   content: { type: Object, required: true },
@@ -359,6 +376,10 @@ function dateDisplayFormat(type) {
 .item-title { display: flex; align-items: center; gap: 8px; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px; margin-top: 8px; }
 .field label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+.field-label { display: flex; align-items: center; gap: 6px; }
+.field-label__text { flex: 0 1 auto; }
+.field-help-icon { cursor: pointer; color: #909399; font-size: 14px; }
+.field-help-text { white-space: pre-line; line-height: 1.6; }
 .sub-block { margin-top: 12px; border: 1px dashed #e4e7ed; padding: 8px; border-radius: 6px; background: #fafbfc; }
 .sub-title { font-weight: 600; color: #606266; margin-bottom: 6px; }
 .kv-list { display: flex; flex-direction: column; gap: 4px; }

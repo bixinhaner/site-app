@@ -169,6 +169,87 @@ async def delete_equipment(
 
 # ===== 设备套装管理 =====
 
+def _as_int(value, field_name: str) -> int:
+    try:
+        return int(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{field_name} 不合法")
+
+
+def _normalize_package_items(db: Session, *, main_equipment_id, items_data) -> List[dict]:
+    """规范化套装明细：
+    - 主设备自动写入明细，数量固定为 1
+    - 明细不允许重复
+    - 除主设备外，仅允许添加辅材类设备
+    """
+    main_id = _as_int(main_equipment_id, "main_equipment_id")
+    if not main_id:
+        raise HTTPException(status_code=400, detail="主设备不能为空")
+
+    if items_data is None:
+        items_data = []
+    if not isinstance(items_data, list):
+        raise HTTPException(status_code=400, detail="items 格式不正确")
+
+    parsed_items = []
+    for idx, raw in enumerate(items_data):
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=400, detail=f"items[{idx}] 格式不正确")
+        if raw.get("equipment_id") is None:
+            raise HTTPException(status_code=400, detail=f"items[{idx}].equipment_id 不能为空")
+        equipment_id = _as_int(raw.get("equipment_id"), "equipment_id")
+        qty = raw.get("quantity", 1)
+        quantity = _as_int(qty, "quantity")
+        if quantity <= 0:
+            raise HTTPException(status_code=400, detail="数量必须大于 0")
+        parsed_items.append(
+            {
+                "equipment_id": equipment_id,
+                "quantity": quantity,
+                "is_required": bool(raw.get("is_required", True)),
+                "notes": raw.get("notes"),
+            }
+        )
+
+    seen_ids = set()
+    for item in parsed_items:
+        equipment_id = item["equipment_id"]
+        if equipment_id in seen_ids:
+            raise HTTPException(status_code=400, detail="套装明细存在重复设备")
+        seen_ids.add(equipment_id)
+
+    all_ids = set(seen_ids)
+    all_ids.add(main_id)
+
+    rows = db.query(Equipment.id, Equipment.category).filter(Equipment.id.in_(list(all_ids))).all()
+    category_map = {row[0]: row[1] for row in rows}
+
+    missing_ids = [eid for eid in all_ids if eid not in category_map]
+    if missing_ids:
+        raise HTTPException(status_code=400, detail="套装明细包含不存在的设备")
+
+    if category_map.get(main_id) != EquipmentCategoryEnum.MAIN_DEVICE:
+        raise HTTPException(status_code=400, detail="主设备类型不正确")
+
+    for item in parsed_items:
+        equipment_id = item["equipment_id"]
+        if equipment_id == main_id:
+            continue
+        if category_map.get(equipment_id) != EquipmentCategoryEnum.AUXILIARY:
+            raise HTTPException(status_code=400, detail="套装明细仅允许添加辅材")
+
+    normalized = [
+        {
+            "equipment_id": main_id,
+            "quantity": 1,
+            "is_required": True,
+            "notes": None,
+        }
+    ]
+    normalized.extend([item for item in parsed_items if item["equipment_id"] != main_id])
+    return normalized
+
+
 @router.get("/packages", response_model=List[dict])
 async def get_equipment_packages(
     site_type: Optional[str] = None,
@@ -232,10 +313,15 @@ async def create_equipment_package(
         raise HTTPException(status_code=400, detail="套装编码已存在")
     
     # 创建套装
+    main_equipment_id = _as_int(package_data.get("main_equipment_id"), "main_equipment_id")
+    normalized_items = _normalize_package_items(
+        db, main_equipment_id=main_equipment_id, items_data=package_data.get("items", [])
+    )
+
     package = EquipmentPackage(
         package_code=package_data["package_code"],
         package_name=package_data["package_name"],
-        main_equipment_id=package_data["main_equipment_id"],
+        main_equipment_id=main_equipment_id,
         site_type=package_data.get("site_type"),
         description=package_data.get("description"),
         created_by=current_user.id
@@ -245,8 +331,7 @@ async def create_equipment_package(
     db.flush()  # 获取package.id
     
     # 创建套装明细
-    items_data = package_data.get("items", [])
-    for item_data in items_data:
+    for item_data in normalized_items:
         package_item = EquipmentPackageItem(
             package_id=package.id,
             equipment_id=item_data["equipment_id"],
@@ -313,19 +398,39 @@ async def update_equipment_package(
     package = db.query(EquipmentPackage).filter(EquipmentPackage.id == package_id).first()
     if not package:
         raise HTTPException(status_code=404, detail="套装不存在")
-    
+
+    need_normalize_items = "items" in package_data or "main_equipment_id" in package_data
+    normalized_items = None
+    if need_normalize_items:
+        items_data = package_data.get("items")
+        if items_data is None:
+            items_data = [
+                {
+                    "equipment_id": it.equipment_id,
+                    "quantity": it.quantity,
+                    "is_required": it.is_required,
+                    "notes": it.notes,
+                }
+                for it in package.package_items
+            ]
+        main_equipment_id = package_data.get("main_equipment_id", package.main_equipment_id)
+        normalized_items = _normalize_package_items(db, main_equipment_id=main_equipment_id, items_data=items_data)
+
     # 更新基本信息
     for key in ["package_name", "main_equipment_id", "site_type", "description", "status"]:
         if key in package_data:
-            setattr(package, key, package_data[key])
+            if key == "main_equipment_id":
+                setattr(package, key, _as_int(package_data[key], "main_equipment_id"))
+            else:
+                setattr(package, key, package_data[key])
     
     # 更新套装明细
-    if "items" in package_data:
+    if need_normalize_items:
         # 删除旧的明细
         db.query(EquipmentPackageItem).filter(EquipmentPackageItem.package_id == package_id).delete()
         
         # 添加新的明细
-        for item_data in package_data["items"]:
+        for item_data in (normalized_items or []):
             package_item = EquipmentPackageItem(
                 package_id=package.id,
                 equipment_id=item_data["equipment_id"],

@@ -42,6 +42,7 @@ export const TemplateFieldRules = {
       'label',                // 字段标签
       'placeholder',          // 占位符
       'default_value',        // 默认值
+      'help_text',            // 描述/注意事项（字段级）
       'allow_photo',          // 是否允许拍照（字段级）
       'photo_required',       // 是否必须拍照（字段级，至少1张）
       'constraints',          // 约束条件

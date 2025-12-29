@@ -318,23 +318,66 @@ async def scan_equipment_checkout(
     
     # 3. 使用第一个套装进行出库
     package = packages[0]
+
+    # 3.1 生成出库明细（兼容历史套装：若明细缺主设备，则运行时补齐）
+    checkout_requirements = []
+    has_main_item = False
+    for item in package.package_items:
+        equipment_id = int(item.equipment_id)
+        qty = int(item.quantity or 0)
+        equipment_instance_id = None
+        if equipment_id == package.main_equipment_id:
+            has_main_item = True
+            qty = 1  # 主设备数量固定为 1
+            if equipment_instance and int(getattr(equipment_instance, "equipment_id", 0) or 0) == equipment_id:
+                equipment_instance_id = equipment_instance.id
+        if qty <= 0:
+            continue
+        checkout_requirements.append(
+            {
+                "equipment_id": equipment_id,
+                "quantity": qty,
+                "equipment_name": item.equipment.equipment_name if item.equipment else None,
+                "equipment_code": item.equipment.equipment_code if item.equipment else None,
+                "unit": item.equipment.unit if item.equipment else None,
+                "equipment_instance_id": equipment_instance_id,
+            }
+        )
+
+    if not has_main_item:
+        checkout_requirements.insert(
+            0,
+            {
+                "equipment_id": int(package.main_equipment_id),
+                "quantity": 1,
+                "equipment_name": equipment.equipment_name,
+                "equipment_code": equipment.equipment_code,
+                "unit": equipment.unit,
+                "equipment_instance_id": equipment_instance.id if equipment_instance else None,
+            },
+        )
     
     # 4. 检查库存是否足够
     shortage_items = []
-    for item in package.package_items:
+    for item in checkout_requirements:
         inventory = db.query(Inventory).filter(
             and_(
                 Inventory.warehouse_id == warehouse_id,
-                Inventory.equipment_id == item.equipment_id,
-                Inventory.available_stock >= item.quantity
+                Inventory.equipment_id == item["equipment_id"],
             )
         ).first()
-        
-        if not inventory or inventory.available_stock < item.quantity:
+
+        required_qty = int(item["quantity"] or 0)
+        if (
+            not inventory
+            or int(inventory.available_stock or 0) < required_qty
+            or int(inventory.current_stock or 0) < required_qty
+        ):
             shortage_items.append({
-                "equipment_name": item.equipment.equipment_name,
-                "required": item.quantity,
-                "available": inventory.available_stock if inventory else 0
+                "equipment_name": item.get("equipment_name") or str(item["equipment_id"]),
+                "required": required_qty,
+                "available": int(inventory.available_stock or 0) if inventory else 0,
+                "current_stock": int(inventory.current_stock or 0) if inventory else 0,
             })
     
     if shortage_items:
@@ -346,6 +389,11 @@ async def scan_equipment_checkout(
     # 5. 执行出库操作
     transaction_id = str(uuid.uuid4())
     document_number = f"OUT-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}"
+
+    transaction_scan_location = {}
+    if isinstance(gps_location, dict):
+        transaction_scan_location.update(gps_location)
+    transaction_scan_location["_stock_flow_version"] = 2
     
     # 创建出库记录
     transaction = StockTransaction(
@@ -358,39 +406,45 @@ async def scan_equipment_checkout(
         scan_barcode=barcode,
         # 扫描时间使用服务器本地时间记录
         scan_time=datetime.now(),
-        scan_location=gps_location,
+        scan_location=transaction_scan_location,
         document_number=document_number,
-        total_quantity=sum([item.quantity for item in package.package_items]),
+        total_quantity=sum([int(item["quantity"] or 0) for item in checkout_requirements]),
         notes=f"扫码出库 - {package.package_name}"
     )
     db.add(transaction)
     
     # 创建明细和更新库存
     checkout_items = []
-    for item in package.package_items:
+    for item in checkout_requirements:
         # 创建出库明细
         transaction_item = StockTransactionItem(
             transaction_id=transaction_id,
-            equipment_id=item.equipment_id,
-            quantity=item.quantity,
+            equipment_instance_id=item.get("equipment_instance_id"),
+            equipment_id=item["equipment_id"],
+            quantity=int(item["quantity"] or 0),
         )
         db.add(transaction_item)
         
         # 更新库存
         inventory = db.query(Inventory).filter(
             Inventory.warehouse_id == warehouse_id,
-            Inventory.equipment_id == item.equipment_id
+            Inventory.equipment_id == item["equipment_id"]
         ).first()
         
         if inventory:
-            inventory.available_stock -= item.quantity
-            inventory.allocated_stock += item.quantity
+            qty = int(item["quantity"] or 0)
+            inventory.current_stock -= qty
+            inventory.available_stock -= qty
+            inventory.allocated_stock += qty
+            inventory.last_updated_by = current_user.id
+        else:
+            raise HTTPException(status_code=400, detail="库存更新失败：未找到库存记录")
         
         checkout_items.append({
-            "equipment_name": item.equipment.equipment_name,
-            "equipment_code": item.equipment.equipment_code,
-            "quantity": item.quantity,
-            "unit": item.equipment.unit
+            "equipment_name": item.get("equipment_name"),
+            "equipment_code": item.get("equipment_code"),
+            "quantity": int(item["quantity"] or 0),
+            "unit": item.get("unit")
         })
     
     # 创建领料记录（直接设置为已确认状态）
@@ -1244,6 +1298,13 @@ async def scan_return_receive(
     if not out_trans:
         raise HTTPException(status_code=404, detail="关联出库单不存在")
 
+    out_loc = out_trans.scan_location if isinstance(out_trans.scan_location, dict) else {}
+    try:
+        stock_flow_version = int(out_loc.get("_stock_flow_version", 0) or 0)
+    except Exception:
+        stock_flow_version = 0
+    is_flow_v2 = stock_flow_version == 2
+
     source_warehouse_id = out_trans.warehouse_id
     target_warehouse_id = return_trans.warehouse_id
 
@@ -1264,15 +1325,22 @@ async def scan_return_receive(
                 raise HTTPException(status_code=400, detail="库存回滚失败：已分配库存不足")
             inv.allocated_stock -= qty
             inv.available_stock += qty
+            if is_flow_v2:
+                inv.current_stock += qty
             inv.last_updated_by = current_user.id
         else:
             inv_src = db.query(Inventory).filter(
                 and_(Inventory.warehouse_id == source_warehouse_id, Inventory.equipment_id == equipment_id)
             ).first()
-            if not inv_src or inv_src.allocated_stock < qty or inv_src.current_stock < qty:
-                raise HTTPException(status_code=400, detail="库存回滚失败：源仓库存不足")
-            inv_src.allocated_stock -= qty
-            inv_src.current_stock -= qty
+            if is_flow_v2:
+                if not inv_src or inv_src.allocated_stock < qty:
+                    raise HTTPException(status_code=400, detail="库存回滚失败：源仓已分配库存不足")
+                inv_src.allocated_stock -= qty
+            else:
+                if not inv_src or inv_src.allocated_stock < qty or inv_src.current_stock < qty:
+                    raise HTTPException(status_code=400, detail="库存回滚失败：源仓库存不足")
+                inv_src.allocated_stock -= qty
+                inv_src.current_stock -= qty
             inv_src.last_updated_by = current_user.id
 
             inv_tgt = db.query(Inventory).filter(
