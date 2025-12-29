@@ -2,22 +2,15 @@ from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 
-def ensure_inspection_schema(engine: Engine) -> None:
+def ensure_work_order_schema(engine: Engine) -> None:
     """
     轻量级表结构迁移（SQLite 友好）：
     - Base.metadata.create_all 不会给旧表补列
-    - 这里在启动时检查 site_inspections / inspection_check_items / inspection_photos 缺失列并用 ALTER TABLE ADD COLUMN 补齐
+    - 这里在启动时检查 work_orders 缺失列并用 ALTER TABLE ADD COLUMN 补齐
     """
     required_columns = {
-        "site_inspections": {
+        "work_orders": {
             "review_comments_i18n": "review_comments_i18n TEXT",
-        },
-        "inspection_check_items": {
-            "notes": "notes TEXT",
-            "review_comments_i18n": "review_comments_i18n TEXT",
-        },
-        "inspection_photos": {
-            "field_id": "field_id TEXT",
         },
     }
 
@@ -42,3 +35,4 @@ def ensure_inspection_schema(engine: Engine) -> None:
                     # 兼容并发启动/重复执行等场景：若已存在则忽略
                     print(f"[Schema Migration] Skipped {column_name} on {table_name}: {e}")
                     continue
+

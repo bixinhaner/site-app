@@ -32,6 +32,7 @@ from app.schemas.work_order import (
     WorkOrderItemResponse,
     WorkOrderStatusChangeRequest,
     WorkOrderReviewRequest,
+    WorkOrderReviewCommentsI18nUpdateRequest,
     WorkOrderOmcManualConfirmRequest,
     ItemReviewRequest,
     ReviewSummary,
@@ -98,12 +99,14 @@ def _touch_inspection_item_and_clear_review(item: InspectionCheckItem, now: date
     had_review = (
         item.review_status is not None
         or item.review_comments is not None
+        or getattr(item, "review_comments_i18n", None) is not None
         or item.reviewed_by is not None
         or item.reviewed_at is not None
     )
     if had_review:
         item.review_status = None
         item.review_comments = None
+        item.review_comments_i18n = None
         item.reviewed_by = None
         item.reviewed_at = None
     item.updated_at = now
@@ -345,6 +348,8 @@ def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
         "assigned_by": wo.assigned_by,
         "assigned_to": wo.assigned_to,
         "reviewer_id": wo.reviewer_id,
+        "review_comments": wo.review_comments,
+        "review_comments_i18n": getattr(wo, "review_comments_i18n", None),
         "assigned_at": wo.assigned_at or current_time,
         "accepted_at": wo.accepted_at,
         "submitted_at": wo.submitted_at,
@@ -1196,6 +1201,7 @@ async def list_items(
             "notes": item.notes,
             "review_status": item.review_status,
             "review_comments": item.review_comments,
+            "review_comments_i18n": getattr(item, "review_comments_i18n", None),
             "reviewed_at": item.reviewed_at if hasattr(item, 'reviewed_at') else None,
             "photos": item.photos,  # Include photos
             "created_at": item.created_at,
@@ -1412,11 +1418,85 @@ async def review_item(
     
     item.review_status = req.action
     item.review_comments = req.comments
+    item.review_comments_i18n = req.comments_i18n
     item.reviewed_at = datetime.utcnow()
     db.commit()
     _audit(db, "item", item_id, "item_review", current_user.id, comments=req.comments, details={"result": req.action})
     _update_work_order_result(db, work_order_id)
     return {"message": "检查项审核成功"}
+
+
+@router.post("/{work_order_id}/review/comments-i18n")
+async def update_review_comments_i18n(
+    work_order_id: str,
+    req: WorkOrderReviewCommentsI18nUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ["admin", "manager", "reviewer"]:
+        raise HTTPException(status_code=403, detail="没有权限更新审核意见多语言")
+
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+
+    updated_work_order = False
+    updated_items = 0
+
+    # 更新工单审核意见多语言（不改变审核状态/时间）
+    if req.comments_i18n is not None:
+        wo.review_comments_i18n = req.comments_i18n
+        updated_work_order = True
+
+        # 同步到关联检查，避免移动端只读 inspection 时缺失多语言
+        inspections = []
+        if wo.inspection_id:
+            inspections = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).all()
+        else:
+            inspections = db.query(SiteInspection).filter(SiteInspection.work_order_id == wo.id).all()
+        for inspection in inspections:
+            inspection.review_comments_i18n = req.comments_i18n
+
+    # 更新检查项审核意见多语言（不改变审核结果/时间）
+    item_updates = req.items or []
+    if item_updates:
+        if not wo.inspection_id:
+            raise HTTPException(status_code=400, detail="工单尚未关联检查实例，无法更新检查项审核意见多语言")
+
+        updates_map = {
+            it.item_id: it.comments_i18n
+            for it in item_updates
+            if it and it.item_id and it.comments_i18n is not None
+        }
+        item_ids = list(updates_map.keys())
+        if item_ids:
+            db_items = db.query(InspectionCheckItem).filter(
+                InspectionCheckItem.inspection_id == wo.inspection_id,
+                InspectionCheckItem.id.in_(item_ids),
+            ).all()
+            found_ids = {i.id for i in db_items}
+            missing = [i for i in item_ids if i not in found_ids]
+            if missing:
+                names = missing[:10]
+                extra = f" 等{len(missing)}项" if len(missing) > 10 else ""
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"检查项不存在或不属于当前工单关联检查：{', '.join(names)}{extra}",
+                )
+
+            for item in db_items:
+                item.review_comments_i18n = updates_map.get(item.id)
+            updated_items = len(db_items)
+
+    if not updated_work_order and updated_items == 0:
+        return {"message": "没有需要更新的多语言内容", "updated_work_order": False, "updated_items": 0}
+
+    db.commit()
+    return {
+        "message": "审核意见多语言已更新",
+        "updated_work_order": updated_work_order,
+        "updated_items": updated_items,
+    }
 
 
 @router.get("/{work_order_id}/review-summary", response_model=ReviewSummary)
@@ -1574,10 +1654,12 @@ async def final_review(
                 inspection.reviewed_by = current_user.id
                 inspection.reviewed_at = datetime.utcnow()
                 inspection.review_comments = req.comments
+                inspection.review_comments_i18n = req.comments_i18n
 
     wo.reviewed_by = current_user.id
     wo.reviewed_at = datetime.utcnow()
     wo.review_comments = req.comments
+    wo.review_comments_i18n = req.comments_i18n
     if req.score is not None:
         wo.score = req.score
     db.commit()
@@ -1834,6 +1916,7 @@ async def submit_work_order(
         
         # 1. 清除工单级别的审核信息
         wo.review_comments = None
+        wo.review_comments_i18n = None
         wo.reviewed_by = None
         wo.reviewed_at = None
         
@@ -1844,6 +1927,7 @@ async def submit_work_order(
             ).first()
             if inspection:
                 inspection.review_comments = None
+                inspection.review_comments_i18n = None
                 inspection.reviewed_by = None
                 inspection.reviewed_at = None
     
@@ -1997,6 +2081,7 @@ async def review_work_order(
                 inspection.reviewed_by = current_user.id
                 inspection.reviewed_at = datetime.utcnow()
                 inspection.review_comments = review_data.comments
+                inspection.review_comments_i18n = review_data.comments_i18n
                 if review_data.score:
                     inspection.score = review_data.score
                     inspection.result = "pass" if review_data.score >= 60 else "fail"
@@ -2012,11 +2097,13 @@ async def review_work_order(
                 inspection.reviewed_by = current_user.id
                 inspection.reviewed_at = datetime.utcnow()
                 inspection.review_comments = review_data.comments
+                inspection.review_comments_i18n = review_data.comments_i18n
                 inspection.result = "fail"
     
     # 更新审核信息
     wo.reviewed_at = datetime.utcnow()
     wo.review_comments = review_data.comments
+    wo.review_comments_i18n = review_data.comments_i18n
     
     # 同步状态
     sync_service = get_work_order_sync_service(db)

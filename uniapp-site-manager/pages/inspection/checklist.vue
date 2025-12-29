@@ -88,7 +88,7 @@
 								<text class="issue-badge" :class="'issue-badge-' + (item.review_status || item.status)">
 									{{ item.review_status === 'fail' ? $t('inspection.fail') : (item.review_status === 'warning' ? $t('inspection.warning') : $t('inspection.failed')) }}
 								</text>
-								<text v-if="item.review_comments" class="issue-comment">{{ item.review_comments }}</text>
+								<text v-if="item.review_comments" class="issue-comment">{{ getI18nText(item.review_comments, item.review_comments_i18n) }}</text>
 							</view>
 							
 							<!-- 设备级检查项：显示绑定状态（小区级不需要绑定） -->

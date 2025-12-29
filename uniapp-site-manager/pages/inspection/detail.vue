@@ -151,7 +151,7 @@
 				</view>
 				<view class="card-content">
 					<view class="reject-content">
-						<text class="reject-text">{{ inspectionData.review_comments }}</text>
+						<text class="reject-text">{{ getI18nText(inspectionData.review_comments, inspectionData.review_comments_i18n) }}</text>
 					</view>
 					<view class="reject-tip">
 						<text class="tip-text">📝 {{ $t('inspection.rejectTip') }}</text>
@@ -217,7 +217,7 @@
 											<text class="issue-badge" :class="'issue-badge-' + (item.review_status || item.status)">
 												{{ item.review_status === 'fail' ? $t('inspection.fail') : (item.review_status === 'warning' ? $t('inspection.warning') : $t('inspection.failed')) }}
 											</text>
-											<text v-if="item.review_comments" class="issue-comment">{{ item.review_comments }}</text>
+											<text v-if="item.review_comments" class="issue-comment">{{ getI18nText(item.review_comments, item.review_comments_i18n) }}</text>
 										</view>
 										
 										<!-- 设备绑定信息块：仅设备级检查项显示（小区级不需要绑定） -->
@@ -283,7 +283,7 @@
 					</view>
 					<view class="info-row" v-if="inspectionData.review_comments">
 						<text class="info-label">{{ $t('inspection.reviewComments') }}:</text>
-						<text class="info-value">{{ inspectionData.review_comments }}</text>
+						<text class="info-value">{{ getI18nText(inspectionData.review_comments, inspectionData.review_comments_i18n) }}</text>
 					</view>
 				</view>
 			</view>
@@ -531,7 +531,7 @@
 							</view>
 							<view class="review-comments-item" v-if="currentItem.review_comments">
 								<text class="review-label">{{ $t('inspection.reviewComments') }}:</text>
-								<text class="review-comments-text">{{ currentItem.review_comments }}</text>
+								<text class="review-comments-text">{{ getI18nText(currentItem.review_comments, currentItem.review_comments_i18n) }}</text>
 							</view>
 							<view class="review-time-item" v-if="currentItem.reviewed_at">
 								<text class="review-label">{{ $t('inspection.reviewTime') }}:</text>

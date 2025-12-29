@@ -63,6 +63,7 @@ class WorkOrder(Base):
     # 审核信息
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     review_comments = Column(Text)
+    review_comments_i18n = Column(JSON)
 
     # 状态
     status = Column(Enum(WorkOrderStatusEnum), default=WorkOrderStatusEnum.PENDING)

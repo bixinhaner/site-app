@@ -222,7 +222,33 @@
         <el-divider />
         <el-form label-width="100px">
           <el-form-item label="审核意见">
-            <el-input v-model="comments" type="textarea" :rows="3" placeholder="请输入审核意见" />
+            <div class="i18n-inline">
+              <el-input
+                v-model="comments"
+                class="i18n-inline__input"
+                type="textarea"
+                :rows="3"
+                placeholder="请输入审核意见"
+              />
+              <el-button-group class="i18n-actions">
+                <el-tooltip content="多语言" placement="top">
+                  <el-button
+                    size="small"
+                    circle
+                    :icon="ChatDotRound"
+                    @click="openI18nEditorForFinalReview()"
+                  />
+                </el-tooltip>
+                <el-tooltip content="AI翻译" placement="top">
+                  <el-button
+                    size="small"
+                    circle
+                    :icon="MagicStick"
+                    @click="aiFillFinalReviewI18n()"
+                  />
+                </el-tooltip>
+              </el-button-group>
+            </div>
           </el-form-item>
           <el-form-item>
             <el-space>
@@ -233,6 +259,9 @@
               <el-button type="danger" :disabled="!canReject" @click="finalReview('reject')">驳回</el-button>
               <el-button type="info" @click="showAuditHistory">
                 <el-icon><Clock /></el-icon>查看审核历史
+              </el-button>
+              <el-button type="warning" :disabled="aiReviewI18nLoading" @click="openAiReviewI18n">
+                <el-icon><MagicStick /></el-icon>AI国际化
               </el-button>
             </el-space>
           </el-form-item>
@@ -479,16 +508,156 @@
         <el-button @click="auditHistoryVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 检查项审核意见弹窗（替代 prompt，支持多语言/AI） -->
+    <el-dialog
+      v-model="itemReviewVisible"
+      title="检查项审核"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="itemReviewRow" class="item-review-body">
+        <div class="item-review-meta">
+          <div class="item-review-name">
+            <span style="font-weight: 600;">检查项：</span>{{ itemReviewRow.item_name }}
+          </div>
+          <el-tag v-if="itemReviewAction === 'pass'" type="success" size="small">通过</el-tag>
+          <el-tag v-else-if="itemReviewAction === 'warning'" type="warning" size="small">警告</el-tag>
+          <el-tag v-else-if="itemReviewAction === 'fail'" type="danger" size="small">不合格</el-tag>
+        </div>
+
+        <div class="i18n-inline">
+          <el-input
+            v-model="itemReviewComments"
+            class="i18n-inline__input"
+            type="textarea"
+            :rows="4"
+            :placeholder="itemReviewAction === 'pass' ? '请输入审核意见（可选）' : '请输入审核意见（必填）'"
+          />
+          <el-button-group class="i18n-actions">
+            <el-tooltip content="多语言" placement="top">
+              <el-button
+                size="small"
+                circle
+                :icon="ChatDotRound"
+                @click="openI18nEditorForItemReview()"
+              />
+            </el-tooltip>
+            <el-tooltip content="AI翻译" placement="top">
+              <el-button
+                size="small"
+                circle
+                :icon="MagicStick"
+                @click="aiFillItemReviewI18n()"
+              />
+            </el-tooltip>
+          </el-button-group>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="itemReviewVisible = false" :disabled="itemReviewSubmitting">取消</el-button>
+        <el-button type="primary" @click="submitItemReview" :loading="itemReviewSubmitting">提交</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 多语言编辑弹窗（en / id） -->
+    <el-dialog
+      v-model="i18nEditorVisible"
+      :title="i18nEditorTitle"
+      width="560px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="80px">
+        <el-form-item label="原文">
+          <el-input v-model="i18nEditorSourceText" type="textarea" :rows="3" disabled />
+        </el-form-item>
+        <el-form-item label="en">
+          <el-input v-model="i18nEditorValues.en" type="textarea" :rows="3" placeholder="English" />
+        </el-form-item>
+        <el-form-item label="id">
+          <el-input v-model="i18nEditorValues.id" type="textarea" :rows="3" placeholder="Bahasa Indonesia" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="i18nEditorVisible = false" :disabled="i18nEditorLoading">取消</el-button>
+        <el-button @click="aiFillI18nInDialog" :loading="i18nEditorLoading">
+          <el-icon><MagicStick /></el-icon>
+          AI翻译
+        </el-button>
+        <el-button type="primary" @click="saveI18nEditor" :disabled="i18nEditorLoading">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="aiReviewI18nVisible" title="AI国际化（生成 en / id）" width="520px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 12px;"
+        title="AI 生成的翻译建议人工检查后再保存。"
+      />
+      <el-form label-width="140px">
+        <el-form-item label="覆盖已有翻译">
+          <el-switch v-model="aiReviewI18nOverwrite" />
+        </el-form-item>
+        <el-form-item label="生成后自动保存">
+          <el-switch v-model="aiReviewI18nAutoSave" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="aiReviewI18nVisible = false">取消</el-button>
+        <el-button type="primary" :loading="aiReviewI18nLoading" @click="runAiReviewI18n">开始生成</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="aiReviewI18nProgressVisible"
+      title="AI翻译进度"
+      width="520px"
+      :show-close="false"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div class="ai-progress">
+        <el-progress :percentage="aiReviewI18nProgressPercent" :status="aiReviewI18nProgressBarStatus" />
+        <div class="ai-progress-meta">
+          <div class="ai-progress-main">
+            已完成 {{ aiReviewI18nProgress.done }}/{{ aiReviewI18nProgress.total }}
+            <span v-if="aiReviewI18nProgress.batchTotal" class="ai-progress-batch">
+              （第 {{ aiReviewI18nProgress.batchIndex }}/{{ aiReviewI18nProgress.batchTotal }} 批）
+            </span>
+          </div>
+          <div class="ai-progress-time" v-if="aiReviewI18nProgress.elapsedSeconds">
+            用时 {{ formatDuration(aiReviewI18nProgress.elapsedSeconds) }}
+          </div>
+        </div>
+        <div class="ai-progress-status">{{ aiReviewI18nProgress.message }}</div>
+        <el-alert
+          v-if="aiReviewI18nProgress.error"
+          type="error"
+          :closable="false"
+          show-icon
+          style="margin-top: 12px;"
+          :title="aiReviewI18nProgress.error"
+        />
+      </div>
+      <template #footer>
+        <el-button v-if="!aiReviewI18nProgress.running" type="primary" @click="closeAiReviewI18nProgress">
+          关闭
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import request from '@/utils/request'
 import config from '../../config/env.js'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import { aiAPI } from '@/api/ai'
+import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled, ChatDotRound, MagicStick } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -499,6 +668,7 @@ const items = ref([])
 const itemsLoading = ref(false)
 const summary = ref(null)
 const comments = ref('')
+const commentsI18n = reactive({ en: '', id: '' })
 const reviewListMode = ref('全部')
 const photoDetailVisible = ref(false)
 const selectedPhoto = ref(null)
@@ -521,6 +691,89 @@ const devices = ref([])
 const deviceStatusCheckedAt = ref(null)
 const manualConfirmEnabled = ref(false)
 const manualConfirmSubmitting = ref(false)
+
+// 检查项逐条审核（自定义弹窗）
+const itemReviewVisible = ref(false)
+const itemReviewRow = ref(null)
+const itemReviewAction = ref('pass')
+const itemReviewComments = ref('')
+const itemReviewCommentsI18n = reactive({ en: '', id: '' })
+const itemReviewSubmitting = ref(false)
+
+// 多语言编辑弹窗（复用）
+const i18nEditorVisible = ref(false)
+const i18nEditorTitle = ref('多语言')
+const i18nEditorSourceText = ref('')
+const i18nEditorValues = reactive({ en: '', id: '' })
+const i18nEditorLoading = ref(false)
+const i18nEditorTargetMap = ref(null)
+
+// 一键 AI 国际化（审核意见）
+const aiReviewI18nVisible = ref(false)
+const aiReviewI18nOverwrite = ref(false)
+const aiReviewI18nAutoSave = ref(true)
+const aiReviewI18nLoading = ref(false)
+const aiReviewI18nProgressVisible = ref(false)
+const aiReviewI18nProgress = reactive({
+  total: 0,
+  done: 0,
+  batchIndex: 0,
+  batchTotal: 0,
+  message: '',
+  error: '',
+  running: false,
+  elapsedSeconds: 0,
+})
+
+let aiReviewI18nProgressTimer = null
+let aiReviewI18nProgressStartedAt = 0
+
+const aiReviewI18nProgressPercent = computed(() => {
+  if (!aiReviewI18nProgress.total) return 0
+  const v = Math.floor((aiReviewI18nProgress.done / aiReviewI18nProgress.total) * 100)
+  return Math.min(100, Math.max(0, v))
+})
+
+const aiReviewI18nProgressBarStatus = computed(() => {
+  if (aiReviewI18nProgress.error) return 'exception'
+  if (!aiReviewI18nProgress.running && aiReviewI18nProgress.total > 0 && aiReviewI18nProgress.done >= aiReviewI18nProgress.total) return 'success'
+  return ''
+})
+
+const startAiReviewI18nProgressTimer = () => {
+  if (aiReviewI18nProgressTimer) {
+    clearInterval(aiReviewI18nProgressTimer)
+    aiReviewI18nProgressTimer = null
+  }
+  aiReviewI18nProgressStartedAt = Date.now()
+  aiReviewI18nProgress.elapsedSeconds = 0
+  aiReviewI18nProgressTimer = setInterval(() => {
+    aiReviewI18nProgress.elapsedSeconds = Math.max(
+      0,
+      Math.floor((Date.now() - aiReviewI18nProgressStartedAt) / 1000),
+    )
+  }, 1000)
+}
+
+const stopAiReviewI18nProgressTimer = () => {
+  if (!aiReviewI18nProgressTimer) return
+  clearInterval(aiReviewI18nProgressTimer)
+  aiReviewI18nProgressTimer = null
+}
+
+const closeAiReviewI18nProgress = () => {
+  if (aiReviewI18nProgress.running) return
+  aiReviewI18nProgressVisible.value = false
+  aiReviewI18nProgress.message = ''
+  aiReviewI18nProgress.error = ''
+}
+
+const formatDuration = (seconds) => {
+  const s = Math.max(0, Number(seconds || 0))
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
+}
 
 const statuses = [
   { label: '待分配', value: 'PENDING' },
@@ -618,6 +871,10 @@ const refresh = async () => {
     loading.value = true
     // 先加载工单信息
     order.value = await request.get(`/api/work-orders/${id}`)
+    // 回填审核意见（含多语言）
+    comments.value = order.value?.review_comments || ''
+    commentsI18n.en = order.value?.review_comments_i18n?.en || ''
+    commentsI18n.id = order.value?.review_comments_i18n?.id || ''
     // 然后基于工单信息加载相关数据
     await Promise.all([loadItems(), loadSummary(), loadDeviceStatus(false)])
   } catch (e) {
@@ -659,6 +916,277 @@ const loadSummary = async () => {
   }
 }
 
+// ===== 多语言与 AI（审核意见）=====
+const normalizeI18nPayload = (map) => {
+  if (!map || typeof map !== 'object') return undefined
+  const en = String(map.en || '').trim()
+  const id = String(map.id || '').trim()
+  if (!en && !id) return undefined
+  return { en, id }
+}
+
+const openI18nEditor = ({ title, sourceText, targetMap }) => {
+  i18nEditorTitle.value = title || '多语言'
+  i18nEditorSourceText.value = String(sourceText || '')
+  i18nEditorTargetMap.value = targetMap
+  i18nEditorValues.en = String(targetMap?.en || '')
+  i18nEditorValues.id = String(targetMap?.id || '')
+  i18nEditorVisible.value = true
+}
+
+const saveI18nEditor = () => {
+  const targetMap = i18nEditorTargetMap.value
+  if (targetMap && typeof targetMap === 'object') {
+    targetMap.en = i18nEditorValues.en || ''
+    targetMap.id = i18nEditorValues.id || ''
+  }
+  i18nEditorVisible.value = false
+}
+
+const aiFillI18n = async (sourceText, targetMap) => {
+  const text = String(sourceText || '').trim()
+  if (!text) {
+    ElMessage.warning('原文为空，无法生成翻译')
+    return
+  }
+  if (!targetMap || typeof targetMap !== 'object') return
+
+  const loadingInstance = ElLoading.service({ text: 'AI 翻译中...' })
+  try {
+    const res = await aiAPI.translateBatch({
+      items: [
+        { key: 'comments:en', text, target_locale: 'en' },
+        { key: 'comments:id', text, target_locale: 'id' },
+      ],
+    })
+    const items = res?.items || []
+    targetMap.en = items?.[0]?.translation ?? ''
+    targetMap.id = items?.[1]?.translation ?? ''
+    ElMessage.success('AI 翻译已生成')
+  } catch (error) {
+    console.error('AI 翻译失败:', error)
+    ElMessage.error(error?.response?.data?.detail || 'AI 翻译失败')
+  } finally {
+    loadingInstance.close()
+  }
+}
+
+const aiFillI18nInDialog = async () => {
+  const text = String(i18nEditorSourceText.value || '').trim()
+  if (!text) {
+    ElMessage.warning('原文为空，无法生成翻译')
+    return
+  }
+  i18nEditorLoading.value = true
+  try {
+    const res = await aiAPI.translateBatch({
+      items: [
+        { key: 'comments:en', text, target_locale: 'en' },
+        { key: 'comments:id', text, target_locale: 'id' },
+      ],
+    })
+    const items = res?.items || []
+    i18nEditorValues.en = items?.[0]?.translation ?? ''
+    i18nEditorValues.id = items?.[1]?.translation ?? ''
+    ElMessage.success('AI 翻译已生成')
+  } catch (error) {
+    console.error('AI 翻译失败:', error)
+    ElMessage.error(error?.response?.data?.detail || 'AI 翻译失败')
+  } finally {
+    i18nEditorLoading.value = false
+  }
+}
+
+const openI18nEditorForFinalReview = () => {
+  openI18nEditor({ title: '审核意见', sourceText: comments.value, targetMap: commentsI18n })
+}
+
+const aiFillFinalReviewI18n = async () => {
+  await aiFillI18n(comments.value, commentsI18n)
+}
+
+const openI18nEditorForItemReview = () => {
+  openI18nEditor({ title: '检查项审核意见', sourceText: itemReviewComments.value, targetMap: itemReviewCommentsI18n })
+}
+
+const aiFillItemReviewI18n = async () => {
+  await aiFillI18n(itemReviewComments.value, itemReviewCommentsI18n)
+}
+
+const ensureI18nMap = (targetObj, i18nKey) => {
+  if (!targetObj) return null
+  const cur = targetObj[i18nKey]
+  if (!cur || typeof cur !== 'object' || Array.isArray(cur)) {
+    targetObj[i18nKey] = {}
+  }
+  return targetObj[i18nKey]
+}
+
+const openAiReviewI18n = () => {
+  aiReviewI18nOverwrite.value = false
+  aiReviewI18nAutoSave.value = true
+  aiReviewI18nVisible.value = true
+}
+
+const runAiReviewI18n = async () => {
+  const overwrite = aiReviewI18nOverwrite.value === true
+  const autoSave = aiReviewI18nAutoSave.value === true
+
+  const tasks = []
+  const appliers = []
+  const dirtyItemIds = new Set()
+  let dirtyWorkOrder = false
+
+  const push = (targetMap, sourceText, locale, keyPrefix, markDirty) => {
+    const text = String(sourceText || '').trim()
+    if (!text) return
+    const existing = targetMap?.[locale]
+    if (!overwrite && existing && String(existing).trim()) return
+    const key = `${keyPrefix || 'comments'}:${locale}`
+    tasks.push({ key, text, target_locale: locale })
+    appliers.push((translation) => {
+      targetMap[locale] = translation ?? ''
+    })
+    if (typeof markDirty === 'function') markDirty()
+  }
+
+  // 最终审核意见（本地生成；是否落库取决于是否已提交/是否一致）
+  push(commentsI18n, comments.value, 'en', 'wo:final', () => { dirtyWorkOrder = true })
+  push(commentsI18n, comments.value, 'id', 'wo:final', () => { dirtyWorkOrder = true })
+
+  // 检查项审核意见（全部）
+  items.value.forEach((it, idx) => {
+    const base = String(it?.review_comments || '').trim()
+    if (!base) return
+    const map = ensureI18nMap(it, 'review_comments_i18n')
+    if (!map) return
+    const keyBase = `item:${idx}:${it.id || ''}`
+    const markDirty = () => dirtyItemIds.add(it.id)
+    push(map, base, 'en', keyBase, markDirty)
+    push(map, base, 'id', keyBase, markDirty)
+  })
+
+  if (!tasks.length) {
+    ElMessage.info('没有需要 AI 生成的多语言内容')
+    aiReviewI18nVisible.value = false
+    return
+  }
+
+  aiReviewI18nLoading.value = true
+  aiReviewI18nVisible.value = false
+  aiReviewI18nProgressVisible.value = true
+  aiReviewI18nProgress.total = tasks.length
+  aiReviewI18nProgress.done = 0
+  aiReviewI18nProgress.batchIndex = 0
+  aiReviewI18nProgress.batchTotal = 0
+  aiReviewI18nProgress.message = '准备开始...'
+  aiReviewI18nProgress.error = ''
+  aiReviewI18nProgress.running = true
+  startAiReviewI18nProgressTimer()
+
+  try {
+    const slowWarnSeconds = 60
+    const warnedOnce = { value: false }
+    const getBatchSize = (total) => {
+      if (total <= 20) return 5
+      if (total <= 60) return 10
+      if (total <= 120) return 20
+      return Math.min(200, 20 + 10 * Math.ceil((total - 120) / 100))
+    }
+    const batchSize = getBatchSize(tasks.length)
+    const batchTotal = Math.max(1, Math.ceil(tasks.length / batchSize))
+    aiReviewI18nProgress.batchTotal = batchTotal
+
+    const yieldEvery = tasks.length <= 100 ? 1 : tasks.length <= 300 ? 5 : 10
+    let batchIndex = 0
+    for (let i = 0; i < tasks.length; i += batchSize) {
+      batchIndex += 1
+      aiReviewI18nProgress.batchIndex = batchIndex
+      const sliceTasks = tasks.slice(i, i + batchSize)
+      const sliceAppliers = appliers.slice(i, i + batchSize)
+      aiReviewI18nProgress.message = `请求翻译中...（第 ${batchIndex}/${batchTotal} 批，${sliceTasks.length} 条）`
+
+      const slowTimer = setTimeout(() => {
+        aiReviewI18nProgress.message = `本批次请求耗时较长（已等待超过 ${slowWarnSeconds} 秒），请继续等待...（第 ${batchIndex}/${batchTotal} 批）`
+        if (!warnedOnce.value) {
+          warnedOnce.value = true
+          ElMessage.warning('AI 翻译耗时较长，请耐心等待...')
+        }
+      }, slowWarnSeconds * 1000)
+
+      let res
+      try {
+        res = await aiAPI.translateBatch({ items: sliceTasks })
+      } finally {
+        clearTimeout(slowTimer)
+      }
+
+      const respItems = res?.items || []
+      aiReviewI18nProgress.message = `写入翻译结果...（第 ${batchIndex}/${batchTotal} 批）`
+      for (let j = 0; j < sliceAppliers.length; j += 1) {
+        const translation = respItems?.[j]?.translation ?? ''
+        sliceAppliers[j](translation)
+        aiReviewI18nProgress.done += 1
+        if (yieldEvery === 1 || aiReviewI18nProgress.done % yieldEvery === 0) {
+          await nextTick()
+        }
+      }
+    }
+
+    if (autoSave) {
+      const id = route.query.id
+      if (!id) {
+        ElMessage.warning('缺少工单ID，无法自动保存')
+      } else {
+        const payload = {}
+
+        // 最终审核意见：若已提交且当前输入未被修改，才自动落库（避免翻译与原文不一致）
+        if (dirtyWorkOrder) {
+          const serverText = normalizeText(order.value?.review_comments)
+          const currentText = normalizeText(comments.value)
+          if (serverText && serverText === currentText) {
+            payload.comments_i18n = normalizeI18nPayload(commentsI18n)
+          } else if (currentText) {
+            ElMessage.info('最终审核意见翻译已生成，待点击通过/驳回提交时将一并保存')
+          }
+        }
+
+        if (dirtyItemIds.size) {
+          payload.items = Array.from(dirtyItemIds)
+            .map((itemId) => {
+              const row = items.value.find(x => x?.id === itemId)
+              return {
+                item_id: itemId,
+                comments_i18n: normalizeI18nPayload(row?.review_comments_i18n),
+              }
+            })
+            .filter(x => x && x.item_id && x.comments_i18n)
+        }
+
+        if (payload.comments_i18n || (payload.items && payload.items.length)) {
+          aiReviewI18nProgress.message = '保存到服务器...'
+          await request.post(`/api/work-orders/${id}/review/comments-i18n`, payload)
+        }
+      }
+    }
+
+    aiReviewI18nProgress.message = '已完成'
+    aiReviewI18nProgress.running = false
+    ElMessage.success(autoSave ? '审核意见多语言已生成并已保存' : '审核意见多语言已生成')
+  } catch (error) {
+    console.error('AI 翻译失败:', error)
+    const detail = error?.response?.data?.detail || error?.message || 'AI 翻译失败'
+    aiReviewI18nProgress.error = detail
+    aiReviewI18nProgress.message = '已中止'
+    aiReviewI18nProgress.running = false
+    ElMessage.error(detail)
+  } finally {
+    aiReviewI18nLoading.value = false
+    aiReviewI18nProgress.running = false
+    stopAiReviewI18nProgressTimer()
+  }
+}
+
 const startReview = async () => {
   const id = route.query.id
   try {
@@ -672,66 +1200,65 @@ const startReview = async () => {
 }
 
 const reviewItem = async (row, action) => {
-  const id = route.query.id
-  try {
-    let value = ''
-    
-    // 根据审核动作决定是否强制要求输入意见
-    if (action === 'pass') {
-      // 通过时，意见可选
-      try {
-        const result = await ElMessageBox.prompt('请输入审核意见（可选）', '检查项审核', {
-          confirmButtonText: '提交',
-          cancelButtonText: '取消',
-          inputValidator: null // 不验证输入
-        })
-        value = result.value || ''
-      } catch (e) {
-        if (e === 'cancel') return
-        throw e
-      }
-    } else {
-      // 警告或不合格时，必须输入意见
-      try {
-        const result = await ElMessageBox.prompt('请输入审核意见（必填）', '检查项审核', {
-          confirmButtonText: '提交',
-          cancelButtonText: '取消',
-          inputValidator: (val) => {
-            if (!val || val.trim() === '') {
-              return '请输入审核意见'
-            }
-            return true
-          }
-        })
-        value = result.value
-      } catch (e) {
-        if (e === 'cancel') return
-        throw e
-      }
-    }
+  itemReviewRow.value = row
+  itemReviewAction.value = action
+  itemReviewComments.value = row?.review_comments || ''
+  itemReviewCommentsI18n.en = row?.review_comments_i18n?.en || ''
+  itemReviewCommentsI18n.id = row?.review_comments_i18n?.id || ''
+  itemReviewVisible.value = true
+}
 
+const submitItemReview = async () => {
+  const id = route.query.id
+  if (!id || !itemReviewRow.value) return
+
+  const action = itemReviewAction.value
+  const baseText = String(itemReviewComments.value || '')
+  if (action !== 'pass' && baseText.trim() === '') {
+    ElMessage.warning('请输入审核意见')
+    return
+  }
+
+  const payload = {
+    action,
+    comments: baseText.trim() ? baseText : undefined,
+    comments_i18n: baseText.trim() ? normalizeI18nPayload(itemReviewCommentsI18n) : undefined,
+  }
+
+  try {
+    itemReviewSubmitting.value = true
     // 如果工单有关联的检查，调用检查项审核API
     if (order.value && order.value.inspection_id) {
-      await request.post(`/api/inspections/detail/${order.value.inspection_id}/items/${row.id}/review`, { action, comments: value || undefined })
+      await request.post(
+        `/api/inspections/detail/${order.value.inspection_id}/items/${itemReviewRow.value.id}/review`,
+        payload
+      )
     } else {
       // 否则调用工单项审核API
-      await request.post(`/api/work-orders/${id}/items/${row.id}/review`, { action, comments: value || undefined })
+      await request.post(`/api/work-orders/${id}/items/${itemReviewRow.value.id}/review`, payload)
     }
     ElMessage.success('已提交')
+    itemReviewVisible.value = false
     // 审核成功后自动关闭“检查项详情”弹窗（不切换下一条）
     itemDetailVisible.value = false
     await Promise.all([loadItems(), loadSummary()])
   } catch (e) {
-    if (e === 'cancel') return
     console.error(e)
     ElMessage.error(e?.response?.data?.detail || '提交失败')
+  } finally {
+    itemReviewSubmitting.value = false
   }
 }
 
 const finalReview = async (action) => {
   const id = route.query.id
   try {
-    await request.post(`/api/work-orders/${id}/review`, { action, comments: comments.value || undefined })
+    const baseText = String(comments.value || '')
+    await request.post(`/api/work-orders/${id}/review`, {
+      action,
+      comments: baseText.trim() ? baseText : undefined,
+      comments_i18n: baseText.trim() ? normalizeI18nPayload(commentsI18n) : undefined,
+    })
     ElMessage.success('审核已提交')
     await refresh()
   } catch (e) {
@@ -1211,6 +1738,72 @@ onMounted(refresh)
 </script>
 
 <style scoped>
+.i18n-inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.i18n-inline__input {
+  flex: 1;
+}
+
+.i18n-actions {
+  flex: none;
+}
+
+.ai-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.ai-progress-main {
+  font-size: 14px;
+  color: #333;
+}
+
+.ai-progress-batch {
+  color: #666;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.ai-progress-time {
+  color: #666;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ai-progress-status {
+  font-size: 12px;
+  color: #666;
+}
+
+.item-review-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.item-review-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .section-header { display:flex; justify-content: space-between; align-items:center; margin: 8px 0; }

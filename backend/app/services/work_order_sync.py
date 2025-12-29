@@ -124,6 +124,8 @@ class WorkOrderSyncService:
             
             if work_order.review_comments and not inspection.review_comments:
                 inspection.review_comments = work_order.review_comments
+            if getattr(work_order, "review_comments_i18n", None) and not getattr(inspection, "review_comments_i18n", None):
+                inspection.review_comments_i18n = work_order.review_comments_i18n
 
 
 def get_work_order_sync_service(db: Session) -> WorkOrderSyncService:

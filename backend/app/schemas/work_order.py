@@ -87,6 +87,7 @@ class WorkOrderReviewStart(BaseModel):
 class WorkOrderReviewRequest(BaseModel):
     action: str = Field(..., pattern="^(approve|reject)$")
     comments: Optional[str] = None
+    comments_i18n: Optional[Dict[str, str]] = None
     score: Optional[float] = None
     require_recheck: Optional[bool] = False
 
@@ -100,6 +101,17 @@ class WorkOrderOmcManualConfirmRequest(BaseModel):
 class ItemReviewRequest(BaseModel):
     action: str = Field(..., pattern="^(pass|fail|warning)$")
     comments: Optional[str] = None
+    comments_i18n: Optional[Dict[str, str]] = None
+
+
+class ReviewCommentsI18nUpdateItem(BaseModel):
+    item_id: str
+    comments_i18n: Optional[Dict[str, str]] = None
+
+
+class WorkOrderReviewCommentsI18nUpdateRequest(BaseModel):
+    comments_i18n: Optional[Dict[str, str]] = None
+    items: Optional[List[ReviewCommentsI18nUpdateItem]] = None
 
 
 class WorkOrderItemResponse(BaseModel):
@@ -117,6 +129,7 @@ class WorkOrderItemResponse(BaseModel):
     notes: Optional[str] = None
     review_status: Optional[str]
     review_comments: Optional[str]
+    review_comments_i18n: Optional[Dict[str, str]] = None
     reviewed_at: Optional[datetime]
     photos: List['InspectionPhotoResponse'] = []
     created_at: datetime
@@ -158,6 +171,7 @@ class WorkOrderResponse(BaseModel):
     completed_at: Optional[datetime]
     due_date: Optional[datetime]
     review_comments: Optional[str] = None
+    review_comments_i18n: Optional[Dict[str, str]] = None
     extra_data: Optional[Dict[str, Any]] = {}
     
     @validator('extra_data', pre=True)

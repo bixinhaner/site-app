@@ -242,6 +242,7 @@ class InspectionCheckItemResponse(BaseModel):
     checked_at: Optional[datetime]
     review_status: Optional[str]
     review_comments: Optional[str]
+    review_comments_i18n: Optional[Dict[str, str]] = None
     reviewed_at: Optional[datetime]
     photos: List[InspectionPhotoResponse] = []
     created_at: datetime
@@ -281,6 +282,7 @@ class SiteInspectionResponse(BaseModel):
     reviewed_by: Optional[int]
     reviewed_at: Optional[datetime]
     review_comments: Optional[str]
+    review_comments_i18n: Optional[Dict[str, str]] = None
     notes: Optional[str]
     issues_found: Optional[str]
     recommendations: Optional[str]
@@ -379,6 +381,7 @@ class CheckItemReviewRequest(BaseModel):
     """检查项审核请求"""
     action: str = Field(..., pattern="^(pass|fail|warning)$")
     comments: Optional[str] = None
+    comments_i18n: Optional[Dict[str, str]] = None
 
 class PhotoReviewRequest(BaseModel):
     """照片审核请求"""

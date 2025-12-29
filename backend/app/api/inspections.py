@@ -206,12 +206,14 @@ def _touch_check_item_and_clear_review(check_item: InspectionCheckItem, now: dat
     had_review = (
         check_item.review_status is not None
         or check_item.review_comments is not None
+        or getattr(check_item, "review_comments_i18n", None) is not None
         or check_item.reviewed_by is not None
         or check_item.reviewed_at is not None
     )
     if had_review:
         check_item.review_status = None
         check_item.review_comments = None
+        check_item.review_comments_i18n = None
         check_item.reviewed_by = None
         check_item.reviewed_at = None
     check_item.updated_at = now
@@ -783,6 +785,7 @@ async def get_inspection(
         if work_order and work_order.status.value == "REJECTED" and work_order.review_comments:
             # 如果工单被驳回且有驳回意见，将其添加到检查的review_comments字段
             inspection.review_comments = work_order.review_comments
+            inspection.review_comments_i18n = getattr(work_order, "review_comments_i18n", None)
     
     return inspection
 
@@ -859,6 +862,7 @@ async def update_inspection(
         
         # 1. 清除检查级别的审核信息
         inspection.review_comments = None
+        inspection.review_comments_i18n = None
         inspection.reviewed_by = None
         inspection.reviewed_at = None
     
@@ -2420,6 +2424,7 @@ async def review_inspection_item(
         now = datetime.utcnow()
         check_item.review_status = review.action
         check_item.review_comments = review.comments
+        check_item.review_comments_i18n = review.comments_i18n
         check_item.reviewed_by = current_user.id
         check_item.reviewed_at = now
         check_item.updated_at = now
