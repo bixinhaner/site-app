@@ -20,7 +20,7 @@
 				</cover-view>
 				
 				<cover-view class="toolbar-center">
-					<cover-text class="toolbar-title">{{ getDisplayItemName(checkItem?.item_name) || $t('inspection.photoInspection') }}</cover-text>
+					<cover-text class="toolbar-title">{{ getDisplayItemName(getI18nText(checkItem?.item_name, checkItem?.item_name_i18n)) || $t('inspection.photoInspection') }}</cover-text>
 					<cover-text class="toolbar-subtitle" v-if="currentSite">{{ currentSite.site_name }}</cover-text>
 				</cover-view>
 				
@@ -200,6 +200,28 @@ export default {
 		// 依赖当前语言，确保切换语言后能更新显示
 		const _ = languageStore.currentLocale
 		return $t(key, params)
+	}
+
+	const normalizeLocale = (value) => {
+		const s = String(value || '').trim().toLowerCase().replace('_', '-')
+		if (!s) return 'zh'
+		if (s === 'zh' || s === 'zh-cn' || s === 'zh-hans') return 'zh'
+		if (s === 'en' || s === 'en-us' || s === 'en-gb') return 'en'
+		if (s === 'id' || s === 'id-id') return 'id'
+		return s
+	}
+
+	const getI18nText = (baseText, i18nMap) => {
+		const locale = normalizeLocale(languageStore.currentLocale)
+		const base = baseText === null || baseText === undefined ? '' : String(baseText)
+		if (!locale || locale === 'zh') return base
+		if (i18nMap && typeof i18nMap === 'object') {
+			const translated = i18nMap[locale]
+			if (translated !== null && translated !== undefined && String(translated).trim() !== '') {
+				return String(translated)
+			}
+		}
+		return base
 	}
 
 	const getDisplayItemName = (name) => {

@@ -17,9 +17,18 @@
       />
 
       <div v-if="modelValue && content" class="preview-body">
-        <div class="preview-meta" v-if="templateName">
-          <el-tag size="small" effect="plain">{{ templateName }}</el-tag>
-          <el-tag v-if="templateVersion" size="small" effect="plain" type="info">v{{ templateVersion }}</el-tag>
+        <div class="preview-toolbar">
+          <div class="preview-meta" v-if="templateName">
+            <el-tag size="small" effect="plain">{{ templateName }}</el-tag>
+            <el-tag v-if="templateVersion" size="small" effect="plain" type="info">v{{ templateVersion }}</el-tag>
+          </div>
+          <div class="preview-locale">
+            <el-select v-model="previewLocale" size="small" style="width: 140px;">
+              <el-option label="中文(zh)" value="zh" />
+              <el-option label="English(en)" value="en" />
+              <el-option label="Bahasa(id)" value="id" />
+            </el-select>
+          </div>
         </div>
 
         <el-tabs v-model="activeLevel" class="level-tabs">
@@ -46,6 +55,7 @@
                 :content="filteredContent"
                 :disabled="disabled"
                 variant="template"
+                :locale="previewLocale"
               />
             </div>
 
@@ -174,11 +184,22 @@ const filteredContent = computed(() => {
   const cats = levelGroups.value[activeLevel.value] || []
   return { ...props.content, check_categories: cats }
 })
+
+const previewLocale = ref('zh')
 </script>
 
 <style scoped>
 .preview-wrap {
   height: 100%;
+}
+
+.preview-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
 .preview-body {
@@ -191,7 +212,11 @@ const filteredContent = computed(() => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+}
+
+.preview-locale {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .phone-frame {

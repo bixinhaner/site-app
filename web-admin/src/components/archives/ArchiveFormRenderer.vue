@@ -2,7 +2,7 @@
   <div class="renderer" :class="{ 'renderer--template': variant === 'template' }">
     <div v-for="cat in content.check_categories || []" :key="cat.category_id" class="cat">
       <h3 class="cat-title">
-        <span class="cat-name">{{ cat.category_name || cat.category_id }}</span>
+        <span class="cat-name">{{ categoryName(cat) }}</span>
         <el-tag
           v-if="variant === 'template'"
           size="small"
@@ -12,8 +12,8 @@
           {{ levelLabel(cat) }}
         </el-tag>
       </h3>
-      <div v-if="variant === 'template' && cat.description" class="cat-desc">
-        {{ cat.description }}
+      <div v-if="variant === 'template' && categoryDesc(cat)" class="cat-desc">
+        {{ categoryDesc(cat) }}
       </div>
       <el-card v-for="it in cat.items || []" :key="`${cat.category_id}-${it.item_id}`" class="item">
         <div class="item-header">
@@ -29,15 +29,15 @@
               {{ levelLabel(cat) }}
             </el-tag>
           </div>
-          <template v-if="it.description">
+          <template v-if="itemDesc(it)">
             <div v-if="variant === 'template'" class="desc-block" role="note" aria-label="检查说明">
               <div class="desc-block__title">
                 <el-icon><InfoFilled /></el-icon>
                 <span>检查说明</span>
               </div>
-              <div class="desc-block__content">{{ it.description }}</div>
+              <div class="desc-block__content">{{ itemDesc(it) }}</div>
             </div>
-            <div v-else class="item-desc">{{ it.description }}</div>
+            <div v-else class="item-desc">{{ itemDesc(it) }}</div>
           </template>
         </div>
 
@@ -45,20 +45,20 @@
         <div v-if="(it.fields || []).length" class="fields">
           <div v-for="fd in (it.fields || [])" :key="fd.field_id" class="field">
             <label class="field-label">
-              <span class="field-label__text">{{ fd.label || fd.field_id }}</span>
+              <span class="field-label__text">{{ fieldDisplayLabel(fd) }}</span>
               <el-popover
-                v-if="String(fd?.help_text || '').trim()"
+                v-if="String(fieldHelpText(fd) || '').trim()"
                 placement="top-start"
                 trigger="click"
                 width="360"
-                :title="`${fd.label || fd.field_id} 描述/注意事项`"
+                :title="`${fieldDisplayLabel(fd)} 描述/注意事项`"
               >
                 <template #reference>
-                  <el-icon class="field-help-icon" :title="`${fd.label || fd.field_id} 描述/注意事项`">
+                  <el-icon class="field-help-icon" :title="`${fieldDisplayLabel(fd)} 描述/注意事项`">
                     <QuestionFilled />
                   </el-icon>
                 </template>
-                <div class="field-help-text">{{ fd.help_text }}</div>
+                <div class="field-help-text">{{ fieldHelpText(fd) }}</div>
               </el-popover>
             </label>
             <!-- number -->
@@ -84,7 +84,7 @@
               @update:modelValue="val => setValue(cat, it, fd, val)"
               :disabled="disabled"
             >
-              <el-option v-for="o in (fd?.options || [])" :key="o.value" :label="o.label" :value="o.value" />
+              <el-option v-for="o in (fd?.options || [])" :key="o.value" :label="optionLabel(o)" :value="o.value" />
             </el-select>
             <!-- select (multi) -->
             <el-select
@@ -94,7 +94,7 @@
               @update:modelValue="val => setValue(cat, it, fd, val)"
               :disabled="disabled"
             >
-              <el-option v-for="o in (fd?.options || [])" :key="o.value" :label="o.label" :value="o.value" />
+              <el-option v-for="o in (fd?.options || [])" :key="o.value" :label="optionLabel(o)" :value="o.value" />
             </el-select>
             <!-- date/time/datetime -->
             <el-date-picker
@@ -109,7 +109,7 @@
             <!-- text/default -->
             <el-input
               v-else
-              :placeholder="fd?.placeholder"
+              :placeholder="fieldPlaceholder(fd)"
               :model-value="getValue(cat, it, fd)"
               @update:modelValue="val => setValue(cat, it, fd, val)"
               :disabled="disabled"
@@ -193,8 +193,61 @@ const props = defineProps({
   content: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
   variant: { type: String, default: 'archive' },
+  locale: { type: String, default: 'zh' },
 })
 const emit = defineEmits(['change', 'upload-photo', 'delete-photo'])
+
+const normalizeLocale = (value) => {
+  const s = String(value || '').trim().toLowerCase().replace('_', '-')
+  if (!s) return 'zh'
+  if (s === 'zh' || s === 'zh-cn' || s === 'zh-hans') return 'zh'
+  if (s === 'en' || s === 'en-us' || s === 'en-gb') return 'en'
+  if (s === 'id' || s === 'id-id') return 'id'
+  return s
+}
+
+const pickText = (base, i18nMap) => {
+  const loc = normalizeLocale(props.locale)
+  const baseText = base === null || base === undefined ? '' : String(base)
+  if (!loc || loc === 'zh') return baseText
+  if (i18nMap && typeof i18nMap === 'object' && !Array.isArray(i18nMap)) {
+    const v = i18nMap[loc]
+    if (v !== null && v !== undefined && String(v).trim() !== '') return String(v)
+  }
+  return baseText
+}
+
+const categoryName = (cat) => {
+  const base = (cat?.category_name || '').trim()
+  const picked = pickText(base, cat?.category_name_i18n)
+  return picked || cat?.category_id || ''
+}
+
+const categoryDesc = (cat) => {
+  return pickText(cat?.description || '', cat?.description_i18n)
+}
+
+const itemDesc = (it) => {
+  return pickText(it?.description || '', it?.description_i18n)
+}
+
+const fieldDisplayLabel = (fd) => {
+  const base = fd?.label || fd?.field_id || ''
+  return pickText(base, fd?.label_i18n) || fd?.field_id || ''
+}
+
+const fieldPlaceholder = (fd) => {
+  return pickText(fd?.placeholder || '', fd?.placeholder_i18n)
+}
+
+const fieldHelpText = (fd) => {
+  return pickText(fd?.help_text || '', fd?.help_text_i18n)
+}
+
+const optionLabel = (o) => {
+  const base = o?.label ?? o?.value ?? ''
+  return pickText(base, o?.label_i18n)
+}
 
 const normalizeLevelType = (category) => {
   const lt = category?.level_type
@@ -327,7 +380,8 @@ function setValue(cat, it, fd, val) {
 
 function fieldLabel(it, key) {
   const f = (it.fields || []).find(x => x.field_id === key)
-  return (f && (f.label || f.field_id)) || key
+  const base = (f && (f.label || f.field_id)) || key
+  return pickText(base, f?.label_i18n) || base
 }
 
 function renderVal(v) {
@@ -347,8 +401,9 @@ function fileUrl(filePath) {
 }
 
 function displayItemName(it) {
-  const name = it.item_name || it.item_id || ''
-  if ((it.cells || []).length > 1 || (it.sectors || []).length > 1) {
+  const base = it.item_name || it.item_id || ''
+  const name = pickText(base, it?.item_name_i18n)
+  if (normalizeLocale(props.locale) === 'zh' && ((it.cells || []).length > 1 || (it.sectors || []).length > 1)) {
     // 去掉尾部含“小区/扇区”描述，避免暗示只对应单个单元
     return name.replace(/[-\s]*小区.*$/u, '').replace(/[-\s]*扇区.*$/u, '')
   }

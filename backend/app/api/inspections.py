@@ -7,6 +7,7 @@ import os
 import uuid
 import hashlib
 import json
+import copy
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -249,6 +250,105 @@ def _template_requires_lld_cells(template_data: dict) -> bool:
         if _normalize_category_level(cat) == "cell_earfcn":
             return True
     return False
+
+
+def _strip_cell_suffix(item_id: str) -> str:
+    """兼容小区级检查项：xxx_cell_1_n41 -> xxx。"""
+    s = str(item_id or "").strip()
+    if not s:
+        return s
+    marker = "_cell_"
+    if marker in s:
+        return s.split(marker, 1)[0]
+    return s
+
+
+def _as_i18n_dict(value):
+    """确保 i18n 字段为 dict[str, str]，否则返回 None。"""
+    if not isinstance(value, dict):
+        return None
+    out = {}
+    for k, v in value.items():
+        if v is None:
+            continue
+        out[str(k)] = str(v)
+    return out or None
+
+
+def _build_template_i18n_index(template_data: dict) -> dict:
+    """构建模板 item_id -> 元信息映射，供检查项接口补充 i18n。"""
+    index = {}
+    for cat in (template_data or {}).get("check_categories", []) or []:
+        if not isinstance(cat, dict):
+            continue
+        for item in (cat.get("items") or []) or []:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("item_id") or "").strip()
+            if not item_id:
+                continue
+            field_map = {}
+            for f in (item.get("fields") or []) or []:
+                if not isinstance(f, dict):
+                    continue
+                fid = str(f.get("field_id") or "").strip()
+                if not fid:
+                    continue
+                field_map[fid] = f
+            index[item_id] = {"category": cat, "item": item, "field_map": field_map}
+    return index
+
+
+def _merge_fields_i18n(fields, template_field_map: Optional[dict]):
+    """将模板中的字段 i18n 合并进检查项字段配置（仅响应层，不写回 DB）。"""
+    if not isinstance(fields, list) or not template_field_map:
+        return fields
+
+    merged = copy.deepcopy(fields)
+    for f in merged:
+        if not isinstance(f, dict):
+            continue
+        fid = str(f.get("field_id") or "").strip()
+        if not fid:
+            continue
+        tpl_f = template_field_map.get(fid)
+        if not isinstance(tpl_f, dict):
+            continue
+
+        for key in ("label_i18n", "placeholder_i18n", "help_text_i18n"):
+            v = _as_i18n_dict(tpl_f.get(key))
+            if v is not None:
+                f[key] = v
+
+        tpl_opts = tpl_f.get("options")
+        if not isinstance(tpl_opts, list):
+            continue
+        opt_map = {}
+        for opt in tpl_opts:
+            if not isinstance(opt, dict):
+                continue
+            ov = opt.get("value")
+            if ov is None:
+                continue
+            opt_map[str(ov)] = opt
+
+        cur_opts = f.get("options")
+        if not isinstance(cur_opts, list) or not opt_map:
+            continue
+        for opt in cur_opts:
+            if not isinstance(opt, dict):
+                continue
+            ov = opt.get("value")
+            if ov is None:
+                continue
+            tpl_opt = opt_map.get(str(ov))
+            if not isinstance(tpl_opt, dict):
+                continue
+            label_i18n = _as_i18n_dict(tpl_opt.get("label_i18n"))
+            if label_i18n is not None:
+                opt["label_i18n"] = label_i18n
+
+    return merged
 
 # 新增工具函数
 async def create_default_template(db: Session, site_id: int, inspection_type: str) -> InspectionTemplate:
@@ -1724,10 +1824,15 @@ async def get_inspection_items(
     Returns:
         检查项列表
     """
+    from sqlalchemy.orm import joinedload
+
     # 验证检查记录存在
-    inspection = db.query(SiteInspection).filter(
-        SiteInspection.id == inspection_id
-    ).first()
+    inspection = (
+        db.query(SiteInspection)
+        .options(joinedload(SiteInspection.template))
+        .filter(SiteInspection.id == inspection_id)
+        .first()
+    )
     
     if not inspection:
         raise HTTPException(
@@ -1744,9 +1849,17 @@ async def get_inspection_items(
         )
     _ensure_surveyor_inspection_type(db, current_user, inspection)
     
+    template_data = {}
+    try:
+        tpl = inspection.template
+        if tpl is not None and isinstance(getattr(tpl, "template_data", None), dict):
+            template_data = tpl.template_data or {}
+    except Exception:
+        template_data = {}
+
+    template_index = _build_template_i18n_index(template_data)
+
     # 获取检查项，包括照片
-    from sqlalchemy.orm import joinedload
-    
     query = db.query(InspectionCheckItem).options(
         joinedload(InspectionCheckItem.photos)
     ).filter(
@@ -1769,8 +1882,35 @@ async def get_inspection_items(
         )
     
     check_items = query.all()
-    
-    return check_items
+
+    resp_items = []
+    for check_item in check_items:
+        base_item_id = _strip_cell_suffix(check_item.item_id)
+        meta = template_index.get(base_item_id) or template_index.get(check_item.item_id)
+
+        cat_i18n = None
+        item_i18n = None
+        desc_i18n = None
+        template_fields_map = None
+        if meta:
+            cat_i18n = _as_i18n_dict(meta.get("category", {}).get("category_name_i18n"))
+            item_i18n = _as_i18n_dict(meta.get("item", {}).get("item_name_i18n"))
+            desc_i18n = _as_i18n_dict(meta.get("item", {}).get("description_i18n"))
+            template_fields_map = meta.get("field_map") or None
+
+        merged_fields = _merge_fields_i18n(check_item.fields, template_fields_map)
+
+        base = InspectionCheckItemResponse.model_validate(check_item, from_attributes=True)
+        update_payload = {"fields": merged_fields}
+        if cat_i18n is not None:
+            update_payload["category_name_i18n"] = cat_i18n
+        if item_i18n is not None:
+            update_payload["item_name_i18n"] = item_i18n
+        if desc_i18n is not None:
+            update_payload["description_i18n"] = desc_i18n
+        resp_items.append(base.model_copy(update=update_payload))
+
+    return resp_items
 
 @router.put("/detail/{inspection_id}/items/{item_id}", response_model=InspectionCheckItemResponse)
 async def update_inspection_item(
@@ -1782,9 +1922,14 @@ async def update_inspection_item(
 ):
     """更新检查项"""
     # 验证检查记录存在
-    inspection = db.query(SiteInspection).filter(
-        SiteInspection.id == inspection_id
-    ).first()
+    from sqlalchemy.orm import joinedload
+
+    inspection = (
+        db.query(SiteInspection)
+        .options(joinedload(SiteInspection.template))
+        .filter(SiteInspection.id == inspection_id)
+        .first()
+    )
     
     if not inspection:
         raise HTTPException(
@@ -1800,6 +1945,15 @@ async def update_inspection_item(
             detail="没有权限修改此检查记录"
         )
     _ensure_surveyor_inspection_type(db, current_user, inspection)
+
+    template_data = {}
+    try:
+        tpl = inspection.template
+        if tpl is not None and isinstance(getattr(tpl, "template_data", None), dict):
+            template_data = tpl.template_data or {}
+    except Exception:
+        template_data = {}
+    template_index = _build_template_i18n_index(template_data)
     
     # 验证检查项存在
     check_item = db.query(InspectionCheckItem).filter(
@@ -2060,7 +2214,28 @@ async def update_inspection_item(
     
     db.commit()
     
-    return check_item
+    base_item_id = _strip_cell_suffix(check_item.item_id)
+    meta = template_index.get(base_item_id) or template_index.get(check_item.item_id)
+    cat_i18n = None
+    item_i18n = None
+    desc_i18n = None
+    template_fields_map = None
+    if meta:
+        cat_i18n = _as_i18n_dict(meta.get("category", {}).get("category_name_i18n"))
+        item_i18n = _as_i18n_dict(meta.get("item", {}).get("item_name_i18n"))
+        desc_i18n = _as_i18n_dict(meta.get("item", {}).get("description_i18n"))
+        template_fields_map = meta.get("field_map") or None
+
+    merged_fields = _merge_fields_i18n(check_item.fields, template_fields_map)
+    base = InspectionCheckItemResponse.model_validate(check_item, from_attributes=True)
+    update_payload = {"fields": merged_fields}
+    if cat_i18n is not None:
+        update_payload["category_name_i18n"] = cat_i18n
+    if item_i18n is not None:
+        update_payload["item_name_i18n"] = item_i18n
+    if desc_i18n is not None:
+        update_payload["description_i18n"] = desc_i18n
+    return base.model_copy(update=update_payload)
 
 @router.post("/detail/{inspection_id}/reset")
 async def reset_inspection_for_rejected_task(

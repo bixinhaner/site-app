@@ -223,9 +223,12 @@ class InspectionCheckItemResponse(BaseModel):
     inspection_id: str
     item_id: str
     item_name: str
+    item_name_i18n: Optional[Dict[str, str]] = None
     description: Optional[str] = None  # 检查项描述
+    description_i18n: Optional[Dict[str, str]] = None
     category_id: Optional[str]
     category_name: Optional[str]
+    category_name_i18n: Optional[Dict[str, str]] = None
     sector_id: Optional[str]
     band: Optional[str]
     cell_id: Optional[str]

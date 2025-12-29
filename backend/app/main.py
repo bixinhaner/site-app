@@ -29,7 +29,7 @@ from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.models import app_version as _app_version_models  # noqa: F401
 from app.models import mobile_client_log as _mobile_client_log_models  # noqa: F401
 from app.models.user import User
-from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode
+from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
 from app.api import operation_logs, app_version
 from app.api import mobile_client_logs
@@ -100,6 +100,7 @@ app.include_router(inspections.router, prefix="/api/inspections", tags=["检查�
 app.include_router(template_binding.router, prefix="/api/inspections", tags=["模板绑定"])
 app.include_router(equipment.router, prefix="/api/equipment", tags=["设备管理"])
 app.include_router(stock.router, prefix="/api/stock", tags=["库存管理"])
+app.include_router(ai.router, prefix="/api/ai", tags=["AI"])
 app.include_router(geocode.router, prefix="/api", tags=["地理编码"])
 app.include_router(site_planning.router, prefix="/api/sites", tags=["站点规划"])
 app.include_router(work_orders.router, prefix="/api/work-orders", tags=["工单管理"])

@@ -13,6 +13,10 @@
       </div>
       
       <div class="header-actions">
+        <el-button @click="openAiTemplateI18n">
+          <el-icon><MagicStick /></el-icon>
+          AI国际化
+        </el-button>
         <el-button @click="previewTemplate" v-if="!isNewTemplate">
           <el-icon><View /></el-icon>
           预览
@@ -98,13 +102,31 @@
                 >
                   <div class="category-header">
                     <div class="category-title">
-                      <el-input 
-                        v-model="category.category_name" 
-                        placeholder="分类名称"
-                        size="small"
-                        :disabled="isFieldDisabled('category', 'category_name')"
-                        :title="getFieldTooltip('category', 'category_name')"
-                      />
+                      <div class="i18n-inline">
+                        <el-input 
+                          v-model="category.category_name" 
+                          placeholder="分类名称"
+                          size="small"
+                          :disabled="isFieldDisabled('category', 'category_name')"
+                          :title="getFieldTooltip('category', 'category_name')"
+                        />
+                        <el-button-group class="i18n-actions">
+                          <el-button
+                            size="small"
+                            circle
+                            :icon="ChatDotRound"
+                            title="多语言"
+                            @click="openI18nEditor(category, 'category_name', 'category_name_i18n', '分类名称')"
+                          />
+                          <el-button
+                            size="small"
+                            circle
+                            :icon="MagicStick"
+                            title="AI翻译"
+                            @click="aiFillI18n(category, 'category_name', 'category_name_i18n')"
+                          />
+                        </el-button-group>
+                      </div>
                       <el-select
                         v-model="category.level_type"
                         placeholder="检查级别"
@@ -153,13 +175,31 @@
                   </div>
                   
                   <div class="category-description">
-                    <el-input 
-                      v-model="category.description" 
-                      placeholder="分类描述（可选）"
-                      size="small"
-                      :disabled="isFieldDisabled('category', 'description')"
-                      :title="getFieldTooltip('category', 'description')"
-                    />
+                    <div class="i18n-inline">
+                      <el-input 
+                        v-model="category.description" 
+                        placeholder="分类描述（可选）"
+                        size="small"
+                        :disabled="isFieldDisabled('category', 'description')"
+                        :title="getFieldTooltip('category', 'description')"
+                      />
+                      <el-button-group class="i18n-actions">
+                        <el-button
+                          size="small"
+                          circle
+                          :icon="ChatDotRound"
+                          title="多语言"
+                          @click="openI18nEditor(category, 'description', 'description_i18n', '分类描述')"
+                        />
+                        <el-button
+                          size="small"
+                          circle
+                          :icon="MagicStick"
+                          title="AI翻译"
+                          @click="aiFillI18n(category, 'description', 'description_i18n')"
+                        />
+                      </el-button-group>
+                    </div>
                   </div>
                   
                   <!-- 检查项列表 -->
@@ -170,13 +210,31 @@
                       class="item-row"
                     >
                       <div class="item-basic">
-                        <el-input 
-                          v-model="item.item_name" 
-                          placeholder="检查项名称"
-                          size="small"
-                          :disabled="isFieldDisabled('item', 'item_name')"
-                          :title="getFieldTooltip('item', 'item_name')"
-                        />
+                        <div class="i18n-inline i18n-inline--item">
+                          <el-input 
+                            v-model="item.item_name" 
+                            placeholder="检查项名称"
+                            size="small"
+                            :disabled="isFieldDisabled('item', 'item_name')"
+                            :title="getFieldTooltip('item', 'item_name')"
+                          />
+                          <el-button-group class="i18n-actions">
+                            <el-button
+                              size="small"
+                              circle
+                              :icon="ChatDotRound"
+                              title="多语言"
+                              @click="openI18nEditor(item, 'item_name', 'item_name_i18n', '检查项名称')"
+                            />
+                            <el-button
+                              size="small"
+                              circle
+                              :icon="MagicStick"
+                              title="AI翻译"
+                              @click="aiFillI18n(item, 'item_name', 'item_name_i18n')"
+                            />
+                          </el-button-group>
+                        </div>
                         
                         <el-select 
                           v-model="item.required_type" 
@@ -204,15 +262,33 @@
                       </div>
                       
                       <div class="item-description">
-                        <el-input 
-                          v-model="item.description" 
-                          type="textarea"
-                          :autosize="{ minRows: 2, maxRows: 6 }"
-                          placeholder="检查项描述（可选）"
-                          size="small"
-                          :disabled="isFieldDisabled('item', 'description')"
-                          :title="getFieldTooltip('item', 'description')"
-                        />
+                        <div class="i18n-inline">
+                          <el-input 
+                            v-model="item.description" 
+                            type="textarea"
+                            :autosize="{ minRows: 2, maxRows: 6 }"
+                            placeholder="检查项描述（可选）"
+                            size="small"
+                            :disabled="isFieldDisabled('item', 'description')"
+                            :title="getFieldTooltip('item', 'description')"
+                          />
+                          <el-button-group class="i18n-actions">
+                            <el-button
+                              size="small"
+                              circle
+                              :icon="ChatDotRound"
+                              title="多语言"
+                              @click="openI18nEditor(item, 'description', 'description_i18n', '检查项描述')"
+                            />
+                            <el-button
+                              size="small"
+                              circle
+                              :icon="MagicStick"
+                              title="AI翻译"
+                              @click="aiFillI18n(item, 'description', 'description_i18n')"
+                            />
+                          </el-button-group>
+                        </div>
                       </div>
 
                       <!-- 字段配置（高级） -->
@@ -269,6 +345,22 @@
                               :disabled="isFieldDisabled('field', 'label')"
                               :title="getFieldTooltip('field', 'label')"
                             />
+                            <el-button-group class="i18n-actions i18n-actions--compact">
+                              <el-button
+                                size="small"
+                                circle
+                                :icon="ChatDotRound"
+                                title="多语言"
+                                @click="openI18nEditor(field, 'label', 'label_i18n', '字段显示名称')"
+                              />
+                              <el-button
+                                size="small"
+                                circle
+                                :icon="MagicStick"
+                                title="AI翻译"
+                                @click="aiFillI18n(field, 'label', 'label_i18n')"
+                              />
+                            </el-button-group>
                             <el-select 
                               v-model="field.type" 
                               size="small" 
@@ -332,7 +424,14 @@
                               <el-button size="small" @click="addOption(field)">添加</el-button>
                               <div class="option-list" v-if="field.options && field.options.length">
                                 <el-tag
-                                  v-for="(opt, oi) in field.options" :key="oi" closable @close="removeOption(field, oi)" style="margin:4px;">
+                                  v-for="(opt, oi) in field.options"
+                                  :key="oi"
+                                  class="option-tag"
+                                  closable
+                                  @close="removeOption(field, oi)"
+                                  @click="openOptionI18n(opt, $event)"
+                                  style="margin:4px;"
+                                >
                                   {{ opt.label || opt }} ({{ opt.value || opt }})
                                 </el-tag>
                               </div>
@@ -350,6 +449,34 @@
                                 <el-input v-model="(field.constraints || (field.constraints={})).pattern" size="small" placeholder="正则表达式" style="width: 220px; margin-left:8px;" />
                               </template>
                             </div>
+                            <!-- 占位符（字段级） -->
+                            <div class="placeholder-line">
+                              <el-tag type="info" size="small">占位符</el-tag>
+                              <el-input
+                                v-model="field.placeholder"
+                                placeholder="占位符（可选）"
+                                size="small"
+                                style="width: 420px; margin-left:8px;"
+                                :disabled="isFieldDisabled('field', 'placeholder')"
+                                :title="getFieldTooltip('field', 'placeholder')"
+                              />
+                              <el-button-group class="i18n-actions">
+                                <el-button
+                                  size="small"
+                                  circle
+                                  :icon="ChatDotRound"
+                                  title="多语言"
+                                  @click="openI18nEditor(field, 'placeholder', 'placeholder_i18n', '字段占位符')"
+                                />
+                                <el-button
+                                  size="small"
+                                  circle
+                                  :icon="MagicStick"
+                                  title="AI翻译"
+                                  @click="aiFillI18n(field, 'placeholder', 'placeholder_i18n')"
+                                />
+                              </el-button-group>
+                            </div>
                             <!-- 描述/注意事项（字段级） -->
                             <div class="help-text">
                               <el-tag type="info" size="small">描述/注意事项</el-tag>
@@ -363,6 +490,22 @@
                                 :disabled="isFieldDisabled('field', 'help_text')"
                                 :title="getFieldTooltip('field', 'help_text')"
                               />
+                              <el-button-group class="i18n-actions">
+                                <el-button
+                                  size="small"
+                                  circle
+                                  :icon="ChatDotRound"
+                                  title="多语言"
+                                  @click="openI18nEditor(field, 'help_text', 'help_text_i18n', '字段描述/注意事项')"
+                                />
+                                <el-button
+                                  size="small"
+                                  circle
+                                  :icon="MagicStick"
+                                  title="AI翻译"
+                                  @click="aiFillI18n(field, 'help_text', 'help_text_i18n')"
+                                />
+                              </el-button-group>
                             </div>
                           </div>
                         </div>
@@ -474,16 +617,100 @@
     :disabled="false"
     title="模板预览"
   />
-</template>
+
+  <el-dialog v-model="i18nEditorVisible" :title="i18nEditorTitle" width="680px">
+    <div class="i18n-editor">
+      <div class="i18n-editor-source">
+        <div class="i18n-editor-source-title">原文</div>
+        <el-input v-model="i18nEditorSourceText" type="textarea" :rows="4" readonly />
+      </div>
+      <el-divider />
+      <el-form label-width="90px">
+        <el-form-item label="英文(en)">
+          <el-input v-model="i18nEditorValues.en" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" />
+        </el-form-item>
+        <el-form-item label="印尼语(id)">
+          <el-input v-model="i18nEditorValues.id" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" />
+        </el-form-item>
+      </el-form>
+    </div>
+    <template #footer>
+      <el-button @click="i18nEditorVisible = false">取消</el-button>
+      <el-button :loading="i18nEditorLoading" @click="aiFillI18nInDialog">AI生成</el-button>
+      <el-button type="primary" @click="saveI18nEditor">保存</el-button>
+    </template>
+  </el-dialog>
+
+	  <el-dialog v-model="aiTemplateVisible" title="AI国际化（生成 en / id）" width="520px">
+	    <el-alert
+	      type="warning"
+	      :closable="false"
+	      show-icon
+      style="margin-bottom: 12px;"
+      title="AI 生成的翻译建议人工检查后再保存。"
+    />
+    <el-form label-width="140px">
+      <el-form-item label="覆盖已有翻译">
+        <el-switch v-model="aiTemplateOverwrite" />
+      </el-form-item>
+    </el-form>
+	    <template #footer>
+	      <el-button @click="aiTemplateVisible = false">取消</el-button>
+	      <el-button type="primary" :loading="aiTemplateLoading" @click="runAiTemplateI18n">开始生成</el-button>
+	    </template>
+	  </el-dialog>
+
+	  <el-dialog
+	    v-model="aiTemplateProgressVisible"
+	    title="AI翻译进度"
+	    width="520px"
+	    :show-close="false"
+	    :close-on-click-modal="false"
+	    :close-on-press-escape="false"
+	  >
+	    <div class="ai-progress">
+	      <el-progress
+	        :percentage="aiTemplateProgressPercent"
+	        :status="aiTemplateProgressBarStatus"
+	      />
+	      <div class="ai-progress-meta">
+	        <div class="ai-progress-main">
+	          已完成 {{ aiTemplateProgress.done }}/{{ aiTemplateProgress.total }}
+	          <span v-if="aiTemplateProgress.batchTotal" class="ai-progress-batch">
+	            （第 {{ aiTemplateProgress.batchIndex }}/{{ aiTemplateProgress.batchTotal }} 批）
+	          </span>
+	        </div>
+	        <div class="ai-progress-time" v-if="aiTemplateProgress.elapsedSeconds">
+	          用时 {{ formatDuration(aiTemplateProgress.elapsedSeconds) }}
+	        </div>
+	      </div>
+	      <div class="ai-progress-status">{{ aiTemplateProgress.message }}</div>
+	      <el-alert
+	        v-if="aiTemplateProgress.error"
+	        type="error"
+	        :closable="false"
+	        show-icon
+	        style="margin-top: 12px;"
+	        :title="aiTemplateProgress.error"
+	      />
+	    </div>
+	    <template #footer>
+	      <el-button v-if="!aiTemplateProgress.running" type="primary" @click="closeAiTemplateProgress">
+	        关闭
+	      </el-button>
+	    </template>
+	  </el-dialog>
+	</template>
 
 <script setup>
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { 
-  ArrowLeft, Check, View, Plus, Delete, DocumentCopy, QuestionFilled 
+  ArrowLeft, Check, View, Plus, Delete, DocumentCopy, QuestionFilled, MagicStick, ChatDotRound
 } from '@element-plus/icons-vue'
 import { templateAPI } from '../../api/templates'
+import { aiAPI } from '../../api/ai'
 import {
   isStructuralField,
   getFieldDisabledReason,
@@ -509,6 +736,79 @@ const templateData = reactive({
   check_categories: []
 })
 
+// ===== 多语言与 AI =====
+const i18nEditorVisible = ref(false)
+const i18nEditorTitle = ref('')
+const i18nEditorSourceText = ref('')
+const i18nEditorTarget = ref(null)
+const i18nEditorI18nKey = ref('')
+const i18nEditorValues = reactive({ en: '', id: '' })
+const i18nEditorLoading = ref(false)
+
+	const aiTemplateVisible = ref(false)
+	const aiTemplateOverwrite = ref(false)
+	const aiTemplateLoading = ref(false)
+	const aiTemplateProgressVisible = ref(false)
+	const aiTemplateProgress = reactive({
+	  total: 0,
+	  done: 0,
+	  batchIndex: 0,
+	  batchTotal: 0,
+	  message: '',
+	  error: '',
+	  running: false,
+	  elapsedSeconds: 0,
+	})
+	const aiTemplateProgressPercent = computed(() => {
+	  if (!aiTemplateProgress.total) return 0
+	  const percent = (aiTemplateProgress.done / aiTemplateProgress.total) * 100
+	  return Math.max(0, Math.min(100, Math.round(percent)))
+	})
+	const aiTemplateProgressBarStatus = computed(() => {
+	  if (aiTemplateProgress.error) return 'exception'
+	  if (!aiTemplateProgress.running && aiTemplateProgress.total && aiTemplateProgress.done >= aiTemplateProgress.total) {
+	    return 'success'
+	  }
+	  return ''
+	})
+	let aiTemplateProgressTimer = null
+	let aiTemplateProgressStartedAt = 0
+
+	const startAiTemplateProgressTimer = () => {
+	  if (aiTemplateProgressTimer) {
+	    clearInterval(aiTemplateProgressTimer)
+	    aiTemplateProgressTimer = null
+	  }
+	  aiTemplateProgressStartedAt = Date.now()
+	  aiTemplateProgress.elapsedSeconds = 0
+	  aiTemplateProgressTimer = setInterval(() => {
+	    aiTemplateProgress.elapsedSeconds = Math.max(
+	      0,
+	      Math.floor((Date.now() - aiTemplateProgressStartedAt) / 1000)
+	    )
+	  }, 1000)
+	}
+
+	const stopAiTemplateProgressTimer = () => {
+	  if (!aiTemplateProgressTimer) return
+	  clearInterval(aiTemplateProgressTimer)
+	  aiTemplateProgressTimer = null
+	}
+
+	const closeAiTemplateProgress = () => {
+	  if (aiTemplateProgress.running) return
+	  aiTemplateProgressVisible.value = false
+	  aiTemplateProgress.message = ''
+	  aiTemplateProgress.error = ''
+	}
+
+	const formatDuration = (seconds) => {
+	  const s = Math.max(0, Number(seconds || 0))
+	  const m = Math.floor(s / 60)
+	  const r = s % 60
+	  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
+	}
+
 // 模板使用情况
 const templateUsageInfo = ref({
   is_used: false,
@@ -523,6 +823,241 @@ const originalTemplateData = ref(null)
 
 // 计算属性
 const isNewTemplate = computed(() => route.params.id === 'new')
+
+const ensureI18nMap = (targetObj, i18nKey) => {
+  if (!targetObj) return null
+  const cur = targetObj[i18nKey]
+  if (!cur || typeof cur !== 'object' || Array.isArray(cur)) {
+    targetObj[i18nKey] = {}
+  }
+  return targetObj[i18nKey]
+}
+
+const openI18nEditor = (targetObj, sourceKey, i18nKey, title) => {
+  if (!targetObj) return
+  i18nEditorTitle.value = title || '多语言'
+  i18nEditorSourceText.value = String(targetObj[sourceKey] || '')
+  i18nEditorTarget.value = targetObj
+  i18nEditorI18nKey.value = i18nKey
+
+  const cur = targetObj[i18nKey]
+  i18nEditorValues.en = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur.en : '') || ''
+  i18nEditorValues.id = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur.id : '') || ''
+  i18nEditorVisible.value = true
+}
+
+const openOptionI18n = (opt, evt) => {
+  try {
+    const target = evt?.target
+    if (target?.classList?.contains('el-tag__close') || target?.closest?.('.el-tag__close')) {
+      return
+    }
+  } catch (e) {
+    // ignore
+  }
+  openI18nEditor(opt, 'label', 'label_i18n', '选项标签')
+}
+
+const saveI18nEditor = () => {
+  const targetObj = i18nEditorTarget.value
+  const i18nKey = i18nEditorI18nKey.value
+  if (!targetObj || !i18nKey) {
+    i18nEditorVisible.value = false
+    return
+  }
+  const map = ensureI18nMap(targetObj, i18nKey)
+  map.en = i18nEditorValues.en || ''
+  map.id = i18nEditorValues.id || ''
+  i18nEditorVisible.value = false
+}
+
+const aiFillI18n = async (targetObj, sourceKey, i18nKey) => {
+  const text = String(targetObj?.[sourceKey] || '').trim()
+  if (!text) {
+    ElMessage.warning('原文为空，无法生成翻译')
+    return
+  }
+
+  const loadingInstance = ElLoading.service({ text: 'AI 生成多语言中...' })
+  try {
+    const res = await aiAPI.translateBatch({
+      items: [
+        { key: `${i18nKey}:en`, text, target_locale: 'en' },
+        { key: `${i18nKey}:id`, text, target_locale: 'id' },
+      ],
+    })
+    const items = res?.items || []
+    const en = items?.[0]?.translation ?? ''
+    const id = items?.[1]?.translation ?? ''
+    const map = ensureI18nMap(targetObj, i18nKey)
+    map.en = en
+    map.id = id
+    ElMessage.success('AI 多语言已生成')
+  } catch (error) {
+    console.error('AI 翻译失败:', error)
+    ElMessage.error(error?.response?.data?.detail || 'AI 翻译失败')
+  } finally {
+    loadingInstance.close()
+  }
+}
+
+const aiFillI18nInDialog = async () => {
+  const targetObj = i18nEditorTarget.value
+  const i18nKey = i18nEditorI18nKey.value
+  const text = String(i18nEditorSourceText.value || '').trim()
+  if (!targetObj || !i18nKey) return
+  if (!text) {
+    ElMessage.warning('原文为空，无法生成翻译')
+    return
+  }
+  i18nEditorLoading.value = true
+  try {
+    const res = await aiAPI.translateBatch({
+      items: [
+        { key: `${i18nKey}:en`, text, target_locale: 'en' },
+        { key: `${i18nKey}:id`, text, target_locale: 'id' },
+      ],
+    })
+    const items = res?.items || []
+    i18nEditorValues.en = items?.[0]?.translation ?? ''
+    i18nEditorValues.id = items?.[1]?.translation ?? ''
+    ElMessage.success('AI 多语言已生成')
+  } catch (error) {
+    console.error('AI 翻译失败:', error)
+    ElMessage.error(error?.response?.data?.detail || 'AI 翻译失败')
+  } finally {
+    i18nEditorLoading.value = false
+  }
+}
+
+	const openAiTemplateI18n = () => {
+	  aiTemplateOverwrite.value = false
+	  aiTemplateVisible.value = true
+	}
+
+	const runAiTemplateI18n = async () => {
+	  const tasks = []
+	  const appliers = []
+	  const overwrite = aiTemplateOverwrite.value === true
+
+  const push = (targetObj, sourceKey, i18nKey, locale, keyPrefix) => {
+    const text = String(targetObj?.[sourceKey] || '').trim()
+    if (!text) return
+    const existing = targetObj?.[i18nKey]?.[locale]
+    if (!overwrite && existing && String(existing).trim()) return
+    const key = `${keyPrefix || i18nKey}:${locale}`
+    tasks.push({ key, text, target_locale: locale })
+    appliers.push((translation) => {
+      const map = ensureI18nMap(targetObj, i18nKey)
+      map[locale] = translation ?? ''
+    })
+  }
+
+  templateData.check_categories.forEach((cat, ci) => {
+    push(cat, 'category_name', 'category_name_i18n', 'en', `cat:${ci}:name`)
+    push(cat, 'category_name', 'category_name_i18n', 'id', `cat:${ci}:name`)
+    push(cat, 'description', 'description_i18n', 'en', `cat:${ci}:desc`)
+    push(cat, 'description', 'description_i18n', 'id', `cat:${ci}:desc`)
+
+    ;(cat.items || []).forEach((item, ii) => {
+      push(item, 'item_name', 'item_name_i18n', 'en', `item:${ci}:${ii}:name`)
+      push(item, 'item_name', 'item_name_i18n', 'id', `item:${ci}:${ii}:name`)
+      push(item, 'description', 'description_i18n', 'en', `item:${ci}:${ii}:desc`)
+      push(item, 'description', 'description_i18n', 'id', `item:${ci}:${ii}:desc`)
+
+      ;(item.fields || []).forEach((field, fi) => {
+        push(field, 'label', 'label_i18n', 'en', `field:${ci}:${ii}:${fi}:label`)
+        push(field, 'label', 'label_i18n', 'id', `field:${ci}:${ii}:${fi}:label`)
+        push(field, 'placeholder', 'placeholder_i18n', 'en', `field:${ci}:${ii}:${fi}:ph`)
+        push(field, 'placeholder', 'placeholder_i18n', 'id', `field:${ci}:${ii}:${fi}:ph`)
+        push(field, 'help_text', 'help_text_i18n', 'en', `field:${ci}:${ii}:${fi}:help`)
+        push(field, 'help_text', 'help_text_i18n', 'id', `field:${ci}:${ii}:${fi}:help`)
+
+        ;(field.options || []).forEach((opt, oi) => {
+          push(opt, 'label', 'label_i18n', 'en', `opt:${ci}:${ii}:${fi}:${oi}`)
+          push(opt, 'label', 'label_i18n', 'id', `opt:${ci}:${ii}:${fi}:${oi}`)
+        })
+      })
+    })
+  })
+
+	  if (!tasks.length) {
+	    ElMessage.info('没有需要 AI 生成的多语言内容')
+	    return
+	  }
+
+	  aiTemplateLoading.value = true
+	  aiTemplateVisible.value = false
+	  aiTemplateProgressVisible.value = true
+	  aiTemplateProgress.total = tasks.length
+	  aiTemplateProgress.done = 0
+	  aiTemplateProgress.batchIndex = 0
+	  aiTemplateProgress.batchTotal = 0
+	  aiTemplateProgress.message = '准备开始...'
+	  aiTemplateProgress.error = ''
+	  aiTemplateProgress.running = true
+	  startAiTemplateProgressTimer()
+	  try {
+	    const slowWarnSeconds = 60
+	    const warnedOnce = { value: false }
+	    const getBatchSize = (total) => {
+	      if (total <= 20) return 5
+	      if (total <= 60) return 10
+	      if (total <= 120) return 20
+	      return Math.min(200, 20 + 10 * Math.ceil((total - 120) / 100))
+	    }
+	    const batchSize = getBatchSize(tasks.length)
+	    const batchTotal = Math.max(1, Math.ceil(tasks.length / batchSize))
+	    aiTemplateProgress.batchTotal = batchTotal
+
+	    const yieldEvery = tasks.length <= 100 ? 1 : tasks.length <= 300 ? 5 : 10
+	    let batchIndex = 0
+	    for (let i = 0; i < tasks.length; i += batchSize) {
+	      batchIndex += 1
+	      aiTemplateProgress.batchIndex = batchIndex
+	      const sliceTasks = tasks.slice(i, i + batchSize)
+	      const sliceAppliers = appliers.slice(i, i + batchSize)
+	      aiTemplateProgress.message = `请求翻译中...（第 ${batchIndex}/${batchTotal} 批，${sliceTasks.length} 条）`
+	      const slowTimer = setTimeout(() => {
+	        aiTemplateProgress.message = `本批次请求耗时较长（已等待超过 ${slowWarnSeconds} 秒），请继续等待...（第 ${batchIndex}/${batchTotal} 批）`
+	        if (!warnedOnce.value) {
+	          warnedOnce.value = true
+	          ElMessage.warning('AI 翻译耗时较长，请耐心等待...')
+	        }
+	      }, slowWarnSeconds * 1000)
+	      let res
+	      try {
+	        res = await aiAPI.translateBatch({ items: sliceTasks })
+	      } finally {
+	        clearTimeout(slowTimer)
+	      }
+	      const items = res?.items || []
+	      aiTemplateProgress.message = `写入翻译结果...（第 ${batchIndex}/${batchTotal} 批）`
+	      for (let j = 0; j < sliceAppliers.length; j += 1) {
+	        const translation = items?.[j]?.translation ?? ''
+	        sliceAppliers[j](translation)
+	        aiTemplateProgress.done += 1
+	        if (yieldEvery === 1 || aiTemplateProgress.done % yieldEvery === 0) {
+	          await nextTick()
+	        }
+	      }
+	    }
+	    aiTemplateProgress.message = '已完成'
+	    aiTemplateProgress.running = false
+	    ElMessage.success('模板多语言已生成，请检查后保存')
+	  } catch (error) {
+	    console.error('AI 模板翻译失败:', error)
+	    const detail = error?.response?.data?.detail || error?.message || 'AI 模板翻译失败'
+	    aiTemplateProgress.error = detail
+	    aiTemplateProgress.message = '已中止'
+	    aiTemplateProgress.running = false
+	    ElMessage.error(detail)
+	  } finally {
+	    aiTemplateLoading.value = false
+	    aiTemplateProgress.running = false
+	    stopAiTemplateProgressTimer()
+	  }
+	}
 
 // 方法
 const loadTemplate = async () => {
@@ -1074,6 +1609,75 @@ onMounted(() => {
   gap: 12px;
 }
 
+.i18n-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.i18n-inline--item {
+  flex: 1;
+}
+
+.i18n-inline .el-input,
+.i18n-inline .el-textarea {
+  flex: 1;
+}
+
+.i18n-actions {
+  margin-left: 0;
+}
+
+.i18n-actions--compact {
+  margin-left: 8px;
+}
+
+.option-tag {
+  cursor: pointer;
+}
+
+.i18n-editor-source-title {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.ai-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.ai-progress-main {
+  font-size: 14px;
+  color: #333;
+}
+
+.ai-progress-batch {
+  color: #666;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.ai-progress-time {
+  color: #666;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ai-progress-status {
+  font-size: 12px;
+  color: #666;
+}
+
 .editor-content {
   min-height: 600px;
 }
@@ -1173,6 +1777,7 @@ onMounted(() => {
 .constraints { margin-top: 6px; display:flex; align-items:center; gap:8px; }
 .options-line { margin-top: 6px; display:flex; align-items:center; flex-wrap: wrap; }
 .help-text { margin-top: 6px; display:flex; align-items:flex-start; gap:8px; flex-wrap: wrap; }
+.placeholder-line { margin-top: 6px; display:flex; align-items:center; gap:8px; flex-wrap: wrap; }
 .empty-fields { color:#999; padding: 8px 0; }
 
 .item-basic {

@@ -80,7 +80,7 @@
 							<text class="status-icon">{{ getStatusIcon(item.status) }}</text>
 						</view>
 						<view class="item-info">
-							<text class="item-name">{{ getDisplayItemName(item.item_name) }}</text>
+							<text class="item-name">{{ getDisplayItemName(getI18nText(item.item_name, item.item_name_i18n)) }}</text>
 							<text class="item-id" v-if="item.sector_id">{{ $t('inspection.sector') }} {{ item.sector_id }}</text>
 
 							<!-- 问题项提示（审核不通过/警告/现场不合格） -->
@@ -176,7 +176,7 @@
 		<view class="item-modal-overlay" v-if="currentItem" @click="closeItemModal">
 			<view class="item-modal" @click.stop>
 				<view class="modal-header">
-					<text class="modal-title">{{ getDisplayItemName(currentItem.item_name) }}</text>
+					<text class="modal-title">{{ getDisplayItemName(getI18nText(currentItem.item_name, currentItem.item_name_i18n)) }}</text>
 					<view class="modal-close" @click="closeItemModal">
 						<uni-icons class="close-icon" type="closeempty" size="36rpx" color="#666" />
 					</view>
@@ -232,12 +232,12 @@
 						</view>
 						
 						<!-- 检查项描述 -->
-						<view class="item-description" v-if="currentItem.description">
+						<view class="item-description" v-if="getI18nText(currentItem.description, currentItem.description_i18n)">
 							<view class="description-header">
 								<text class="description-icon">💡</text>
 								<text class="description-title">{{ $t('inspection.descriptionTitle') }}</text>
 							</view>
-							<text class="description-content">{{ currentItem.description }}</text>
+							<text class="description-content">{{ getI18nText(currentItem.description, currentItem.description_i18n) }}</text>
 						</view>
 					</view>
 					
@@ -588,7 +588,7 @@
 						  v-for="item in preSubmitUnboundList" 
 						  :key="item.id">
 						<view class="checklist-item-info">
-							<text class="checklist-item-name">{{ getDisplayItemName(item.item_name) }}</text>
+							<text class="checklist-item-name">{{ getDisplayItemName(getI18nText(item.item_name, item.item_name_i18n)) }}</text>
 							<text class="checklist-item-cell">{{ item.cell_id || `${item.sector_id}_${item.band}` }}</text>
 						</view>
 						<button class="bind-quick-btn" @click="quickBindDevice(item)">
@@ -638,6 +638,28 @@
 		const t = (key, params = {}) => {
 			const _ = languageStore.currentLocale
 			return $t(key, params)
+		}
+
+		const normalizeLocale = (value) => {
+			const s = String(value || '').trim().toLowerCase().replace('_', '-')
+			if (!s) return 'zh'
+			if (s === 'zh' || s === 'zh-cn' || s === 'zh-hans') return 'zh'
+			if (s === 'en' || s === 'en-us' || s === 'en-gb') return 'en'
+			if (s === 'id' || s === 'id-id') return 'id'
+			return s
+		}
+
+		const getI18nText = (baseText, i18nMap) => {
+			const locale = normalizeLocale(languageStore.currentLocale)
+			const base = baseText === null || baseText === undefined ? '' : String(baseText)
+			if (!locale || locale === 'zh') return base
+			if (i18nMap && typeof i18nMap === 'object') {
+				const translated = i18nMap[locale]
+				if (translated !== null && translated !== undefined && String(translated).trim() !== '') {
+					return String(translated)
+				}
+			}
+			return base
 		}
 
 		const hasChinese = (value) => /[\u4e00-\u9fff]/.test(String(value || ''))
@@ -744,9 +766,10 @@
 		filteredCheckItems.value.forEach(item => {
 			const categoryId = item.category_id
 			if (!groups[categoryId]) {
+				const baseName = item.category_name || categoryId
 				groups[categoryId] = {
 					categoryId,
-					categoryName: item.category_name || categoryId,
+					categoryName: getI18nText(baseName, item.category_name_i18n),
 					items: []
 				}
 			}
@@ -864,15 +887,14 @@
 			
 			// 将后端fields格式转换为前端dataFields格式
 				const fields = item.fields.map(field => {
-					const rawLabel = String(field.label || '').trim()
+					const rawLabel = String(getI18nText(field.label || '', field.label_i18n) || '').trim()
 					const mapping = getKnownFieldMapping(rawLabel)
 					const label = mapping ? t(mapping.labelKey) : rawLabel
 
-					const rawPlaceholder = String(field.placeholder || '').trim()
-					const placeholder =
-						rawPlaceholder && !hasChinese(rawPlaceholder)
-							? rawPlaceholder
-							: buildPlaceholder(label)
+					const rawPlaceholder = String(getI18nText(field.placeholder || '', field.placeholder_i18n) || '').trim()
+					const placeholder = rawPlaceholder
+						? (normalizeLocale(languageStore.currentLocale) === 'zh' || !hasChinese(rawPlaceholder) ? rawPlaceholder : buildPlaceholder(label))
+						: buildPlaceholder(label)
 
 					const dataField = {
 						label,
@@ -907,9 +929,8 @@
 				}
 				
 				// 处理帮助文本
-				if (field.help_text) {
-					dataField.help_text = field.help_text
-				}
+				const helpText = String(getI18nText(field.help_text || '', field.help_text_i18n) || '').trim()
+				if (helpText) dataField.help_text = helpText
 				
 				// 处理依赖关系
 				if (field.dependencies) {
@@ -918,7 +939,13 @@
 				
 				// 处理选项（下拉框等）
 				if (field.options && Array.isArray(field.options)) {
-					dataField.options = field.options
+					dataField.options = field.options.map(opt => {
+						if (!opt || typeof opt !== 'object') return opt
+						return {
+							...opt,
+							label: getI18nText(opt.label || '', opt.label_i18n)
+						}
+					})
 				}
 				
 				// 处理必填项
@@ -1050,15 +1077,32 @@
 		
 		checkItems.value.forEach(item => {
 			if (!categoryMap.has(item.category_id)) {
+				const baseName = item.category_name || item.category_id
 				categoryMap.set(item.category_id, {
 					id: item.category_id,
-					name: item.category_name || item.category_id
+					name: getI18nText(baseName, item.category_name_i18n)
 				})
 			}
 		})
 		
 		categories.value = Array.from(categoryMap.values())
 	}
+
+	watch(
+		() => languageStore.currentLocale,
+		() => {
+			// 语言切换时，重建动态字段展示文案（label/placeholder/help_text/options）
+			checkItems.value = checkItems.value.map(item => ({
+				...item,
+				dataFields: generateDataFieldsFromBackend(item)
+			}))
+			if (currentItem.value?.id) {
+				const matched = checkItems.value.find(it => it.id === currentItem.value.id)
+				if (matched) currentItem.value = matched
+			}
+			extractCategories()
+		}
+	)
 	
 	const switchCategory = (categoryId) => {
 		currentCategory.value = categoryId

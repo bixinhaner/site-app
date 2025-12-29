@@ -207,7 +207,7 @@
 									<view class="item-info">
 										<text class="item-name">{{ getCheckItemDisplayTitle(item) }}</text>
 										<view class="item-meta">
-											<text class="item-category">{{ item.category_name }}</text>
+											<text class="item-category">{{ getI18nText(item.category_name || item.category_id, item.category_name_i18n) }}</text>
 											<text class="item-sector" v-if="item.sector_id">{{ $t('inspection.sector') }}{{ item.sector_id }}</text>
 											<text class="item-cell" v-if="item.cell_id">{{ item.cell_id }}</text>
 										</view>
@@ -596,6 +596,28 @@
 	const languageStore = useLanguageStore()
 	
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
+
+	const normalizeLocale = (value) => {
+		const s = String(value || '').trim().toLowerCase().replace('_', '-')
+		if (!s) return 'zh'
+		if (s === 'zh' || s === 'zh-cn' || s === 'zh-hans') return 'zh'
+		if (s === 'en' || s === 'en-us' || s === 'en-gb') return 'en'
+		if (s === 'id' || s === 'id-id') return 'id'
+		return s
+	}
+
+	const getI18nText = (baseText, i18nMap) => {
+		const locale = normalizeLocale(languageStore.currentLocale)
+		const base = baseText === null || baseText === undefined ? '' : String(baseText)
+		if (!locale || locale === 'zh') return base
+		if (i18nMap && typeof i18nMap === 'object') {
+			const translated = i18nMap[locale]
+			if (translated !== null && translated !== undefined && String(translated).trim() !== '') {
+				return String(translated)
+			}
+		}
+		return base
+	}
 	
 	// 页面参数
 	const inspectionId = ref('')
@@ -1223,12 +1245,14 @@
 	}
 
 	const getCheckItemDisplayTitle = (item) => {
-		const name = getDisplayItemName(item?.item_name)
+		const name = getDisplayItemName(getI18nText(item?.item_name, item?.item_name_i18n))
 		// 若 item_name 异常（例如 field_...），尝试从 fields 中找一个可读的 label 作为标题
 		if (!name || /^field_\\d+/.test(name)) {
 			const fields = item?.fields
 			if (Array.isArray(fields) && fields.length > 0) {
-				const firstLabel = fields.map(f => String(f?.label || '').trim()).find(v => v)
+				const firstLabel = fields
+					.map(f => String(getI18nText(f?.label || '', f?.label_i18n) || '').trim())
+					.find(v => v)
 				if (firstLabel) return firstLabel
 			}
 			return name || $t('inspection.checkItem')
@@ -1247,14 +1271,14 @@
 				const fid = String(f?.field_id || f?.id || f?.key || '').trim()
 				return fid && fid === rawName
 			})
-			const labelFromId = String(matchedById?.label || matchedById?.name || matchedById?.title || '').trim()
+			const labelFromId = String(getI18nText(matchedById?.label || matchedById?.name || matchedById?.title || '', matchedById?.label_i18n) || '').trim()
 			if (labelFromId) return labelFromId
 
 			const matchedByLabel = fields.find(f => {
 				const label = String(f?.label || f?.name || f?.title || '').trim()
 				return label && label === rawName
 			})
-			const labelFromLabel = String(matchedByLabel?.label || matchedByLabel?.name || matchedByLabel?.title || '').trim()
+			const labelFromLabel = String(getI18nText(matchedByLabel?.label || matchedByLabel?.name || matchedByLabel?.title || '', matchedByLabel?.label_i18n) || '').trim()
 			if (labelFromLabel) return labelFromLabel
 		}
 

@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     # Mock OMC 代理配置（用于前端无法直连 9000 的部署场景）
     MOCK_OMC_BASE_URL: str = os.getenv("MOCK_OMC_BASE_URL", "http://127.0.0.1:9000")
     MOCK_OMC_TIMEOUT_SECONDS: int = int(os.getenv("MOCK_OMC_TIMEOUT_SECONDS", "10"))
+
+    # AI（OpenAI 兼容：Deepseek 等）
+    AI_BASE_URL: str = os.getenv("AI_BASE_URL", "")
+    AI_API_KEY: str = os.getenv("AI_API_KEY", "")
+    AI_MODEL: str = os.getenv("AI_MODEL", "")
+    # OpenAI-compat：chat.completions 路径；支持 base_url 为 https://xxx 或 https://xxx/v1
+    AI_CHAT_COMPLETIONS_PATH: str = os.getenv("AI_CHAT_COMPLETIONS_PATH", "/v1/chat/completions")
+    AI_TIMEOUT_SECONDS: int = int(os.getenv("AI_TIMEOUT_SECONDS", "60"))
+    AI_TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.2"))
+    AI_MAX_TOKENS: int = int(os.getenv("AI_MAX_TOKENS", "1024"))
+    # 批量翻译分段大小（避免 prompt 过长）
+    AI_BATCH_CHUNK_SIZE: int = int(os.getenv("AI_BATCH_CHUNK_SIZE", "20"))
+    # 行业语境提示（可按需调整）
+    AI_DOMAIN_HINT: str = os.getenv("AI_DOMAIN_HINT", "无线通信行业（站点巡检/工单系统）")
     
     # 动态属性
     @property
