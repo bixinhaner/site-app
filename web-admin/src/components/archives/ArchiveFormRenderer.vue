@@ -374,6 +374,7 @@ function dateDisplayFormat(type) {
 .item { margin-bottom: 12px; border: 1px solid #eee; border-radius: 10px; overflow: hidden; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.06); padding: 12px; }
 .item-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .item-title { display: flex; align-items: center; gap: 8px; }
+.item-desc { white-space: pre-wrap; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px; margin-top: 8px; }
 .field label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
 .field-label { display: flex; align-items: center; gap: 6px; }

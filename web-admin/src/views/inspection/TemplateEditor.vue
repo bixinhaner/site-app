@@ -206,6 +206,8 @@
                       <div class="item-description">
                         <el-input 
                           v-model="item.description" 
+                          type="textarea"
+                          :autosize="{ minRows: 2, maxRows: 6 }"
                           placeholder="检查项描述（可选）"
                           size="small"
                           :disabled="isFieldDisabled('item', 'description')"
