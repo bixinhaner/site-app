@@ -34,6 +34,7 @@ from app.schemas.planning import (
     PlanningImportReport,
     SitePlanningBase,
     PlanningChangeLogItem,
+    ImportIssue,
     BatchImportReport,
     BatchPlanningResult,
     PlanningCell,
@@ -845,6 +846,7 @@ def _create_new_version(
     actor_id: int,
     operation: str,
     summary: Optional[str] = None,
+    commit: bool = True,
 ) -> SitePlanning:
     current = _get_current_planning(db, site_id)
     before_snapshot = _snapshot(current)
@@ -906,8 +908,11 @@ def _create_new_version(
             )
         )
 
-    db.commit()
-    db.refresh(planning)
+    if commit:
+        db.commit()
+        db.refresh(planning)
+    else:
+        db.flush()
 
     after_snapshot = _snapshot(planning)
     diff = _compute_diff(before_snapshot, after_snapshot)
@@ -929,110 +934,235 @@ def _create_new_version(
         diff=diff,
     )
     db.add(log)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     return planning
 
 
-def _collect_lld_rows_by_tower(excel: pd.ExcelFile) -> dict:
-    """
-    按 SiteCode 聚合 LLD 行数据（用于匹配 sites.site_code）。
+def _validate_lld_excel_and_collect_rows(
+    excel: pd.ExcelFile,
+) -> Tuple[Dict[str, List[dict]], List[ImportIssue]]:
+    """对 LLD Excel 做全量校验并收集可导入的行（严格：不跳过、不部分导入）。
 
-    返回结构:
-        {
-          "SiteCode": [
-              {"rat": "LTE"|"NR", "band_code": "B20"/"N41", "sheet_name": "4G"/"5G", "row": {...}},
-              ...
-          ],
-          ...
-        }
+    返回：
+    - rows_by_site_code: 仅包含“满足最低字段要求”的行（用于后续站点级校验/导入）
+    - issues: 结构化问题列表（只要非空即视为整文件失败）
     """
-    rows_by_tower: Dict[str, List[dict]] = {}
+    issues: List[ImportIssue] = []
+    rows_by_site_code: Dict[str, List[dict]] = {}
 
-    # 仅支持新模板：
-    # - Sheet：4G/5G
-    # - 频段从行内 BAND/Band 列读取
-    #
-    # 若检测到旧模板的 Sheet（如 B28/N41），直接报错提示使用新模板。
-    legacy_sheets: List[str] = []
-    for sheet in excel.sheet_names:
-        if not sheet:
-            continue
-        s = str(sheet).strip()
+    # 旧模板识别：Sheet 类似 B28/N41 等，直接报错提示使用新模板。
+    for sheet in excel.sheet_names or []:
+        s = (str(sheet).strip() if sheet is not None else "")
         if not s:
             continue
         if re.match(r"^[BN]\d+$", s.upper()):
-            legacy_sheets.append(s)
-    if legacy_sheets:
-        raise HTTPException(
-            status_code=400,
-            detail=f"检测到旧版 LLD 模板 Sheet：{', '.join(sorted(set(legacy_sheets)))}。旧模板已停用，请使用新模板（Sheet：4G/5G）重新导入。",
+            issues.append(
+                ImportIssue(
+                    code="LLD_LEGACY_TEMPLATE",
+                    message=f"检测到旧版 LLD 模板 Sheet：{s}。旧模板已停用，请使用新模板（Sheet：4G/5G）重新导入。",
+                    sheet=s,
+                )
+            )
+
+    def _add_issue(
+        *,
+        code: str,
+        message: str,
+        sheet: Optional[str] = None,
+        row: Optional[int] = None,
+        column: Optional[str] = None,
+        site_code: Optional[str] = None,
+        value: Optional[str] = None,
+        hint: Optional[str] = None,
+    ) -> None:
+        issues.append(
+            ImportIssue(
+                code=code,
+                message=message,
+                level="error",
+                sheet=sheet,
+                row=row,
+                column=column,
+                site_code=site_code,
+                value=value,
+                hint=hint,
+            )
         )
 
-    for sheet_name in excel.sheet_names:
-        if not sheet_name:
-            continue
-        sname = str(sheet_name).strip()
+    saw_target_sheet = False
+
+    for sheet_name in excel.sheet_names or []:
+        sname = (str(sheet_name).strip() if sheet_name is not None else "")
         if not sname:
             continue
         upper = sname.upper()
 
-        df = excel.parse(sheet_name)
-        if df.empty:
+        is_4g = upper in ("4G", "4G CELL", "LTE")
+        is_5g = upper in ("5G", "5G CELL", "NR")
+        if not (is_4g or is_5g):
             continue
+
+        saw_target_sheet = True
+
+        try:
+            df = excel.parse(sheet_name)
+        except Exception as e:
+            _add_issue(code="LLD_SHEET_PARSE_ERROR", message=f"Sheet 解析失败: {e}", sheet=sname)
+            continue
+
+        if df is None or df.empty:
+            continue
+
         df.rename(columns=_normalize_lld_column_name, inplace=True)
 
-        def add_row(row_dict: dict, rat: str, band_code: Optional[str], sheet_label: str):
-            site_code = _normalize_site_code(_first_not_null(row_dict, ["SiteCode"]))
-            local_cell_val = _first_not_null(row_dict, ["Sector ID Local ID", "Sector ID"])
-            if not site_code or local_cell_val is None:
-                return
+        required_exact = ["SiteCode", "SITE NAME"]
+        local_cell_candidates = ["Sector ID Local ID", "Sector ID"]
+        band_candidates = ["BAND", "Band"]
+
+        missing_cols = [c for c in required_exact if c not in df.columns]
+        if missing_cols:
+            for c in missing_cols:
+                _add_issue(
+                    code="LLD_MISSING_COLUMN",
+                    message=f"缺少必要列：{c}",
+                    sheet=sname,
+                    column=c,
+                )
+
+        if not any(c in df.columns for c in local_cell_candidates):
+            _add_issue(
+                code="LLD_MISSING_COLUMN",
+                message=f"缺少必要列：{local_cell_candidates[0]}（或 {local_cell_candidates[1]}）",
+                sheet=sname,
+                column=local_cell_candidates[0],
+            )
+
+        if not any(c in df.columns for c in band_candidates):
+            _add_issue(
+                code="LLD_MISSING_COLUMN",
+                message=f"缺少必要列：{band_candidates[0]}（或 {band_candidates[1]}）",
+                sheet=sname,
+                column=band_candidates[0],
+            )
+
+        # 若结构性缺列，跳过逐行校验，避免产生噪声；用户先补齐列名即可。
+        if missing_cols or (not any(c in df.columns for c in local_cell_candidates)) or (not any(c in df.columns for c in band_candidates)):
+            continue
+
+        for row_num, row_dict in enumerate(df.to_dict(orient="records"), start=2):
+            site_code_raw = _first_not_null(row_dict, ["SiteCode"])
+            site_code = _normalize_site_code(site_code_raw)
+            if not site_code:
+                _add_issue(
+                    code="LLD_REQUIRED",
+                    message="SiteCode 不能为空",
+                    sheet=sname,
+                    row=row_num,
+                    column="SiteCode",
+                )
+                continue
+
+            # 记录该站点编码已出现（即使该行后续校验失败，也用于统计与提示）
+            rows_by_site_code.setdefault(site_code, [])
+
+            # 常见问题：SiteCode 被 Excel 当成数字，读出来会变成 123...0
+            if re.match(r"^\\d+\\.0$", site_code):
+                _add_issue(
+                    code="LLD_SITECODE_DECIMAL",
+                    message=f"SiteCode 值疑似被当成数字读取：{site_code}",
+                    sheet=sname,
+                    row=row_num,
+                    column="SiteCode",
+                    site_code=site_code,
+                    value=site_code,
+                    hint="请将 Excel 的 SiteCode 列设置为“文本”，避免出现 .0。",
+                )
+
+            site_name = _to_str(_first_not_null(row_dict, ["SITE NAME"]))
+            if not site_name:
+                _add_issue(
+                    code="LLD_REQUIRED",
+                    message="SITE NAME 不能为空",
+                    sheet=sname,
+                    row=row_num,
+                    column="SITE NAME",
+                    site_code=site_code,
+                )
+                continue
+
+            local_cell_val = _first_not_null(row_dict, local_cell_candidates)
+            local_cell_id = _to_int(local_cell_val)
+            if local_cell_val is None or local_cell_id is None:
+                _add_issue(
+                    code="LLD_REQUIRED",
+                    message=f"{local_cell_candidates[0]}（或 {local_cell_candidates[1]}）不能为空且必须为整数",
+                    sheet=sname,
+                    row=row_num,
+                    column=local_cell_candidates[0],
+                    site_code=site_code,
+                    value=_to_str(local_cell_val),
+                )
+                continue
+
+            band = _to_str(_first_not_null(row_dict, band_candidates))
+            if not band:
+                _add_issue(
+                    code="LLD_REQUIRED",
+                    message=f"{band_candidates[0]}（或 {band_candidates[1]}）不能为空",
+                    sheet=sname,
+                    row=row_num,
+                    column=band_candidates[0],
+                    site_code=site_code,
+                )
+                continue
+
             tower_id = _normalize_tower_id(_first_not_null(row_dict, ["TOWER ID"]))
-            b = _to_str(band_code)
-            b = b.upper() if b else None
-            rows_by_tower.setdefault(site_code, []).append(
+
+            rows_by_site_code[site_code].append(
                 {
-                    "rat": rat,
-                    "band_code": b or sheet_label,
-                    "sheet_name": sheet_label,
+                    "rat": "LTE" if is_4g else "NR",
+                    "band_code": band.upper(),
+                    "sheet_name": sname,
                     "tower_id": tower_id,
+                    "excel_row": row_num,
+                    "site_name_in_file": site_name,
                     "row": row_dict,
                 }
             )
 
-        if upper in ("4G", "4G CELL", "LTE"):
-            if "SiteCode" not in df.columns:
-                raise HTTPException(
-                    status_code=400,
-                    detail="LLD 模板缺少 SiteCode 列（原 SITE INFORMATION 已改名为 SiteCode），请下载最新模板重新导入。",
-                )
-            for _, r in df.iterrows():
-                row_dict = r.to_dict()
-                band = _to_str(_first_not_null(row_dict, ["BAND", "Band"]))
-                # 新模板 4G/5G Sheet 不含频段信息的情况下无法推断 band_code，直接跳过
-                if not band:
-                    continue
-                add_row(row_dict, rat="LTE", band_code=band, sheet_label=sname)
-            continue
+    if not saw_target_sheet:
+        _add_issue(
+            code="LLD_MISSING_SHEET",
+            message="未找到 4G/5G Sheet（请使用最新 LLD 模板：Sheet 为 4G/5G）。",
+        )
 
-        if upper in ("5G", "5G CELL", "NR"):
-            if "SiteCode" not in df.columns:
-                raise HTTPException(
-                    status_code=400,
-                    detail="LLD 模板缺少 SiteCode 列（原 SITE INFORMATION 已改名为 SiteCode），请下载最新模板重新导入。",
-                )
-            for _, r in df.iterrows():
-                row_dict = r.to_dict()
-                band = _to_str(_first_not_null(row_dict, ["Band", "BAND"]))
-                if not band:
-                    continue
-                add_row(row_dict, rat="NR", band_code=band, sheet_label=sname)
-            continue
+    valid_row_count = sum(len(v) for v in rows_by_site_code.values())
+    if valid_row_count == 0:
+        _add_issue(
+            code="LLD_NO_VALID_ROWS",
+            message="未在 LLD 文件中找到满足最低字段要求的有效行（请检查 4G/5G Sheet 是否有数据、且 SiteCode/SITE NAME/Sector ID/Band 均已填写）。",
+        )
 
-        # 其他 sheet 忽略
-        continue
+    # 同一 SiteCode 的 SITE NAME 必须一致（strip 后精确匹配）
+    for site_code, metas in rows_by_site_code.items():
+        names = []
+        for m in metas:
+            nm = (m.get("site_name_in_file") or "").strip()
+            if nm:
+                names.append(nm)
+        uniq = sorted(set(names))
+        if len(uniq) > 1:
+            _add_issue(
+                code="LLD_SITE_NAME_INCONSISTENT",
+                message=f"SITE NAME 在同一站点（{site_code}）内不一致：{', '.join(uniq)}",
+                site_code=site_code,
+            )
 
-    return rows_by_tower
+    return rows_by_site_code, issues
 
 
 def _build_cell_dict_from_row(
@@ -2093,114 +2223,216 @@ async def lld_batch_upload_planning(
 
     content = await file.read()
     if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="仅支持 Excel(.xlsx/.xls)")
+        return BatchImportReport(
+            dry_run=dry_run,
+            success=False,
+            issues=[ImportIssue(code="LLD_FILE_TYPE", message="仅支持 Excel(.xlsx/.xls)")],
+            total_sites=0,
+            success_count=0,
+            failed_count=0,
+            results=[],
+        )
 
     try:
         excel = pd.ExcelFile(io.BytesIO(content))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Excel 解析失败: {e}")
-
-    rows_by_tower = _collect_lld_rows_by_tower(excel)
-    if not rows_by_tower:
-        raise HTTPException(
-            status_code=400,
-            detail="未在 LLD 文件中找到有效的规划数据（请检查是否包含 4G/5G Sheet，且 SiteCode 与 4G: Sector ID Local ID / 5G: Sector ID 列存在且非空）",
+        return BatchImportReport(
+            dry_run=dry_run,
+            success=False,
+            issues=[ImportIssue(code="LLD_EXCEL_PARSE_ERROR", message=f"Excel 解析失败: {e}")],
+            total_sites=0,
+            success_count=0,
+            failed_count=0,
+            results=[],
         )
 
-    results: List[BatchPlanningResult] = []
-    success_count = 0
-    failed_count = 0
+    rows_by_site_code, issues = _validate_lld_excel_and_collect_rows(excel)
+    total_sites = len(rows_by_site_code)
 
-    for site_code, metas in rows_by_tower.items():
-        errors: List[str] = []
-        warnings: List[str] = []
+    site_work: Dict[str, Dict[str, Any]] = {}
+    site_id_by_code: Dict[str, Optional[int]] = {}
+
+    for site_code, metas in rows_by_site_code.items():
+        site = db.query(Site).filter(Site.site_code == site_code).first()
+        if not site:
+            issues.append(
+                ImportIssue(
+                    code="LLD_SITE_NOT_FOUND",
+                    message="站点不存在：请先在“站点信息导入”创建站点并完成勘察",
+                    site_code=site_code,
+                )
+            )
+            continue
+
+        site_id_by_code[site_code] = site.id
+
+        # 生命周期门禁
         try:
-            site = db.query(Site).filter(Site.site_code == site_code).first()
-            if not site:
-                errors.append("站点不存在：请先在‘站点信息导入’创建站点并完成勘察")
-                results.append(BatchPlanningResult(site_code=site_code, success=False, errors=errors))
-                failed_count += 1
-                continue
-
-            # 生命周期门禁
-            try:
-                _ensure_site_plannable(site)
-            except HTTPException as he:
-                errors.append(str(he.detail))
-                results.append(BatchPlanningResult(site_code=site_code, site_id=site.id, success=False, errors=errors))
-                failed_count += 1
-                continue
-
-            # 构造 Cell 明细
-            cell_dicts: List[dict] = []
-            for meta in metas:
-                cell = _build_cell_dict_from_row(site.id, meta.get("tower_id"), meta)
-                if cell.get("local_cell_id") is None:
-                    # 理论上上游已经过滤过，这里再次防御
-                    continue
-                cell_dicts.append(cell)
-
-            if not cell_dicts:
-                errors.append("该站点在 LLD 中没有有效的小区行（4G: Sector ID Local ID / 5G: Sector ID 为空）")
-                results.append(BatchPlanningResult(site_code=site_code, site_id=site.id, success=False, errors=errors))
-                failed_count += 1
-                continue
-
-            lte_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "LTE")
-            nr_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "NR")
-            bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
-
-            has_active_opening_wo = _has_active_opening_work_order(db, site.id)
-            edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
-
-            # 用于受限策略校验/预览的 diff
-            current_planning = _get_current_planning(db, site.id)
-            old_cells: List[SitePlanningCell] = []
-            if current_planning:
-                old_cells = (
-                    db.query(SitePlanningCell)
-                    .filter(SitePlanningCell.planning_id == current_planning.id)
-                    .all()
+            _ensure_site_plannable(site)
+        except HTTPException as he:
+            issues.append(
+                ImportIssue(
+                    code="LLD_SITE_NOT_PLANNABLE",
+                    message=str(he.detail),
+                    site_code=site_code,
+                    site_id=site.id,
                 )
-            preview_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
+            )
 
-            conflicts = _find_lld_policy_conflicts_for_import(edit_policy, preview_diff)
-            if conflicts:
-                errors.extend(_build_lld_policy_conflict_errors(edit_policy, conflicts))
-                results.append(
-                    BatchPlanningResult(
+        # 站点名称必须与系统一致（strip() 后精确匹配）
+        file_site_name = (metas[0].get("site_name_in_file") or "").strip() if metas else ""
+        sys_site_name = (site.site_name or "").strip()
+        if not file_site_name:
+            issues.append(
+                ImportIssue(
+                    code="LLD_REQUIRED",
+                    message="SITE NAME 不能为空",
+                    site_code=site_code,
+                    site_id=site.id,
+                    column="SITE NAME",
+                )
+            )
+        elif file_site_name != sys_site_name:
+            issues.append(
+                ImportIssue(
+                    code="LLD_SITE_NAME_MISMATCH",
+                    message=f"站点名称与系统不一致（Excel='{file_site_name}'，系统='{sys_site_name}'）",
+                    site_code=site_code,
+                    site_id=site.id,
+                )
+            )
+
+        cell_dicts: List[dict] = []
+        for meta in metas or []:
+            cell = _build_cell_dict_from_row(site.id, meta.get("tower_id"), meta)
+            if cell.get("local_cell_id") is None:
+                issues.append(
+                    ImportIssue(
+                        code="LLD_REQUIRED",
+                        message="Sector ID 不能为空且必须为整数",
+                        sheet=meta.get("sheet_name"),
+                        row=meta.get("excel_row"),
+                        column="Sector ID Local ID",
                         site_code=site_code,
                         site_id=site.id,
-                        success=False,
-                        errors=errors,
-                        warnings=warnings,
-                        lte_cell_count=lte_cell_count,
-                        nr_cell_count=nr_cell_count,
-                        bands=bands,
-                        preview_diff=preview_diff or None,
                     )
                 )
-                failed_count += 1
                 continue
+            cell_dicts.append(cell)
 
-            if dry_run:
-                # 试运行：不落库，但返回更详细的 Cell 变更预览，方便前端展示
-                results.append(
-                    BatchPlanningResult(
-                        site_code=site_code,
-                        site_id=site.id,
-                        success=True,
-                        warnings=warnings,
-                        lte_cell_count=lte_cell_count,
-                        nr_cell_count=nr_cell_count,
-                        bands=bands,
-                        preview_diff=preview_diff or None,
-                    )
+        if not cell_dicts:
+            issues.append(
+                ImportIssue(
+                    code="LLD_NO_VALID_ROWS",
+                    message="该站点在 LLD 中没有满足最低字段要求的小区行",
+                    site_code=site_code,
+                    site_id=site.id,
                 )
-                success_count += 1
-                continue
+            )
+            continue
 
-            # 构造并持久化新的规划版本
+        lte_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "LTE")
+        nr_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "NR")
+        bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
+
+        has_active_opening_wo = _has_active_opening_work_order(db, site.id)
+        edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
+
+        # 用于受限策略校验/预览的 diff
+        current_planning = _get_current_planning(db, site.id)
+        old_cells: List[SitePlanningCell] = []
+        if current_planning:
+            old_cells = (
+                db.query(SitePlanningCell)
+                .filter(SitePlanningCell.planning_id == current_planning.id)
+                .all()
+            )
+        preview_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
+
+        conflicts = _find_lld_policy_conflicts_for_import(edit_policy, preview_diff)
+        if conflicts:
+            issues.append(
+                ImportIssue(
+                    code="LLD_POLICY_CONFLICT",
+                    message="\n".join(_build_lld_policy_conflict_errors(edit_policy, conflicts)),
+                    site_code=site_code,
+                    site_id=site.id,
+                )
+            )
+
+        site_work[site_code] = {
+            "site": site,
+            "cell_dicts": cell_dicts,
+            "preview_diff": preview_diff,
+            "lte_cell_count": lte_cell_count,
+            "nr_cell_count": nr_cell_count,
+            "bands": bands,
+        }
+
+    # 若存在任何问题：整文件失败（不落库，不跳过）
+    if issues:
+        results: List[BatchPlanningResult] = []
+        for site_code in rows_by_site_code.keys():
+            row_issues = [i for i in issues if i.site_code == site_code]
+            work = site_work.get(site_code) or {}
+            results.append(
+                BatchPlanningResult(
+                    site_code=site_code,
+                    site_id=site_id_by_code.get(site_code),
+                    success=False,
+                    errors=[i.message for i in row_issues if i.message],
+                    issues=row_issues,
+                    lte_cell_count=work.get("lte_cell_count"),
+                    nr_cell_count=work.get("nr_cell_count"),
+                    bands=work.get("bands"),
+                    preview_diff=(work.get("preview_diff") if dry_run else None),
+                )
+            )
+
+        return BatchImportReport(
+            dry_run=dry_run,
+            success=False,
+            issues=issues,
+            total_sites=total_sites,
+            success_count=0,
+            failed_count=total_sites,
+            results=results,
+        )
+
+    # 无任何问题：dry run 仅返回预览，不落库
+    if dry_run:
+        results: List[BatchPlanningResult] = []
+        for site_code, work in site_work.items():
+            site = work["site"]
+            results.append(
+                BatchPlanningResult(
+                    site_code=site_code,
+                    site_id=site.id,
+                    success=True,
+                    warnings=[],
+                    lte_cell_count=work.get("lte_cell_count"),
+                    nr_cell_count=work.get("nr_cell_count"),
+                    bands=work.get("bands"),
+                    preview_diff=work.get("preview_diff") or None,
+                )
+            )
+
+        return BatchImportReport(
+            dry_run=True,
+            success=True,
+            issues=[],
+            total_sites=total_sites,
+            success_count=total_sites,
+            failed_count=0,
+            results=results,
+        )
+
+    # 无问题且非 dry run：原子落库（任一异常回滚整文件）
+    created_versions: Dict[str, int] = {}
+    try:
+        for site_code, work in site_work.items():
+            site = work["site"]
+            cell_dicts = work["cell_dicts"]
             base = _build_planning_from_cells(site.id, cell_dicts)
             planning = _create_new_version(
                 db,
@@ -2209,36 +2441,47 @@ async def lld_batch_upload_planning(
                 current_user.id,
                 operation="lld_import",
                 summary=f"LLD batch import: {file.filename}",
+                commit=False,
             )
-
-            # 将 cells 与规划版本关联后落库
             for c in cell_dicts:
                 db.add(SitePlanningCell(planning_id=planning.id, **c))
-            db.commit()
+            created_versions[site_code] = planning.version
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return BatchImportReport(
+            dry_run=False,
+            success=False,
+            issues=[ImportIssue(code="LLD_DB_ERROR", message=f"导入落库失败: {e}")],
+            total_sites=total_sites,
+            success_count=0,
+            failed_count=total_sites,
+            results=[],
+        )
 
-            results.append(
-                BatchPlanningResult(
-                    site_code=site_code,
-                    site_id=site.id,
-                    success=True,
-                    version_created=planning.version,
-                    warnings=warnings,
-                    lte_cell_count=lte_cell_count,
-                    nr_cell_count=nr_cell_count,
-                    bands=bands,
-                )
+    results: List[BatchPlanningResult] = []
+    for site_code, work in site_work.items():
+        site = work["site"]
+        results.append(
+            BatchPlanningResult(
+                site_code=site_code,
+                site_id=site.id,
+                success=True,
+                version_created=created_versions.get(site_code),
+                warnings=[],
+                lte_cell_count=work.get("lte_cell_count"),
+                nr_cell_count=work.get("nr_cell_count"),
+                bands=work.get("bands"),
             )
-            success_count += 1
-        except Exception as e:
-            errors.append(str(e))
-            results.append(BatchPlanningResult(site_code=site_code, success=False, errors=errors))
-            failed_count += 1
+        )
 
     return BatchImportReport(
-        dry_run=dry_run,
-        total_sites=len(rows_by_tower),
-        success_count=success_count,
-        failed_count=failed_count,
+        dry_run=False,
+        success=True,
+        issues=[],
+        total_sites=total_sites,
+        success_count=total_sites,
+        failed_count=0,
         results=results,
     )
 
@@ -2261,72 +2504,182 @@ async def lld_upload_planning_for_site(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
-    _ensure_site_plannable(site)
 
     content = await file.read()
     if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="仅支持 Excel(.xlsx/.xls)")
-
-    try:
-        excel = pd.ExcelFile(io.BytesIO(content))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Excel 解析失败: {e}")
-
-    rows_by_tower = _collect_lld_rows_by_tower(excel)
-    metas = rows_by_tower.get(site.site_code) or []
-    if not metas:
-        raise HTTPException(status_code=400, detail=f"LLD 文件中未找到与站点编码 {site.site_code} 匹配的 SiteCode 行")
-
-    errors: List[str] = []
-    warnings: List[str] = []
-
-    # 记录导入前的 Cell 列表，用于后续生成 diff
-    current_planning = _get_current_planning(db, site.id)
-    old_cells: List[SitePlanningCell] = []
-    if current_planning:
-        old_cells = (
-            db.query(SitePlanningCell)
-            .filter(
-                SitePlanningCell.site_id == site.id,
-                SitePlanningCell.planning_id == current_planning.id,
-            )
-            .all()
-        )
-
-    cell_dicts: List[dict] = []
-    for meta in metas:
-        cell = _build_cell_dict_from_row(site.id, meta.get("tower_id"), meta)
-        if cell.get("local_cell_id") is None:
-            continue
-        cell_dicts.append(cell)
-
-    if not cell_dicts:
-        errors.append("该站点在 LLD 中没有有效的小区行（4G: Sector ID Local ID / 5G: Sector ID 为空）")
-        return BatchPlanningResult(site_code=site.site_code, site_id=site.id, success=False, errors=errors)
-
-    lte_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "LTE")
-    nr_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "NR")
-    bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
-
-    has_active_opening_wo = _has_active_opening_work_order(db, site.id)
-    edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
-
-    # 预先计算 diff（用于受限策略校验与 dry_run 预览）
-    cell_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
-
-    conflicts = _find_lld_policy_conflicts_for_import(edit_policy, cell_diff)
-    if conflicts:
-        errors.extend(_build_lld_policy_conflict_errors(edit_policy, conflicts))
         return BatchPlanningResult(
             site_code=site.site_code,
             site_id=site.id,
             success=False,
-            errors=errors,
-            warnings=warnings,
-            lte_cell_count=lte_cell_count,
-            nr_cell_count=nr_cell_count,
-            bands=bands,
-            preview_diff=cell_diff or None,
+            errors=["仅支持 Excel(.xlsx/.xls)"],
+            issues=[ImportIssue(code="LLD_FILE_TYPE", message="仅支持 Excel(.xlsx/.xls)")],
+        )
+
+    try:
+        excel = pd.ExcelFile(io.BytesIO(content))
+    except Exception as e:
+        return BatchPlanningResult(
+            site_code=site.site_code,
+            site_id=site.id,
+            success=False,
+            errors=[f"Excel 解析失败: {e}"],
+            issues=[ImportIssue(code="LLD_EXCEL_PARSE_ERROR", message=f"Excel 解析失败: {e}")],
+        )
+
+    rows_by_site_code, issues = _validate_lld_excel_and_collect_rows(excel)
+
+    # 单站导入也按“整文件严格失败”处理：文件中任意站点/行异常均阻止导入
+    site_work: Dict[str, Dict[str, Any]] = {}
+
+    for site_code, metas in rows_by_site_code.items():
+        s = db.query(Site).filter(Site.site_code == site_code).first()
+        if not s:
+            issues.append(
+                ImportIssue(
+                    code="LLD_SITE_NOT_FOUND",
+                    message="站点不存在：请先在“站点信息导入”创建站点并完成勘察",
+                    site_code=site_code,
+                )
+            )
+            continue
+
+        # 生命周期门禁
+        try:
+            _ensure_site_plannable(s)
+        except HTTPException as he:
+            issues.append(
+                ImportIssue(
+                    code="LLD_SITE_NOT_PLANNABLE",
+                    message=str(he.detail),
+                    site_code=site_code,
+                    site_id=s.id,
+                )
+            )
+
+        # 站点名称必须与系统一致（strip() 后精确匹配）
+        file_site_name = (metas[0].get("site_name_in_file") or "").strip() if metas else ""
+        sys_site_name = (s.site_name or "").strip()
+        if not file_site_name:
+            issues.append(
+                ImportIssue(
+                    code="LLD_REQUIRED",
+                    message="SITE NAME 不能为空",
+                    site_code=site_code,
+                    site_id=s.id,
+                    column="SITE NAME",
+                )
+            )
+        elif file_site_name != sys_site_name:
+            issues.append(
+                ImportIssue(
+                    code="LLD_SITE_NAME_MISMATCH",
+                    message=f"站点名称与系统不一致（Excel='{file_site_name}'，系统='{sys_site_name}'）",
+                    site_code=site_code,
+                    site_id=s.id,
+                )
+            )
+
+        cell_dicts: List[dict] = []
+        for meta in metas or []:
+            cell = _build_cell_dict_from_row(s.id, meta.get("tower_id"), meta)
+            if cell.get("local_cell_id") is None:
+                issues.append(
+                    ImportIssue(
+                        code="LLD_REQUIRED",
+                        message="Sector ID 不能为空且必须为整数",
+                        sheet=meta.get("sheet_name"),
+                        row=meta.get("excel_row"),
+                        column="Sector ID Local ID",
+                        site_code=site_code,
+                        site_id=s.id,
+                    )
+                )
+                continue
+            cell_dicts.append(cell)
+
+        if not cell_dicts:
+            issues.append(
+                ImportIssue(
+                    code="LLD_NO_VALID_ROWS",
+                    message="该站点在 LLD 中没有满足最低字段要求的小区行",
+                    site_code=site_code,
+                    site_id=s.id,
+                )
+            )
+            continue
+
+        lte_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "LTE")
+        nr_cell_count = sum(1 for c in cell_dicts if c.get("rat") == "NR")
+        bands = sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")})
+
+        has_active_opening_wo = _has_active_opening_work_order(db, s.id)
+        edit_policy = _compute_lld_edit_policy(s, has_active_opening_wo, current_user)
+
+        current_planning = _get_current_planning(db, s.id)
+        old_cells: List[SitePlanningCell] = []
+        if current_planning:
+            old_cells = (
+                db.query(SitePlanningCell)
+                .filter(
+                    SitePlanningCell.site_id == s.id,
+                    SitePlanningCell.planning_id == current_planning.id,
+                )
+                .all()
+            )
+        cell_diff = _compute_lld_cells_diff(old_cells, cell_dicts)
+
+        conflicts = _find_lld_policy_conflicts_for_import(edit_policy, cell_diff)
+        if conflicts:
+            issues.append(
+                ImportIssue(
+                    code="LLD_POLICY_CONFLICT",
+                    message="\n".join(_build_lld_policy_conflict_errors(edit_policy, conflicts)),
+                    site_code=site_code,
+                    site_id=s.id,
+                )
+            )
+
+        site_work[site_code] = {
+            "site": s,
+            "cell_dicts": cell_dicts,
+            "cell_diff": cell_diff,
+            "lte_cell_count": lte_cell_count,
+            "nr_cell_count": nr_cell_count,
+            "bands": bands,
+        }
+
+    if site.site_code not in rows_by_site_code:
+        issues.append(
+            ImportIssue(
+                code="LLD_SITE_NOT_IN_FILE",
+                message=f"LLD 文件中未找到与站点编码 {site.site_code} 匹配的 SiteCode 行",
+                site_code=site.site_code,
+                site_id=site.id,
+            )
+        )
+
+    if issues:
+        target_work = site_work.get(site.site_code) or {}
+        return BatchPlanningResult(
+            site_code=site.site_code,
+            site_id=site.id,
+            success=False,
+            errors=[i.message for i in issues if i.message],
+            issues=issues,
+            lte_cell_count=target_work.get("lte_cell_count"),
+            nr_cell_count=target_work.get("nr_cell_count"),
+            bands=target_work.get("bands"),
+            preview_diff=(target_work.get("cell_diff") if (dry_run and target_work) else None),
+        )
+
+    target_work = site_work.get(site.site_code)
+    if not target_work:
+        return BatchPlanningResult(
+            site_code=site.site_code,
+            site_id=site.id,
+            success=False,
+            errors=["未找到可导入的站点数据（请检查 Excel 中的 SiteCode）"],
+            issues=[ImportIssue(code="LLD_NO_VALID_ROWS", message="未找到可导入的站点数据", site_code=site.site_code, site_id=site.id)],
         )
 
     if dry_run:
@@ -2334,31 +2687,41 @@ async def lld_upload_planning_for_site(
             site_code=site.site_code,
             site_id=site.id,
             success=True,
-            warnings=warnings,
-            lte_cell_count=lte_cell_count,
-            nr_cell_count=nr_cell_count,
-            bands=bands,
-            preview_diff=cell_diff or None,
+            warnings=[],
+            lte_cell_count=target_work.get("lte_cell_count"),
+            nr_cell_count=target_work.get("nr_cell_count"),
+            bands=target_work.get("bands"),
+            preview_diff=target_work.get("cell_diff") or None,
         )
 
-    base = _build_planning_from_cells(site.id, cell_dicts)
-    planning = _create_new_version(
-        db,
-        site.id,
-        base,
-        current_user.id,
-        operation="lld_import",
-        summary=f"LLD single-site import: {file.filename}",
-    )
-    for c in cell_dicts:
-        db.add(SitePlanningCell(planning_id=planning.id, **c))
-    db.commit()
-
-    # 基于导入前后的 Cell 列表，将更细粒度的 diff（字段级别变更）合并写入日志
     try:
-        _merge_lld_cell_diff_into_planning_log(db, planning.id, cell_diff)
+        base = _build_planning_from_cells(site.id, target_work["cell_dicts"])
+        planning = _create_new_version(
+            db,
+            site.id,
+            base,
+            current_user.id,
+            operation="lld_import",
+            summary=f"LLD single-site import: {file.filename}",
+            commit=False,
+        )
+        for c in target_work["cell_dicts"]:
+            db.add(SitePlanningCell(planning_id=planning.id, **c))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return BatchPlanningResult(
+            site_code=site.site_code,
+            site_id=site.id,
+            success=False,
+            errors=[f"导入落库失败: {e}"],
+            issues=[ImportIssue(code="LLD_DB_ERROR", message=f"导入落库失败: {e}", site_code=site.site_code, site_id=site.id)],
+        )
+
+    # 将更细粒度的 diff（字段级别变更）合并写入日志（失败不影响主流程）
+    try:
+        _merge_lld_cell_diff_into_planning_log(db, planning.id, target_work.get("cell_diff"))
     except Exception:
-        # diff 生成失败不影响主流程
         pass
 
     return BatchPlanningResult(
@@ -2366,10 +2729,10 @@ async def lld_upload_planning_for_site(
         site_id=site.id,
         success=True,
         version_created=planning.version,
-        warnings=warnings,
-        lte_cell_count=lte_cell_count,
-        nr_cell_count=nr_cell_count,
-        bands=bands,
+        warnings=[],
+        lte_cell_count=target_work.get("lte_cell_count"),
+        nr_cell_count=target_work.get("nr_cell_count"),
+        bands=target_work.get("bands"),
     )
 
 

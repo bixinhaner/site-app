@@ -122,12 +122,31 @@ class PlanningChangeLogItem(BaseModel):
     diff: Optional[Dict[str, Any]]
 
 
+class ImportIssue(BaseModel):
+    """导入校验问题（用于前端展示）。"""
+
+    code: str
+    message: str
+    level: Literal["error", "warning"] = "error"
+
+    sheet: Optional[str] = None
+    row: Optional[int] = None
+    column: Optional[str] = None
+
+    site_code: Optional[str] = None
+    site_id: Optional[int] = None
+
+    value: Optional[str] = None
+    hint: Optional[str] = None
+
+
 class BatchPlanningResult(BaseModel):
     site_code: str
     site_id: Optional[int] = None
     success: bool
     errors: List[str] = []
     warnings: List[str] = []
+    issues: List[ImportIssue] = []
     version_created: Optional[int] = None
     # LLD 导入扩展字段（可选）
     lte_cell_count: Optional[int] = None
@@ -139,6 +158,9 @@ class BatchPlanningResult(BaseModel):
 
 class BatchImportReport(BaseModel):
     dry_run: bool
+    # LLD 导入扩展字段（仅 lld-batch-upload 使用；非 LLD 批量导入返回 None/空）
+    success: Optional[bool] = None
+    issues: List[ImportIssue] = []
     total_sites: int
     success_count: int
     failed_count: int

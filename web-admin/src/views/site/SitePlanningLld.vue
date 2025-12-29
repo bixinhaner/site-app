@@ -81,6 +81,14 @@
             <el-icon><Upload /></el-icon>{{ dryRun ? '试运行导入' : '导入并保存' }}
           </el-button>
         </el-upload>
+        <el-button
+          v-if="importIssues.length"
+          type="danger"
+          link
+          @click="openIssues()"
+        >
+          查看问题（{{ importIssues.length }}）
+        </el-button>
         <span v-if="importInfo" class="import-info">{{ importInfo }}</span>
       </div>
     </el-card>
@@ -1519,6 +1527,38 @@
         <el-button @click="logDetailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="issuesVisible"
+      title="LLD 导入校验问题"
+      width="980px"
+    >
+      <div class="mb12">
+        <el-input
+          v-model="issueSiteCodeFilter"
+          placeholder="按 SiteCode 过滤（可选）"
+          style="width: 260px"
+          clearable
+        />
+      </div>
+      <el-table :data="filteredIssues" border size="small" max-height="520">
+        <el-table-column prop="level" label="级别" width="70" />
+        <el-table-column prop="code" label="代码" width="170" />
+        <el-table-column prop="site_code" label="SiteCode" width="150" />
+        <el-table-column prop="sheet" label="Sheet" width="90" />
+        <el-table-column prop="row" label="行" width="70" />
+        <el-table-column prop="column" label="列" width="120" />
+        <el-table-column label="问题" min-width="260">
+          <template #default="{ row }">
+            <div class="issue-message">{{ row.message }}</div>
+            <div v-if="row.hint" class="issue-hint">提示：{{ row.hint }}</div>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="issuesVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1537,6 +1577,14 @@ const loading = ref(false)
 const importing = ref(false)
 const dryRun = ref(true)
 const importInfo = ref('')
+const importIssues = ref([])
+const issuesVisible = ref(false)
+const issueSiteCodeFilter = ref('')
+const filteredIssues = computed(() => {
+  const kw = (issueSiteCodeFilter.value || '').trim()
+  if (!kw) return importIssues.value
+  return (importIssues.value || []).filter(i => (i.site_code || '').trim() === kw)
+})
 const activeTab = ref('overview')
 
 const formatDateTime = (val) => {
@@ -1830,26 +1878,38 @@ const onUploadLld = async (opts) => {
     importing.value = true
     importInfo.value = '正在解析 LLD...'
     const res = await sitePlanningApi.lldImportPlanning(siteId, opts.file, dryRun.value)
+    importIssues.value = Array.isArray(res.issues) ? res.issues : []
     if (dryRun.value) {
       importInfo.value = res.success
         ? `试运行成功：4G Cells=${res.lte_cell_count || 0}, 5G Cells=${res.nr_cell_count || 0}, Bands=${(res.bands || []).join(', ')}`
-        : `试运行失败：${(res.errors || []).join('; ')}`
+        : (importIssues.value.length
+          ? `试运行校验失败：发现 ${importIssues.value.length} 个问题，已阻止导入`
+          : `试运行失败：${(res.errors || []).join('; ')}`)
     } else {
       if (res.success) {
         importInfo.value = `导入成功，生成版本 v${res.version_created || ''}`
+        importIssues.value = []
         await loadLldPlanning()
         await loadLogs()
       } else {
-        importInfo.value = `导入失败：${(res.errors || []).join('; ')}`
+        importInfo.value = importIssues.value.length
+          ? `校验失败：发现 ${importIssues.value.length} 个问题，已阻止导入`
+          : `导入失败：${(res.errors || []).join('; ')}`
       }
     }
     opts.onSuccess(res)
   } catch (e) {
     importInfo.value = extractErrorMessage(e, '导入失败')
+    importIssues.value = []
     opts.onError(e)
   } finally {
     importing.value = false
   }
+}
+
+const openIssues = (siteCode = '') => {
+  issueSiteCodeFilter.value = siteCode || (site.value?.site_code || '')
+  issuesVisible.value = true
 }
 
 const filteredLteCells = computed(() => {
@@ -2155,8 +2215,11 @@ onMounted(async () => {
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .header-actions { display:flex; gap: 12px; }
 .mb16 { margin-bottom: 16px; }
+.mb12 { margin-bottom: 12px; }
 .import-row { display:flex; align-items:center; gap: 12px; }
 .import-info { color: #666; }
+.issue-message { white-space: pre-wrap; line-height: 1.6; }
+.issue-hint { margin-top: 4px; color: #999; font-size: 12px; white-space: pre-wrap; }
 .meta-row { display:flex; gap: 12px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; }
 .filter-row { display:flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 .mr8 { margin-right: 8px; }

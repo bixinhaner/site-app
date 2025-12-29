@@ -8,6 +8,23 @@
     </div>
 
     <el-card class="mb16">
+      <el-alert type="info" :closable="false" show-icon class="mb12">
+        <template #title>LLD Excel 导入说明（严格校验：有问题整份不导入）</template>
+        <div class="tips">
+          <div>1）模板要求：仅支持最新 LLD 模板（Sheet：4G / 5G），请先点“下载 LLD 模板”。</div>
+          <div>2）站点匹配：系统会用 <b>SiteCode</b> 去关联站点；同时校验 <b>SITE NAME</b> 是否与站点信息一致。</div>
+          <div class="tips-indent">
+            - SiteCode（站点编码）：必须与站点信息中的“站点编码”一致（建议把 Excel 该列设为“文本”，避免出现 .0）<br>
+            - SITE NAME（站点名称）：必须与站点信息中的“站点名称”一致（strip() 后精确匹配）
+          </div>
+          <div>3）小区关键字段（任一为空或不合法将整文件失败）：</div>
+          <div class="tips-indent">
+            - 4G：Sector ID Local ID（必须为整数） + BAND（非空）<br>
+            - 5G：Sector ID（必须为整数） + Band（非空）
+          </div>
+          <div>4）校验策略：只要发现任何问题，整份文件都会失败并返回问题列表（不会落库、不跳过行、不做部分导入）。</div>
+        </div>
+      </el-alert>
       <div class="import-row">
         <el-button @click="downloadBatchTemplate">
           <el-icon><Download /></el-icon>下载 LLD 模板
@@ -22,6 +39,14 @@
             <el-icon><Upload /></el-icon>{{ dryRun ? '试运行导入' : '导入并保存' }}
           </el-button>
         </el-upload>
+        <el-button
+          v-if="issues.length"
+          type="danger"
+          link
+          @click="openIssues()"
+        >
+          查看问题（{{ issues.length }}）
+        </el-button>
         <span v-if="importInfo" class="import-info">{{ importInfo }}</span>
       </div>
     </el-card>
@@ -160,6 +185,38 @@
         <el-button @click="detailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="issuesVisible"
+      title="LLD 导入校验问题"
+      width="980px"
+    >
+      <div class="mb12">
+        <el-input
+          v-model="issueSiteCodeFilter"
+          placeholder="按 SiteCode 过滤（可选）"
+          style="width: 260px"
+          clearable
+        />
+      </div>
+      <el-table :data="filteredIssues" border size="small" max-height="520">
+        <el-table-column prop="level" label="级别" width="70" />
+        <el-table-column prop="code" label="代码" width="170" />
+        <el-table-column prop="site_code" label="SiteCode" width="150" />
+        <el-table-column prop="sheet" label="Sheet" width="90" />
+        <el-table-column prop="row" label="行" width="70" />
+        <el-table-column prop="column" label="列" width="120" />
+        <el-table-column label="问题" min-width="260">
+          <template #default="{ row }">
+            <div class="issue-message">{{ row.message }}</div>
+            <div v-if="row.hint" class="issue-hint">提示：{{ row.hint }}</div>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="issuesVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -177,6 +234,7 @@ const loading = ref(false)
 const dryRun = ref(true)
 const importInfo = ref('')
 const results = ref([])
+const issues = ref([])
 // 记录最近一次导入是否为 dry run，用于决定“变更详情”的展示逻辑
 const lastDryRun = ref(true)
 
@@ -184,6 +242,14 @@ const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detailSite = ref(null)
 const detailLog = ref(null)
+
+const issuesVisible = ref(false)
+const issueSiteCodeFilter = ref('')
+const filteredIssues = computed(() => {
+  const kw = (issueSiteCodeFilter.value || '').trim()
+  if (!kw) return issues.value
+  return (issues.value || []).filter(i => (i.site_code || '').trim() === kw)
+})
 
 const canEdit = computed(() => ['admin', 'manager', 'planner'].includes(userStore.user?.role))
 
@@ -219,17 +285,29 @@ const onUploadRequest = async (opts) => {
     loading.value = true
     importInfo.value = '正在解析 LLD 文件...'
     const res = await sitePlanningApi.lldBatchImportPlanning(opts.file, dryRun.value)
+    issues.value = Array.isArray(res.issues) ? res.issues : []
     lastDryRun.value = !!res.dry_run
     results.value = res.results || []
-    importInfo.value = `共 ${res.total_sites} 个站点，成功 ${res.success_count} 个，失败 ${res.failed_count} 个`
+    if (res.success === false) {
+      importInfo.value = `校验失败：发现 ${issues.value.length} 个问题，已阻止整文件导入`
+      ElMessage.warning(importInfo.value)
+    } else {
+      importInfo.value = `共 ${res.total_sites} 个站点，成功 ${res.success_count} 个，失败 ${res.failed_count} 个`
+    }
     opts.onSuccess(res)
   } catch (e) {
     const msg = e?.response?.data?.detail || '导入失败'
     importInfo.value = msg
+    issues.value = []
     opts.onError(e)
   } finally {
     loading.value = false
   }
+}
+
+const openIssues = (siteCode = '') => {
+  issueSiteCodeFilter.value = siteCode
+  issuesVisible.value = true
 }
 
 const openDetail = async (row) => {
@@ -281,6 +359,7 @@ const openDetail = async (row) => {
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .header-actions { display:flex; gap: 12px; }
 .mb16 { margin-bottom: 16px; }
+.mb12 { margin-bottom: 12px; }
 .import-row { display:flex; align-items:center; gap: 12px; }
 .import-info { color: #666; }
 .muted { color: #999; font-size: 12px; }
@@ -293,4 +372,8 @@ const openDetail = async (row) => {
 .field-name { font-weight: 500; }
 .old-val { color: #999; }
 .new-val { color: #409EFF; }
+.tips { color: #555; font-size: 13px; line-height: 1.7; }
+.tips-indent { padding-left: 12px; color: #666; }
+.issue-message { white-space: pre-wrap; line-height: 1.6; }
+.issue-hint { margin-top: 4px; color: #999; font-size: 12px; white-space: pre-wrap; }
 </style>
