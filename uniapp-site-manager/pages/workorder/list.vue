@@ -90,6 +90,21 @@
                   <text class="order-type-text">{{ typeText(wo.type) }}</text>
                 </view>
               </view>
+              <!-- 开站工单：设备上线/激活（ever）状态（不触发 OMC 实时查询） -->
+              <view v-if="shouldShowOmcTags(wo)" class="omc-tags-row">
+                <text
+                  class="omc-tag"
+                  :class="omcOnlineTagClass(wo)"
+                >
+                  {{ omcOnlineTagText(wo) }}
+                </text>
+                <text
+                  class="omc-tag"
+                  :class="omcActivatedTagClass(wo)"
+                >
+                  {{ omcActivatedTagText(wo) }}
+                </text>
+              </view>
             </view>
             <view class="order-actions" v-if="wo.status === 'PENDING'">
               <button class="accept-btn u-pressable" size="mini" @click.stop="handleAccept(wo)">{{ $t('workorder.accept') }}</button>
@@ -134,13 +149,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, getCurrentInstance } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { ref, onMounted, watch, getCurrentInstance, reactive, onUnmounted } from 'vue'
+import { onShow, onHide } from '@dcloudio/uni-app'
 import { useWorkOrderStore } from '@/stores/workorder'
 import { useLanguageStore } from '@/stores/language'
 import { useUserStore } from '@/stores/user'
 import { useUpgradeStore } from '@/stores/upgrade'
 import { trackOperation } from '@/utils/operationTrack.js'
+import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 import CustomNavbar from '@/components/CustomNavbar.vue'
 import SkeletonCard from '@/components/SkeletonCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -160,6 +176,10 @@ const refreshing = ref(false)
 const isLoading = ref(true)
 const isPageVisible = ref(false)
 let searchTimer = null
+
+// 开站工单：站点设备上线/激活（ever）状态（按 site_id 缓存，不触发 OMC 实时查询）
+const omcEverBySiteId = reactive({})
+const omcEverLoadingBySiteId = reactive({})
 
 // 版本更新弹窗状态
 const showUpdateDialog = ref(false)
@@ -192,6 +212,8 @@ const reload = async () => {
     if (res.success) {
       orders.value = res.data
       console.log('✅ 工单列表刷新成功', { count: res.data?.length })
+      // 自动拉取开站工单的设备状态（ever 汇总，不触发 OMC 实时查询）
+      void preloadOmcEverForWorkOrders(res.data || [])
 
       // 如果有需要聚焦的工单，则滚动到对应卡片位置并短暂高亮
       if (store.focusedWorkOrderId) {
@@ -232,6 +254,120 @@ const reload = async () => {
 // 下拉刷新处理
 const handleRefresh = async () => {
   await reload()
+}
+
+const isOpeningWorkOrder = (wo) => String(wo?.type || '') === 'opening_inspection'
+
+const getOmcEverKey = (siteId) => {
+  const s = String(siteId ?? '').trim()
+  return s
+}
+
+const loadOmcEverForSite = async (siteId) => {
+  const key = getOmcEverKey(siteId)
+  if (!key) return
+  if (!userStore.token) return
+  if (omcEverLoadingBySiteId[key]) return
+
+  omcEverLoadingBySiteId[key] = true
+  try {
+    const response = await uni.request({
+      url: buildApiUrl(API_ENDPOINTS.SITES.OMC_STATUS_EVER(key)),
+      ...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
+    })
+    if (response.statusCode === 200) {
+      const sns = Array.isArray(response.data?.sns) ? response.data.sns : []
+      const hasDevices = sns.length > 0
+      omcEverBySiteId[key] = {
+        loaded: true,
+        error: false,
+        hasDevices,
+        allEverOnline: !!response.data?.all_ever_online,
+        allEverActivated: !!response.data?.all_ever_activated
+      }
+      return
+    }
+    throw new Error(response.data?.detail || 'load failed')
+  } catch (e) {
+    const prev = omcEverBySiteId[key]
+    // 首次失败：不展示；仅在“曾经成功且有绑定设备”的情况下显示未知
+    if (prev && prev.hasDevices) {
+      omcEverBySiteId[key] = {
+        ...prev,
+        loaded: true,
+        error: true
+      }
+    }
+  } finally {
+    omcEverLoadingBySiteId[key] = false
+  }
+}
+
+const preloadOmcEverForWorkOrders = async (list) => {
+  const siteIds = Array.from(new Set(
+    (list || [])
+      .filter((wo) => isOpeningWorkOrder(wo) && wo?.site_id)
+      .map((wo) => getOmcEverKey(wo.site_id))
+      .filter(Boolean)
+  ))
+  if (!siteIds.length) return
+  await Promise.all(siteIds.map((siteId) => loadOmcEverForSite(siteId)))
+}
+
+const getOmcEverSummary = (wo) => {
+  const key = getOmcEverKey(wo?.site_id)
+  return key ? omcEverBySiteId[key] : null
+}
+
+const shouldShowOmcTags = (wo) => {
+  if (!isOpeningWorkOrder(wo)) return false
+  const s = getOmcEverSummary(wo)
+  return !!(s && s.hasDevices)
+}
+
+const omcOnlineTagText = (wo) => {
+  const s = getOmcEverSummary(wo)
+  if (!s || !s.hasDevices) return ''
+  if (s.error) return $t('common.unknown')
+  return s.allEverOnline ? $t('site.omcEverOnlineYes') : $t('site.omcEverOnlineNo')
+}
+
+const omcActivatedTagText = (wo) => {
+  const s = getOmcEverSummary(wo)
+  if (!s || !s.hasDevices) return ''
+  if (s.error) return $t('common.unknown')
+  return s.allEverActivated ? $t('site.omcEverActivatedYes') : $t('site.omcEverActivatedNo')
+}
+
+const omcOnlineTagClass = (wo) => {
+  const s = getOmcEverSummary(wo)
+  if (!s || !s.hasDevices) return ''
+  if (s.error) return 'omc-tag--unknown'
+  return s.allEverOnline ? 'omc-tag--ok' : 'omc-tag--no'
+}
+
+const omcActivatedTagClass = (wo) => {
+  const s = getOmcEverSummary(wo)
+  if (!s || !s.hasDevices) return ''
+  if (s.error) return 'omc-tag--unknown'
+  return s.allEverActivated ? 'omc-tag--ok' : 'omc-tag--no'
+}
+
+const OMC_EVER_AUTO_REFRESH_MS = 30 * 1000
+let omcEverTimer = null
+
+const startOmcEverAutoRefresh = () => {
+  stopOmcEverAutoRefresh()
+  omcEverTimer = setInterval(() => {
+    void preloadOmcEverForWorkOrders(orders.value || [])
+  }, OMC_EVER_AUTO_REFRESH_MS)
+}
+
+const stopOmcEverAutoRefresh = () => {
+  if (omcEverTimer) {
+    clearInterval(omcEverTimer)
+    omcEverTimer = null
+  }
 }
 
 const setStatus = async (s) => {
@@ -456,7 +592,16 @@ onShow(() => {
     console.log('🔄 页面重新显示，自动刷新数据')
     reload()
   }
+  startOmcEverAutoRefresh()
   isPageVisible.value = true
+})
+
+onHide(() => {
+  stopOmcEverAutoRefresh()
+})
+
+onUnmounted(() => {
+  stopOmcEverAutoRefresh()
 })
 </script>
 
@@ -723,6 +868,43 @@ onShow(() => {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.omc-tags-row {
+		display: flex;
+		gap: 12rpx;
+		margin-left: 44rpx; /* 与 row-icon 对齐 */
+		flex-wrap: wrap;
+	}
+
+	.omc-tag {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		height: 44rpx;
+		padding: 0 16rpx;
+		border-radius: 999rpx;
+		font-size: 22rpx;
+		font-weight: 600;
+		border: 1rpx solid transparent;
+	}
+
+	.omc-tag--ok {
+		background: rgba(34, 197, 94, 0.12);
+		color: #16a34a;
+		border-color: rgba(34, 197, 94, 0.24);
+	}
+
+	.omc-tag--no {
+		background: rgba(107, 114, 128, 0.12);
+		color: #6b7280;
+		border-color: rgba(107, 114, 128, 0.24);
+	}
+
+	.omc-tag--unknown {
+		background: rgba(148, 163, 184, 0.14);
+		color: #64748b;
+		border-color: rgba(148, 163, 184, 0.28);
 	}
 	
 	// 操作按钮

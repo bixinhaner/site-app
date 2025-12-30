@@ -124,7 +124,9 @@ const messages = {
       minWithValue: '最小值：{min}',
       maxWithValue: '最大值：{max}',
       rangeWithMinMax: '范围：{min} - {max}',
-      maxChars: '最多 {count} 字符'
+      maxChars: '最多 {count} 字符',
+      retry: '重试',
+      unknown: '未知'
     },
     login: {
       title: '站点管理',
@@ -274,6 +276,12 @@ const messages = {
       noOmcData: '暂无设备状态数据',
       loadOmcFailed: '获取设备状态失败',
       loadFailed: '加载失败',
+      deviceStatusTitle: '设备状态',
+      omcEverOnlineYes: '已上线',
+      omcEverOnlineNo: '未上线',
+      omcEverActivatedYes: '已激活',
+      omcEverActivatedNo: '未激活',
+      noBoundDevices: '暂无绑定设备',
 
       planningTitle: '站点规划',
       planningBands: '频段配置',
@@ -1130,7 +1138,9 @@ const messages = {
       minWithValue: 'Min {min}',
       maxWithValue: 'Max {max}',
       rangeWithMinMax: 'Range {min} - {max}',
-      maxChars: 'Max {count} chars'
+      maxChars: 'Max {count} chars',
+      retry: 'Retry',
+      unknown: 'Unknown'
     },
     login: {
       title: 'Site Manager',
@@ -1280,6 +1290,12 @@ const messages = {
       noOmcData: 'No device status data',
       loadOmcFailed: 'Failed to load device status',
       loadFailed: 'Load failed',
+      deviceStatusTitle: 'Device Status',
+      omcEverOnlineYes: 'Online',
+      omcEverOnlineNo: 'Not Online',
+      omcEverActivatedYes: 'Activated',
+      omcEverActivatedNo: 'Not Activated',
+      noBoundDevices: 'No bound devices',
 
       planningTitle: 'Site Planning',
       planningBands: 'Band configuration',
@@ -2156,7 +2172,9 @@ const messages = {
       minWithValue: 'Minimum {min}',
       maxWithValue: 'Maksimum {max}',
       rangeWithMinMax: 'Rentang {min} - {max}',
-      maxChars: 'Maks {count} karakter'
+      maxChars: 'Maks {count} karakter',
+      retry: 'Coba lagi',
+      unknown: 'Tidak Diketahui'
     },
     login: {
       title: 'Manajemen Situs',
@@ -2317,6 +2335,12 @@ const messages = {
       noOmcData: 'Tidak ada data status perangkat',
       loadOmcFailed: 'Gagal mengambil status perangkat',
       loadFailed: 'Gagal memuat',
+      deviceStatusTitle: 'Status Perangkat',
+      omcEverOnlineYes: 'Online',
+      omcEverOnlineNo: 'Belum online',
+      omcEverActivatedYes: 'Diaktifkan',
+      omcEverActivatedNo: 'Belum diaktifkan',
+      noBoundDevices: 'Tidak ada perangkat terikat',
       planningTitle: 'Perencanaan Situs',
       planningBands: 'Konfigurasi Pita Frekuensi',
       planningSectorCount: 'Jumlah Sektor',

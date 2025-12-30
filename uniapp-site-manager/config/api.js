@@ -194,7 +194,8 @@ export const API_ENDPOINTS = {
     UPDATE: (id) => `/api/sites/${id}`,
     DELETE: (id) => `/api/sites/${id}`,
     PLANNING: (id) => `/api/sites/${id}/planning`,
-    OMC_STATUS: (id) => `/api/sites/${id}/omc/devices`
+    OMC_STATUS: (id) => `/api/sites/${id}/omc/devices`,
+    OMC_STATUS_EVER: (id) => `/api/sites/${id}/omc/devices/ever`
   },
 
 

@@ -12,6 +12,11 @@
 				<view class="header-info">
 					<text class="site-name">{{ inspectionData.site_name }}</text>
 					<text class="inspection-type">{{ getInspectionTypeText(inspectionData.inspection_type) }}</text>
+					<!-- 开站工单：设备上线/激活（ever）状态（不触发 OMC 实时查询） -->
+					<view v-if="shouldShowOmcTags" class="omc-tags-row">
+						<text class="omc-tag" :class="omcOnlineTagClass">{{ omcOnlineTagText }}</text>
+						<text class="omc-tag" :class="omcActivatedTagClass">{{ omcActivatedTagText }}</text>
+					</view>
 				</view>
 				
 				<view class="header-score" v-if="inspectionData.score">
@@ -618,12 +623,12 @@
 </template>
 
 <script setup>
-	import { ref, computed, onMounted, watch, getCurrentInstance } from 'vue'
-	import { onLoad, onShow } from '@dcloudio/uni-app'
+	import { ref, computed, onMounted, watch, getCurrentInstance, onUnmounted } from 'vue'
+	import { onLoad, onShow, onHide } from '@dcloudio/uni-app'
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
-	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl } from '@/config/api.js'
+	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl, API_ENDPOINTS } from '@/config/api.js'
 	import { createPhotoCacheContext, ensurePhotoCached } from '@/utils/photoCache.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	
@@ -666,6 +671,8 @@
 	const workOrderData = ref(null)
 	const deviceStatus = ref({ checked_at: null, devices: [] })
 	const deviceStatusLoading = ref(false)
+	const omcEverSummary = ref(null)
+	const omcEverLoading = ref(false)
 	const inspectorInfo = ref(null)
 	const checkItems = ref([])
 	const currentFilter = ref('all')
@@ -772,6 +779,104 @@
 			band: item.band
 		}))
 	})
+
+	const isOpeningInspection = computed(() => String(workOrderData.value?.type || '') === 'opening_inspection')
+	const hasBoundDevicesHint = computed(() => (checkItems.value || []).some((it) => !!it?.equipment_sn))
+
+	const shouldShowOmcTags = computed(() => {
+		if (!isOpeningInspection.value) return false
+		const s = omcEverSummary.value
+		return !!(s && s.hasDevices)
+	})
+
+	const omcOnlineTagText = computed(() => {
+		const s = omcEverSummary.value
+		if (!s || !s.hasDevices) return ''
+		if (s.error) return $t('common.unknown')
+		return s.allEverOnline ? $t('site.omcEverOnlineYes') : $t('site.omcEverOnlineNo')
+	})
+
+	const omcActivatedTagText = computed(() => {
+		const s = omcEverSummary.value
+		if (!s || !s.hasDevices) return ''
+		if (s.error) return $t('common.unknown')
+		return s.allEverActivated ? $t('site.omcEverActivatedYes') : $t('site.omcEverActivatedNo')
+	})
+
+	const omcOnlineTagClass = computed(() => {
+		const s = omcEverSummary.value
+		if (!s || !s.hasDevices) return ''
+		if (s.error) return 'omc-tag--unknown'
+		return s.allEverOnline ? 'omc-tag--ok' : 'omc-tag--no'
+	})
+
+	const omcActivatedTagClass = computed(() => {
+		const s = omcEverSummary.value
+		if (!s || !s.hasDevices) return ''
+		if (s.error) return 'omc-tag--unknown'
+		return s.allEverActivated ? 'omc-tag--ok' : 'omc-tag--no'
+	})
+
+	const loadOmcEverSummary = async () => {
+		const siteId = workOrderData.value?.site_id || inspectionData.value?.site_id
+		if (!isOpeningInspection.value || !siteId || !userStore.token) {
+			omcEverSummary.value = null
+			return
+		}
+		if (omcEverLoading.value) return
+
+		omcEverLoading.value = true
+		try {
+			const response = await uni.request({
+				url: buildApiUrl(API_ENDPOINTS.SITES.OMC_STATUS_EVER(siteId)),
+				...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
+			})
+			if (response.statusCode === 200) {
+				const sns = Array.isArray(response.data?.sns) ? response.data.sns : []
+				omcEverSummary.value = {
+					loaded: true,
+					error: false,
+					hasDevices: sns.length > 0,
+					allEverOnline: !!response.data?.all_ever_online,
+					allEverActivated: !!response.data?.all_ever_activated
+				}
+				return
+			}
+			throw new Error(response.data?.detail || 'load failed')
+		} catch (e) {
+			// 接口失败：仅在“能确认站点有绑定设备”时显示未知
+			if (hasBoundDevicesHint.value) {
+				omcEverSummary.value = {
+					loaded: true,
+					error: true,
+					hasDevices: true,
+					allEverOnline: false,
+					allEverActivated: false
+				}
+				return
+			}
+			omcEverSummary.value = null
+		} finally {
+			omcEverLoading.value = false
+		}
+	}
+
+	const OMC_EVER_AUTO_REFRESH_MS = 30 * 1000
+	let omcEverTimer = null
+
+	const startOmcEverAutoRefresh = () => {
+		stopOmcEverAutoRefresh()
+		omcEverTimer = setInterval(() => {
+			void loadOmcEverSummary()
+		}, OMC_EVER_AUTO_REFRESH_MS)
+	}
+
+	const stopOmcEverAutoRefresh = () => {
+		if (omcEverTimer) {
+			clearInterval(omcEverTimer)
+			omcEverTimer = null
+		}
+	}
 	
 	// 未绑定弹窗控制
 	const showUnboundModal = ref(false)
@@ -805,7 +910,16 @@
 			console.log('🔄 页面重新显示，自动刷新数据')
 			loadInspectionDetail()
 		}
+		startOmcEverAutoRefresh()
 		isPageVisible.value = true
+	})
+
+	onHide(() => {
+		stopOmcEverAutoRefresh()
+	})
+
+	onUnmounted(() => {
+		stopOmcEverAutoRefresh()
 	})
 
 	const pickDefaultFilter = () => {
@@ -1069,15 +1183,18 @@
 				// 设置默认筛选（驳回优先展示“问题项”）
 				pickDefaultFilter()
 				
-				// 加载工单进度信息（如果检查关联了工单）
-				if (inspectionData.value && inspectionData.value.work_order_id) {
-					await loadWorkOrderProgress(inspectionData.value.work_order_id)
+					// 加载工单进度信息（如果检查关联了工单）
+					if (inspectionData.value && inspectionData.value.work_order_id) {
+						await loadWorkOrderProgress(inspectionData.value.work_order_id)
+					}
+
+					// 开站工单：加载站点设备 ever 状态（只读后端缓存）
+					await loadOmcEverSummary()
+				
+				// 加载检查员信息
+				if (inspectionData.value && inspectionData.value.inspector_id) {
+					await loadInspectorInfo(inspectionData.value.inspector_id)
 				}
-			
-			// 加载检查员信息
-			if (inspectionData.value && inspectionData.value.inspector_id) {
-				await loadInspectorInfo(inspectionData.value.inspector_id)
-			}
 			
 		} catch (error) {
 			console.error('❌ 检查详情加载异常:', error)
@@ -1697,6 +1814,44 @@
 	}
 	
 	.inspection-type { font-size: 26rpx; color: #6b7280; }
+
+	/* 开站工单：设备上线/激活状态标签 */
+	.omc-tags-row {
+		display: flex;
+		gap: 12rpx;
+		flex-wrap: wrap;
+		margin-top: 12rpx;
+	}
+
+	.omc-tag {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		height: 44rpx;
+		padding: 0 16rpx;
+		border-radius: 999rpx;
+		font-size: 22rpx;
+		font-weight: 600;
+		border: 1rpx solid transparent;
+	}
+
+	.omc-tag--ok {
+		background: rgba(34, 197, 94, 0.12);
+		color: #16a34a;
+		border-color: rgba(34, 197, 94, 0.24);
+	}
+
+	.omc-tag--no {
+		background: rgba(107, 114, 128, 0.12);
+		color: #6b7280;
+		border-color: rgba(107, 114, 128, 0.24);
+	}
+
+	.omc-tag--unknown {
+		background: rgba(148, 163, 184, 0.14);
+		color: #64748b;
+		border-color: rgba(148, 163, 184, 0.28);
+	}
 	
 	.header-score {
 		text-align: center;
