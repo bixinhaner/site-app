@@ -490,9 +490,32 @@
 								class="photo-item" 
 								v-for="(photo, index) in currentItem.photos" 
 								:key="index"
-								@click="previewPhoto(currentItem.photos, index)"
+								@click="onPhotoTap(currentItem.photos, index)"
 							>
-								<image class="photo-thumb" :src="buildImageUrl(photo.file_path)" mode="aspectFill"></image>
+								<view class="photo-thumb-wrapper">
+									<image
+										v-if="getPhotoThumbSrc(photo)"
+										class="photo-thumb"
+										:src="getPhotoThumbSrc(photo)"
+										mode="aspectFill"
+										@error.stop="handlePhotoError(photo)"
+									></image>
+									<view v-else class="photo-thumb-placeholder"></view>
+									<view
+										v-if="getPhotoDisplayStatus(photo) !== 'ready'"
+										class="photo-status-overlay"
+										:class="'photo-status-' + getPhotoDisplayStatus(photo)"
+										@click.stop="onPhotoStatusTap(photo)"
+									>
+										<text v-if="getPhotoDisplayStatus(photo) === 'downloading'" class="photo-status-text">
+											{{ getPhotoProgress(photo) }}%
+										</text>
+										<view v-else-if="getPhotoDisplayStatus(photo) === 'error'" class="photo-status-error">
+											<text class="photo-status-text">{{ $t('site.loadFailed') }}</text>
+											<text class="photo-status-sub">{{ $t('releaseNotes.retry') }}</text>
+										</view>
+									</view>
+								</view>
 							</view>
 						</view>
 					</view>
@@ -579,6 +602,18 @@
 				</view>
 			</view>
 		</view>
+
+		<!-- 大图预览准备中（缓存/下载） -->
+		<view class="preview-loading-overlay" v-if="previewPreparing" @click.stop>
+			<view class="preview-loading-card" @click.stop>
+				<text class="preview-loading-title">{{ $t('common.loading') }}</text>
+				<text class="preview-loading-sub">{{ previewProgress.done }}/{{ previewProgress.total }}</text>
+				<view class="preview-loading-bar">
+					<view class="preview-loading-bar-fill" :style="{ width: previewProgress.percent + '%' }"></view>
+				</view>
+				<text class="preview-loading-percent">{{ previewProgress.percent }}%</text>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -589,6 +624,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl } from '@/config/api.js'
+	import { createPhotoCacheContext, ensurePhotoCached } from '@/utils/photoCache.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	
 	const inspectionStore = useInspectionStore()
@@ -637,6 +673,16 @@
 	const refreshing = ref(false)
 	const isPageVisible = ref(false)
 	const showMapSelector = ref(false)
+
+	// 图片缓存/加载状态（按 photo.id 或 file_path）
+	const photoCacheCtx = computed(() => createPhotoCacheContext(userStore.userInfo))
+	const photoStateMap = ref({})
+	const previewPreparing = ref(false)
+	const previewProgress = ref({
+		total: 0,
+		done: 0,
+		percent: 0
+	})
 	
 	const isIssueItem = (item) => {
 		const status = item?.status
@@ -1067,6 +1113,7 @@
 			reviewed_at: item.reviewed_at
 		})
 		currentItem.value = item
+		primeCurrentItemPhotoCache()
 	}
 	
 	const closeItemDetail = () => {
@@ -1102,12 +1149,243 @@
 		})
 	}
 	
-	const previewPhoto = (photos, current) => {
-		const urls = photos.map(photo => buildImageUrl(photo.file_path))
-		uni.previewImage({
-			urls,
-			current: current || 0
+	const getPhotoStateKey = (photo) => {
+		if (!photo) return ''
+		if (photo.id) return String(photo.id)
+		const path = String(photo.file_path || '').trim()
+		return path
+	}
+
+	const getPhotoRemoteUrl = (photo) => buildImageUrl(photo?.file_path || '')
+
+	const isRemotePhoto = (photo) => {
+		const url = getPhotoRemoteUrl(photo)
+		return typeof url === 'string' && url.startsWith('http')
+	}
+
+	const ensurePhotoState = (photo) => {
+		const key = getPhotoStateKey(photo)
+		if (!key) return null
+		if (!photoStateMap.value[key]) {
+			photoStateMap.value[key] = {
+				status: 'idle',
+				progress: 0,
+				src: '',
+				error: ''
+			}
+		}
+		return photoStateMap.value[key]
+	}
+
+	const setPhotoReady = (photo, localPath) => {
+		const key = getPhotoStateKey(photo)
+		if (!key) return
+		photoStateMap.value[key] = {
+			status: 'ready',
+			progress: 100,
+			src: String(localPath || '').trim(),
+			error: ''
+		}
+	}
+
+	const setPhotoError = (photo, error) => {
+		const key = getPhotoStateKey(photo)
+		if (!key) return
+		photoStateMap.value[key] = {
+			status: 'error',
+			progress: 0,
+			src: '',
+			error: error ? String(error) : ''
+		}
+	}
+
+	const cachePhotoIfNeeded = async (photo) => {
+		if (!photo) return { ok: false, reason: 'no_photo' }
+
+		// 本地临时照片：直接展示，不做缓存
+		if (!photo.id || !isRemotePhoto(photo)) {
+			return { ok: true, localPath: getPhotoRemoteUrl(photo), persisted: false, fromCache: true }
+		}
+
+		const state = ensurePhotoState(photo)
+		if (state?.status === 'ready' && state?.src) {
+			return { ok: true, localPath: state.src, persisted: true, fromCache: true }
+		}
+
+		if (state) {
+			state.status = 'downloading'
+			state.progress = 0
+			state.src = ''
+			state.error = ''
+		}
+
+		const remoteUrl = getPhotoRemoteUrl(photo)
+		// downloadFile 不支持时：直接回退到网络图片展示（不做持久化缓存）
+		if (typeof uni.downloadFile !== 'function') {
+			setPhotoReady(photo, remoteUrl)
+			return { ok: true, localPath: remoteUrl, persisted: false, fromCache: false }
+		}
+
+		const res = await ensurePhotoCached({
+			photoId: photo.id,
+			remoteUrl,
+			ctx: photoCacheCtx.value,
+			onProgress: (p) => {
+				const s = ensurePhotoState(photo)
+				if (s && s.status !== 'ready') s.progress = p
+			}
 		})
+
+		if (res?.ok && res.localPath) {
+			setPhotoReady(photo, res.localPath)
+			return res
+		}
+
+		setPhotoError(photo, res?.error?.message || res?.reason || 'load_failed')
+		return res
+	}
+
+	const primeCurrentItemPhotoCache = async () => {
+		const photos = currentItem.value?.photos || []
+		if (!Array.isArray(photos) || photos.length === 0) return
+
+		const targets = photos.filter(p => p?.id && isRemotePhoto(p))
+		if (targets.length === 0) return
+
+		const concurrency = 2
+		const queue = targets.slice()
+		const workers = Array.from({ length: Math.min(concurrency, queue.length) }).map(async () => {
+			while (queue.length) {
+				const p = queue.shift()
+				try {
+					await cachePhotoIfNeeded(p)
+				} catch (e) {
+					// ignore
+				}
+			}
+		})
+
+		await Promise.all(workers)
+	}
+
+	const getPhotoThumbSrc = (photo) => {
+		if (!photo) return ''
+		if (!photo.id || !isRemotePhoto(photo)) return getPhotoRemoteUrl(photo)
+		const key = getPhotoStateKey(photo)
+		const state = key ? photoStateMap.value[key] : null
+		return state?.status === 'ready' && state?.src ? state.src : ''
+	}
+
+	const getPhotoDisplayStatus = (photo) => {
+		if (!photo) return 'ready'
+		if (!photo.id || !isRemotePhoto(photo)) return 'ready'
+		const key = getPhotoStateKey(photo)
+		const state = key ? photoStateMap.value[key] : null
+		if (!state) return 'downloading'
+		if (state.status === 'ready') return 'ready'
+		if (state.status === 'error') return 'error'
+		return 'downloading'
+	}
+
+	const getPhotoProgress = (photo) => {
+		const key = getPhotoStateKey(photo)
+		const state = key ? photoStateMap.value[key] : null
+		return typeof state?.progress === 'number' ? state.progress : 0
+	}
+
+	const onPhotoStatusTap = async (photo) => {
+		const status = getPhotoDisplayStatus(photo)
+		if (status !== 'error') return
+		await cachePhotoIfNeeded(photo)
+	}
+
+	const handlePhotoError = async (photo) => {
+		if (!photo?.id || !isRemotePhoto(photo)) return
+		await cachePhotoIfNeeded(photo)
+	}
+
+	const preparePreviewUrls = async (photos) => {
+		const list = Array.isArray(photos) ? photos : []
+		const urls = []
+		let failed = 0
+
+		for (let i = 0; i < list.length; i++) {
+			const p = list[i]
+			previewProgress.value.done = i
+			previewProgress.value.percent = 0
+
+			if (!p?.id || !isRemotePhoto(p)) {
+				urls.push(getPhotoRemoteUrl(p))
+				previewProgress.value.done = i + 1
+				previewProgress.value.percent = 100
+				continue
+			}
+
+			const res = await ensurePhotoCached({
+				photoId: p.id,
+				remoteUrl: getPhotoRemoteUrl(p),
+				ctx: photoCacheCtx.value,
+				onProgress: (percent) => {
+					previewProgress.value.percent = percent
+				}
+			})
+
+			if (res?.ok && res.localPath) {
+				setPhotoReady(p, res.localPath)
+				urls.push(res.localPath)
+			} else {
+				failed += 1
+				setPhotoError(p, res?.error?.message || res?.reason || 'load_failed')
+				urls.push(getPhotoRemoteUrl(p))
+			}
+
+			previewProgress.value.done = i + 1
+			previewProgress.value.percent = 100
+		}
+
+		return { urls, failed }
+	}
+
+	const openPreview = (urls, currentIndex) => {
+		const safeUrls = (urls || []).filter(Boolean)
+		if (safeUrls.length === 0) return
+		const idx = Math.min(Math.max(0, Number(currentIndex) || 0), safeUrls.length - 1)
+		const current = safeUrls[idx]
+		uni.previewImage({
+			urls: safeUrls,
+			current
+		})
+	}
+
+	const onPhotoTap = async (photos, currentIndex) => {
+		const list = Array.isArray(photos) ? photos : []
+		if (list.length === 0) return
+
+		const allReady = list.every(p => {
+			if (!p?.id || !isRemotePhoto(p)) return true
+			const key = getPhotoStateKey(p)
+			const s = key ? photoStateMap.value[key] : null
+			return s?.status === 'ready' && !!s?.src
+		})
+
+		if (allReady) {
+			const urls = list.map(p => (!p?.id || !isRemotePhoto(p)) ? getPhotoRemoteUrl(p) : (photoStateMap.value[getPhotoStateKey(p)]?.src || getPhotoRemoteUrl(p)))
+			openPreview(urls, currentIndex)
+			return
+		}
+
+		previewPreparing.value = true
+		previewProgress.value.total = list.length
+		previewProgress.value.done = 0
+		previewProgress.value.percent = 0
+
+		try {
+			const { urls } = await preparePreviewUrls(list)
+			openPreview(urls, currentIndex)
+		} finally {
+			previewPreparing.value = false
+			previewProgress.value.percent = 0
+		}
 	}
 	
 	// 工具函数
@@ -2258,10 +2536,109 @@
 		background: #f7f8fa;
 		border: 1rpx solid rgba(0, 0, 0, 0.04);
 	}
-	
+
+	.photo-thumb-wrapper {
+		position: relative;
+		width: 100%;
+		height: 150rpx;
+	}
+
 	.photo-thumb {
 		width: 100%;
 		height: 150rpx;
+	}
+
+	.photo-thumb-placeholder {
+		width: 100%;
+		height: 150rpx;
+		background: linear-gradient(135deg, #eef2f7, #f7f8fb);
+	}
+
+	.photo-status-overlay {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.45);
+	}
+
+	.photo-status-text {
+		color: #fff;
+		font-size: 26rpx;
+		font-weight: 600;
+	}
+
+	.photo-status-error {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8rpx;
+	}
+
+	.photo-status-sub {
+		color: rgba(255, 255, 255, 0.9);
+		font-size: 22rpx;
+	}
+
+	/* 大图预览准备中 */
+	.preview-loading-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.55);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 3000;
+	}
+
+	.preview-loading-card {
+		width: 560rpx;
+		background: #ffffff;
+		border-radius: 18rpx;
+		padding: 36rpx 32rpx;
+		box-sizing: border-box;
+		display: flex;
+		flex-direction: column;
+		gap: 18rpx;
+	}
+
+	.preview-loading-title {
+		font-size: 30rpx;
+		font-weight: 600;
+		color: #111827;
+	}
+
+	.preview-loading-sub {
+		font-size: 24rpx;
+		color: #6b7280;
+	}
+
+	.preview-loading-bar {
+		width: 100%;
+		height: 12rpx;
+		background: #eef2f7;
+		border-radius: 999rpx;
+		overflow: hidden;
+	}
+
+	.preview-loading-bar-fill {
+		height: 100%;
+		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+		border-radius: 999rpx;
+	}
+
+	.preview-loading-percent {
+		font-size: 26rpx;
+		font-weight: 600;
+		color: #374151;
+		align-self: flex-end;
 	}
 	
 	/* 验证信息 */
