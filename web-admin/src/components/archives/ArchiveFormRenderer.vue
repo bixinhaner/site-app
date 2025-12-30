@@ -133,14 +133,14 @@
 	              class="field-photos"
 	            >
 	              <div
-	                v-for="p in getPhotosForField(it.photos, fd.field_id)"
+	                v-for="(p, idx) in getPhotosForField(it.photos, fd.field_id)"
 	                :key="p.id"
 	                class="field-photo-thumb"
 	              >
-	                <el-image
+	                <ProgressImage
 	                  :src="fileUrl(p.file_path)"
-	                  :preview-src-list="photoPreviewList(getPhotosForField(it.photos, fd.field_id))"
 	                  fit="cover"
+	                  @click.stop="openPhotoPreview(getPhotosForField(it.photos, fd.field_id), idx)"
 	                />
 	                <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	                <div class="thumb-actions">
@@ -188,14 +188,14 @@
 	                    class="field-photos field-photos--compact"
 	                  >
 	                    <div
-	                      v-for="p in getPhotosForField(sec.photos, fid)"
+	                      v-for="(p, idx) in getPhotosForField(sec.photos, fid)"
 	                      :key="p.id"
 	                      class="field-photo-thumb"
 	                    >
-	                      <el-image
+	                      <ProgressImage
 	                        :src="fileUrl(p.file_path)"
-	                        :preview-src-list="photoPreviewList(getPhotosForField(sec.photos, fid))"
 	                        fit="cover"
+	                        @click.stop="openPhotoPreview(getPhotosForField(sec.photos, fid), idx)"
 	                      />
 	                      <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	                      <div class="thumb-actions">
@@ -222,14 +222,14 @@
 	                <el-divider class="photos-divider" />
 	                <div class="field-photos field-photos--compact">
 	                  <div
-	                    v-for="p in getUnlinkedPhotos(sec.photos)"
+	                    v-for="(p, idx) in getUnlinkedPhotos(sec.photos)"
 	                    :key="p.id"
 	                    class="field-photo-thumb"
 	                  >
-	                    <el-image
+	                    <ProgressImage
 	                      :src="fileUrl(p.file_path)"
-	                      :preview-src-list="photoPreviewList(getUnlinkedPhotos(sec.photos))"
 	                      fit="cover"
+	                      @click.stop="openPhotoPreview(getUnlinkedPhotos(sec.photos), idx)"
 	                    />
 	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	                    <div class="thumb-actions">
@@ -254,8 +254,8 @@
 	              >
 	                <div class="photos-header" v-if="sec.photos && sec.photos.length">照片</div>
 	                <div class="grid" v-if="sec.photos && sec.photos.length">
-	                  <div v-for="p in sec.photos" :key="p.id" class="item photo-card">
-	                    <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
+	                  <div v-for="(p, idx) in sec.photos" :key="p.id" class="item photo-card">
+	                    <ProgressImage class="photo-card-image" :src="fileUrl(p.file_path)" fit="cover" @click.stop="openPhotoPreview(sec.photos, idx)" />
 	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	                    <div class="meta compact">
 	                      <div class="meta-actions">
@@ -319,14 +319,14 @@
 	                    class="field-photos field-photos--compact"
 	                  >
 	                    <div
-	                      v-for="p in getPhotosForField(cell.photos, fid)"
+	                      v-for="(p, idx) in getPhotosForField(cell.photos, fid)"
 	                      :key="p.id"
 	                      class="field-photo-thumb"
 	                    >
-	                      <el-image
+	                      <ProgressImage
 	                        :src="fileUrl(p.file_path)"
-	                        :preview-src-list="photoPreviewList(getPhotosForField(cell.photos, fid))"
 	                        fit="cover"
+	                        @click.stop="openPhotoPreview(getPhotosForField(cell.photos, fid), idx)"
 	                      />
 	                      <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	                      <div class="thumb-actions">
@@ -353,14 +353,14 @@
 	                <el-divider class="photos-divider" />
 	                <div class="field-photos field-photos--compact">
 	                  <div
-	                    v-for="p in getUnlinkedPhotos(cell.photos)"
+	                    v-for="(p, idx) in getUnlinkedPhotos(cell.photos)"
 	                    :key="p.id"
 	                    class="field-photo-thumb"
 	                  >
-	                    <el-image
+	                    <ProgressImage
 	                      :src="fileUrl(p.file_path)"
-	                      :preview-src-list="photoPreviewList(getUnlinkedPhotos(cell.photos))"
 	                      fit="cover"
+	                      @click.stop="openPhotoPreview(getUnlinkedPhotos(cell.photos), idx)"
 	                    />
 	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	                    <div class="thumb-actions">
@@ -385,8 +385,8 @@
 	              >
 	                <div class="photos-header" v-if="cell.photos && cell.photos.length">照片</div>
 	                <div class="grid" v-if="cell.photos && cell.photos.length">
-	                  <div v-for="p in cell.photos" :key="p.id" class="item photo-card">
-	                    <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
+	                  <div v-for="(p, idx) in cell.photos" :key="p.id" class="item photo-card">
+	                    <ProgressImage class="photo-card-image" :src="fileUrl(p.file_path)" fit="cover" @click.stop="openPhotoPreview(cell.photos, idx)" />
 	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	                    <div class="meta compact">
 	                      <div class="meta-actions">
@@ -423,14 +423,14 @@
 	          <el-divider class="photos-divider" />
 	          <div class="field-photos">
 	            <div
-	              v-for="p in getExtraPhotos(it)"
+	              v-for="(p, idx) in getExtraPhotos(it)"
 	              :key="p.id"
 	              class="field-photo-thumb"
 	            >
-	              <el-image
+	              <ProgressImage
 	                :src="fileUrl(p.file_path)"
-	                :preview-src-list="photoPreviewList(getExtraPhotos(it))"
 	                fit="cover"
+	                @click.stop="openPhotoPreview(getExtraPhotos(it), idx)"
 	              />
 	              <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	              <div class="thumb-actions">
@@ -456,8 +456,8 @@
 	        >
 	          <div class="photos-header" v-if="it.photos && it.photos.length">照片</div>
 	          <div class="grid" v-if="it.photos && it.photos.length">
-	            <div v-for="p in it.photos" :key="p.id" class="item photo-card">
-	              <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
+	            <div v-for="(p, idx) in it.photos" :key="p.id" class="item photo-card">
+	              <ProgressImage class="photo-card-image" :src="fileUrl(p.file_path)" fit="cover" @click.stop="openPhotoPreview(it.photos, idx)" />
 	              <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
 	              <div class="meta compact">
 	                <div class="meta-actions">
@@ -489,12 +489,36 @@
 	      </el-card>
 	    </div>
 	  </div>
+
+	  <!-- 预览准备进度（下载/缓存） -->
+	  <div v-if="previewPreparing" class="preview-loading-overlay" @click.stop>
+	    <div class="preview-loading-card" @click.stop>
+	      <div class="preview-loading-title">加载中</div>
+	      <div class="preview-loading-sub">{{ previewProgress.done }}/{{ previewProgress.total }}</div>
+	      <div class="preview-loading-bar">
+	        <div class="preview-loading-bar-fill" :style="{ width: previewProgress.percent + '%' }"></div>
+	      </div>
+	      <div class="preview-loading-percent">{{ previewProgress.percent }}%</div>
+	    </div>
+	  </div>
+
+	  <!-- 全屏图片预览 -->
+	  <ElImageViewer
+	    v-if="previewVisible"
+	    :url-list="previewUrls"
+	    :initial-index="previewIndex"
+	    :hide-on-click-modal="true"
+	    :teleported="true"
+	    @close="closePreview"
+	  />
 	</template>
 
 <script setup>
-import { reactive, watch } from 'vue'
-import config from '@/config/env.js'
+import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { ElImageViewer, ElMessage } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
+import ProgressImage from '@/components/common/ProgressImage.vue'
+import { createObjectUrl, loadImageBlob, revokeObjectUrl, resolveImageUrl } from '@/utils/imageLoader'
 
 const props = defineProps({
   content: { type: Object, required: true },
@@ -787,13 +811,108 @@ function renderVal(v) {
 }
 
 function fileUrl(filePath) {
-  if (!filePath) return ''
-  const s = String(filePath)
-  if (/^https?:\/\//i.test(s) || s.startsWith('data:')) return s
-  if (s.startsWith('uploads/')) return `${config.API_BASE_URL}/${s}`
-  if (s.startsWith('/uploads/')) return `${config.API_BASE_URL}${s}`
-  return `${config.API_BASE_URL}/${s.replace(/^\//, '')}`
+  return resolveImageUrl(filePath)
 }
+
+const previewVisible = ref(false)
+const previewPreparing = ref(false)
+const previewUrls = ref([])
+const previewIndex = ref(0)
+const previewProgress = reactive({
+  total: 0,
+  done: 0,
+  percent: 0,
+})
+
+let previewLoadToken = 0
+let previewObjectUrls = []
+
+const cleanupPreviewObjectUrls = () => {
+  previewObjectUrls.forEach((u) => revokeObjectUrl(u))
+  previewObjectUrls = []
+  previewUrls.value = []
+}
+
+const closePreview = () => {
+  previewLoadToken += 1
+  previewVisible.value = false
+  previewPreparing.value = false
+  previewProgress.total = 0
+  previewProgress.done = 0
+  previewProgress.percent = 0
+  cleanupPreviewObjectUrls()
+}
+
+const openPhotoPreview = async (photos, startIndex = 0) => {
+  const list = Array.isArray(photos) ? photos : []
+  if (list.length === 0) return
+
+  const token = ++previewLoadToken
+  previewPreparing.value = true
+  previewProgress.total = list.length
+  previewProgress.done = 0
+  previewProgress.percent = 0
+  cleanupPreviewObjectUrls()
+
+  let failed = 0
+  const urls = []
+
+  try {
+    for (let i = 0; i < list.length; i++) {
+      if (token !== previewLoadToken) return
+      const p = list[i]
+      const src = fileUrl(p?.file_path)
+      previewProgress.done = i
+      previewProgress.percent = 0
+
+      const res = await loadImageBlob({
+        url: src,
+        onProgress: (percent) => {
+          if (token !== previewLoadToken) return
+          previewProgress.percent = percent
+        },
+      })
+
+      if (token !== previewLoadToken) return
+
+      if (res?.ok && res.blob) {
+        const objUrl = createObjectUrl(res.blob)
+        if (objUrl) {
+          previewObjectUrls.push(objUrl)
+          urls.push(objUrl)
+        } else {
+          failed += 1
+          urls.push(src)
+        }
+      } else {
+        failed += 1
+        urls.push(src)
+      }
+
+      previewProgress.done = i + 1
+      previewProgress.percent = 100
+    }
+
+    if (token !== previewLoadToken) return
+
+    previewUrls.value = urls.filter(Boolean)
+    previewIndex.value = Math.min(
+      Math.max(0, Number(startIndex) || 0),
+      Math.max(0, previewUrls.value.length - 1)
+    )
+    previewVisible.value = true
+
+    if (failed > 0) {
+      ElMessage.warning(`有 ${failed} 张图片加载失败，将尝试直接预览原始链接`)
+    }
+  } finally {
+    if (token === previewLoadToken) previewPreparing.value = false
+  }
+}
+
+onBeforeUnmount(() => {
+  closePreview()
+})
 
 function displayItemName(it) {
   const base = it.item_name || it.item_id || ''
@@ -835,7 +954,7 @@ function dateDisplayFormat(type) {
 .field-photos { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
 .field-photos--compact { gap: 6px; }
 .field-photo-thumb { position: relative; width: 64px; height: 64px; border: 1px solid #ebeef5; border-radius: 8px; overflow: hidden; background: #fff; }
-.field-photo-thumb .el-image { width: 100%; height: 100%; }
+.field-photo-thumb :deep(.progress-image) { width: 100%; height: 100%; }
 .field-photo-thumb :deep(img) { width: 100%; height: 100%; object-fit: cover; }
 .field-photo-thumb .badge-pending { top: 4px; right: 4px; }
 .thumb-actions { position: absolute; top: 2px; left: 2px; display: flex; gap: 4px; }
@@ -855,11 +974,64 @@ function dateDisplayFormat(type) {
 .upload-bar { margin-top: 8px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 .photo-card { position: relative; border: 1px solid #f0f0f0; border-radius: 8px; overflow: hidden; background: #fff; }
-.photo-card .el-image { width: 100%; height: auto; aspect-ratio: 4 / 3; }
+.photo-card-image { width: 100%; height: auto !important; aspect-ratio: 4 / 3; }
 .badge-pending { position: absolute; top: 8px; right: 8px; pointer-events: none; }
 .meta { display:flex; justify-content: flex-end; align-items:center; padding:6px 8px; font-size:12px; background:#fafafa; }
 .meta.compact { gap: 8px; }
 .muted { color: #999; font-weight: normal; }
+
+/* 预览准备进度 */
+.preview-loading-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 3000;
+}
+
+.preview-loading-card {
+  width: 280px;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  text-align: center;
+}
+
+.preview-loading-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.preview-loading-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.preview-loading-bar {
+  margin-top: 10px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ebeef5;
+  overflow: hidden;
+}
+
+.preview-loading-bar-fill {
+  height: 100%;
+  width: 0;
+  background: #409eff;
+}
+
+.preview-loading-percent {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #409eff;
+}
 
 .cat-title {
   margin: 0 0 8px 0;

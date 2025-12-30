@@ -329,7 +329,7 @@
 	            <el-table-column label="照片" min-width="260">
 	              <template #default="{ row }">
 	                <div v-if="row.photos && row.photos.length" class="field-photo-strip">
-	                  <el-image
+	                  <ProgressImage
 	                    v-for="(p, idx) in row.photos.slice(0, 4)"
 	                    :key="p.id || idx"
 	                    :src="getImageUrl(p.file_path)"
@@ -356,7 +356,7 @@
 	            <el-row :gutter="10">
 	              <el-col v-for="p in itemDetailExtraPhotos" :key="p.id" :span="8">
 	                <div class="photo-card">
-	                  <el-image
+	                  <ProgressImage
 	                    :src="getImageUrl(p.file_path)"
 	                    style="width: 100%; height: 120px; cursor: pointer;"
 	                    fit="cover"
@@ -378,7 +378,7 @@
 	          <el-row :gutter="10">
 	            <el-col v-for="photo in selectedItem.photos" :key="photo.id" :span="8">
 	              <div class="photo-card">
-                <el-image 
+                <ProgressImage 
                   :src="getImageUrl(photo.file_path)" 
                   style="width: 100%; height: 120px; cursor: pointer;"
                   fit="cover"
@@ -439,9 +439,27 @@
                 <span class="zoom-info">{{ Math.round(zoomLevel * 100) }}%</span>
               </div>
               <div class="photo-viewer" @wheel="handleWheel" @mousedown="handleMouseDown" @mousemove="handleMouseMove" @mouseup="handleMouseUp" @mouseleave="handleMouseUp">
+                <div
+                  v-if="photoViewerStatus !== 'loaded'"
+                  class="photo-viewer-overlay"
+                  :class="photoViewerStatus === 'error' ? 'photo-viewer-overlay--error' : ''"
+                  @click.stop="photoViewerStatus === 'error' ? loadSelectedPhotoForViewer() : undefined"
+                >
+                  <template v-if="photoViewerStatus === 'loading'">
+                    <div class="photo-viewer-overlay__percent">{{ photoViewerProgress }}%</div>
+                    <div class="photo-viewer-overlay__bar">
+                      <div class="photo-viewer-overlay__bar-fill" :style="{ width: photoViewerProgress + '%' }"></div>
+                    </div>
+                  </template>
+                  <template v-else-if="photoViewerStatus === 'error'">
+                    <div class="photo-viewer-overlay__error-text">加载失败</div>
+                    <div class="photo-viewer-overlay__error-sub">点击重试</div>
+                  </template>
+                </div>
                 <img 
+                  v-if="photoViewerStatus === 'loaded'"
                   ref="photoImage"
-                  :src="getImageUrl(selectedPhoto.file_path)" 
+                  :src="photoViewerSrc" 
                   :style="{
                     transform: `scale(${zoomLevel}) translate(${translateX}px, ${translateY}px)`,
                     cursor: isDragging ? 'grabbing' : 'grab',
@@ -694,14 +712,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
-import request from '@/utils/request'
-import config from '../../config/env.js'
-import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
-import { aiAPI } from '@/api/ai'
-import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled, ChatDotRound, MagicStick } from '@element-plus/icons-vue'
-import { useUserStore } from '@/stores/user'
+	import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+	import { useRoute } from 'vue-router'
+	import request from '@/utils/request'
+	import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+	import { aiAPI } from '@/api/ai'
+	import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled, ChatDotRound, MagicStick } from '@element-plus/icons-vue'
+	import { useUserStore } from '@/stores/user'
+	import ProgressImage from '@/components/common/ProgressImage.vue'
+	import { createObjectUrl, loadImageBlob, revokeObjectUrl, resolveImageUrl } from '@/utils/imageLoader'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -721,12 +740,25 @@ const isFullscreen = ref(false)
 const zoomLevel = ref(1)
 const translateX = ref(0)
 const translateY = ref(0)
-const isDragging = ref(false)
-const dragStart = ref({ x: 0, y: 0 })
-const photoImage = ref(null)
-const auditHistoryVisible = ref(false)
-const timelineLogs = ref([])
-const expandedLogDetails = ref({})
+	const isDragging = ref(false)
+	const dragStart = ref({ x: 0, y: 0 })
+	const photoImage = ref(null)
+
+	// 照片查看器（大图）加载状态
+	const photoViewerStatus = ref('idle') // idle | loading | loaded | error
+	const photoViewerProgress = ref(0)
+	const photoViewerObjectUrl = ref('')
+	const photoViewerLoadToken = ref(0)
+	const photoViewerSrc = computed(() => photoViewerObjectUrl.value || '')
+
+	const cleanupPhotoViewerObjectUrl = () => {
+	  if (photoViewerObjectUrl.value) revokeObjectUrl(photoViewerObjectUrl.value)
+	  photoViewerObjectUrl.value = ''
+	}
+
+	const auditHistoryVisible = ref(false)
+	const timelineLogs = ref([])
+	const expandedLogDetails = ref({})
 
 // 设备状态
 const deviceStatusLoading = ref(false)
@@ -1312,12 +1344,7 @@ const finalReview = async (action) => {
 
 
 const getImageUrl = (filePath) => {
-  if (!filePath) return ''
-  // 如果文件路径以uploads开头，需要添加后端URL前缀
-  if (filePath.startsWith('uploads/')) {
-    return `${config.API_BASE_URL}/${filePath}`
-  }
-  return filePath
+  return resolveImageUrl(filePath)
 }
 
 const normalizeText = (val) => String(val ?? '').trim()
@@ -1442,6 +1469,47 @@ const viewPhotoDetail = (photo) => {
   // 重置查看器状态
   resetZoom()
   isFullscreen.value = false
+  loadSelectedPhotoForViewer()
+}
+
+const loadSelectedPhotoForViewer = async () => {
+  cleanupPhotoViewerObjectUrl()
+  const photo = selectedPhoto.value
+  if (!photo) {
+    photoViewerStatus.value = 'idle'
+    photoViewerProgress.value = 0
+    return
+  }
+
+  const url = getImageUrl(photo.file_path)
+  if (!url) {
+    photoViewerStatus.value = 'error'
+    photoViewerProgress.value = 0
+    return
+  }
+
+  photoViewerStatus.value = 'loading'
+  photoViewerProgress.value = 0
+  const token = ++photoViewerLoadToken.value
+
+  const res = await loadImageBlob({
+    url,
+    onProgress: (p) => {
+      if (token !== photoViewerLoadToken.value) return
+      photoViewerProgress.value = p
+    },
+  })
+
+  if (token !== photoViewerLoadToken.value) return
+
+  if (res?.ok && res.blob) {
+    photoViewerProgress.value = 100
+    photoViewerObjectUrl.value = createObjectUrl(res.blob) || ''
+    photoViewerStatus.value = photoViewerObjectUrl.value ? 'loaded' : 'error'
+    return
+  }
+
+  photoViewerStatus.value = 'error'
 }
 
 const zoomIn = () => {
@@ -1467,7 +1535,7 @@ const downloadPhoto = async () => {
   
   try {
     // 获取图片URL
-    const imageUrl = getImageUrl(selectedPhoto.value.file_path)
+    const imageUrl = photoViewerObjectUrl.value || getImageUrl(selectedPhoto.value.file_path)
     
     // 创建一个临时的a标签进行下载
     const link = document.createElement('a')
@@ -1499,6 +1567,15 @@ const downloadPhoto = async () => {
     ElMessage.error('下载照片失败')
   }
 }
+
+watch(photoDetailVisible, (visible) => {
+  if (!visible) {
+    photoViewerLoadToken.value += 1
+    photoViewerStatus.value = 'idle'
+    photoViewerProgress.value = 0
+    cleanupPhotoViewerObjectUrl()
+  }
+})
 
 const handleWheel = (e) => {
   e.preventDefault()
@@ -1997,6 +2074,53 @@ onMounted(refresh)
   background: #000;
   position: relative;
   user-select: none;
+}
+
+.photo-viewer-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  z-index: 2;
+}
+
+.photo-viewer-overlay__percent {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.photo-viewer-overlay__bar {
+  width: min(420px, 72%);
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.photo-viewer-overlay__bar-fill {
+  height: 100%;
+  background: #409eff;
+  width: 0;
+}
+
+.photo-viewer-overlay--error {
+  cursor: pointer;
+}
+
+.photo-viewer-overlay__error-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffd1d1;
+}
+
+.photo-viewer-overlay__error-sub {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .photo-viewer img {
