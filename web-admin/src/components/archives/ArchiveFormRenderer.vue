@@ -219,39 +219,33 @@
 	                v-if="getUnlinkedPhotos(sec.photos).length"
 	                class="sub-extra-photos"
 	              >
-	                <el-collapse>
-	                  <el-collapse-item :name="`sec-${sec.sector_id}-unlinked`">
-	                    <template #title>
-	                      <span class="muted">未关联照片（{{ getUnlinkedPhotos(sec.photos).length }}张）</span>
-	                    </template>
-	                    <div class="field-photos field-photos--compact">
-	                      <div
-	                        v-for="p in getUnlinkedPhotos(sec.photos)"
-	                        :key="p.id"
-	                        class="field-photo-thumb"
+	                <el-divider class="photos-divider" />
+	                <div class="field-photos field-photos--compact">
+	                  <div
+	                    v-for="p in getUnlinkedPhotos(sec.photos)"
+	                    :key="p.id"
+	                    class="field-photo-thumb"
+	                  >
+	                    <el-image
+	                      :src="fileUrl(p.file_path)"
+	                      :preview-src-list="photoPreviewList(getUnlinkedPhotos(sec.photos))"
+	                      fit="cover"
+	                    />
+	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                    <div class="thumb-actions">
+	                      <el-button
+	                        v-if="!disabled"
+	                        link
+	                        type="danger"
+	                        size="small"
+	                        @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'sector', sectorId: sec.sector_id, photoId: p.id, photo: p })"
+	                        title="删除"
 	                      >
-	                        <el-image
-	                          :src="fileUrl(p.file_path)"
-	                          :preview-src-list="photoPreviewList(getUnlinkedPhotos(sec.photos))"
-	                          fit="cover"
-	                        />
-	                        <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
-	                        <div class="thumb-actions">
-	                          <el-button
-	                            v-if="!disabled"
-	                            link
-	                            type="danger"
-	                            size="small"
-	                            @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'sector', sectorId: sec.sector_id, photoId: p.id, photo: p })"
-	                            title="删除"
-	                          >
-	                            <el-icon><Delete /></el-icon>
-	                          </el-button>
-	                        </div>
-	                      </div>
+	                        <el-icon><Delete /></el-icon>
+	                      </el-button>
 	                    </div>
-	                  </el-collapse-item>
-	                </el-collapse>
+	                  </div>
+	                </div>
 	              </div>
 	
 	              <div
@@ -356,39 +350,33 @@
 	                v-if="getUnlinkedPhotos(cell.photos).length"
 	                class="sub-extra-photos"
 	              >
-	                <el-collapse>
-	                  <el-collapse-item :name="`cell-${cell.cell_id}-unlinked`">
-	                    <template #title>
-	                      <span class="muted">未关联照片（{{ getUnlinkedPhotos(cell.photos).length }}张）</span>
-	                    </template>
-	                    <div class="field-photos field-photos--compact">
-	                      <div
-	                        v-for="p in getUnlinkedPhotos(cell.photos)"
-	                        :key="p.id"
-	                        class="field-photo-thumb"
+	                <el-divider class="photos-divider" />
+	                <div class="field-photos field-photos--compact">
+	                  <div
+	                    v-for="p in getUnlinkedPhotos(cell.photos)"
+	                    :key="p.id"
+	                    class="field-photo-thumb"
+	                  >
+	                    <el-image
+	                      :src="fileUrl(p.file_path)"
+	                      :preview-src-list="photoPreviewList(getUnlinkedPhotos(cell.photos))"
+	                      fit="cover"
+	                    />
+	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                    <div class="thumb-actions">
+	                      <el-button
+	                        v-if="!disabled"
+	                        link
+	                        type="danger"
+	                        size="small"
+	                        @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'cell', cellId: cell.cell_id, photoId: p.id, photo: p })"
+	                        title="删除"
 	                      >
-	                        <el-image
-	                          :src="fileUrl(p.file_path)"
-	                          :preview-src-list="photoPreviewList(getUnlinkedPhotos(cell.photos))"
-	                          fit="cover"
-	                        />
-	                        <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
-	                        <div class="thumb-actions">
-	                          <el-button
-	                            v-if="!disabled"
-	                            link
-	                            type="danger"
-	                            size="small"
-	                            @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'cell', cellId: cell.cell_id, photoId: p.id, photo: p })"
-	                            title="删除"
-	                          >
-	                            <el-icon><Delete /></el-icon>
-	                          </el-button>
-	                        </div>
-	                      </div>
+	                        <el-icon><Delete /></el-icon>
+	                      </el-button>
 	                    </div>
-	                  </el-collapse-item>
-	                </el-collapse>
+	                  </div>
+	                </div>
 	              </div>
 	
 	              <div
@@ -431,45 +419,34 @@
 	          </div>
 	        </div>
 	
-	        <!-- 站点级未关联/未知字段照片 -->
-	        <div v-if="getExtraPhotoGroups(it).length" class="sub-extra-photos">
-	          <el-collapse>
-	            <el-collapse-item
-	              v-for="g in getExtraPhotoGroups(it)"
-	              :key="g.key"
-	              :name="g.key"
+	        <div v-if="getExtraPhotos(it).length" class="sub-extra-photos">
+	          <el-divider class="photos-divider" />
+	          <div class="field-photos">
+	            <div
+	              v-for="p in getExtraPhotos(it)"
+	              :key="p.id"
+	              class="field-photo-thumb"
 	            >
-	              <template #title>
-	                <span class="muted">{{ g.title }}</span>
-	              </template>
-	              <div class="field-photos">
-	                <div
-	                  v-for="p in g.photos"
-	                  :key="p.id"
-	                  class="field-photo-thumb"
+	              <el-image
+	                :src="fileUrl(p.file_path)"
+	                :preview-src-list="photoPreviewList(getExtraPhotos(it))"
+	                fit="cover"
+	              />
+	              <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	              <div class="thumb-actions">
+	                <el-button
+	                  v-if="!disabled"
+	                  link
+	                  type="danger"
+	                  size="small"
+	                  @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'site', photoId: p.id, photo: p })"
+	                  title="删除"
 	                >
-	                  <el-image
-	                    :src="fileUrl(p.file_path)"
-	                    :preview-src-list="photoPreviewList(g.photos)"
-	                    fit="cover"
-	                  />
-	                  <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
-	                  <div class="thumb-actions">
-	                    <el-button
-	                      v-if="!disabled"
-	                      link
-	                      type="danger"
-	                      size="small"
-	                      @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'site', photoId: p.id, photo: p })"
-	                      title="删除"
-	                    >
-	                      <el-icon><Delete /></el-icon>
-	                    </el-button>
-	                  </div>
-	                </div>
+	                  <el-icon><Delete /></el-icon>
+	                </el-button>
 	              </div>
-	            </el-collapse-item>
-	          </el-collapse>
+	            </div>
+	          </div>
 	        </div>
 	
 	        <!-- 照片类检查项但无字段定义：按检查项展示照片 -->
@@ -704,41 +681,14 @@ function getUnlinkedPhotos(photos) {
   return _safeArray(photos).filter((p) => !_normId(p?.field_id))
 }
 
-function getExtraPhotoGroups(it) {
+function getExtraPhotos(it) {
   const photos = _safeArray(it?.photos)
   if (!photos.length) return []
   const known = new Set(_safeArray(it?.fields).map((f) => _normId(f?.field_id)).filter(Boolean))
-
-  const unlinked = []
-  const unknown = new Map()
-  photos.forEach((p) => {
+  return photos.filter((p) => {
     const fid = _normId(p?.field_id)
-    if (!fid) {
-      unlinked.push(p)
-      return
-    }
-    if (!known.has(fid)) {
-      if (!unknown.has(fid)) unknown.set(fid, [])
-      unknown.get(fid).push(p)
-    }
+    return !fid || !known.has(fid)
   })
-
-  const out = []
-  if (unlinked.length) {
-    out.push({
-      key: `site-${_normId(it?.item_id)}-unlinked`,
-      title: `未关联照片（${unlinked.length}张）`,
-      photos: unlinked,
-    })
-  }
-  for (const [fid, list] of unknown.entries()) {
-    out.push({
-      key: `site-${_normId(it?.item_id)}-unknown-${fid}`,
-      title: `未知字段 ${fid}（${list.length}张）`,
-      photos: list,
-    })
-  }
-  return out
 }
 
 function getSubFieldIds(it, rec) {
@@ -893,6 +843,7 @@ function dateDisplayFormat(type) {
 .sub-block { margin-top: 12px; border: 1px dashed #e4e7ed; padding: 8px; border-radius: 6px; background: #fafbfc; }
 .sub-title { font-weight: 600; color: #606266; margin-bottom: 6px; }
 .sub-extra-photos { margin-top: 8px; }
+.photos-divider { margin: 8px 0; }
 .kv-list { display: flex; flex-direction: column; gap: 4px; }
 .kv-item { display: flex; gap: 6px; font-size: 13px; line-height: 1.5; flex-wrap: wrap; }
 .kv-item--block { flex-direction: column; align-items: stretch; gap: 6px; padding: 6px 0; border-bottom: 1px dashed #ebeef5; }

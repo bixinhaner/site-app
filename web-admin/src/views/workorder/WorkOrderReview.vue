@@ -351,35 +351,24 @@
 	            </el-table-column>
 	          </el-table>
 
-	          <div v-if="itemDetailExtraPhotoGroups.length" style="margin-top: 12px;">
+	          <div v-if="itemDetailExtraPhotos.length" style="margin-top: 12px;">
 	            <el-divider />
-	            <el-collapse>
-	              <el-collapse-item
-	                v-for="g in itemDetailExtraPhotoGroups"
-	                :key="g.key"
-	                :name="g.key"
-	              >
-	                <template #title>
-	                  <span class="muted">{{ g.title }}</span>
-	                </template>
-	                <el-row :gutter="10">
-	                  <el-col v-for="p in g.photos" :key="p.id" :span="8">
-	                    <div class="photo-card">
-	                      <el-image
-	                        :src="getImageUrl(p.file_path)"
-	                        style="width: 100%; height: 120px; cursor: pointer;"
-	                        fit="cover"
-	                        @click="viewPhotoDetail(p)"
-	                      />
-	                      <div class="photo-info">
-	                        <div class="photo-name">{{ p.original_name }}</div>
-	                        <div class="photo-time">{{ formatDateTime(p.taken_at) }}</div>
-	                      </div>
-	                    </div>
-	                  </el-col>
-	                </el-row>
-	              </el-collapse-item>
-	            </el-collapse>
+	            <el-row :gutter="10">
+	              <el-col v-for="p in itemDetailExtraPhotos" :key="p.id" :span="8">
+	                <div class="photo-card">
+	                  <el-image
+	                    :src="getImageUrl(p.file_path)"
+	                    style="width: 100%; height: 120px; cursor: pointer;"
+	                    fit="cover"
+	                    @click="viewPhotoDetail(p)"
+	                  />
+	                  <div class="photo-info">
+	                    <div class="photo-name">{{ p.original_name }}</div>
+	                    <div class="photo-time">{{ formatDateTime(p.taken_at) }}</div>
+	                  </div>
+	                </div>
+	              </el-col>
+	            </el-row>
 	          </div>
 	        </div>
 
@@ -1428,33 +1417,16 @@ const formatFieldValueForReview = (val) => {
 
 	const itemDetailFieldRows = computed(() => buildItemDetailFieldRows(selectedItem.value))
 	
-	const itemDetailExtraPhotoGroups = computed(() => {
+	const itemDetailExtraPhotos = computed(() => {
 	  const item = selectedItem.value
 	  if (!item) return []
 	  const defs = Array.isArray(item.fields) ? item.fields : []
 	  const known = new Set(defs.map(d => normalizeText(d?.field_id)).filter(Boolean))
 	  const photos = Array.isArray(item.photos) ? item.photos : []
-	  const unlinked = []
-	  const unknown = new Map()
-	  photos.forEach((p) => {
+	  return photos.filter((p) => {
 	    const fid = normalizeText(p?.field_id)
-	    if (!fid) {
-	      unlinked.push(p)
-	      return
-	    }
-	    if (!known.has(fid)) {
-	      if (!unknown.has(fid)) unknown.set(fid, [])
-	      unknown.get(fid).push(p)
-	    }
+	    return !fid || !known.has(fid)
 	  })
-	  const groups = []
-	  if (unlinked.length) {
-	    groups.push({ key: '__unlinked__', title: `未关联字段（${unlinked.length}张）`, photos: unlinked })
-	  }
-	  for (const [fid, list] of unknown.entries()) {
-	    groups.push({ key: `__unknown__${fid}`, title: `未知字段 ${fid}（${list.length}张）`, photos: list })
-	  }
-	  return groups
 	})
 
 const viewItemDetail = (item) => {
