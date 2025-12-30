@@ -296,14 +296,14 @@
           <el-descriptions-item label="现场备注">{{ selectedItem.notes || '-' }}</el-descriptions-item>
         </el-descriptions>
 
-        <!-- 数据内容 -->
-        <div v-if="itemDetailFieldRows.length > 0" style="margin-top: 20px;">
-          <h4>填写数据</h4>
-          <el-table :data="itemDetailFieldRows" size="small" border>
-            <el-table-column label="字段名称" min-width="260">
-              <template #default="{ row }">
-                <div class="field-name-cell">
-                  <span>{{ row.label }}</span>
+	        <!-- 数据内容 -->
+	        <div v-if="itemDetailFieldRows.length > 0" style="margin-top: 20px;">
+	          <h4>字段数据 & 字段照片</h4>
+	          <el-table :data="itemDetailFieldRows" size="small" border>
+	            <el-table-column label="字段名称" min-width="260">
+	              <template #default="{ row }">
+	                <div class="field-name-cell">
+	                  <span>{{ row.label }}</span>
                   <span v-if="row.required" class="field-required-mark">*</span>
                   <el-popover
                     v-if="row.help_text"
@@ -320,21 +320,75 @@
                     <div class="field-help-text">{{ row.help_text }}</div>
                   </el-popover>
                 </div>
-              </template>
-            </el-table-column>
-            <el-table-column prop="display_value" label="填写值" min-width="180" show-overflow-tooltip />
-            <el-table-column prop="unit" label="单位" width="120">
-              <template #default="{ row }">{{ row.unit || '-' }}</template>
-            </el-table-column>
-          </el-table>
-        </div>
+	              </template>
+	            </el-table-column>
+	            <el-table-column prop="display_value" label="填写值" min-width="180" show-overflow-tooltip />
+	            <el-table-column prop="unit" label="单位" width="120">
+	              <template #default="{ row }">{{ row.unit || '-' }}</template>
+	            </el-table-column>
+	            <el-table-column label="照片" min-width="260">
+	              <template #default="{ row }">
+	                <div v-if="row.photos && row.photos.length" class="field-photo-strip">
+	                  <el-image
+	                    v-for="(p, idx) in row.photos.slice(0, 4)"
+	                    :key="p.id || idx"
+	                    :src="getImageUrl(p.file_path)"
+	                    class="field-photo-img"
+	                    fit="cover"
+	                    @click.stop="viewPhotoDetail(p)"
+	                  />
+	                  <el-tag
+	                    v-if="row.photos.length > 4"
+	                    size="small"
+	                    effect="plain"
+	                    type="info"
+	                    class="field-photo-more"
+	                  >
+	                    +{{ row.photos.length - 4 }}
+	                  </el-tag>
+	                </div>
+	              </template>
+	            </el-table-column>
+	          </el-table>
 
-        <!-- 照片内容 -->
-        <div v-if="selectedItem.photos && selectedItem.photos.length > 0" style="margin-top: 20px;">
-          <h4>相关照片 ({{ selectedItem.photos.length }}张)</h4>
-          <el-row :gutter="10">
-            <el-col v-for="photo in selectedItem.photos" :key="photo.id" :span="8">
-              <div class="photo-card">
+	          <div v-if="itemDetailExtraPhotoGroups.length" style="margin-top: 12px;">
+	            <el-divider />
+	            <el-collapse>
+	              <el-collapse-item
+	                v-for="g in itemDetailExtraPhotoGroups"
+	                :key="g.key"
+	                :name="g.key"
+	              >
+	                <template #title>
+	                  <span class="muted">{{ g.title }}</span>
+	                </template>
+	                <el-row :gutter="10">
+	                  <el-col v-for="p in g.photos" :key="p.id" :span="8">
+	                    <div class="photo-card">
+	                      <el-image
+	                        :src="getImageUrl(p.file_path)"
+	                        style="width: 100%; height: 120px; cursor: pointer;"
+	                        fit="cover"
+	                        @click="viewPhotoDetail(p)"
+	                      />
+	                      <div class="photo-info">
+	                        <div class="photo-name">{{ p.original_name }}</div>
+	                        <div class="photo-time">{{ formatDateTime(p.taken_at) }}</div>
+	                      </div>
+	                    </div>
+	                  </el-col>
+	                </el-row>
+	              </el-collapse-item>
+	            </el-collapse>
+	          </div>
+	        </div>
+
+	        <!-- 照片内容 -->
+	        <div v-if="itemDetailFieldRows.length === 0 && selectedItem.photos && selectedItem.photos.length > 0" style="margin-top: 20px;">
+	          <h4>相关照片 ({{ selectedItem.photos.length }}张)</h4>
+	          <el-row :gutter="10">
+	            <el-col v-for="photo in selectedItem.photos" :key="photo.id" :span="8">
+	              <div class="photo-card">
                 <el-image 
                   :src="getImageUrl(photo.file_path)" 
                   style="width: 100%; height: 120px; cursor: pointer;"
@@ -1295,15 +1349,24 @@ const formatFieldValueForReview = (val) => {
   return String(val)
 }
 
-const buildItemDetailFieldRows = (item) => {
-  if (!item) return []
-  const defs = Array.isArray(item.fields) ? item.fields : []
-  const dataList = Array.isArray(item.data_value) ? item.data_value : []
+	const buildItemDetailFieldRows = (item) => {
+	  if (!item) return []
+	  const defs = Array.isArray(item.fields) ? item.fields : []
+	  const dataList = Array.isArray(item.data_value) ? item.data_value : []
+	  const photos = Array.isArray(item.photos) ? item.photos : []
+	
+	  const photoMap = new Map()
+	  photos.forEach((p) => {
+	    const fid = normalizeText(p?.field_id)
+	    if (!fid) return
+	    if (!photoMap.has(fid)) photoMap.set(fid, [])
+	    photoMap.get(fid).push(p)
+	  })
 
-  const dvByName = new Map()
-  dataList.forEach((dv) => {
-    const key = normalizeText(dv?.field_name)
-    if (!key) return
+	  const dvByName = new Map()
+	  dataList.forEach((dv) => {
+	    const key = normalizeText(dv?.field_name)
+	    if (!key) return
     if (!dvByName.has(key)) dvByName.set(key, dv)
   })
 
@@ -1318,47 +1381,81 @@ const buildItemDetailFieldRows = (item) => {
     return null
   }
 
-  defs.forEach((def) => {
-    const label = normalizeText(def?.label) || normalizeText(def?.field_id)
-    if (!label) return
-    const dv = pickDataValue(def)
-    if (dv) usedFieldNames.add(normalizeText(dv.field_name))
-    const helpText = normalizeText(def?.help_text)
+	  defs.forEach((def) => {
+	    const label = normalizeText(def?.label) || normalizeText(def?.field_id)
+	    if (!label) return
+	    const dv = pickDataValue(def)
+	    if (dv) usedFieldNames.add(normalizeText(dv.field_name))
+	    const helpText = normalizeText(def?.help_text)
+	    const fid = normalizeText(def?.field_id)
 
-    rows.push({
-      key: normalizeText(def?.field_id) || label,
-      label,
-      required: def?.required === true,
-      help_text: helpText,
-      display_value: formatFieldValueForReview(dv ? dv.value : null),
-      unit: normalizeText(dv?.unit) || '',
-      is_defined: true,
-    })
-  })
+	    rows.push({
+	      key: normalizeText(def?.field_id) || label,
+	      field_id: fid || null,
+	      label,
+	      required: def?.required === true,
+	      help_text: helpText,
+	      display_value: formatFieldValueForReview(dv ? dv.value : null),
+	      unit: normalizeText(dv?.unit) || '',
+	      is_defined: true,
+	      photos: fid ? (photoMap.get(fid) || []) : [],
+	    })
+	  })
 
-  // 追加未在字段定义中出现的数据（兼容历史/异常数据）
-  dataList.forEach((dv) => {
+	  // 追加未在字段定义中出现的数据（兼容历史/异常数据）
+	  dataList.forEach((dv) => {
     const fieldName = normalizeText(dv?.field_name)
     if (!fieldName) return
     if (usedFieldNames.has(fieldName)) return
     const matched = defs.some((def) => normalizeText(def?.field_id) === fieldName || normalizeText(def?.label) === fieldName)
     if (matched) return
 
-    rows.push({
-      key: `__extra__${fieldName}`,
-      label: fieldName,
-      required: false,
-      help_text: '',
-      display_value: formatFieldValueForReview(dv?.value),
-      unit: normalizeText(dv?.unit) || '',
-      is_defined: false,
-    })
-  })
+	    rows.push({
+	      key: `__extra__${fieldName}`,
+	      field_id: null,
+	      label: fieldName,
+	      required: false,
+	      help_text: '',
+	      display_value: formatFieldValueForReview(dv?.value),
+	      unit: normalizeText(dv?.unit) || '',
+	      is_defined: false,
+	      photos: [],
+	    })
+	  })
 
-  return rows
-}
+	  return rows
+	}
 
-const itemDetailFieldRows = computed(() => buildItemDetailFieldRows(selectedItem.value))
+	const itemDetailFieldRows = computed(() => buildItemDetailFieldRows(selectedItem.value))
+	
+	const itemDetailExtraPhotoGroups = computed(() => {
+	  const item = selectedItem.value
+	  if (!item) return []
+	  const defs = Array.isArray(item.fields) ? item.fields : []
+	  const known = new Set(defs.map(d => normalizeText(d?.field_id)).filter(Boolean))
+	  const photos = Array.isArray(item.photos) ? item.photos : []
+	  const unlinked = []
+	  const unknown = new Map()
+	  photos.forEach((p) => {
+	    const fid = normalizeText(p?.field_id)
+	    if (!fid) {
+	      unlinked.push(p)
+	      return
+	    }
+	    if (!known.has(fid)) {
+	      if (!unknown.has(fid)) unknown.set(fid, [])
+	      unknown.get(fid).push(p)
+	    }
+	  })
+	  const groups = []
+	  if (unlinked.length) {
+	    groups.push({ key: '__unlinked__', title: `未关联字段（${unlinked.length}张）`, photos: unlinked })
+	  }
+	  for (const [fid, list] of unknown.entries()) {
+	    groups.push({ key: `__unknown__${fid}`, title: `未知字段 ${fid}（${list.length}张）`, photos: list })
+	  }
+	  return groups
+	})
 
 const viewItemDetail = (item) => {
   selectedItem.value = item
@@ -1854,6 +1951,32 @@ onMounted(refresh)
 .field-help-text {
   white-space: pre-line;
   line-height: 1.6;
+}
+
+.muted {
+  color: #909399;
+  font-weight: normal;
+}
+
+.field-photo-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.field-photo-img {
+  width: 52px;
+  height: 52px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #ebeef5;
+  cursor: pointer;
+  background: #fff;
+}
+
+.field-photo-more {
+  margin-left: 2px;
 }
 
 /* 审核历史样式 */

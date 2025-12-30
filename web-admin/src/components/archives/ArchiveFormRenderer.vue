@@ -41,11 +41,11 @@
           </template>
         </div>
 
-        <!-- 站点级字段 -->
-        <div v-if="(it.fields || []).length" class="fields">
-          <div v-for="fd in (it.fields || [])" :key="fd.field_id" class="field">
-            <label class="field-label">
-              <span class="field-label__text">{{ fieldDisplayLabel(fd) }}</span>
+	        <!-- 站点级字段 -->
+	        <div v-if="(it.fields || []).length" class="fields">
+	          <div v-for="fd in (it.fields || [])" :key="fd.field_id" class="field">
+	            <label class="field-label">
+	              <span class="field-label__text">{{ fieldDisplayLabel(fd) }}</span>
               <el-popover
                 v-if="String(fieldHelpText(fd) || '').trim()"
                 placement="top-start"
@@ -57,10 +57,20 @@
                   <el-icon class="field-help-icon" :title="`${fieldDisplayLabel(fd)} 描述/注意事项`">
                     <QuestionFilled />
                   </el-icon>
-                </template>
-                <div class="field-help-text">{{ fieldHelpText(fd) }}</div>
-              </el-popover>
-            </label>
+	                </template>
+	                <div class="field-help-text">{{ fieldHelpText(fd) }}</div>
+	              </el-popover>
+	              <el-upload
+	                v-if="!disabled && canUploadFieldPhoto(it, fd)"
+	                :show-file-list="false"
+	                :http-request="(opt) => onUploadForField(cat, it, { fieldId: fd.field_id, level: 'site' }, opt)"
+	                accept="image/*"
+	              >
+	                <el-button link size="small" type="primary" class="field-upload-btn" @click.stop>
+	                  <el-icon><Upload /></el-icon>
+	                </el-button>
+	              </el-upload>
+	            </label>
             <!-- number -->
             <el-input-number
               v-if="(fd.type || 'text').toLowerCase() === 'number'"
@@ -107,82 +117,402 @@
               :disabled="disabled"
             />
             <!-- text/default -->
-            <el-input
-              v-else
-              :placeholder="fieldPlaceholder(fd)"
-              :model-value="getValue(cat, it, fd)"
+	            <el-input
+	              v-else
+	              :placeholder="fieldPlaceholder(fd)"
+	              :model-value="getValue(cat, it, fd)"
               @update:modelValue="val => setValue(cat, it, fd, val)"
               :disabled="disabled"
               :maxlength="fd?.constraints?.max_length || null"
-              :minlength="fd?.constraints?.min_length || null"
-              show-word-limit
-            />
-          </div>
-        </div>
-        <!-- 扇区级数据 -->
-        <div v-if="(it.sectors || []).length" class="sub-block">
-          <div class="sub-title">扇区级</div>
-          <div class="card-grid">
-            <el-card v-for="sec in it.sectors" :key="sec.sector_id" shadow="never" class="mini-card">
-              <div class="mini-header">
-                <el-tag size="small" type="info">扇区 {{ sec.sector_id }}</el-tag>
-              </div>
-              <div class="kv-list">
-                <div v-for="(v, k) in sec.values || {}" :key="k" class="kv-item">
-                  <span class="kv-key">{{ fieldLabel(it, k) }}</span>
-                  <span class="kv-val">{{ renderVal(v) }}</span>
-                </div>
-              </div>
-            </el-card>
-          </div>
-        </div>
+	              :minlength="fd?.constraints?.min_length || null"
+	              show-word-limit
+	            />
+	
+	            <div
+	              v-if="getPhotosForField(it.photos, fd.field_id).length"
+	              class="field-photos"
+	            >
+	              <div
+	                v-for="p in getPhotosForField(it.photos, fd.field_id)"
+	                :key="p.id"
+	                class="field-photo-thumb"
+	              >
+	                <el-image
+	                  :src="fileUrl(p.file_path)"
+	                  :preview-src-list="photoPreviewList(getPhotosForField(it.photos, fd.field_id))"
+	                  fit="cover"
+	                />
+	                <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                <div class="thumb-actions">
+	                  <el-button
+	                    v-if="!disabled"
+	                    link
+	                    type="danger"
+	                    size="small"
+	                    @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'site', fieldId: fd.field_id, photoId: p.id, photo: p })"
+	                    title="删除"
+	                  >
+	                    <el-icon><Delete /></el-icon>
+	                  </el-button>
+	                </div>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	        <!-- 扇区级数据 -->
+	        <div v-if="(it.sectors || []).length" class="sub-block">
+	          <div class="sub-title">扇区级</div>
+	          <div class="card-grid">
+	            <el-card v-for="sec in it.sectors" :key="sec.sector_id" shadow="never" class="mini-card">
+	              <div class="mini-header">
+	                <el-tag size="small" type="info">扇区 {{ sec.sector_id }}</el-tag>
+	              </div>
+	              <div v-if="getSubFieldIds(it, sec).length" class="kv-list">
+	                <div v-for="fid in getSubFieldIds(it, sec)" :key="fid" class="kv-item kv-item--block">
+	                  <div class="kv-line">
+	                    <span class="kv-key">{{ fieldLabel(it, fid) }}</span>
+	                    <span class="kv-val">{{ renderVal((sec.values || {})[fid]) }}</span>
+	                    <el-upload
+	                      v-if="!disabled && canUploadFieldPhotoById(it, fid)"
+	                      :show-file-list="false"
+	                      :http-request="(opt) => onUploadForField(cat, it, { fieldId: fid, level: 'sector', sectorId: sec.sector_id }, opt)"
+	                      accept="image/*"
+	                    >
+	                      <el-button link size="small" type="primary" class="field-upload-btn" @click.stop>
+	                        <el-icon><Upload /></el-icon>
+	                      </el-button>
+	                    </el-upload>
+	                  </div>
+	                  <div
+	                    v-if="getPhotosForField(sec.photos, fid).length"
+	                    class="field-photos field-photos--compact"
+	                  >
+	                    <div
+	                      v-for="p in getPhotosForField(sec.photos, fid)"
+	                      :key="p.id"
+	                      class="field-photo-thumb"
+	                    >
+	                      <el-image
+	                        :src="fileUrl(p.file_path)"
+	                        :preview-src-list="photoPreviewList(getPhotosForField(sec.photos, fid))"
+	                        fit="cover"
+	                      />
+	                      <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                      <div class="thumb-actions">
+	                        <el-button
+	                          v-if="!disabled"
+	                          link
+	                          type="danger"
+	                          size="small"
+	                          @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'sector', sectorId: sec.sector_id, fieldId: fid, photoId: p.id, photo: p })"
+	                          title="删除"
+	                        >
+	                          <el-icon><Delete /></el-icon>
+	                        </el-button>
+	                      </div>
+	                    </div>
+	                  </div>
+	                </div>
+	              </div>
+	
+	              <div
+	                v-if="getUnlinkedPhotos(sec.photos).length"
+	                class="sub-extra-photos"
+	              >
+	                <el-collapse>
+	                  <el-collapse-item :name="`sec-${sec.sector_id}-unlinked`">
+	                    <template #title>
+	                      <span class="muted">未关联照片（{{ getUnlinkedPhotos(sec.photos).length }}张）</span>
+	                    </template>
+	                    <div class="field-photos field-photos--compact">
+	                      <div
+	                        v-for="p in getUnlinkedPhotos(sec.photos)"
+	                        :key="p.id"
+	                        class="field-photo-thumb"
+	                      >
+	                        <el-image
+	                          :src="fileUrl(p.file_path)"
+	                          :preview-src-list="photoPreviewList(getUnlinkedPhotos(sec.photos))"
+	                          fit="cover"
+	                        />
+	                        <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                        <div class="thumb-actions">
+	                          <el-button
+	                            v-if="!disabled"
+	                            link
+	                            type="danger"
+	                            size="small"
+	                            @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'sector', sectorId: sec.sector_id, photoId: p.id, photo: p })"
+	                            title="删除"
+	                          >
+	                            <el-icon><Delete /></el-icon>
+	                          </el-button>
+	                        </div>
+	                      </div>
+	                    </div>
+	                  </el-collapse-item>
+	                </el-collapse>
+	              </div>
+	
+	              <div
+	                v-if="(!it.fields || !(it.fields || []).length) && ((sec.photos && sec.photos.length) || (!disabled && needsPhoto(it)))"
+	                class="photos"
+	              >
+	                <div class="photos-header" v-if="sec.photos && sec.photos.length">照片</div>
+	                <div class="grid" v-if="sec.photos && sec.photos.length">
+	                  <div v-for="p in sec.photos" :key="p.id" class="item photo-card">
+	                    <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
+	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                    <div class="meta compact">
+	                      <div class="meta-actions">
+	                        <el-button
+	                          v-if="!disabled"
+	                          link
+	                          type="danger"
+	                          size="small"
+	                          @click="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'sector', sectorId: sec.sector_id, photoId: p.id, photo: p })"
+	                          title="删除"
+	                          aria-label="删除"
+	                        >
+	                          <el-icon><Delete /></el-icon>
+	                        </el-button>
+	                      </div>
+	                    </div>
+	                  </div>
+	                </div>
+	                <div class="upload-bar" v-if="!disabled && needsPhoto(it)">
+	                  <el-upload
+	                    :show-file-list="false"
+	                    :http-request="(opt) => onUploadForField(cat, it, { level: 'sector', sectorId: sec.sector_id }, opt)"
+	                    accept="image/*"
+	                  >
+	                    <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
+	                  </el-upload>
+	                </div>
+	              </div>
+	            </el-card>
+	          </div>
+	        </div>
 
-        <!-- 小区级数据 -->
-        <div v-if="(it.cells || []).length" class="sub-block">
-          <div class="sub-title">小区级</div>
-          <div class="card-grid">
-            <el-card v-for="cell in it.cells" :key="cell.cell_id" shadow="never" class="mini-card">
-              <div class="mini-header">
-                <el-tag size="small" type="success">小区 {{ cell.cell_id }}</el-tag>
-                <el-tag size="small" effect="plain" style="margin-left:6px">扇区 {{ cell.sector_id }}</el-tag>
-                <el-tag v-if="cell.band" size="small" effect="plain" style="margin-left:6px">Band {{ cell.band }}</el-tag>
-              </div>
-              <div class="kv-list">
-                <div v-for="(v, k) in cell.values || {}" :key="k" class="kv-item">
-                  <span class="kv-key">{{ fieldLabel(it, k) }}</span>
-                  <span class="kv-val">{{ renderVal(v) }}</span>
-                </div>
-              </div>
-            </el-card>
-          </div>
-        </div>
-
-        <div class="photos" v-if="(it.photos && it.photos.length) || (!disabled && needsPhoto(it))">
-          <div class="photos-header" v-if="it.photos && it.photos.length">照片</div>
-          <div class="grid" v-if="it.photos && it.photos.length">
-            <div v-for="p in it.photos" :key="p.id" class="item photo-card">
-              <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
-              <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
-              <div class="meta compact">
-                <div class="meta-actions">
-                  <el-button v-if="!disabled" link type="danger" size="small"
-                    @click="$emit('delete-photo', { photoId: p.id, photo: p })" title="删除" aria-label="删除">
-                    <el-icon><Delete /></el-icon>
-                  </el-button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="upload-bar" v-if="!disabled && needsPhoto(it)">
-            <el-upload :show-file-list="false" :http-request="(opt) => onUpload(cat, it, opt)" accept="image/*">
-              <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
-            </el-upload>
-          </div>
-        </div>
-      </el-card>
-    </div>
-  </div>
-</template>
+	        <!-- 小区级数据 -->
+	        <div v-if="(it.cells || []).length" class="sub-block">
+	          <div class="sub-title">小区级</div>
+	          <div class="card-grid">
+	            <el-card v-for="cell in it.cells" :key="cell.cell_id" shadow="never" class="mini-card">
+	              <div class="mini-header">
+	                <el-tag size="small" type="success">小区 {{ cell.cell_id }}</el-tag>
+	                <el-tag size="small" effect="plain" style="margin-left:6px">扇区 {{ cell.sector_id }}</el-tag>
+	                <el-tag v-if="cell.band" size="small" effect="plain" style="margin-left:6px">Band {{ cell.band }}</el-tag>
+	              </div>
+	              <div v-if="getSubFieldIds(it, cell).length" class="kv-list">
+	                <div v-for="fid in getSubFieldIds(it, cell)" :key="fid" class="kv-item kv-item--block">
+	                  <div class="kv-line">
+	                    <span class="kv-key">{{ fieldLabel(it, fid) }}</span>
+	                    <span class="kv-val">{{ renderVal((cell.values || {})[fid]) }}</span>
+	                    <el-upload
+	                      v-if="!disabled && canUploadFieldPhotoById(it, fid)"
+	                      :show-file-list="false"
+	                      :http-request="(opt) => onUploadForField(cat, it, { fieldId: fid, level: 'cell', cellId: cell.cell_id }, opt)"
+	                      accept="image/*"
+	                    >
+	                      <el-button link size="small" type="primary" class="field-upload-btn" @click.stop>
+	                        <el-icon><Upload /></el-icon>
+	                      </el-button>
+	                    </el-upload>
+	                  </div>
+	                  <div
+	                    v-if="getPhotosForField(cell.photos, fid).length"
+	                    class="field-photos field-photos--compact"
+	                  >
+	                    <div
+	                      v-for="p in getPhotosForField(cell.photos, fid)"
+	                      :key="p.id"
+	                      class="field-photo-thumb"
+	                    >
+	                      <el-image
+	                        :src="fileUrl(p.file_path)"
+	                        :preview-src-list="photoPreviewList(getPhotosForField(cell.photos, fid))"
+	                        fit="cover"
+	                      />
+	                      <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                      <div class="thumb-actions">
+	                        <el-button
+	                          v-if="!disabled"
+	                          link
+	                          type="danger"
+	                          size="small"
+	                          @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'cell', cellId: cell.cell_id, fieldId: fid, photoId: p.id, photo: p })"
+	                          title="删除"
+	                        >
+	                          <el-icon><Delete /></el-icon>
+	                        </el-button>
+	                      </div>
+	                    </div>
+	                  </div>
+	                </div>
+	              </div>
+	
+	              <div
+	                v-if="getUnlinkedPhotos(cell.photos).length"
+	                class="sub-extra-photos"
+	              >
+	                <el-collapse>
+	                  <el-collapse-item :name="`cell-${cell.cell_id}-unlinked`">
+	                    <template #title>
+	                      <span class="muted">未关联照片（{{ getUnlinkedPhotos(cell.photos).length }}张）</span>
+	                    </template>
+	                    <div class="field-photos field-photos--compact">
+	                      <div
+	                        v-for="p in getUnlinkedPhotos(cell.photos)"
+	                        :key="p.id"
+	                        class="field-photo-thumb"
+	                      >
+	                        <el-image
+	                          :src="fileUrl(p.file_path)"
+	                          :preview-src-list="photoPreviewList(getUnlinkedPhotos(cell.photos))"
+	                          fit="cover"
+	                        />
+	                        <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                        <div class="thumb-actions">
+	                          <el-button
+	                            v-if="!disabled"
+	                            link
+	                            type="danger"
+	                            size="small"
+	                            @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'cell', cellId: cell.cell_id, photoId: p.id, photo: p })"
+	                            title="删除"
+	                          >
+	                            <el-icon><Delete /></el-icon>
+	                          </el-button>
+	                        </div>
+	                      </div>
+	                    </div>
+	                  </el-collapse-item>
+	                </el-collapse>
+	              </div>
+	
+	              <div
+	                v-if="(!it.fields || !(it.fields || []).length) && ((cell.photos && cell.photos.length) || (!disabled && needsPhoto(it)))"
+	                class="photos"
+	              >
+	                <div class="photos-header" v-if="cell.photos && cell.photos.length">照片</div>
+	                <div class="grid" v-if="cell.photos && cell.photos.length">
+	                  <div v-for="p in cell.photos" :key="p.id" class="item photo-card">
+	                    <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
+	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                    <div class="meta compact">
+	                      <div class="meta-actions">
+	                        <el-button
+	                          v-if="!disabled"
+	                          link
+	                          type="danger"
+	                          size="small"
+	                          @click="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'cell', cellId: cell.cell_id, photoId: p.id, photo: p })"
+	                          title="删除"
+	                          aria-label="删除"
+	                        >
+	                          <el-icon><Delete /></el-icon>
+	                        </el-button>
+	                      </div>
+	                    </div>
+	                  </div>
+	                </div>
+	                <div class="upload-bar" v-if="!disabled && needsPhoto(it)">
+	                  <el-upload
+	                    :show-file-list="false"
+	                    :http-request="(opt) => onUploadForField(cat, it, { level: 'cell', cellId: cell.cell_id }, opt)"
+	                    accept="image/*"
+	                  >
+	                    <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
+	                  </el-upload>
+	                </div>
+	              </div>
+	            </el-card>
+	          </div>
+	        </div>
+	
+	        <!-- 站点级未关联/未知字段照片 -->
+	        <div v-if="getExtraPhotoGroups(it).length" class="sub-extra-photos">
+	          <el-collapse>
+	            <el-collapse-item
+	              v-for="g in getExtraPhotoGroups(it)"
+	              :key="g.key"
+	              :name="g.key"
+	            >
+	              <template #title>
+	                <span class="muted">{{ g.title }}</span>
+	              </template>
+	              <div class="field-photos">
+	                <div
+	                  v-for="p in g.photos"
+	                  :key="p.id"
+	                  class="field-photo-thumb"
+	                >
+	                  <el-image
+	                    :src="fileUrl(p.file_path)"
+	                    :preview-src-list="photoPreviewList(g.photos)"
+	                    fit="cover"
+	                  />
+	                  <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	                  <div class="thumb-actions">
+	                    <el-button
+	                      v-if="!disabled"
+	                      link
+	                      type="danger"
+	                      size="small"
+	                      @click.stop="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'site', photoId: p.id, photo: p })"
+	                      title="删除"
+	                    >
+	                      <el-icon><Delete /></el-icon>
+	                    </el-button>
+	                  </div>
+	                </div>
+	              </div>
+	            </el-collapse-item>
+	          </el-collapse>
+	        </div>
+	
+	        <!-- 照片类检查项但无字段定义：按检查项展示照片 -->
+	        <div
+	          v-if="(!(it.fields || []).length) && ((it.photos && it.photos.length) || (!disabled && needsPhoto(it)))"
+	          class="photos"
+	        >
+	          <div class="photos-header" v-if="it.photos && it.photos.length">照片</div>
+	          <div class="grid" v-if="it.photos && it.photos.length">
+	            <div v-for="p in it.photos" :key="p.id" class="item photo-card">
+	              <el-image :src="fileUrl(p.file_path)" :preview-src-list="[fileUrl(p.file_path)]" fit="cover" />
+	              <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
+	              <div class="meta compact">
+	                <div class="meta-actions">
+	                  <el-button
+	                    v-if="!disabled"
+	                    link
+	                    type="danger"
+	                    size="small"
+	                    @click="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'site', photoId: p.id, photo: p })"
+	                    title="删除"
+	                    aria-label="删除"
+	                  >
+	                    <el-icon><Delete /></el-icon>
+	                  </el-button>
+	                </div>
+	              </div>
+	            </div>
+	          </div>
+	          <div class="upload-bar" v-if="!disabled && needsPhoto(it)">
+	            <el-upload
+	              :show-file-list="false"
+	              :http-request="(opt) => onUploadForField(cat, it, { level: 'site' }, opt)"
+	              accept="image/*"
+	            >
+	              <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
+	            </el-upload>
+	          </div>
+	        </div>
+	      </el-card>
+	    </div>
+	  </div>
+	</template>
 
 <script setup>
 import { reactive, watch } from 'vue'
@@ -356,10 +686,125 @@ function emitChange(cat, it, fd) {
   emit('change', { categoryId: cat.category_id, itemId: it.item_id, fieldId: fd.field_id, value: state.values[buildKey(cat, it, fd)] })
 }
 
-function isImage(mime) { return (mime || '').startsWith('image/') }
+function _safeArray(v) {
+  return Array.isArray(v) ? v : []
+}
 
-function onUpload(cat, it, opt) {
-  emit('upload-photo', { categoryId: cat.category_id, itemId: it.item_id, file: opt.file })
+function _normId(v) {
+  return String(v ?? '').trim()
+}
+
+function getPhotosForField(photos, fieldId) {
+  const fid = _normId(fieldId)
+  if (!fid) return []
+  return _safeArray(photos).filter((p) => _normId(p?.field_id) === fid)
+}
+
+function getUnlinkedPhotos(photos) {
+  return _safeArray(photos).filter((p) => !_normId(p?.field_id))
+}
+
+function getExtraPhotoGroups(it) {
+  const photos = _safeArray(it?.photos)
+  if (!photos.length) return []
+  const known = new Set(_safeArray(it?.fields).map((f) => _normId(f?.field_id)).filter(Boolean))
+
+  const unlinked = []
+  const unknown = new Map()
+  photos.forEach((p) => {
+    const fid = _normId(p?.field_id)
+    if (!fid) {
+      unlinked.push(p)
+      return
+    }
+    if (!known.has(fid)) {
+      if (!unknown.has(fid)) unknown.set(fid, [])
+      unknown.get(fid).push(p)
+    }
+  })
+
+  const out = []
+  if (unlinked.length) {
+    out.push({
+      key: `site-${_normId(it?.item_id)}-unlinked`,
+      title: `未关联照片（${unlinked.length}张）`,
+      photos: unlinked,
+    })
+  }
+  for (const [fid, list] of unknown.entries()) {
+    out.push({
+      key: `site-${_normId(it?.item_id)}-unknown-${fid}`,
+      title: `未知字段 ${fid}（${list.length}张）`,
+      photos: list,
+    })
+  }
+  return out
+}
+
+function getSubFieldIds(it, rec) {
+  const allowPhotoIds = _safeArray(it?.fields)
+    .filter((f) => f?.allow_photo === true)
+    .map((f) => _normId(f?.field_id))
+    .filter(Boolean)
+
+  const values = (rec && typeof rec.values === 'object' && !Array.isArray(rec.values)) ? rec.values : {}
+  const valueKeys = Object.keys(values || {}).map(_normId).filter(Boolean)
+
+  const photoKeys = _safeArray(rec?.photos).map((p) => _normId(p?.field_id)).filter(Boolean)
+
+  const union = new Set([...allowPhotoIds, ...valueKeys, ...photoKeys])
+
+  const ordered = []
+  const used = new Set()
+  _safeArray(it?.fields).forEach((f) => {
+    const fid = _normId(f?.field_id)
+    if (!fid || !union.has(fid) || used.has(fid)) return
+    used.add(fid)
+    ordered.push(fid)
+  })
+  for (const fid of union) {
+    if (!used.has(fid)) {
+      used.add(fid)
+      ordered.push(fid)
+    }
+  }
+  return ordered
+}
+
+function canUploadFieldPhoto(it, fd) {
+  if (!needsPhoto(it)) return false
+  const fid = _normId(fd?.field_id)
+  if (!fid) return false
+  return fd?.allow_photo === true
+}
+
+function canUploadFieldPhotoById(it, fieldId) {
+  if (!needsPhoto(it)) return false
+  const fid = _normId(fieldId)
+  if (!fid) return false
+  const f = _safeArray(it?.fields).find((x) => _normId(x?.field_id) === fid)
+  return f?.allow_photo === true
+}
+
+function photoPreviewList(photos) {
+  return _safeArray(photos).map((p) => fileUrl(p?.file_path)).filter(Boolean)
+}
+
+function onUploadForField(cat, it, meta, opt) {
+  const payload = {
+    categoryId: cat.category_id,
+    itemId: it.item_id,
+    file: opt.file,
+  }
+  const fieldId = _normId(meta?.fieldId)
+  const level = _normId(meta?.level)
+  const sectorId = _normId(meta?.sectorId)
+  const cellId = _normId(meta?.cellId)
+  if (fieldId) payload.fieldId = fieldId
+  if (level) payload.level = level
+  if (sectorId) payload.sectorId = sectorId
+  if (cellId) payload.cellId = cellId
+  emit('upload-photo', payload)
 }
 
 function getValue(cat, it, fd) {
@@ -433,13 +878,26 @@ function dateDisplayFormat(type) {
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px; margin-top: 8px; }
 .field label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
 .field-label { display: flex; align-items: center; gap: 6px; }
-.field-label__text { flex: 0 1 auto; }
+.field-label__text { flex: 1 1 auto; min-width: 0; }
 .field-help-icon { cursor: pointer; color: #909399; font-size: 14px; }
 .field-help-text { white-space: pre-line; line-height: 1.6; }
+.field-upload-btn { padding: 0; }
+.field-photos { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+.field-photos--compact { gap: 6px; }
+.field-photo-thumb { position: relative; width: 64px; height: 64px; border: 1px solid #ebeef5; border-radius: 8px; overflow: hidden; background: #fff; }
+.field-photo-thumb .el-image { width: 100%; height: 100%; }
+.field-photo-thumb :deep(img) { width: 100%; height: 100%; object-fit: cover; }
+.field-photo-thumb .badge-pending { top: 4px; right: 4px; }
+.thumb-actions { position: absolute; top: 2px; left: 2px; display: flex; gap: 4px; }
+.thumb-actions :deep(.el-button) { padding: 0; }
 .sub-block { margin-top: 12px; border: 1px dashed #e4e7ed; padding: 8px; border-radius: 6px; background: #fafbfc; }
 .sub-title { font-weight: 600; color: #606266; margin-bottom: 6px; }
+.sub-extra-photos { margin-top: 8px; }
 .kv-list { display: flex; flex-direction: column; gap: 4px; }
 .kv-item { display: flex; gap: 6px; font-size: 13px; line-height: 1.5; flex-wrap: wrap; }
+.kv-item--block { flex-direction: column; align-items: stretch; gap: 6px; padding: 6px 0; border-bottom: 1px dashed #ebeef5; }
+.kv-item--block:last-child { border-bottom: none; }
+.kv-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .kv-key { color: #606266; font-weight: 600; }
 .kv-val { color: #303133; }
 .photos { margin-top: 12px; }

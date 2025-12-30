@@ -722,6 +722,10 @@ async def upload_temp_photo(
     archive_id: str,
     category_id: str = Form(...),
     item_id: str = Form(...),
+    field_id: Optional[str] = Form(None),
+    level: Optional[str] = Form(None),
+    sector_id: Optional[str] = Form(None),
+    cell_id: Optional[str] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -760,6 +764,10 @@ async def upload_temp_photo(
         "hash_value": file_hash,
         "uploaded_by": current_user.id,
         "taken_at": None,
+        "field_id": field_id,
+        "level": level,
+        "sector_id": sector_id,
+        "cell_id": cell_id,
         "_temp": True,
         "category_id": category_id,
         "item_id": item_id,
@@ -803,6 +811,10 @@ async def upload_photo(
     archive_id: str,
     category_id: str = Form(...),
     item_id: str = Form(...),
+    field_id: Optional[str] = Form(None),
+    level: Optional[str] = Form(None),
+    sector_id: Optional[str] = Form(None),
+    cell_id: Optional[str] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -832,7 +844,20 @@ async def upload_photo(
     old = arc.content
     new = jsonpatch.apply_patch(old, [], in_place=False)  # 深拷贝
 
-    # 定位到指定项
+    level_norm = str(level or "site").strip().lower()
+
+    photo_obj = {
+        "id": uuid.uuid4().hex,
+        "file_path": stored_path,
+        "file_size": file_size,
+        "mime_type": file.content_type,
+        "hash_value": file_hash,
+        "uploaded_by": current_user.id,
+        "taken_at": None,
+        "field_id": field_id,
+    }
+
+    # 定位到指定项/层级
     found = False
     for cat in new.get("check_categories", []) or []:
         if str(cat.get("category_id")) != str(category_id):
@@ -840,16 +865,32 @@ async def upload_photo(
         for it in cat.get("items", []) or []:
             if str(it.get("item_id")) != str(item_id):
                 continue
-            it.setdefault("photos", []).append({
-                "id": uuid.uuid4().hex,
-                "file_path": stored_path,
-                "file_size": file_size,
-                "mime_type": file.content_type,
-                "hash_value": file_hash,
-                "uploaded_by": current_user.id,
-                "taken_at": None,
-            })
-            found = True
+            if level_norm == "sector":
+                if sector_id is None:
+                    raise HTTPException(status_code=400, detail="sector_id 不能为空")
+                sectors = it.get("sectors") or []
+                for sec in sectors:
+                    if str(sec.get("sector_id")) != str(sector_id):
+                        continue
+                    sec.setdefault("photos", []).append(photo_obj)
+                    found = True
+                    break
+            elif level_norm == "cell":
+                if cell_id is None:
+                    raise HTTPException(status_code=400, detail="cell_id 不能为空")
+                cells = it.get("cells") or []
+                for cell in cells:
+                    if str(cell.get("cell_id")) != str(cell_id):
+                        continue
+                    cell.setdefault("photos", []).append(photo_obj)
+                    found = True
+                    break
+            else:
+                it.setdefault("photos", []).append(photo_obj)
+                found = True
+            if found:
+                break
+        if found:
             break
     if not found:
         raise HTTPException(status_code=400, detail="未找到对应的分类/检查项")
@@ -888,11 +929,18 @@ def delete_photo(
     removed = False
     for cat in new.get("check_categories", []) or []:
         for it in cat.get("items", []) or []:
-            photos = it.get("photos") or []
-            for i, p in enumerate(list(photos)):
-                if str(p.get("id")) == str(photo_id):
-                    photos.pop(i)
-                    removed = True
+            targets = [it]
+            targets.extend(it.get("sectors") or [])
+            targets.extend(it.get("cells") or [])
+
+            for tgt in targets:
+                photos = tgt.get("photos") or []
+                for i, p in enumerate(list(photos)):
+                    if str(p.get("id")) == str(photo_id):
+                        photos.pop(i)
+                        removed = True
+                        break
+                if removed:
                     break
             if removed:
                 break

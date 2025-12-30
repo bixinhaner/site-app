@@ -23,20 +23,28 @@ export const surveyArchivesApi = {
   revert(id, toVersion) {
     return request.post(`/api/survey-archives/${id}/revert`, null, { params: { to_version: toVersion } })
   },
-  uploadPhoto(id, { category_id, item_id, file }) {
+  uploadPhoto(id, { category_id, item_id, file, field_id, level, sector_id, cell_id }) {
     const fd = new FormData()
     fd.append('category_id', category_id)
     fd.append('item_id', item_id)
+    if (field_id != null && String(field_id).trim() !== '') fd.append('field_id', field_id)
+    if (level != null && String(level).trim() !== '') fd.append('level', level)
+    if (sector_id != null && String(sector_id).trim() !== '') fd.append('sector_id', sector_id)
+    if (cell_id != null && String(cell_id).trim() !== '') fd.append('cell_id', cell_id)
     fd.append('file', file)
     // 明确为 multipart/form-data，覆盖实例默认的 application/json
     return request.post(`/api/survey-archives/${id}/photos`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
   },
-  uploadTempPhoto(id, { category_id, item_id, file }) {
+  uploadTempPhoto(id, { category_id, item_id, file, field_id, level, sector_id, cell_id }) {
     const fd = new FormData()
     fd.append('category_id', category_id)
     fd.append('item_id', item_id)
+    if (field_id != null && String(field_id).trim() !== '') fd.append('field_id', field_id)
+    if (level != null && String(level).trim() !== '') fd.append('level', level)
+    if (sector_id != null && String(sector_id).trim() !== '') fd.append('sector_id', sector_id)
+    if (cell_id != null && String(cell_id).trim() !== '') fd.append('cell_id', cell_id)
     fd.append('file', file)
     return request.post(`/api/survey-archives/${id}/photos/temp`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' }

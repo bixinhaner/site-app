@@ -20,19 +20,27 @@ export const ssvArchivesApi = {
   revert(id, toVersion) {
     return request.post(`/api/ssv-archives/${id}/revert`, null, { params: { to_version: toVersion } })
   },
-  uploadPhoto(id, { categoryId, itemId, file }) {
+  uploadPhoto(id, { category_id, item_id, categoryId, itemId, file, field_id, level, sector_id, cell_id }) {
     const fd = new FormData()
-    fd.append('category_id', categoryId)
-    fd.append('item_id', itemId)
+    fd.append('category_id', category_id ?? categoryId)
+    fd.append('item_id', item_id ?? itemId)
+    if (field_id != null && String(field_id).trim() !== '') fd.append('field_id', field_id)
+    if (level != null && String(level).trim() !== '') fd.append('level', level)
+    if (sector_id != null && String(sector_id).trim() !== '') fd.append('sector_id', sector_id)
+    if (cell_id != null && String(cell_id).trim() !== '') fd.append('cell_id', cell_id)
     fd.append('file', file)
     return request.post(`/api/ssv-archives/${id}/photos`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
   },
-  uploadTempPhoto(id, { categoryId, itemId, file }) {
+  uploadTempPhoto(id, { category_id, item_id, categoryId, itemId, file, field_id, level, sector_id, cell_id }) {
     const fd = new FormData()
-    fd.append('category_id', categoryId)
-    fd.append('item_id', itemId)
+    fd.append('category_id', category_id ?? categoryId)
+    fd.append('item_id', item_id ?? itemId)
+    if (field_id != null && String(field_id).trim() !== '') fd.append('field_id', field_id)
+    if (level != null && String(level).trim() !== '') fd.append('level', level)
+    if (sector_id != null && String(sector_id).trim() !== '') fd.append('sector_id', sector_id)
+    if (cell_id != null && String(cell_id).trim() !== '') fd.append('cell_id', cell_id)
     fd.append('file', file)
     return request.post(`/api/ssv-archives/${id}/photos/temp`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' }

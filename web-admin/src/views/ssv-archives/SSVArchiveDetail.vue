@@ -95,8 +95,8 @@ const origin = ref(null)
 const content = ref(null)
 const edits = reactive(new Map()) // key: json pointer, value: new value
 // 照片变更在前端暂存，保存时一次性通过 JSON Patch 提交
-const photoAdds = ref([]) // { categoryId, itemId, photo }
-const photoDeletes = ref([]) // { categoryId, itemId, photoId }
+const photoAdds = ref([]) // { categoryId, itemId, level, sectorId?, cellId?, photo }
+const photoDeletes = ref([]) // { categoryId, itemId, level, sectorId?, cellId?, photoId }
 
 const history = ref([])
 const historyLoading = ref(false)
@@ -197,6 +197,58 @@ function buildExportName(ext) {
 const jsonPointerEscape = (s) => String(s).replaceAll('~', '~0').replaceAll('/', '~1')
 const jsonPointerUnescape = (s) => String(s).replaceAll('~1', '/').replaceAll('~0', '~')
 
+const normalizeId = (v) => String(v ?? '').trim()
+
+const normalizeLevel = (level) => {
+  const lv = String(level || 'site').trim().toLowerCase()
+  if (lv === 'sector') return 'sector'
+  if (lv === 'cell') return 'cell'
+  return 'site'
+}
+
+function resolvePhotosContainer(root, categoryId, itemId, level, sectorId, cellId) {
+  const cats = root?.check_categories || []
+  const catIndex = cats.findIndex((x) => String(x.category_id) === String(categoryId))
+  if (catIndex < 0) return null
+  const items = cats[catIndex]?.items || []
+  const itemIndex = items.findIndex((x) => String(x.item_id) === String(itemId))
+  if (itemIndex < 0) return null
+  const item = items[itemIndex]
+
+  const lv = normalizeLevel(level)
+  if (lv === 'sector') {
+    const secIndex = (item?.sectors || []).findIndex((x) => String(x.sector_id) === String(sectorId))
+    if (secIndex < 0) return null
+    const sec = item.sectors[secIndex]
+    return {
+      catIndex,
+      itemIndex,
+      level: 'sector',
+      container: sec,
+      photosPathBase: `/check_categories/${catIndex}/items/${itemIndex}/sectors/${secIndex}/photos`,
+    }
+  }
+  if (lv === 'cell') {
+    const cellIndex = (item?.cells || []).findIndex((x) => String(x.cell_id) === String(cellId))
+    if (cellIndex < 0) return null
+    const cell = item.cells[cellIndex]
+    return {
+      catIndex,
+      itemIndex,
+      level: 'cell',
+      container: cell,
+      photosPathBase: `/check_categories/${catIndex}/items/${itemIndex}/cells/${cellIndex}/photos`,
+    }
+  }
+  return {
+    catIndex,
+    itemIndex,
+    level: 'site',
+    container: item,
+    photosPathBase: `/check_categories/${catIndex}/items/${itemIndex}/photos`,
+  }
+}
+
 function applyLocalEdits() {
   try {
     for (const [path, value] of edits.entries()) {
@@ -212,15 +264,21 @@ function applyLocalEdits() {
       item.values[fieldKey] = value
     }
     for (const rec of photoAdds.value) {
-      const { categoryId, itemId, photo } = rec
-      const catIdx = (content.value?.check_categories || []).findIndex(x => String(x.category_id) === String(categoryId))
-      const itemIdx = (content.value?.check_categories?.[catIdx]?.items || []).findIndex(x => String(x.item_id) === String(itemId))
-      if (catIdx >= 0 && itemIdx >= 0) {
-        const photos = content.value.check_categories[catIdx].items[itemIdx].photos || (content.value.check_categories[catIdx].items[itemIdx].photos = [])
-        if (!photos.find(p => String(p.id) === String(photo.id))) {
-          photos.push(photo)
-        }
+      const { categoryId, itemId, level, sectorId, cellId, photo } = rec
+      const loc = resolvePhotosContainer(content.value, categoryId, itemId, level, sectorId, cellId)
+      if (!loc) continue
+      const photos = loc.container.photos || (loc.container.photos = [])
+      if (!photos.find((p) => String(p.id) === String(photo.id))) {
+        photos.push(photo)
       }
+    }
+    for (const rec of photoDeletes.value) {
+      const { categoryId, itemId, level, sectorId, cellId, photoId } = rec
+      const loc = resolvePhotosContainer(content.value, categoryId, itemId, level, sectorId, cellId)
+      if (!loc) continue
+      const photos = Array.isArray(loc.container.photos) ? loc.container.photos : []
+      const idx = photos.findIndex((p) => String(p.id) === String(photoId))
+      if (idx >= 0) photos.splice(idx, 1)
     }
   } catch (e) {
     console.warn('applyLocalEdits failed:', e)
@@ -252,29 +310,42 @@ async function saveChanges() {
     for (const [path, value] of edits.entries()) {
       patchOps.push({ op: 'replace', path, value })
     }
+    const addGroups = new Map()
     for (const rec of photoAdds.value) {
-      const catIndex = (origin.value?.check_categories || []).findIndex(x => String(x.category_id) === String(rec.categoryId))
-      const itemIndex = (origin.value?.check_categories?.[catIndex]?.items || []).findIndex(x => String(x.item_id) === String(rec.itemId))
-      if (catIndex >= 0 && itemIndex >= 0) {
-        const originItem = origin.value?.check_categories?.[catIndex]?.items?.[itemIndex] || {}
-        const photoVal = { ...rec.photo }
-        delete photoVal.pending
-        if (Array.isArray(originItem.photos)) {
-          const path = `/check_categories/${catIndex}/items/${itemIndex}/photos/-`
-          patchOps.push({ op: 'add', path, value: photoVal })
-        } else {
-          const path = `/check_categories/${catIndex}/items/${itemIndex}/photos`
-          patchOps.push({ op: 'add', path, value: [photoVal] })
-        }
+      const loc = resolvePhotosContainer(origin.value, rec.categoryId, rec.itemId, rec.level, rec.sectorId, rec.cellId)
+      if (!loc) continue
+      const base = loc.photosPathBase
+      const photoVal = { ...rec.photo }
+      delete photoVal.pending
+      if (!addGroups.has(base)) {
+        addGroups.set(base, { hasArray: Array.isArray(loc.container?.photos), photos: [] })
+      }
+      addGroups.get(base).photos.push(photoVal)
+    }
+    for (const [base, info] of addGroups.entries()) {
+      if (info.hasArray) {
+        info.photos.forEach((p) => patchOps.push({ op: 'add', path: `${base}/-`, value: p }))
+      } else if (info.photos.length) {
+        patchOps.push({ op: 'add', path: base, value: info.photos })
       }
     }
+
+    const removeGroups = new Map()
     for (const rec of photoDeletes.value) {
-      const catIndex = (origin.value?.check_categories || []).findIndex(x => String(x.category_id) === String(rec.categoryId))
-      const itemIndex = (origin.value?.check_categories?.[catIndex]?.items || []).findIndex(x => String(x.item_id) === String(rec.itemId))
-      if (catIndex >= 0 && itemIndex >= 0) {
-        const path = `/check_categories/${catIndex}/items/${itemIndex}/photos/${rec.photoIndex}`
-        patchOps.push({ op: 'remove', path })
-      }
+      const loc = resolvePhotosContainer(origin.value, rec.categoryId, rec.itemId, rec.level, rec.sectorId, rec.cellId)
+      if (!loc) continue
+      const photos = Array.isArray(loc.container?.photos) ? loc.container.photos : []
+      const idx = photos.findIndex((p) => String(p.id) === String(rec.photoId))
+      if (idx < 0) continue
+      const base = loc.photosPathBase
+      if (!removeGroups.has(base)) removeGroups.set(base, [])
+      removeGroups.get(base).push(idx)
+    }
+    for (const [base, indexes] of removeGroups.entries()) {
+      indexes
+        .filter((x) => Number.isInteger(x))
+        .sort((a, b) => b - a)
+        .forEach((idx) => patchOps.push({ op: 'remove', path: `${base}/${idx}` }))
     }
 
     if (!patchOps.length) {
@@ -341,11 +412,29 @@ async function openHistory() {
   }
 }
 
-async function onUploadPhoto({ categoryId, itemId, file }) {
+async function onUploadPhoto(payload) {
   if (!editing.value) return
   try {
-    const res = await ssvArchivesApi.uploadTempPhoto(id, { categoryId, itemId, file })
-    photoAdds.value.push({ categoryId, itemId, photo: { ...res, pending: true } })
+    const { categoryId, itemId, file, fieldId: rawFieldId, level: rawLevel, sectorId: rawSectorId, cellId: rawCellId } = payload || {}
+    const fieldId = normalizeId(rawFieldId)
+    const level = normalizeLevel(rawLevel)
+    const sectorId = normalizeId(rawSectorId)
+    const cellId = normalizeId(rawCellId)
+
+    const res = await ssvArchivesApi.uploadTempPhoto(id, {
+      category_id: categoryId,
+      item_id: itemId,
+      file,
+      field_id: fieldId || undefined,
+      level,
+      sector_id: sectorId || undefined,
+      cell_id: cellId || undefined,
+    })
+    const photo = { ...res, field_id: fieldId || res.field_id || null, pending: true }
+    const rec = { categoryId, itemId, level, photo }
+    if (level === 'sector' && sectorId) rec.sectorId = sectorId
+    if (level === 'cell' && cellId) rec.cellId = cellId
+    photoAdds.value.push(rec)
     applyLocalEdits()
     ElMessage.success('已上传，保存后生效')
   } catch (e) {
@@ -354,23 +443,38 @@ async function onUploadPhoto({ categoryId, itemId, file }) {
   }
 }
 
-function onDeletePhoto({ categoryId, itemId, photoId }) {
+async function onDeletePhoto(payload) {
   if (!editing.value) return
-  const catIdx = (origin.value?.check_categories || []).findIndex(x => String(x.category_id) === String(categoryId))
-  const itemIdx = (origin.value?.check_categories?.[catIdx]?.items || []).findIndex(x => String(x.item_id) === String(itemId))
-  const photos = origin.value?.check_categories?.[catIdx]?.items?.[itemIdx]?.photos || []
-  const idx = photos.findIndex(p => String(p.id) === String(photoId))
-  if (idx >= 0) {
-    photoDeletes.value.push({ categoryId, itemId, photoId, photoIndex: idx })
-    applyLocalEdits()
-  } else {
-    // 如果是刚刚新增未保存的，直接从待新增列表移除
-    const pendingIdx = photoAdds.value.findIndex(p => String(p.photo.id) === String(photoId))
-    if (pendingIdx >= 0) {
-      photoAdds.value.splice(pendingIdx, 1)
-      applyLocalEdits()
-    }
+  const { categoryId, itemId, level, sectorId, cellId, photoId, photo } = payload || {}
+  try {
+    await ElMessageBox.confirm('确认删除该照片？', '提示', { type: 'warning' })
+  } catch (e) {
+    return
   }
+
+  const pendingIdx = photoAdds.value.findIndex((x) => String(x.photo?.id) === String(photoId))
+  const loc = resolvePhotosContainer(content.value, categoryId, itemId, level, sectorId, cellId)
+  if (loc) {
+    const photos = Array.isArray(loc.container.photos) ? loc.container.photos : []
+    const idx = photos.findIndex((p) => String(p.id) === String(photoId))
+    if (idx >= 0) photos.splice(idx, 1)
+  }
+  if (pendingIdx >= 0 || photo?.pending) {
+    if (pendingIdx >= 0) photoAdds.value.splice(pendingIdx, 1)
+    applyLocalEdits()
+    ElMessage.success('已移除未保存的照片')
+    return
+  }
+
+  const del = { categoryId, itemId, level: normalizeLevel(level), photoId }
+  const sid = normalizeId(sectorId)
+  const cid = normalizeId(cellId)
+  if (del.level === 'sector' && sid) del.sectorId = sid
+  if (del.level === 'cell' && cid) del.cellId = cid
+  if (!photoDeletes.value.find((x) => String(x.photoId) === String(photoId))) {
+    photoDeletes.value.push(del)
+  }
+  applyLocalEdits()
 }
 
 onMounted(load)
