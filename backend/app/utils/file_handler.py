@@ -6,6 +6,103 @@ from fastapi import UploadFile
 from PIL import Image, ImageDraw, ImageFont
 import aiofiles
 
+
+class ImageValidationError(ValueError):
+    """图片文件校验失败。"""
+
+
+def _calc_white_ratio_rgb(patch: Image.Image, threshold: int = 250) -> float:
+    """计算 patch 中“近白色”像素占比。patch 应为 RGB 模式。"""
+
+    if patch.mode != "RGB":
+        patch = patch.convert("RGB")
+
+    data = list(patch.getdata())
+    total = len(data)
+    if total == 0:
+        return 0.0
+
+    white = 0
+    for r, g, b in data:
+        if r >= threshold and g >= threshold and b >= threshold:
+            white += 1
+
+    return white / total
+
+
+def _is_suspicious_blank_bottom(img: Image.Image) -> bool:
+    """
+    经验性检测：底部区域大面积近白，而中间区域不是近白，疑似 canvas 未完整渲染导致“下半截发白”。
+    """
+
+    if not img or not getattr(img, "size", None):
+        return False
+
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return False
+
+    patch = min(64, w, h)
+    if patch < 8:
+        return False
+
+    # 取底部三块 + 中间一块，降低误判（例如整张都是白纸）
+    y_bottom = h - patch
+    y_mid = max(0, h // 2 - patch // 2)
+    x_mid = max(0, w // 2 - patch // 2)
+
+    boxes = {
+        "bottom_left": (0, y_bottom, patch, h),
+        "bottom_mid": (x_mid, y_bottom, x_mid + patch, h),
+        "bottom_right": (w - patch, y_bottom, w, h),
+        "mid": (x_mid, y_mid, x_mid + patch, y_mid + patch),
+    }
+
+    img_rgb = img.convert("RGB") if img.mode != "RGB" else img
+
+    ratios = {}
+    for key, box in boxes.items():
+        try:
+            patch_img = img_rgb.crop(box)
+            ratios[key] = _calc_white_ratio_rgb(patch_img)
+        except Exception:
+            return False
+
+    bottom_ok = (
+        ratios["bottom_left"] >= 0.985
+        and ratios["bottom_mid"] >= 0.985
+        and ratios["bottom_right"] >= 0.985
+    )
+    mid_not_white = ratios["mid"] <= 0.95
+
+    return bool(bottom_ok and mid_not_white)
+
+
+def validate_image_on_disk(image_path: str, *, detect_blank_bottom: bool = True) -> None:
+    """
+    校验图片文件是否可完整解码，并可选检测“下半截空白”异常。
+    失败会抛出 ImageValidationError。
+    """
+
+    if not image_path:
+        raise ImageValidationError("图片路径为空")
+
+    if not os.path.exists(image_path):
+        raise ImageValidationError("图片文件不存在")
+
+    try:
+        with Image.open(image_path) as img:
+            img.verify()
+
+        with Image.open(image_path) as img:
+            img.load()
+            if detect_blank_bottom and _is_suspicious_blank_bottom(img):
+                raise ImageValidationError("图片疑似未完整渲染（底部区域空白）")
+    except ImageValidationError:
+        raise
+    except Exception as e:
+        raise ImageValidationError(f"图片解码失败: {e}") from e
+
 async def save_uploaded_file(
     file: UploadFile, 
     category: str, 

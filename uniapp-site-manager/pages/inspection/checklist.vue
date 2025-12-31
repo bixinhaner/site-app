@@ -1876,7 +1876,7 @@
 						const skipLocation = watermarkOptions && watermarkOptions.skipLocation === true
 						const localUploadNote = watermarkOptions && watermarkOptions.localUploadNote
 					
-					// 先获取图片信息并设置canvas尺寸
+					// 先获取图片信息
 					const imageInfo = await new Promise((resolve, reject) => {
 						uni.getImageInfo({
 							src: imagePath,
@@ -1884,17 +1884,12 @@
 							fail: reject
 						})
 					})
-					
-					// 更新canvas尺寸
-					canvasWidth.value = imageInfo.width
-					canvasHeight.value = imageInfo.height
-					console.log('设置Canvas尺寸:', imageInfo.width, imageInfo.height)
-					
-					// 等待DOM更新
-					await new Promise(resolve => setTimeout(resolve, 100))
-					
-						// 导入增强水印工具
-						const { watermarkTool } = await import('@/utils/watermark.js')
+					const originWidth = imageInfo.width
+					const originHeight = imageInfo.height
+					const originLongEdge = Math.max(originWidth, originHeight)
+
+					// 导入增强水印工具
+					const { watermarkTool } = await import('@/utils/watermark.js')
 					
 					// 准备水印数据，尝试多种站点名称获取方式
 					const siteName = inspectionData.value?.site_name || 
@@ -1924,26 +1919,84 @@
 						最终水印数据: watermarkData
 					})
 
-						let watermarkedPath = null
-						if (skipLocation) {
-							// 本地/相册上传且不携带定位信息：不调用定位与逆地理，仅添加标注水印
-							watermarkedPath = await watermarkTool.addWatermark(imagePath, {
-								...watermarkData,
-								localUploadNote: localUploadNote || $t('messages.localUploadPhotoWatermark'),
-								timestamp: formatWatermarkTimestamp()
-							}, 'watermarkCanvas')
-						} else {
-							// 使用新的增强水印功能，使用页面中的canvas，并复用已获取的GPS
-							watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, watermarkData, {
-								showAddressDetails: true,
-								showPOI: false,
-								canvasId: 'watermarkCanvas',  // 使用页面中已有的canvas
-								gpsOverride: gpsExtra
+					// Android canvas 大图偶发渲染不全：优先保持原尺寸（但不超过4K），失败则自动降级尺寸重试
+					const candidateEdges = []
+					const firstEdge = Math.min(4096, originLongEdge)
+					candidateEdges.push(firstEdge)
+					if (firstEdge > 2560) candidateEdges.push(2560)
+					if (firstEdge > 2048) candidateEdges.push(2048)
+					const uniqueEdges = [...new Set(candidateEdges.filter(Boolean))]
+
+					const buildTargetSize = (maxEdge) => {
+						const edge = Number(maxEdge || 0)
+						const scale = (originLongEdge > edge && edge > 0) ? (edge / originLongEdge) : 1
+						return {
+							width: Math.max(1, Math.round(originWidth * scale)),
+							height: Math.max(1, Math.round(originHeight * scale)),
+							maxEdge: edge,
+							scale,
+						}
+					}
+
+					const fixedTimestamp = formatWatermarkTimestamp()
+					let lastError = null
+					for (const edge of uniqueEdges) {
+						const target = buildTargetSize(edge)
+
+						// 更新canvas尺寸
+						canvasWidth.value = target.width
+						canvasHeight.value = target.height
+						console.log('设置Canvas尺寸:', {
+							origin: { width: originWidth, height: originHeight },
+							target: { width: target.width, height: target.height, maxEdge: target.maxEdge, scale: target.scale }
+						})
+
+						// 等待DOM更新
+						await new Promise(resolve => setTimeout(resolve, 120))
+
+						try {
+							let watermarkedPath = null
+							if (skipLocation) {
+								// 本地/相册上传且不携带定位信息：不调用定位与逆地理，仅添加标注水印
+								watermarkedPath = await watermarkTool.addWatermark(imagePath, {
+									...watermarkData,
+									localUploadNote: localUploadNote || $t('messages.localUploadPhotoWatermark'),
+									timestamp: fixedTimestamp
+								}, 'watermarkCanvas', {
+									renderWidth: target.width,
+									renderHeight: target.height,
+									maxEdge: target.maxEdge,
+									validateRender: true,
+									postDrawDelayMs: 30,
+								})
+							} else {
+								// 使用新的增强水印功能，使用页面中的canvas，并复用已获取的GPS
+								watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, watermarkData, {
+									showAddressDetails: true,
+									showPOI: false,
+									canvasId: 'watermarkCanvas',  // 使用页面中已有的canvas
+									gpsOverride: gpsExtra,
+									renderWidth: target.width,
+									renderHeight: target.height,
+									maxEdge: target.maxEdge,
+									validateRender: true,
+									postDrawDelayMs: 30,
+								})
+							}
+
+							console.log('增强水印添加完成:', watermarkedPath)
+							return watermarkedPath
+						} catch (e) {
+							lastError = e
+							console.warn('水印生成失败，尝试降级尺寸:', {
+								maxEdge: target.maxEdge,
+								target: { width: target.width, height: target.height },
+								error: e?.message || e
 							})
 						}
-					
-					console.log('增强水印添加完成:', watermarkedPath)
-					return watermarkedPath
+					}
+
+					throw lastError || new Error('水印添加失败')
 					
 				} catch (error) {
 					console.error('增强水印失败，使用原方案:', error)
@@ -1961,12 +2014,17 @@
 							success: (imageInfo) => {
 								const imgWidth = imageInfo.width
 								const imgHeight = imageInfo.height
+								const longEdge = Math.max(imgWidth, imgHeight)
+								const maxEdge = Math.min(4096, longEdge)
+								const scale = (longEdge > maxEdge && maxEdge > 0) ? (maxEdge / longEdge) : 1
+								const outW = Math.max(1, Math.round(imgWidth * scale))
+								const outH = Math.max(1, Math.round(imgHeight * scale))
 								
 								// 更新canvas尺寸
-								canvasWidth.value = imgWidth
-								canvasHeight.value = imgHeight
+								canvasWidth.value = outW
+								canvasHeight.value = outH
 								
-								console.log('兜底方案更新Canvas尺寸:', imgWidth, imgHeight)
+								console.log('兜底方案更新Canvas尺寸:', { origin: { imgWidth, imgHeight }, target: { outW, outH, scale } })
 								
 								// 等待DOM更新后再绘制
 								setTimeout(() => {
@@ -1974,7 +2032,7 @@
 									const ctx = uni.createCanvasContext('watermarkCanvas')
 									
 									// 设置canvas尺寸并绘制图片
-									ctx.drawImage(imagePath, 0, 0, imgWidth, imgHeight)
+									ctx.drawImage(imagePath, 0, 0, outW, outH)
 								
 								// 添加水印文字
 								const ts = formatWatermarkTimestamp()
@@ -1999,8 +2057,8 @@
 									const boxPaddingTop = 18
 									const boxPaddingBottom = 18
 									const boxHeight = watermarkText.length * lineHeight + boxPaddingTop + boxPaddingBottom
-									const boxY = Math.max(10, imgHeight - boxHeight - 10)
-									ctx.fillRect(10, boxY, imgWidth - 20, boxHeight)
+									const boxY = Math.max(10, outH - boxHeight - 10)
+									ctx.fillRect(10, boxY, outW - 20, boxHeight)
 									
 									ctx.setFillStyle('#ffffff')
 									ctx.setFontSize(18)
@@ -2014,8 +2072,8 @@
 									ctx.draw(false, () => {
 										uni.canvasToTempFilePath({
 											canvasId: 'watermarkCanvas',
-											destWidth: imgWidth,
-											destHeight: imgHeight,
+											destWidth: outW,
+											destHeight: outH,
 											success: (canvasRes) => {
 												console.log('兜底水印处理成功:', canvasRes.tempFilePath)
 												resolve(canvasRes.tempFilePath)

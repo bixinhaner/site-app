@@ -31,7 +31,12 @@ from app.schemas.inspection_enhanced import (
 )
 from app.api.auth import get_current_user
 from app.models.work_order import WorkOrder, WorkOrderTypeEnum
-from app.utils.file_handler import save_uploaded_file, generate_watermark
+from app.utils.file_handler import (
+    ImageValidationError,
+    generate_watermark,
+    save_uploaded_file,
+    validate_image_on_disk,
+)
 from app.utils.gps_utils import reverse_geocode, validate_gps_accuracy
 from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.cell_generator import CellGenerator
@@ -1106,6 +1111,23 @@ async def upload_inspection_photo(
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "inspector": current_user.full_name or current_user.username
         }
+
+    # 兜底校验：图片必须可完整解码；并检测“下半截空白”异常（Android canvas 偶发）
+    try:
+        validate_image_on_disk(watermarked_path, detect_blank_bottom=True)
+    except ImageValidationError as e:
+        print(f"图片校验失败，拒收上传: {e}. path={watermarked_path}")
+        # 清理落盘文件，避免脏数据长期占用空间
+        for p in {file_path, watermarked_path}:
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception as cleanup_err:
+                print(f"清理失败: {p}, err={cleanup_err}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
     
     # 计算文件哈希
     file_hash = calculate_file_hash(watermarked_path)
@@ -1276,6 +1298,22 @@ async def replace_inspection_photo(
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "inspector": current_user.full_name or current_user.username
         }
+
+    # 兜底校验：图片必须可完整解码；并检测“下半截空白”异常（Android canvas 偶发）
+    try:
+        validate_image_on_disk(watermarked_path, detect_blank_bottom=True)
+    except ImageValidationError as e:
+        print(f"图片校验失败，拒收上传: {e}. path={watermarked_path}")
+        for p in {file_path, watermarked_path}:
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception as cleanup_err:
+                print(f"清理失败: {p}, err={cleanup_err}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
     
     file_hash = calculate_file_hash(watermarked_path)
     address = await reverse_geocode(latitude, longitude)
@@ -1448,6 +1486,20 @@ async def batch_inspection_photo_operations(
                             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                             "inspector": current_user.full_name or current_user.username
                         }
+
+                    # 兜底校验：图片必须可完整解码；并检测“下半截空白”异常（Android canvas 偶发）
+                    try:
+                        validate_image_on_disk(watermarked_path, detect_blank_bottom=True)
+                    except ImageValidationError as e:
+                        print(f"批量操作：图片校验失败，跳过本次replace: {e}. path={watermarked_path}")
+                        for p in {file_path, watermarked_path}:
+                            try:
+                                if p and os.path.exists(p):
+                                    os.remove(p)
+                            except Exception as cleanup_err:
+                                print(f"批量操作：清理失败: {p}, err={cleanup_err}")
+                        results.append({"index": i, "action": "replace", "success": False, "error": str(e)})
+                        continue
                     
                     file_hash = calculate_file_hash(watermarked_path)
                     address = await reverse_geocode(latitude, longitude)
@@ -1570,6 +1622,20 @@ async def batch_inspection_photo_operations(
                             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                             "inspector": current_user.full_name or current_user.username
                         }
+
+                    # 兜底校验：图片必须可完整解码；并检测“下半截空白”异常（Android canvas 偶发）
+                    try:
+                        validate_image_on_disk(watermarked_path, detect_blank_bottom=True)
+                    except ImageValidationError as e:
+                        print(f"批量操作：图片校验失败，跳过本次add: {e}. path={watermarked_path}")
+                        for p in {file_path, watermarked_path}:
+                            try:
+                                if p and os.path.exists(p):
+                                    os.remove(p)
+                            except Exception as cleanup_err:
+                                print(f"批量操作：清理失败: {p}, err={cleanup_err}")
+                        results.append({"index": i, "action": "add", "success": False, "error": str(e)})
+                        continue
                     
                     file_hash = calculate_file_hash(watermarked_path)
                     address = await reverse_geocode(latitude, longitude)

@@ -46,20 +46,156 @@ export class WatermarkTool {
     }
   }
 
+  _sleep(ms) {
+    const delay = Number(ms || 0)
+    if (!Number.isFinite(delay) || delay <= 0) return Promise.resolve()
+    return new Promise((resolve) => setTimeout(resolve, delay))
+  }
+
+  _calcRenderSize(imageInfo, options = {}) {
+    const srcW = Number(imageInfo?.width || 0)
+    const srcH = Number(imageInfo?.height || 0)
+    if (!Number.isFinite(srcW) || !Number.isFinite(srcH) || srcW <= 0 || srcH <= 0) {
+      return { width: srcW, height: srcH, scale: 1 }
+    }
+
+    const optW = Number(options.renderWidth || 0)
+    const optH = Number(options.renderHeight || 0)
+    if (Number.isFinite(optW) && Number.isFinite(optH) && optW > 0 && optH > 0) {
+      const scaleW = optW / srcW
+      const scaleH = optH / srcH
+      const scale = Math.min(scaleW, scaleH)
+      return { width: Math.round(optW), height: Math.round(optH), scale }
+    }
+
+    const maxEdge = Number(options.maxEdge || 0) || 4096
+    const longEdge = Math.max(srcW, srcH)
+    if (!Number.isFinite(maxEdge) || maxEdge <= 0 || longEdge <= maxEdge) {
+      return { width: srcW, height: srcH, scale: 1 }
+    }
+
+    const scale = maxEdge / longEdge
+    return {
+      width: Math.max(1, Math.round(srcW * scale)),
+      height: Math.max(1, Math.round(srcH * scale)),
+      scale,
+    }
+  }
+
+  async _getCanvasImageData(canvasId, x, y, width, height) {
+    if (typeof uni?.canvasGetImageData !== 'function') {
+      return null
+    }
+
+    return await new Promise((resolve, reject) => {
+      uni.canvasGetImageData({
+        canvasId,
+        x,
+        y,
+        width,
+        height,
+        success: resolve,
+        fail: reject,
+      })
+    })
+  }
+
+  _calcWhiteRatio(imageData, threshold = 250) {
+    const data = imageData?.data
+    if (!data || typeof data.length !== 'number' || data.length === 0) return 0
+
+    const t = Number(threshold)
+    const th = Number.isFinite(t) ? t : 250
+
+    let white = 0
+    const total = Math.floor(data.length / 4)
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+      const a = data[i + 3]
+      if (a >= 250 && r >= th && g >= th && b >= th) {
+        white += 1
+      }
+    }
+    return total > 0 ? white / total : 0
+  }
+
+  async _assertCanvasRenderOk(canvasId, width, height, options = {}) {
+    // 默认开启；如遇兼容问题可传 validateRender=false 关闭
+    if (options && options.validateRender === false) return
+    if (typeof uni?.canvasGetImageData !== 'function') return
+
+    const w = Math.floor(Number(width || 0))
+    const h = Math.floor(Number(height || 0))
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return
+
+    const patch = Math.min(32, w, h)
+    if (patch < 8) return
+
+    const xMid = Math.max(0, Math.floor(w / 2 - patch / 2))
+    const yMid = Math.max(0, Math.floor(h / 2 - patch / 2))
+    const yBottom = Math.max(0, h - patch)
+    const xLeft = 0
+    const xRight = Math.max(0, w - patch)
+
+    try {
+      const mid = await this._getCanvasImageData(canvasId, xMid, yMid, patch, patch)
+      const bottomLeft = await this._getCanvasImageData(canvasId, xLeft, yBottom, patch, patch)
+      const bottomMid = await this._getCanvasImageData(canvasId, xMid, yBottom, patch, patch)
+      const bottomRight = await this._getCanvasImageData(canvasId, xRight, yBottom, patch, patch)
+
+      const midWhite = this._calcWhiteRatio(mid)
+      const b1 = this._calcWhiteRatio(bottomLeft)
+      const b2 = this._calcWhiteRatio(bottomMid)
+      const b3 = this._calcWhiteRatio(bottomRight)
+
+      const bottomAllWhite = b1 >= 0.985 && b2 >= 0.985 && b3 >= 0.985
+      const midNotWhite = midWhite <= 0.95
+
+      if (bottomAllWhite && midNotWhite) {
+        throw new Error(
+          `Canvas渲染疑似不完整（底部区域空白），midWhite=${midWhite.toFixed(3)}, bottomWhite=${[b1, b2, b3]
+            .map(v => v.toFixed(3))
+            .join('/')}`
+        )
+      }
+    } catch (e) {
+      // 对“底部空白”的命中必须阻断（用于触发降级重试）；其余 canvas API 异常默认不阻断，避免兼容性问题影响业务
+      const msg = e && (e.message || String(e))
+      if (typeof msg === 'string' && msg.includes('Canvas渲染疑似不完整')) {
+        throw e
+      }
+      const strict = options && options.validateRenderStrict === true
+      if (strict) throw e
+      console.warn('[watermark] canvas渲染校验跳过/失败:', e)
+    }
+  }
+
   /**
    * 为照片添加水印
    * @param {string} imagePath - 原始照片路径
    * @param {Object} watermarkData - 水印数据
    * @param {string} canvasId - 可选的canvas ID，如果不提供则创建新的
+   * @param {Object} options - 可选配置（如 maxEdge/renderWidth/renderHeight/validateRender）
    * @returns {Promise<string>} - 带水印的照片路径
    */
-  async addWatermark(imagePath, watermarkData, canvasId = null) {
+  async addWatermark(imagePath, watermarkData, canvasId = null, options = {}) {
     try {
       console.log('开始添加水印:', { imagePath, watermarkData })
       
       // 获取图片信息
-      const imageInfo = await this.getImageInfo(imagePath)
-      console.log('图片信息:', imageInfo)
+      const originImageInfo = await this.getImageInfo(imagePath)
+      const render = this._calcRenderSize(originImageInfo, options)
+      const imageInfo = {
+        ...originImageInfo,
+        width: render.width,
+        height: render.height,
+        originalWidth: originImageInfo.width,
+        originalHeight: originImageInfo.height,
+        scale: render.scale,
+      }
+      console.log('图片信息:', { ...imageInfo, origin: { width: originImageInfo.width, height: originImageInfo.height } })
       
       let canvas
       if (canvasId) {
@@ -82,9 +218,13 @@ export class WatermarkTool {
       
       // 绘制水印
       await this.drawWatermark(canvas, watermarkData, imageInfo)
+
+      // 某些 Android 机型大图绘制存在“回调已触发但底部未渲染”的偶发现象，做轻量校验 + 可选延迟
+      await this._sleep(options.postDrawDelayMs || 0)
+      await this._assertCanvasRenderOk(canvas.canvasId, imageInfo.width, imageInfo.height, options)
       
       // 保存带水印的图片
-      const watermarkedPath = await this.saveCanvasToFile(canvas, imageInfo)
+      const watermarkedPath = await this.saveCanvasToFile(canvas, imageInfo, options)
       
       console.log('水印添加完成:', watermarkedPath)
       return watermarkedPath
@@ -423,20 +563,23 @@ export class WatermarkTool {
   /**
    * 保存canvas为文件
    */
-  async saveCanvasToFile(canvas, imageInfo) {
+  async saveCanvasToFile(canvas, imageInfo, options = {}) {
     return new Promise((resolve, reject) => {
       console.log('开始保存Canvas:', {
         canvasId: canvas.canvasId,
         width: imageInfo?.width || canvas.width,
         height: imageInfo?.height || canvas.height
       })
+
+      const quality = typeof options.quality === 'number' ? options.quality : 0.9
+      const fileType = options.fileType || 'jpg'
       
       uni.canvasToTempFilePath({
         canvasId: canvas.canvasId,
         destWidth: imageInfo?.width || canvas.width,
         destHeight: imageInfo?.height || canvas.height,
-        quality: 0.9,
-        fileType: 'jpg',
+        quality,
+        fileType,
         success: (res) => {
           console.log('Canvas保存成功:', res.tempFilePath)
           if (res.tempFilePath) {
@@ -643,7 +786,7 @@ export class WatermarkTool {
       console.log('增强的水印数据:', enhancedWatermarkData)
       
       // 添加水印
-      const result = await this.addWatermark(imagePath, enhancedWatermarkData, options.canvasId)
+      const result = await this.addWatermark(imagePath, enhancedWatermarkData, options.canvasId, options)
       console.log('增强水印添加完成:', result)
       
       return result
@@ -667,7 +810,7 @@ export class WatermarkTool {
         ...watermarkData,
         gps: failedGpsInfo,
         timestamp: watermarkData.timestamp || formatWatermarkTimestamp()
-      }, options.canvasId)
+      }, options.canvasId, options)
     }
   }
 

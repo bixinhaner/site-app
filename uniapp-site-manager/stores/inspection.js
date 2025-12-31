@@ -180,8 +180,20 @@ export const useInspectionStore = defineStore('inspection', () => {
 				console.log('照片上传成功:', data)
 				return { success: true, data }
 			} else {
-				console.error('照片上传失败，状态码:', response.statusCode, '响应:', response.data)
-				throw new Error(`上传照片失败，状态码: ${response.statusCode}`)
+				let detail = ''
+				try {
+					const payload = JSON.parse(response.data || '{}')
+					detail = payload?.detail || payload?.message || ''
+				} catch (e) {
+					// ignore
+				}
+				console.error('照片上传失败，状态码:', response.statusCode, '响应:', response.data, 'detail:', detail)
+				return {
+					success: false,
+					statusCode: response.statusCode,
+					error: detail || `上传照片失败，状态码: ${response.statusCode}`,
+					raw: response.data
+				}
 			}
 		} catch (error) {
 			console.error('Upload photo error:', error)

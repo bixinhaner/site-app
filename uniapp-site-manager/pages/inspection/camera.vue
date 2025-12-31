@@ -857,33 +857,102 @@ export default {
 			// 使用新的增强水印功能，自动获取GPS和地址信息
 			// 获取图片信息并设置canvas
 			const imageInfo = await getImageInfo(imagePath)
+
+			const originWidth = imageInfo.width
+			const originHeight = imageInfo.height
+			const originLongEdge = Math.max(originWidth, originHeight)
 			
-			// 设置canvas尺寸
-			canvasWidth.value = imageInfo.width
-			canvasHeight.value = imageInfo.height
+			// 优先用定位策略取一次（含地址）；失败则使用页面实时GPS（只带坐标），避免多次重试时重复走网络
+			let gpsOverride = null
+			try {
+				const result = await getLocationWithAddressStrategy()
+				if (result && result.success && result.data) {
+					gpsOverride = result
+				}
+			} catch (e) {
+				// ignore
+			}
+			if (!gpsOverride) {
+				gpsOverride = {
+					latitude: gpsInfo.value?.latitude || 0,
+					longitude: gpsInfo.value?.longitude || 0,
+					accuracy: gpsInfo.value?.accuracy || 0,
+					address: gpsInfo.value?.address || ''
+				}
+			}
+
 			canvasId.value = 'watermark-canvas-' + Date.now()
 			
 			console.log('设置Camera页面Canvas:', {
 				canvasId: canvasId.value,
-				width: canvasWidth.value,
-				height: canvasHeight.value
+				origin: { width: originWidth, height: originHeight }
 			})
-			
-			// 等待canvas元素渲染
-			await new Promise(resolve => setTimeout(resolve, 100))
-			
-			const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
-				inspector: userStore.userInfo?.username || t('messages.unknownInspector'),
-				checkItem: checkItem.value?.item_name || t('inspection.checkItem'),
-				siteName: currentSite.value?.site_name || t('site.unknownSite')
-			}, {
-				showAddressDetails: true,  // 显示详细地址信息
-				showPOI: false,           // 不显示POI信息
-				canvasId: canvasId.value  // 使用页面中的canvas
-			})
-			
-			console.log('GPS地址水印添加完成:', watermarkedPath)
-			return watermarkedPath
+
+			// Android canvas 大图偶发渲染不全：优先保持原尺寸（但不超过4K），失败则自动降级尺寸重试
+			const candidateEdges = []
+			const firstEdge = Math.min(4096, originLongEdge)
+			candidateEdges.push(firstEdge)
+			if (firstEdge > 2560) candidateEdges.push(2560)
+			if (firstEdge > 2048) candidateEdges.push(2048)
+			const uniqueEdges = [...new Set(candidateEdges.filter(Boolean))]
+
+			const buildTargetSize = (maxEdge) => {
+				const edge = Number(maxEdge || 0)
+				const scale = (originLongEdge > edge && edge > 0) ? (edge / originLongEdge) : 1
+				return {
+					width: Math.max(1, Math.round(originWidth * scale)),
+					height: Math.max(1, Math.round(originHeight * scale)),
+					maxEdge: edge,
+					scale,
+				}
+			}
+
+			let lastError = null
+			for (const edge of uniqueEdges) {
+				const target = buildTargetSize(edge)
+
+				// 设置canvas尺寸
+				canvasWidth.value = target.width
+				canvasHeight.value = target.height
+
+				console.log('Camera水印Canvas尺寸:', {
+					origin: { width: originWidth, height: originHeight },
+					target: { width: target.width, height: target.height, maxEdge: target.maxEdge, scale: target.scale }
+				})
+
+				// 等待canvas元素渲染
+				await new Promise(resolve => setTimeout(resolve, 120))
+
+				try {
+					const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
+						inspector: userStore.userInfo?.username || t('messages.unknownInspector'),
+						checkItem: checkItem.value?.item_name || t('inspection.checkItem'),
+						siteName: currentSite.value?.site_name || t('site.unknownSite')
+					}, {
+						showAddressDetails: true,  // 显示详细地址信息
+						showPOI: false,           // 不显示POI信息
+						canvasId: canvasId.value,  // 使用页面中的canvas
+						gpsOverride,
+						renderWidth: target.width,
+						renderHeight: target.height,
+						maxEdge: target.maxEdge,
+						validateRender: true,
+						postDrawDelayMs: 30,
+					})
+
+					console.log('GPS地址水印添加完成:', watermarkedPath)
+					return watermarkedPath
+				} catch (e) {
+					lastError = e
+					console.warn('Camera水印生成失败，尝试降级尺寸:', {
+						maxEdge: target.maxEdge,
+						target: { width: target.width, height: target.height },
+						error: e?.message || e
+					})
+				}
+			}
+
+			throw lastError || new Error('水印添加失败')
 			
 		} catch (error) {
 			console.error('原生插件水印添加失败:', error)
