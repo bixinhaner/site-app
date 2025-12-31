@@ -490,17 +490,30 @@
 	    </div>
 	  </div>
 
-	  <!-- 预览准备进度（下载/缓存） -->
-	  <div v-if="previewPreparing" class="preview-loading-overlay" @click.stop>
-	    <div class="preview-loading-card" @click.stop>
-	      <div class="preview-loading-title">加载中</div>
-	      <div class="preview-loading-sub">{{ previewProgress.done }}/{{ previewProgress.total }}</div>
-	      <div class="preview-loading-bar">
-	        <div class="preview-loading-bar-fill" :style="{ width: previewProgress.percent + '%' }"></div>
+	  <teleport to="body">
+	    <!-- 预览准备进度（下载/缓存）：非阻塞展示 -->
+	    <div v-if="previewPreparing" class="preview-loading-overlay">
+	      <div class="preview-loading-card">
+	        <div class="preview-loading-title">加载中</div>
+	        <div class="preview-loading-sub">{{ previewProgress.done }}/{{ previewProgress.total }}</div>
+	        <div class="preview-loading-bar">
+	          <div class="preview-loading-bar-fill" :style="{ width: previewProgress.percent + '%' }"></div>
+	        </div>
+	        <div class="preview-loading-percent">{{ previewProgress.percent }}%</div>
 	      </div>
-	      <div class="preview-loading-percent">{{ previewProgress.percent }}%</div>
 	    </div>
-	  </div>
+
+	    <!-- 当前大图未就绪：仍立即打开预览，但显示加载中/失败态 -->
+	    <div v-if="previewCurrentOverlay" class="preview-current-overlay">
+	      <div class="preview-current-card">
+	        <div class="preview-current-title">加载中</div>
+	        <div class="preview-current-sub">{{ previewCurrentOverlay.progress }}%</div>
+	        <div class="preview-loading-bar">
+	          <div class="preview-loading-bar-fill" :style="{ width: previewCurrentOverlay.progress + '%' }"></div>
+	        </div>
+	      </div>
+	    </div>
+	  </teleport>
 
 	  <!-- 全屏图片预览 -->
 	  <ElImageViewer
@@ -509,12 +522,13 @@
 	    :initial-index="previewIndex"
 	    :hide-on-click-modal="true"
 	    :teleported="true"
+	    @switch="onPreviewSwitch"
 	    @close="closePreview"
 	  />
 	</template>
 
 <script setup>
-import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElImageViewer, ElMessage } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import ProgressImage from '@/components/common/ProgressImage.vue'
@@ -818,6 +832,7 @@ const previewVisible = ref(false)
 const previewPreparing = ref(false)
 const previewUrls = ref([])
 const previewIndex = ref(0)
+const previewActiveIndex = ref(0)
 const previewProgress = reactive({
   total: 0,
   done: 0,
@@ -826,11 +841,60 @@ const previewProgress = reactive({
 
 let previewLoadToken = 0
 let previewObjectUrls = []
+const previewItemStates = ref([])
+
+const PREVIEW_PLACEHOLDER =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+
+const clampIndex = (value, len) => {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  if (len <= 0) return 0
+  return Math.min(Math.max(0, Math.floor(n)), len - 1)
+}
+
+const buildPriorityOrder = (len, startIndex) => {
+  const total = Math.max(0, Number(len) || 0)
+  if (total <= 0) return []
+  const start = clampIndex(startIndex, total)
+  const order = []
+  const pushed = new Set()
+  const push = (i) => {
+    if (i < 0 || i >= total) return
+    if (pushed.has(i)) return
+    pushed.add(i)
+    order.push(i)
+  }
+
+  push(start)
+  for (let offset = 1; pushed.size < total; offset++) {
+    push(start + offset)
+    push(start - offset)
+    if (offset > total) break
+  }
+  return order
+}
+
+const onPreviewSwitch = (idx) => {
+  previewActiveIndex.value = clampIndex(idx, previewUrls.value.length)
+}
+
+const previewCurrentOverlay = computed(() => {
+  if (!previewVisible.value) return null
+  const idx = clampIndex(previewActiveIndex.value, previewUrls.value.length)
+  const state = previewItemStates.value?.[idx]
+  if (!state) return { kind: 'loading', progress: 0 }
+  if (state.status === 'pending' || state.status === 'loading') {
+    return { kind: 'loading', progress: Math.min(100, Math.max(0, Number(state.progress) || 0)) }
+  }
+  return null
+})
 
 const cleanupPreviewObjectUrls = () => {
   previewObjectUrls.forEach((u) => revokeObjectUrl(u))
   previewObjectUrls = []
   previewUrls.value = []
+  previewItemStates.value = []
 }
 
 const closePreview = () => {
@@ -840,74 +904,103 @@ const closePreview = () => {
   previewProgress.total = 0
   previewProgress.done = 0
   previewProgress.percent = 0
+  previewActiveIndex.value = 0
   cleanupPreviewObjectUrls()
 }
 
-const openPhotoPreview = async (photos, startIndex = 0) => {
+const openPhotoPreview = (photos, startIndex = 0) => {
   const list = Array.isArray(photos) ? photos : []
   if (list.length === 0) return
 
   const token = ++previewLoadToken
+  const total = list.length
+  const initialIndex = clampIndex(startIndex, total)
+
   previewPreparing.value = true
-  previewProgress.total = list.length
+  previewProgress.total = total
   previewProgress.done = 0
   previewProgress.percent = 0
   cleanupPreviewObjectUrls()
 
+  const originalUrls = list.map((p) => fileUrl(p?.file_path))
+  previewUrls.value = originalUrls.map(() => PREVIEW_PLACEHOLDER)
+  previewItemStates.value = originalUrls.map(() => ({ status: 'pending', progress: 0 }))
+
+  previewIndex.value = initialIndex
+  previewActiveIndex.value = initialIndex
+  previewVisible.value = true
+
+  const queue = buildPriorityOrder(total, initialIndex)
+  const concurrency = Math.min(4, queue.length || 1)
+
+  let completed = 0
   let failed = 0
-  const urls = []
 
-  try {
-    for (let i = 0; i < list.length; i++) {
-      if (token !== previewLoadToken) return
-      const p = list[i]
-      const src = fileUrl(p?.file_path)
-      previewProgress.done = i
-      previewProgress.percent = 0
+  const markDone = () => {
+    completed += 1
+    previewProgress.done = completed
+    previewProgress.percent = Math.floor((completed / total) * 100)
+  }
 
-      const res = await loadImageBlob({
-        url: src,
-        onProgress: (percent) => {
-          if (token !== previewLoadToken) return
-          previewProgress.percent = percent
-        },
-      })
+  const loadOne = async (i) => {
+    if (token !== previewLoadToken) return
 
-      if (token !== previewLoadToken) return
-
-      if (res?.ok && res.blob) {
-        const objUrl = createObjectUrl(res.blob)
-        if (objUrl) {
-          previewObjectUrls.push(objUrl)
-          urls.push(objUrl)
-        } else {
-          failed += 1
-          urls.push(src)
-        }
-      } else {
-        failed += 1
-        urls.push(src)
-      }
-
-      previewProgress.done = i + 1
-      previewProgress.percent = 100
+    const src = originalUrls[i]
+    if (!src) {
+      previewItemStates.value[i] = { status: 'error', progress: 0 }
+      failed += 1
+      markDone()
+      return
     }
+
+    previewItemStates.value[i] = { status: 'loading', progress: 0 }
+
+    const res = await loadImageBlob({
+      url: src,
+      onProgress: (percent) => {
+        if (token !== previewLoadToken) return
+        const state = previewItemStates.value?.[i]
+        if (!state || state.status !== 'loading') return
+        state.progress = percent
+      },
+    })
 
     if (token !== previewLoadToken) return
 
-    previewUrls.value = urls.filter(Boolean)
-    previewIndex.value = Math.min(
-      Math.max(0, Number(startIndex) || 0),
-      Math.max(0, previewUrls.value.length - 1)
-    )
-    previewVisible.value = true
-
-    if (failed > 0) {
-      ElMessage.warning(`有 ${failed} 张图片加载失败，将尝试直接预览原始链接`)
+    if (res?.ok && res.blob) {
+      const objUrl = createObjectUrl(res.blob)
+      if (objUrl) {
+        previewObjectUrls.push(objUrl)
+        previewUrls.value[i] = objUrl
+        previewItemStates.value[i] = { status: 'ready', progress: 100 }
+        markDone()
+        return
+      }
     }
-  } finally {
-    if (token === previewLoadToken) previewPreparing.value = false
+
+    // 失败：仍尝试使用原始链接预览
+    failed += 1
+    previewUrls.value[i] = src
+    previewItemStates.value[i] = { status: 'error', progress: 0 }
+    markDone()
   }
+
+  const workers = Array.from({ length: concurrency }).map(async () => {
+    while (queue.length) {
+      if (token !== previewLoadToken) return
+      const i = queue.shift()
+      if (i === undefined) return
+      await loadOne(i)
+    }
+  })
+
+  Promise.all(workers).then(() => {
+    if (token !== previewLoadToken) return
+    previewProgress.done = total
+    previewProgress.percent = 100
+    previewPreparing.value = false
+    if (failed > 0) ElMessage.warning(`有 ${failed} 张图片加载失败，将尝试直接预览原始链接`)
+  })
 }
 
 onBeforeUnmount(() => {
@@ -983,16 +1076,14 @@ function dateDisplayFormat(type) {
 /* 预览准备进度 */
 .preview-loading-overlay {
   position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  z-index: 3000;
+  top: 12px;
+  right: 12px;
+  z-index: 4000;
+  pointer-events: none;
 }
 
 .preview-loading-card {
-  width: 280px;
+  width: 260px;
   border-radius: 12px;
   padding: 14px 16px;
   background: #fff;
@@ -1031,6 +1122,38 @@ function dateDisplayFormat(type) {
   font-size: 18px;
   font-weight: 800;
   color: #409eff;
+}
+
+.preview-current-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4001;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.preview-current-card {
+  width: 280px;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  text-align: center;
+}
+
+.preview-current-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.preview-current-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
 }
 
 .cat-title {

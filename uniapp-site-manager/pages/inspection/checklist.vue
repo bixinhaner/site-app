@@ -683,9 +683,9 @@
 			</view>
 		</view>
 
-		<!-- 大图预览准备中（缓存/下载） -->
-		<view class="preview-loading-overlay" v-if="previewPreparing" @click.stop>
-			<view class="preview-loading-card" @click.stop>
+		<!-- 大图预览准备中（缓存/下载）：非阻塞展示 -->
+		<view class="preview-loading-overlay" v-if="previewPreparing">
+			<view class="preview-loading-card">
 				<text class="preview-loading-title">{{ $t('common.loading') }}</text>
 				<text class="preview-loading-sub">{{ previewProgress.done }}/{{ previewProgress.total }}</text>
 				<view class="preview-loading-bar">
@@ -2259,49 +2259,14 @@
 		await cachePhotoIfNeeded(photo)
 	}
 
-	const preparePreviewUrls = async (photos) => {
+	const buildPreviewUrls = (photos) => {
 		const list = Array.isArray(photos) ? photos : []
-		const urls = []
-		let failed = 0
-
-		for (let i = 0; i < list.length; i++) {
-			const p = list[i]
-
-			previewProgress.value.done = i
-			previewProgress.value.percent = 0
-
-			// 本地临时图片直接用本地路径
-			if (!p?.id || !isRemotePhoto(p)) {
-				urls.push(getPhotoRemoteUrl(p))
-				previewProgress.value.done = i + 1
-				previewProgress.value.percent = 100
-				continue
-			}
-
-			const res = await ensurePhotoCached({
-				photoId: p.id,
-				remoteUrl: getPhotoRemoteUrl(p),
-				ctx: photoCacheCtx.value,
-				onProgress: (percent) => {
-					previewProgress.value.percent = percent
-				}
-			})
-
-			if (res?.ok && res.localPath) {
-				setPhotoReady(p, res.localPath)
-				urls.push(res.localPath)
-			} else {
-				failed += 1
-				setPhotoError(p, res?.error?.message || res?.reason || 'load_failed')
-				// 兜底：仍允许使用网络 URL 预览
-				urls.push(getPhotoRemoteUrl(p))
-			}
-
-			previewProgress.value.done = i + 1
-			previewProgress.value.percent = 100
-		}
-
-		return { urls, failed }
+		return list.map((p) => {
+			if (!p?.id || !isRemotePhoto(p)) return getPhotoRemoteUrl(p)
+			const key = getPhotoStateKey(p)
+			const s = key ? photoStateMap.value[key] : null
+			return (s?.status === 'ready' && s?.src) ? s.src : getPhotoRemoteUrl(p)
+		})
 	}
 
 	const openPreview = (urls, currentIndex) => {
@@ -2316,13 +2281,6 @@
 	}
 
 	const onPhotoTap = async (photo) => {
-		const status = getPhotoDisplayStatus(photo)
-		if (status === 'downloading') return
-		if (status === 'error') {
-			await cachePhotoIfNeeded(photo)
-			return
-		}
-
 		const photos = currentItem.value?.photos || []
 		if (!Array.isArray(photos) || photos.length === 0) return
 
@@ -2331,31 +2289,18 @@
 			(photo?.file_path && p?.file_path && String(p.file_path) === String(photo.file_path))
 		)
 
-		// 若全部已就绪，直接预览，避免弹层闪烁
-		const allReady = photos.every(p => {
-			if (!p?.id || !isRemotePhoto(p)) return true
-			const key = getPhotoStateKey(p)
-			const s = key ? photoStateMap.value[key] : null
-			return s?.status === 'ready' && !!s?.src
-		})
-		if (allReady) {
-			const urls = photos.map(p => (!p?.id || !isRemotePhoto(p)) ? getPhotoRemoteUrl(p) : (photoStateMap.value[getPhotoStateKey(p)]?.src || getPhotoRemoteUrl(p)))
-			openPreview(urls, currentIndex >= 0 ? currentIndex : 0)
-			return
+		// 若该图处于错误态，触发重试但不阻塞预览
+		const status = getPhotoDisplayStatus(photo)
+		if (status === 'error') {
+			cachePhotoIfNeeded(photo).catch(() => {})
 		}
 
-		previewPreparing.value = true
-		previewProgress.value.total = photos.length
-		previewProgress.value.done = 0
-		previewProgress.value.percent = 0
+		// 不再等待“全部缓存完成”才允许预览：已缓存的用本地路径，其它用网络 URL
+		const urls = buildPreviewUrls(photos)
+		openPreview(urls, currentIndex >= 0 ? currentIndex : 0)
 
-		try {
-			const { urls } = await preparePreviewUrls(photos)
-			openPreview(urls, currentIndex >= 0 ? currentIndex : 0)
-		} finally {
-			previewPreparing.value = false
-			previewProgress.value.percent = 0
-		}
+		// 继续后台缓存，不阻塞预览
+		primeCurrentItemPhotoCache().catch(() => {})
 	}
 	
 	const deletePhoto = async (photoOrIndex) => {
@@ -4275,26 +4220,22 @@
 	/* 大图预览准备中 */
 	.preview-loading-overlay {
 		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background: rgba(0, 0, 0, 0.55);
-		display: flex;
-		align-items: center;
-		justify-content: center;
+		top: 24rpx;
+		right: 24rpx;
 		z-index: 3000;
+		pointer-events: none;
 	}
 
 	.preview-loading-card {
-		width: 560rpx;
-		background: #ffffff;
+		width: 420rpx;
+		background: rgba(255, 255, 255, 0.96);
 		border-radius: 18rpx;
 		padding: 36rpx 32rpx;
 		box-sizing: border-box;
 		display: flex;
 		flex-direction: column;
 		gap: 18rpx;
+		box-shadow: 0 16rpx 40rpx rgba(0, 0, 0, 0.18);
 	}
 
 	.preview-loading-title {
