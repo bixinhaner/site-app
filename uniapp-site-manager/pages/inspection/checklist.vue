@@ -135,13 +135,13 @@
 							<text class="detail-value">{{ item.data_value.length }}{{ $t('inspection.itemsUnit') }}</text>
 						</view>
 						
-						<view class="detail-row" v-if="item.validation_result && !item.validation_result.valid">
-							<text class="detail-label">{{ $t('inspection.validationResult') }}:</text>
-							<text class="detail-value error">{{ item.validation_result.errors.join(', ') }}</text>
+							<view class="detail-row" v-if="item.validation_result && !item.validation_result.valid">
+								<text class="detail-label">{{ $t('inspection.validationResult') }}:</text>
+								<text class="detail-value error">{{ formatValidationErrors(item.validation_result) }}</text>
+							</view>
 						</view>
 					</view>
 				</view>
-			</view>
 			
 			<!-- 空状态 -->
 			<view class="empty-state" v-if="filteredCheckItems.length === 0">
@@ -608,15 +608,15 @@
 									{{ currentItem.validation_result.valid ? `✅ ${$t('inspection.pass')}` : `❌ ${$t('inspection.fail')}` }}
 								</text>
 							</view>
-							<view class="result-errors" v-if="!currentItem.validation_result.valid">
-								<text 
-									class="error-item" 
-									v-for="error in currentItem.validation_result.errors"
-									:key="error"
-								>
-									• {{ error }}
-								</text>
-							</view>
+								<view class="result-errors" v-if="!currentItem.validation_result.valid">
+									<text 
+										class="error-item" 
+										v-for="error in getValidationErrorList(currentItem.validation_result)"
+										:key="error"
+									>
+										• {{ error }}
+									</text>
+								</view>
 						</view>
 					</view>
 					
@@ -2435,8 +2435,8 @@
 	/**
 	 * 更新整体验证结果（汇总所有字段的错误）
 	 */
-	const updateValidationResult = () => {
-		if (!currentItem.value || !currentItem.value.dataFields) return
+		const updateValidationResult = () => {
+			if (!currentItem.value || !currentItem.value.dataFields) return
 		
 		// 收集所有字段的错误
 		const errors = []
@@ -2450,15 +2450,67 @@
 		})
 		
 		// 更新整体验证结果
-		currentItem.value.validation_result = {
-			valid: !hasError,
-			errors: errors
+			currentItem.value.validation_result = {
+				valid: !hasError,
+				errors: errors
+			}
 		}
-	}
-	
-	/**
-	 * 验证当前检查项的所有字段（提交前验证）
-	 */
+
+		const getValidationErrorList = (validationResult) => {
+			if (!validationResult) return []
+			const errors = validationResult.errors
+			if (!errors) return []
+			if (Array.isArray(errors)) return errors.filter(Boolean).map(e => String(e))
+			if (errors && typeof errors === 'object') return Object.values(errors).filter(Boolean).map(e => String(e))
+			return [String(errors)]
+		}
+
+		const formatValidationErrors = (validationResult) => {
+			return getValidationErrorList(validationResult).join(', ')
+		}
+
+		const isEmptyFieldValue = (value) => {
+			if (value === undefined || value === null) return true
+			if (typeof value === 'string') return value.trim() === ''
+			if (Array.isArray(value)) return value.length === 0
+			return false
+		}
+
+		// 保存时使用严格校验（required生效），且隐藏字段不参与校验
+		const validateCurrentItemStrictVisible = () => {
+			if (!currentItem.value || !Array.isArray(currentItem.value.dataFields)) {
+				return { valid: true, requiredMissing: false, hasAnyValue: false }
+			}
+
+			let requiredMissing = false
+			let hasAnyValue = false
+
+			currentItem.value.dataFields.forEach(field => {
+				const visible = shouldShowField(field)
+				if (!visible) {
+					field.error = null
+					return
+				}
+
+				const empty = isEmptyFieldValue(field.value)
+				if (!empty) hasAnyValue = true
+				if (field.required === true && empty) requiredMissing = true
+
+				const result = validateField(field, field.value, true)
+				field.error = result.error
+			})
+
+			updateValidationResult()
+			return {
+				valid: currentItem.value.validation_result?.valid !== false,
+				requiredMissing,
+				hasAnyValue
+			}
+		}
+		
+		/**
+		 * 验证当前检查项的所有字段（提交前验证）
+		 */
 	const validateCurrentItem = () => {
 		if (!currentItem.value || !currentItem.value.dataFields) return
 		
@@ -2606,11 +2658,22 @@
 
 				let hasRequiredPhotos = reqType === 'data' ||
 					(currentItem.value.photos && currentItem.value.photos.length > 0)
-				let hasRequiredData = reqType === 'photo' || dataValue.length > 0
+				let hasRequiredData = reqType === 'photo'
+
+				// data/both：完成态严格校验（required生效，隐藏字段不参与）
+				const strictCheck = (reqType === 'data' || reqType === 'both')
+					? validateCurrentItemStrictVisible()
+					: { valid: true, requiredMissing: false, hasAnyValue: false }
+
+				if (reqType === 'data' || reqType === 'both') {
+					const visibleFields = (currentItem.value.dataFields || []).filter(f => shouldShowField(f))
+					const requiredVisible = visibleFields.filter(f => f?.required === true)
+					hasRequiredData = requiredVisible.length > 0
+						? !strictCheck.requiredMissing
+						: strictCheck.hasAnyValue
+				}
 
 				if (reqType === 'both') {
-					hasRequiredData = dataValue.length > 0
-
 					// both + 字段拍照模式：按 allow_photo / photo_required 判断
 					if (isFieldPhotoMode()) {
 						const visibleRequiredPhotoFields = (currentItem.value.dataFields || [])
@@ -2629,16 +2692,19 @@
 					}
 
 					if (hasRequiredPhotos && hasRequiredData) {
-						status = currentItem.value.validation_result?.valid !== false ? 'completed' : 'failed'
+						status = strictCheck.valid ? 'completed' : 'failed'
 					} else {
-						status = 'in_progress'
+						const hasAnyPhoto = (currentItem.value.photos && currentItem.value.photos.length > 0)
+						status = (hasAnyPhoto || strictCheck.hasAnyValue) ? 'in_progress' : 'pending'
 					}
 				} else if (reqType === 'photo') {
 					status = hasRequiredPhotos ? 'completed' : 'pending'
 				} else if (reqType === 'data') {
-					status = hasRequiredData
-						? (currentItem.value.validation_result?.valid !== false ? 'completed' : 'failed')
-						: 'pending'
+					if (!hasRequiredData) {
+						status = strictCheck.hasAnyValue ? 'in_progress' : 'pending'
+					} else {
+						status = strictCheck.valid ? 'completed' : 'failed'
+					}
 				}
 			
 			// 更新检查项
@@ -2800,16 +2866,19 @@
 				closeItemModal()
 			}
 			
-		} catch (error) {
-			console.error('保存检查项失败:', error)
-			uni.showToast({
-				title: $t('inspection.saveFailed'),
-				icon: 'error'
-			})
-		} finally {
-			savingItem.value = false
+			} catch (error) {
+				console.error('保存检查项失败:', error)
+				const reason = String(error?.message || '').trim()
+				uni.showToast({
+					title: reason
+						? $t('messages.saveFailedWithReason', { reason })
+						: $t('inspection.saveFailed'),
+					icon: 'error'
+				})
+			} finally {
+				savingItem.value = false
+			}
 		}
-	}
 	
 	const updateInspectionProgress = async () => {
 		const totalItems = checkItems.value.length
@@ -2839,16 +2908,19 @@
 				})
 			}
 			
-		} catch (error) {
-			console.error('保存草稿失败:', error)
-			uni.showToast({
-				title: $t('inspection.saveFailed'),
-				icon: 'error'
-			})
-		} finally {
-			saving.value = false
+			} catch (error) {
+				console.error('保存草稿失败:', error)
+				const reason = String(error?.message || '').trim()
+				uni.showToast({
+					title: reason
+						? $t('messages.saveFailedWithReason', { reason })
+						: $t('inspection.saveFailed'),
+					icon: 'error'
+				})
+			} finally {
+				saving.value = false
+			}
 		}
-	}
 	
 	const submitInspection = async () => {
 		if (!canSubmit.value) {

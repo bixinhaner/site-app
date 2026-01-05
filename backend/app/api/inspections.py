@@ -69,6 +69,22 @@ def _truthy(v) -> bool:
     return False
 
 
+def _enum_value(v) -> str:
+    if v is None:
+        return ""
+    return str(getattr(v, "value", v))
+
+
+def _is_empty_value(v) -> bool:
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return v.strip() == ""
+    if isinstance(v, list):
+        return len(v) == 0
+    return False
+
+
 def _coerce_float(v) -> Optional[float]:
     try:
         if v is None or v == "":
@@ -991,6 +1007,13 @@ async def upload_inspection_photo(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="检查记录不存在"
+        )
+
+    # 检查状态门禁：仅允许草稿/进行中/驳回继续上传（与删除/替换保持一致）
+    if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"检查状态 {_enum_value(inspection.status)} 下不允许上传照片"
         )
 
     # 照片变更属于检查项内容变更：触发该检查项回到待审核（仅清空该项，不影响其他项）
@@ -2016,6 +2039,13 @@ async def update_inspection_item(
         )
     _ensure_surveyor_inspection_type(db, current_user, inspection)
 
+    # 检查状态门禁：仅允许草稿/进行中/驳回继续更新检查项（避免已提交/审核中/已通过/已完成继续修改）
+    if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"检查状态 {_enum_value(inspection.status)} 下不允许更新检查项"
+        )
+
     template_data = {}
     try:
         tpl = inspection.template
@@ -2122,14 +2152,6 @@ async def update_inspection_item(
                 # 如果有验证错误，记录但不阻止保存（允许保存草稿）
                 if not validation_result['valid']:
                     print(f"INFO: 检查项 {item_id} 存在字段验证错误: {validation_result['errors']}")
-                    # 可以选择在检查项状态为COMPLETED时才强制验证通过
-                    if 'status' in update_fields and update_fields['status'] == CheckItemStatusEnum.COMPLETED:
-                        if validation_result['errors']:
-                            error_messages = '; '.join([f"{k}: {v}" for k, v in validation_result['errors'].items()])
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f"字段验证失败，无法标记为完成: {error_messages}"
-                            )
         except HTTPException:
             raise  # 重新抛出HTTP异常
         except Exception as e:
@@ -2161,6 +2183,66 @@ async def update_inspection_item(
     # 内容变更：清空该检查项既有审核结果（若已审核过），以便增量复审
     if content_changed:
         _touch_check_item_and_clear_review(check_item, now)
+
+    # 完成态数据校验：
+    # - required_type=data：必须至少提交1个字段值；且所有“可见(required=true)”字段必须填写并通过约束
+    # - required_type=both：必须至少提交1个字段值；且所有“可见(required=true)”字段必须填写并通过约束
+    if check_item.status == CheckItemStatusEnum.COMPLETED and str(check_item.required_type) in ("data", "both"):
+        data_value = getattr(check_item, "data_value", None)
+        values = _build_field_values_from_data_value(data_value)
+
+        # 规则：至少 1 个字段有“有效值”
+        has_any_value = any(not _is_empty_value(v) for v in values.values())
+        if not has_any_value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该检查项需要填写至少1个字段数据"
+            )
+
+        # 若存在字段定义，则按“可见字段”进行严格校验（隐藏字段不参与必填）
+        errors = {}
+        label_map = {}
+        visible_field_ids = []
+        if isinstance(check_item.fields, list) and check_item.fields:
+            for f in check_item.fields:
+                if not isinstance(f, dict):
+                    continue
+                fid = str(f.get("field_id") or "").strip()
+                if not fid:
+                    continue
+                label_map[fid] = str(f.get("label") or fid)
+                if not _is_field_visible(f, values):
+                    continue
+                visible_field_ids.append(fid)
+
+                try:
+                    field_def = FieldDefinition(**f)
+                except Exception as e:
+                    print(f"WARNING: 无法解析字段定义用于完成态校验: {f}, 错误: {e}")
+                    continue
+
+                ok, msg = FieldValidator.validate_field_value(field_def, values.get(field_def.field_id), strict=True)
+                if not ok:
+                    errors[field_def.field_id] = msg
+
+            # 若存在可见字段定义：至少 1 个可见字段应有值（避免仅提交隐藏字段导致“空完成”）
+            if visible_field_ids:
+                has_any_visible_value = any(
+                    (fid in values) and (not _is_empty_value(values.get(fid)))
+                    for fid in visible_field_ids
+                )
+                if not has_any_visible_value:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="该检查项需要填写至少1个字段数据"
+                    )
+
+        if errors:
+            error_messages = '; '.join([f"{label_map.get(k, k)}: {v}" for k, v in errors.items()])
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"字段验证失败，无法标记为完成: {error_messages}"
+            )
 
     # 字段级照片校验：
     # - 若检查项要求照片(photo/both)，且本次要标记为完成，则校验：

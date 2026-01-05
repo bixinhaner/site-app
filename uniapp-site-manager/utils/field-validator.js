@@ -22,8 +22,14 @@ export function validateField(field, value, strict = true) {
 			}
 		}
 		
-		// 如果值为空且不是必填，允许通过
-		if (!value && !field.required) {
+		// 如果值为空且不是必填，允许通过（注意：0/false 不是空值）
+		const isEmpty = (
+			value === undefined ||
+			value === null ||
+			value === '' ||
+			(Array.isArray(value) && value.length === 0)
+		)
+		if (isEmpty && !field.required) {
 			return { valid: true, error: null }
 		}
 		

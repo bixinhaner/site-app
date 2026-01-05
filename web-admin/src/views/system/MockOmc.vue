@@ -9,6 +9,42 @@
       </div>
     </div>
 
+    <el-collapse v-model="helpActive" class="help-collapse">
+      <el-collapse-item name="help">
+        <template #title>
+          <span>用户帮助（如何配置为 OMC 模拟测试桩）</span>
+        </template>
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="配置为 OMC 模拟测试桩：后端调用 OMC API 的 base_url 需要指向 mock-omc 服务（默认 9000 端口）。"
+          class="mb12"
+        />
+        <div class="help-body">
+          <div class="help-section">
+            <div class="help-title">1）先后台启动测试桩（默认 9000 端口）</div>
+            <pre class="help-code">cd mock-omc
+python3 -m venv venv &amp;&amp; ./venv/bin/pip install -r requirements.txt
+./venv/bin/uvicorn main:app --reload --port 9000</pre>
+          </div>
+
+          <div class="help-section">
+            <div class="help-title">2）在 Web 管理端 系统管理 -&gt; OMC API 配置 填写</div>
+            <ul class="help-list">
+              <li>
+                OMC 基础地址(base_url)：<code>http://127.0.0.1:9000</code>
+                <div class="help-tip">注意：后端会在此基础上拼接 <code>/northboundApi/v1/...</code>，所以这里不要再带 <code>/northboundApi/...</code></div>
+              </li>
+              <li>API 用户名(username)：任意非空（mock 不校验）</li>
+              <li>API 密码(password)：任意非空（mock 不校验）</li>
+              <li>超时时间(timeout_seconds)：按需（默认 10）</li>
+            </ul>
+          </div>
+        </div>
+      </el-collapse-item>
+    </el-collapse>
+
     <el-card>
       <div class="filter-bar">
         <el-input v-model="keyword" placeholder="按 SN 过滤" clearable style="width: 240px" @keyup.enter.native="reload" />
@@ -85,6 +121,7 @@ const saving = ref(false)
 const editing = ref(false)
 const form = ref({ sn: '', online: false, activated: false, description: '' })
 const baseURL = import.meta.env.VITE_MOCK_OMC_BASE || '/api/mock-omc'
+const helpActive = ref([])
 
 const filtered = computed(() => {
   if (!keyword.value) return items.value
@@ -189,6 +226,25 @@ onMounted(reload)
 .page { padding: 16px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .header-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.help-collapse { margin-bottom: 12px; }
+.help-body { padding: 4px 0 8px; }
+.help-section { margin-bottom: 12px; }
+.help-title { font-weight: 600; margin-bottom: 8px; }
+.help-code {
+  margin: 0;
+  padding: 10px 12px;
+  background: #0b1020;
+  color: #e5e7eb;
+  border-radius: 6px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.help-list { margin: 0; padding-left: 18px; }
+.help-list li { margin: 6px 0; }
+.help-tip { margin-top: 4px; color: #909399; font-size: 12px; }
+.mb12 { margin-bottom: 12px; }
 .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 .hint { color: #909399; }
 </style>
