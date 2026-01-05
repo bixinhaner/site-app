@@ -141,7 +141,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { TrendCharts, Location, Box, Aim, CircleCheck, Tools, Checked } from '@element-plus/icons-vue'
+import { TrendCharts, Location, Box, Aim, CircleCheck, Tools, Checked, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 
@@ -154,7 +154,7 @@ const props = defineProps({
 
 const loading = ref(false)
 const equipmentInfo = ref(null)
-const bindingHistory = ref([])
+const lifecycleEvents = ref([])
 const omcLoading = ref(false)
 const omcStatus = ref(null)
 const refreshCooldown = ref(0)
@@ -216,22 +216,37 @@ const loadLifecycle = async () => {
 
   loading.value = true
   equipmentInfo.value = null
-  bindingHistory.value = []
+  lifecycleEvents.value = []
 
   try {
-    const [equipmentRes, historyRes] = await Promise.all([
-      request
-        .get('/api/equipment/instances/search', { params: { serial_number: props.sn } })
-        .catch(() => null),
-      request
-        .get(`/api/inspections/equipment-history/${props.sn}`)
-        .catch(() => ({ history: [] }))
-    ])
+    // 优先使用新接口（统一返回设备信息 + 事件列表）
+    const res = await request.get(`/api/equipment/instances/${props.sn}/lifecycle-events`).catch(() => null)
+    if (res && res.equipment) {
+      equipmentInfo.value = res.equipment
+      lifecycleEvents.value = Array.isArray(res.events) ? res.events : []
+    } else {
+      // 兼容降级：旧接口拼装（事件不完整，但可用）
+      const [equipmentRes, historyRes] = await Promise.all([
+        request
+          .get('/api/equipment/instances/search', { params: { serial_number: props.sn } })
+          .catch(() => null),
+        request
+          .get(`/api/inspections/equipment-history/${props.sn}`)
+          .catch(() => ({ history: [] }))
+      ])
+      equipmentInfo.value = equipmentRes
+      const history = (historyRes && historyRes.history) ? historyRes.history : []
+      const fallback = []
+      if (equipmentRes?.created_at) {
+        fallback.push({ action: 'stock_in', operated_at: equipmentRes.created_at, details: {} })
+      }
+      if (equipmentRes?.issued_at) {
+        fallback.push({ action: 'stock_out', operated_at: equipmentRes.issued_at, details: {} })
+      }
+      lifecycleEvents.value = [...history, ...fallback]
+    }
 
-    equipmentInfo.value = equipmentRes
-    bindingHistory.value = (historyRes && historyRes.history) ? historyRes.history : []
-
-    if (!equipmentInfo.value && bindingHistory.value.length === 0) {
+    if (!equipmentInfo.value && lifecycleEvents.value.length === 0) {
       ElMessage.warning('未找到该设备的信息')
     }
   } catch (error) {
@@ -267,107 +282,233 @@ onUnmounted(() => {
 const lifecycleStages = computed(() => {
   const stages = []
 
-  // 1. 入库阶段
-  if (equipmentInfo.value?.created_at) {
-    stages.push({
-      title: '📦 设备入库',
-      // 直接使用后端返回的 UTC ISO 字符串作为排序依据
-      timestamp: equipmentInfo.value.created_at,
-      type: 'primary',
-      color: '#409EFF',
-      tagType: 'primary',
-      size: 'large',
-      icon: Box,
-      description: '设备已录入系统，完成入库登记',
-      details: {
-        设备SN: equipmentInfo.value.serial_number,
-        条码: equipmentInfo.value.barcode || '-',
-        供应商: equipmentInfo.value.vendor || '-',
-        仓库: equipmentInfo.value.stock_in_warehouse_name || equipmentInfo.value.warehouse_name || equipmentInfo.value.last_warehouse_name || '-'
-      }
-    })
-  }
+  const events = Array.isArray(lifecycleEvents.value) ? lifecycleEvents.value : []
+  events.forEach((record) => {
+    const action = record?.action
+    const ts = record?.operated_at
+    if (!action || !ts) return
 
-  // 2. 分配/出库阶段
-  if (equipmentInfo.value?.issued_at) {
-    stages.push({
-      title: '🚚 设备出库',
-      timestamp: equipmentInfo.value.issued_at,
-      type: 'success',
-      color: '#67C23A',
-      tagType: 'success',
-      size: 'large',
-      icon: Aim,
-      description: '设备已分配并出库',
-      operator: equipmentInfo.value.issued_to_name,
-      details: {
-        领料人: equipmentInfo.value.issued_to_name || '-',
-        出库时间: formatTime(equipmentInfo.value.issued_at)
-      }
-    })
-  }
-
-  // 3. 绑定阶段（从历史记录获取）
-  bindingHistory.value.forEach((record, index) => {
-    const isFirst = index === bindingHistory.value.length - 1
-
-    if (record.action === 'bind') {
+    if (action === 'stock_in') {
       stages.push({
-        title: isFirst ? '🔗 首次绑定' : '🔗 设备绑定',
-        timestamp: record.operated_at,
+        title: '📦 设备入库',
+        timestamp: ts,
+        type: 'primary',
+        color: '#409EFF',
+        tagType: 'primary',
+        size: 'large',
+        icon: Box,
+        description: record.notes || '设备已录入系统，完成入库登记',
+        details: record.details || {
+          设备SN: equipmentInfo.value?.serial_number || props.sn || '-',
+          条码: equipmentInfo.value?.barcode || '-',
+          供应商: equipmentInfo.value?.vendor || '-',
+          仓库: equipmentInfo.value?.stock_in_warehouse_name || equipmentInfo.value?.warehouse_name || equipmentInfo.value?.last_warehouse_name || '-'
+        }
+      })
+      return
+    }
+
+    if (action === 'stock_out') {
+      stages.push({
+        title: '🚚 设备出库',
+        timestamp: ts,
+        type: 'success',
+        color: '#67C23A',
+        tagType: 'success',
+        size: 'large',
+        icon: Aim,
+        description: record.notes || '设备已出库',
+        operator: record.operator?.name || equipmentInfo.value?.issued_to_name,
+        details: record.details || {
+          领料人: equipmentInfo.value?.issued_to_name || '-',
+          出库时间: formatTime(ts)
+        }
+      })
+      return
+    }
+
+    if (action === 'bind') {
+      const siteName = record?.site?.name || '未知站点'
+      const cellId = record?.cell_info?.cell_id || '-'
+      stages.push({
+        title: '🔗 设备绑定',
+        timestamp: ts,
         type: 'success',
         color: '#10b981',
         tagType: 'success',
-        size: isFirst ? 'large' : 'normal',
+        size: 'normal',
         icon: CircleCheck,
-        description: `设备绑定到 ${record.site.name} 的小区 ${record.cell_info.cell_id}`,
-        operator: record.operator.name,
+        description: `设备绑定到 ${siteName} 的小区 ${cellId}`,
+        operator: record.operator?.name,
         details: {
-          站点: `${record.site.name} (ID: ${record.site.id})`,
-          小区: `扇区${record.cell_info.sector_id} ${record.cell_info.band || ''}`,
-          检查ID: record.inspection_id
+          站点: `${siteName} (ID: ${record?.site?.id || '-'})`,
+          小区: `扇区${record?.cell_info?.sector_id || '-'} ${record?.cell_info?.band || ''}`,
+          检查ID: record.inspection_id || '-'
         },
-        location: record.latitude && record.longitude
-          ? `${record.latitude}, ${record.longitude}`
-          : null
+        location: record.latitude && record.longitude ? `${record.latitude}, ${record.longitude}` : null
       })
-    } else if (record.action === 'unbind') {
+      return
+    }
+
+    if (action === 'unbind') {
+      const siteName = record?.site?.name || '未知站点'
+      const cellId = record?.cell_info?.cell_id || '-'
       stages.push({
         title: '🔓 设备解绑',
-        timestamp: record.operated_at,
+        timestamp: ts,
         type: 'warning',
         color: '#ef4444',
         tagType: 'danger',
         size: 'normal',
         icon: Tools,
-        description: `设备从 ${record.site.name} 的小区 ${record.cell_info.cell_id} 解绑`,
-        operator: record.operator.name,
+        description: `设备从 ${siteName} 的小区 ${cellId} 解绑`,
+        operator: record.operator?.name,
         details: {
-          站点: `${record.site.name} (ID: ${record.site.id})`,
-          小区: `扇区${record.cell_info.sector_id} ${record.cell_info.band || ''}`
+          站点: `${siteName} (ID: ${record?.site?.id || '-'})`,
+          小区: `扇区${record?.cell_info?.sector_id || '-'} ${record?.cell_info?.band || ''}`
         }
       })
-    } else if (record.action === 'rebind') {
+      return
+    }
+
+    if (action === 'rebind') {
+      const siteName = record?.site?.name || '未知站点'
+      const cellId = record?.cell_info?.cell_id || '-'
       stages.push({
         title: '🔄 重新绑定',
-        timestamp: record.operated_at,
+        timestamp: ts,
         type: 'warning',
         color: '#f59e0b',
         tagType: 'warning',
         size: 'normal',
         icon: Tools,
-        description: `设备重新绑定到 ${record.site.name} 的小区 ${record.cell_info.cell_id}`,
-        operator: record.operator.name,
+        description: `设备重新绑定到 ${siteName} 的小区 ${cellId}`,
+        operator: record.operator?.name,
         details: {
-          原设备: record.previous_equipment_sn,
-          新站点: `${record.site.name} (ID: ${record.site.id})`,
-          新小区: `扇区${record.cell_info.sector_id} ${record.cell_info.band || ''}`
+          原设备: record.previous_equipment_sn || '-',
+          新站点: `${siteName} (ID: ${record?.site?.id || '-'})`,
+          新小区: `扇区${record?.cell_info?.sector_id || '-'} ${record?.cell_info?.band || ''}`
         }
       })
-    } else if (record.action === 'omc_first_online') {
+      return
+    }
+
+    if (action === 'inspection_completed') {
+      stages.push({
+        title: '🧾 检查完成',
+        timestamp: ts,
+        type: 'success',
+        color: '#22c55e',
+        tagType: 'success',
+        size: 'large',
+        icon: Checked,
+        description: record.notes || '检查项已完成，设备状态更新为“已检查”',
+        operator: record.operator?.name || '检查人员',
+        details: record.details || {}
+      })
+      return
+    }
+
+    if (action === 'return_requested') {
+      stages.push({
+        title: '↩️ 退库申请（待收货）',
+        timestamp: ts,
+        type: 'warning',
+        color: '#f59e0b',
+        tagType: 'warning',
+        size: 'large',
+        icon: Box,
+        description: record.notes || '退库申请已提交，等待仓库收货确认',
+        operator: record.operator?.name,
+        details: record.details || {}
+      })
+      return
+    }
+
+    if (action === 'return_received') {
+      stages.push({
+        title: '📥 退库收货确认',
+        timestamp: ts,
+        type: 'success',
+        color: '#10b981',
+        tagType: 'success',
+        size: 'large',
+        icon: Box,
+        description: record.notes || '仓库已收货确认，设备已回库',
+        operator: record.operator?.name || '仓库',
+        details: record.details || {}
+      })
+      return
+    }
+
+    if (action === 'return_rejected') {
+      stages.push({
+        title: '⛔ 退库拒收',
+        timestamp: ts,
+        type: 'danger',
+        color: '#ef4444',
+        tagType: 'danger',
+        size: 'large',
+        icon: Tools,
+        description: record.notes || '仓库拒收退库申请',
+        operator: record.operator?.name || '仓库',
+        details: record.details || {}
+      })
+      return
+    }
+
+    if (action === 'void_stock_in') {
+      stages.push({
+        title: '🧹 撤销入库',
+        timestamp: ts,
+        type: 'warning',
+        color: '#f59e0b',
+        tagType: 'warning',
+        size: 'normal',
+        icon: Tools,
+        description: record.notes || '撤销入库',
+        operator: record.operator?.name,
+        details: record.details || {}
+      })
+      return
+    }
+
+    if (action === 'edit_instance_info') {
+      stages.push({
+        title: '✏️ 编辑实例信息',
+        timestamp: ts,
+        type: 'info',
+        color: '#0ea5e9',
+        tagType: 'info',
+        size: 'normal',
+        icon: Tools,
+        description: record.notes || '编辑设备实例信息',
+        operator: record.operator?.name,
+        details: record.details || {}
+      })
+      return
+    }
+
+    if (action === 'damaged_marked') {
+      stages.push({
+        title: '⚠️ 损坏/报损',
+        timestamp: ts,
+        type: 'danger',
+        color: '#ef4444',
+        tagType: 'danger',
+        size: 'large',
+        icon: WarningFilled,
+        description: record.notes || '设备标记为“损坏/报损”',
+        operator: record.operator?.name,
+        details: record.details || {}
+      })
+      return
+    }
+
+    if (action === 'omc_first_online') {
       stages.push({
         title: '🌐 首次上线',
-        timestamp: record.operated_at,
+        timestamp: ts,
         type: 'info',
         color: '#0ea5e9',
         tagType: 'info',
@@ -380,10 +521,13 @@ const lifecycleStages = computed(() => {
           记录来源: 'OMC'
         }
       })
-    } else if (record.action === 'omc_first_activated') {
+      return
+    }
+
+    if (action === 'omc_first_activated') {
       stages.push({
         title: '⚡ 首次激活',
-        timestamp: record.operated_at,
+        timestamp: ts,
         type: 'success',
         color: '#22c55e',
         tagType: 'success',
@@ -399,23 +543,6 @@ const lifecycleStages = computed(() => {
     }
   })
 
-  // 4. 投入使用阶段（如果设备状态为已激活）
-  if (equipmentInfo.value?.status === 'activated') {
-    stages.push({
-      title: '✅ 投入使用',
-      timestamp: equipmentInfo.value.updated_at,
-      type: 'success',
-      color: '#10b981',
-      tagType: 'success',
-      size: 'large',
-      icon: Checked,
-      description: '设备已完成部署，正式投入使用',
-      details: {
-        当前状态: getStatusText(equipmentInfo.value.status)
-      }
-    })
-  }
-
   // 按时间倒序排序（最新的在前）
   return stages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
 })
@@ -423,12 +550,14 @@ const lifecycleStages = computed(() => {
 const getStatusType = (status) => {
   const typeMap = {
     in_stock: 'info',
-    allocated: 'warning',
     issued: 'primary',
     pending_inspection: 'warning',
     inspected: 'success',
-    activated: 'success',
-    returned: 'danger'
+    return_pending_receive: 'warning',
+    damaged: 'danger',
+    // 兼容保留（历史值）
+    allocated: 'warning',
+    returned: 'info'
   }
   return typeMap[status] || 'info'
 }
@@ -436,12 +565,14 @@ const getStatusType = (status) => {
 const getStatusText = (status) => {
   const textMap = {
     in_stock: '库存中',
-    allocated: '已分配',
     issued: '已出库',
     pending_inspection: '待检查',
     inspected: '已检查',
-    activated: '已激活',
-    returned: '已退库'
+    return_pending_receive: '退库待收货',
+    damaged: '损坏/报损',
+    // 兼容保留（历史值）
+    allocated: '已分配(旧)',
+    returned: '已退库(旧)'
   }
   return textMap[status] || status
 }

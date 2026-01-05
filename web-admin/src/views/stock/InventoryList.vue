@@ -176,13 +176,16 @@
       width="80%"
       top="5vh"
     >
-      <div v-if="selectedEquipment">
-        <div class="instance-stats">
-          <el-tag type="info" size="small">总数量: {{ deviceInstances.length }}</el-tag>
-          <el-tag type="success" size="small">在库: {{ getInstancesByStatus('in_stock').length }}</el-tag>
-          <el-tag type="warning" size="small">已分配: {{ getInstancesByStatus('allocated').length }}</el-tag>
-          <el-tag type="danger" size="small">已出库: {{ getInstancesByStatus('issued').length }}</el-tag>
-        </div>
+        <div v-if="selectedEquipment">
+          <div class="instance-stats">
+            <el-tag type="info" size="small">总数量: {{ deviceInstances.length }}</el-tag>
+            <el-tag type="success" size="small">在库: {{ getInstancesByStatus('in_stock').length }}</el-tag>
+            <el-tag type="warning" size="small">待检查: {{ getInstancesByStatus('pending_inspection').length }}</el-tag>
+            <el-tag type="success" size="small">已检查: {{ getInstancesByStatus('inspected').length }}</el-tag>
+            <el-tag type="warning" size="small">退库待收货: {{ getInstancesByStatus('return_pending_receive').length }}</el-tag>
+            <el-tag type="info" size="small">已出库: {{ getInstancesByStatus('issued').length }}</el-tag>
+            <el-tag type="danger" size="small">损坏/报损: {{ getInstancesByStatus('damaged').length }}</el-tag>
+          </div>
 
         <el-table :data="deviceInstances" stripe style="width: 100%; margin-top: 16px;" max-height="400">
           <el-table-column prop="serial_number" label="SN序列号" width="150" />
@@ -639,10 +642,14 @@ const getInstancesByStatus = (status) => {
 const getInstanceStatusType = (status) => {
   const statusMap = {
     'in_stock': 'success',
-    'allocated': 'warning', 
     'issued': 'info',
-    'returned': 'primary',
-    'scrapped': 'danger'
+    'pending_inspection': 'warning',
+    'inspected': 'success',
+    'return_pending_receive': 'warning',
+    'damaged': 'danger',
+    // 兼容保留（历史值）
+    'allocated': 'warning',
+    'returned': 'info'
   }
   return statusMap[status] || 'info'
 }
@@ -651,10 +658,14 @@ const getInstanceStatusType = (status) => {
 const getInstanceStatusText = (status) => {
   const statusMap = {
     'in_stock': '在库',
-    'allocated': '已分配',
     'issued': '已出库',
-    'returned': '已归还',
-    'scrapped': '已报废'
+    'pending_inspection': '待检查',
+    'inspected': '已检查',
+    'return_pending_receive': '退库待收货',
+    'damaged': '损坏/报损',
+    // 兼容保留（历史值）
+    'allocated': '已分配(旧)',
+    'returned': '已归还(旧)'
   }
   return statusMap[status] || '未知'
 }

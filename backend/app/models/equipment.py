@@ -15,13 +15,26 @@ class EquipmentStatusEnum(str, enum.Enum):
     DISCONTINUED = "discontinued"     # 已停产
 
 class InventoryStatusEnum(str, enum.Enum):
-    IN_STOCK = "in_stock"            # 库存中
-    ALLOCATED = "allocated"          # 已分配
-    ISSUED = "issued"                # 已出库
-    PENDING_INSPECTION = "pending_inspection"  # 待检查
-    INSPECTED = "inspected"          # 已检查
-    RETURNED = "returned"            # 已退库
-    DAMAGED = "damaged"              # 损坏
+    """设备实例库存状态枚举
+
+    状态流转说明:
+    - 标准流程: in_stock -> issued -> pending_inspection -> inspected -> return_pending_receive -> in_stock
+    - 异常流程: 任意状态 -> damaged (终态)
+    - 历史兼容: allocated, returned (不再使用，仅用于历史数据)
+    """
+    IN_STOCK = "in_stock"                              # 库存中（设备在仓库，可用）
+    PENDING_ISSUE = "pending_issue"                    # 待出库（已分配待领料）
+    ISSUED = "issued"                                  # 已出库（设备已领料，未安装）
+    PENDING_INSPECTION = "pending_inspection"          # 待检查（已安装待检查）
+    INSPECTED = "inspected"                            # 已检查（安装检查通过）
+    RETURN_PENDING_RECEIVE = "return_pending_receive"  # 退库待收货（退库申请已提交，等待仓库确认）
+    DAMAGED = "damaged"                                # 损坏/报损（设备损坏，不可用）
+    REPAIRING = "repairing"                            # 维修中（设备正在维修）
+    SCRAPPED = "scrapped"                              # 已报废（设备已报废）
+
+    # 历史兼容（不再使用）
+    ALLOCATED = "allocated"                            # 已分配（旧，已废弃）
+    RETURNED = "returned"                              # 已退库（旧，已废弃）
 
 class TransactionTypeEnum(str, enum.Enum):
     STOCK_IN = "stock_in"            # 入库
@@ -114,7 +127,7 @@ class EquipmentInstance(Base):
     voided_by = Column(Integer, ForeignKey("users.id"))
     void_reason = Column(Text)
     batch_number = Column(String(50))  # 批次号
-    status = Column(Enum(InventoryStatusEnum), default=InventoryStatusEnum.IN_STOCK)
+    status = Column(Enum(InventoryStatusEnum, native_enum=False, length=32), default=InventoryStatusEnum.IN_STOCK)
     
     # 新增设备属性字段
     mac_address = Column(String(17))  # MAC地址 (AA:BB:CC:DD:EE:FF)

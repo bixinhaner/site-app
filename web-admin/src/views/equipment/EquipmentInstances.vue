@@ -8,9 +8,11 @@
         </el-select>
         <el-select v-model="status" clearable placeholder="状态" style="width: 160px">
           <el-option label="库存中" value="in_stock" />
-          <el-option label="已分配" value="allocated" />
           <el-option label="已出库" value="issued" />
-          <el-option label="已退库" value="returned" />
+          <el-option label="待检查" value="pending_inspection" />
+          <el-option label="已检查" value="inspected" />
+          <el-option label="退库待收货" value="return_pending_receive" />
+          <el-option label="损坏/报损" value="damaged" />
         </el-select>
         <el-checkbox v-model="includeVoided">显示已撤销</el-checkbox>
         <el-input v-model="keyword" placeholder="搜索SN/条码/供应商" clearable style="width: 220px" />

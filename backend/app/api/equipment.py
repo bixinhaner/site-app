@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 import uuid
 import json
 from datetime import datetime
@@ -19,10 +19,14 @@ from app.models.equipment import (
     StockTransaction,
     StockTransactionItem,
     TransactionTypeEnum,
+    InventoryStatusEnum,
     Warehouse,
     PickupRecord,
 )
 from app.models.equipment import EquipmentInstance  # noqa: E402
+from app.models.work_order import AuditEvent
+from app.models.inspection import InspectionCheckItem, CheckItemStatusEnum, SiteInspection
+from app.models.site import Site
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -670,3 +674,271 @@ async def search_equipment_instance(
         "created_at": to_utc_iso(instance.created_at) if instance.created_at else None,
         "updated_at": to_utc_iso(instance.updated_at) if instance.updated_at else None,
     }
+
+
+@router.get("/instances/{serial_number}/lifecycle-events")
+async def get_equipment_instance_lifecycle_events(
+    serial_number: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取设备实例生命周期事件列表（用于“设备生命周期追踪”时间线）。
+
+    说明：
+    - 事件以 action + operated_at 的形式返回，前端按 action 渲染为不同阶段
+    - 兼容保留已有绑定历史与 OMC 首次上线/激活事件
+    """
+    sn = (serial_number or "").strip()
+    if not sn:
+        raise HTTPException(status_code=400, detail="serial_number 不能为空")
+
+    # 复用现有搜索接口的数据结构，保证前端展示字段一致
+    equipment_info = await search_equipment_instance(serial_number=sn, db=db, current_user=current_user)
+    instance_id = equipment_info.get("id")
+
+    events: List[Dict[str, Any]] = []
+
+    def _mk_event(
+        *,
+        action: str,
+        operated_at: str,
+        operator_id: Optional[int] = None,
+        operator_name: str = "系统",
+        notes: Optional[str] = None,
+        details: Optional[dict] = None,
+        inspection_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "id": f"{action}-{uuid.uuid4().hex[:12]}",
+            "action": action,
+            "site": None,
+            "cell_info": {},
+            "operator": {"id": operator_id, "name": operator_name},
+            "operated_at": operated_at,
+            "previous_equipment_sn": None,
+            "latitude": None,
+            "longitude": None,
+            "gps_accuracy": None,
+            "notes": notes,
+            "inspection_id": inspection_id,
+            "details": details or {},
+        }
+
+    # 1) 入库/出库（来自 equipment_instances）
+    if equipment_info.get("created_at"):
+        events.append(
+            _mk_event(
+                action="stock_in",
+                operated_at=str(equipment_info["created_at"]),
+                notes="设备已录入系统，完成入库登记",
+                details={
+                    "设备SN": equipment_info.get("serial_number"),
+                    "条码": equipment_info.get("barcode") or "-",
+                    "供应商": equipment_info.get("vendor") or "-",
+                    "仓库": equipment_info.get("stock_in_warehouse_name")
+                    or equipment_info.get("warehouse_name")
+                    or equipment_info.get("last_warehouse_name")
+                    or "-",
+                },
+            )
+        )
+
+    if equipment_info.get("issued_at"):
+        events.append(
+            _mk_event(
+                action="stock_out",
+                operated_at=str(equipment_info["issued_at"]),
+                operator_name=equipment_info.get("issued_to_name") or "系统",
+                notes="设备已出库",
+                details={
+                    "领料人": equipment_info.get("issued_to_name") or "-",
+                },
+            )
+        )
+
+    # 2) 绑定历史 + OMC 首次上线/激活（复用既有接口的输出结构）
+    try:
+        from app.api.inspections import get_equipment_binding_history  # 避免循环依赖
+
+        history_res = await get_equipment_binding_history(equipment_sn=sn, db=db, current_user=current_user)
+        raw_history = (history_res or {}).get("history") or []
+        if isinstance(raw_history, list):
+            events.extend(raw_history)
+    except Exception as exc:  # pragma: no cover
+        print(f"[WARN] 加载绑定历史失败: {exc}")
+
+    # 3) 检查完成（补齐 inspected 对应事件）
+    try:
+        row = (
+            db.query(InspectionCheckItem, SiteInspection, Site, User)
+            .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+            .join(Site, SiteInspection.site_id == Site.id)
+            .outerjoin(User, InspectionCheckItem.checked_by == User.id)
+            .filter(
+                InspectionCheckItem.equipment_sn == sn,
+                InspectionCheckItem.status == CheckItemStatusEnum.COMPLETED,
+                InspectionCheckItem.checked_at.isnot(None),
+            )
+            .order_by(InspectionCheckItem.checked_at.desc())
+            .first()
+        )
+        if row:
+            item, inspection, site, checker = row
+            operated_at = to_utc_iso(item.checked_at)
+            if operated_at:
+                events.append(
+                    _mk_event(
+                        action="inspection_completed",
+                        operated_at=operated_at,
+                        operator_id=getattr(checker, "id", None),
+                        operator_name=(getattr(checker, "full_name", None) or getattr(checker, "username", None) or "检查人员"),
+                        notes="检查项已完成，设备状态更新为“已检查”",
+                        inspection_id=getattr(inspection, "id", None),
+                        details={
+                            "站点": getattr(site, "site_name", None) or "未知站点",
+                            "检查ID": getattr(inspection, "id", None),
+                            "检查项": getattr(item, "item_name", None) or "-",
+                        },
+                    )
+                )
+    except Exception as exc:  # pragma: no cover
+        print(f"[WARN] 附加检查完成事件失败: {exc}")
+
+    # 4) 退库事件（补齐 return_pending_receive 对应事件）
+    try:
+        if instance_id:
+            return_rows = (
+                db.query(StockTransaction, Warehouse, User)
+                .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+                .join(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+                .join(User, User.id == StockTransaction.operator_id)
+                .filter(
+                    StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                    StockTransactionItem.equipment_instance_id == instance_id,
+                )
+                .order_by(StockTransaction.created_at.desc())
+                .all()
+            )
+            for trans, wh, operator in return_rows:
+                approval_status = (getattr(trans, "approval_status", None) or "").strip()
+                if approval_status == "pending_receive":
+                    operated_at = to_utc_iso(getattr(trans, "scan_time", None), assume_local=True)
+                    if operated_at:
+                        events.append(
+                            _mk_event(
+                                action="return_requested",
+                                operated_at=operated_at,
+                                operator_id=getattr(operator, "id", None),
+                                operator_name=(getattr(operator, "full_name", None) or getattr(operator, "username", None) or "退库申请人"),
+                                notes="退库申请已提交，等待仓库收货确认",
+                                details={
+                                    "退入仓库": getattr(wh, "warehouse_name", None) or "-",
+                                    "退库单号": getattr(trans, "document_number", None) or "-",
+                                    "状态": "pending_receive",
+                                },
+                            )
+                        )
+                elif approval_status == "received":
+                    operated_at = to_utc_iso(getattr(trans, "approved_at", None), assume_local=True) or to_utc_iso(
+                        getattr(trans, "updated_at", None), assume_local=True
+                    )
+                    if operated_at:
+                        events.append(
+                            _mk_event(
+                                action="return_received",
+                                operated_at=operated_at,
+                                operator_name="仓库",
+                                notes="仓库已收货确认，设备已回库",
+                                details={
+                                    "退入仓库": getattr(wh, "warehouse_name", None) or "-",
+                                    "退库单号": getattr(trans, "document_number", None) or "-",
+                                    "状态": "received",
+                                },
+                            )
+                        )
+                elif approval_status == "rejected":
+                    operated_at = to_utc_iso(getattr(trans, "approved_at", None), assume_local=True)
+                    if operated_at:
+                        events.append(
+                            _mk_event(
+                                action="return_rejected",
+                                operated_at=operated_at,
+                                operator_name="仓库",
+                                notes="仓库拒收退库申请",
+                                details={
+                                    "退入仓库": getattr(wh, "warehouse_name", None) or "-",
+                                    "退库单号": getattr(trans, "document_number", None) or "-",
+                                    "状态": "rejected",
+                                    "原因": getattr(trans, "approval_comments", None) or "-",
+                                },
+                            )
+                        )
+    except Exception as exc:  # pragma: no cover
+        print(f"[WARN] 附加退库事件失败: {exc}")
+
+    # 5) 实例审计事件：撤销入库 / 编辑信息
+    try:
+        if instance_id:
+            audit_rows = (
+                db.query(AuditEvent)
+                .filter(
+                    AuditEvent.resource_type == "equipment_instance",
+                    AuditEvent.resource_id == str(instance_id),
+                    AuditEvent.action.in_(["void_stock_in", "edit_instance_info"]),
+                )
+                .order_by(AuditEvent.created_at.desc())
+                .all()
+            )
+            for ev in audit_rows:
+                operated_at = to_utc_iso(getattr(ev, "created_at", None))
+                if not operated_at:
+                    continue
+                op_user = getattr(ev, "operator", None)
+                op_name = getattr(op_user, "full_name", None) or getattr(op_user, "username", None) or "系统"
+                if ev.action == "void_stock_in":
+                    events.append(
+                        _mk_event(
+                            action="void_stock_in",
+                            operated_at=operated_at,
+                            operator_id=getattr(op_user, "id", None),
+                            operator_name=op_name,
+                            notes="撤销入库（释放 SN，保留追溯记录）",
+                            details=getattr(ev, "details", None) or {},
+                        )
+                    )
+                elif ev.action == "edit_instance_info":
+                    events.append(
+                        _mk_event(
+                            action="edit_instance_info",
+                            operated_at=operated_at,
+                            operator_id=getattr(op_user, "id", None),
+                            operator_name=op_name,
+                            notes="编辑设备实例信息",
+                            details=getattr(ev, "details", None) or {},
+                        )
+                    )
+    except Exception as exc:  # pragma: no cover
+        print(f"[WARN] 附加审计事件失败: {exc}")
+
+    # 6) damaged(损坏/报损) 的兜底事件：若实例已处于 damaged 状态，则用 updated_at 标记一次
+    try:
+        instance = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn).first()
+        if instance and getattr(instance, "status", None) == InventoryStatusEnum.DAMAGED and getattr(instance, "updated_at", None):
+            operated_at = to_utc_iso(getattr(instance, "updated_at", None))
+            if operated_at:
+                events.append(
+                    _mk_event(
+                        action="damaged_marked",
+                        operated_at=operated_at,
+                        notes="设备标记为“损坏/报损”",
+                        details={"当前状态": "damaged"},
+                    )
+                )
+    except Exception as exc:  # pragma: no cover
+        print(f"[WARN] 附加报损事件失败: {exc}")
+
+    # 按时间倒序，确保时间线顺序正确
+    events.sort(key=lambda x: x.get("operated_at") or "", reverse=True)
+
+    return {"equipment": equipment_info, "events": events}

@@ -1184,8 +1184,9 @@ async def scan_return_request(
     if bindings["need_unbind"]:
         raise HTTPException(status_code=400, detail="存在设备级检查绑定，需先解绑并清理检查内容")
 
+    now = datetime.now()
     return_transaction_id = str(uuid.uuid4())
-    document_number = f"RET-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}"
+    document_number = f"RET-{now.strftime('%Y%m%d%H%M%S')}-{current_user.id}"
 
     return_trans = StockTransaction(
         id=return_transaction_id,
@@ -1193,7 +1194,7 @@ async def scan_return_request(
         warehouse_id=return_warehouse_id,
         operator_id=current_user.id,
         scan_barcode=sn,
-        scan_time=datetime.now(),
+        scan_time=now,
         scan_location=gps_location,
         document_number=document_number,
         total_quantity=out_trans.total_quantity,
@@ -1216,6 +1217,12 @@ async def scan_return_request(
                 item_notes=getattr(item, "item_notes", None),
             )
         )
+
+    # 主设备实例进入“退库待收货”状态（不回滚库存，等待仓库收货确认）
+    equipment_instance = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn).first()
+    if equipment_instance:
+        equipment_instance.status = InventoryStatusEnum.RETURN_PENDING_RECEIVE
+        equipment_instance.updated_at = now
 
     db.commit()
 
@@ -1426,6 +1433,15 @@ async def scan_return_reject(
     return_trans.approved_by = current_user.id
     return_trans.approved_at = now
     return_trans.approval_comments = reason
+
+    # 拒收后，设备仍视为“已出库”（回退实例状态）
+    sn = (return_trans.scan_barcode or "").strip()
+    if sn:
+        equipment_instance = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn).first()
+        if equipment_instance:
+            equipment_instance.status = InventoryStatusEnum.ISSUED
+            equipment_instance.updated_at = now
+
     db.commit()
 
     return {
