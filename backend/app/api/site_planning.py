@@ -58,7 +58,6 @@ LLD_LOCKED_FIELDS = [
     "rat",
     "band_code",
     "local_cell_id",
-    "tower_id",
     "enb_id",
     "gnb_id",
     "eci",
