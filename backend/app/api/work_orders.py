@@ -1203,6 +1203,16 @@ async def list_items(
             "review_comments": item.review_comments,
             "review_comments_i18n": getattr(item, "review_comments_i18n", None),
             "reviewed_at": item.reviewed_at if hasattr(item, 'reviewed_at') else None,
+            "ai_status": getattr(item, "ai_status", None),
+            "ai_mode": getattr(item, "ai_mode", None),
+            "ai_model": getattr(item, "ai_model", None),
+            "ai_input_hash": getattr(item, "ai_input_hash", None),
+            "ai_result": getattr(item, "ai_result", None),
+            "ai_error": getattr(item, "ai_error", None),
+            "ai_checked_by": getattr(item, "ai_checked_by", None),
+            "ai_checked_at": getattr(item, "ai_checked_at", None),
+            "ai_applied_by": getattr(item, "ai_applied_by", None),
+            "ai_applied_at": getattr(item, "ai_applied_at", None),
             "photos": item.photos,  # Include photos
             "created_at": item.created_at,
             "updated_at": item.updated_at

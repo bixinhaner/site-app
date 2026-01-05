@@ -65,6 +65,15 @@ class Settings(BaseSettings):
     AI_BATCH_CHUNK_SIZE: int = int(os.getenv("AI_BATCH_CHUNK_SIZE", "20"))
     # 行业语境提示（可按需调整）
     AI_DOMAIN_HINT: str = os.getenv("AI_DOMAIN_HINT", "无线通信行业（站点巡检/工单系统）")
+
+    # AI Vision（OpenAI 兼容：支持 image_url 多模态）
+    AI_VISION_BASE_URL: str = os.getenv("AI_VISION_BASE_URL", "")
+    AI_VISION_API_KEY: str = os.getenv("AI_VISION_API_KEY", "")
+    AI_VISION_MODEL: str = os.getenv("AI_VISION_MODEL", "")
+    AI_VISION_CHAT_COMPLETIONS_PATH: str = os.getenv("AI_VISION_CHAT_COMPLETIONS_PATH", "/v1/chat/completions")
+    AI_VISION_TIMEOUT_SECONDS: int = int(os.getenv("AI_VISION_TIMEOUT_SECONDS", "60"))
+    AI_VISION_TEMPERATURE: float = float(os.getenv("AI_VISION_TEMPERATURE", "0.2"))
+    AI_VISION_MAX_TOKENS: int = int(os.getenv("AI_VISION_MAX_TOKENS", "1024"))
     
     # 动态属性
     @property

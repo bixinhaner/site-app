@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import config from '@/config/env.js'
 
 // 系统备份相关 API
 export const systemBackupApi = {
@@ -68,6 +69,28 @@ export const geocodeCacheApi = {
   // 与移动端“在线逆地理（国内Baidu/海外Google）”一致：调用后端 /api/geo/baidu-reverse
   reverseGeocode(params) {
     return request.get('/api/geo/baidu-reverse', { params })
+  },
+}
+
+// AI 管理（配置/监控/统计）
+export const aiAdminApi = {
+  getConfig() {
+    return request.get('/api/system/ai/config')
+  },
+  updateConfig(data) {
+    return request.put('/api/system/ai/config', data, { timeout: config.LONG_REQUEST_TIMEOUT })
+  },
+  test(data) {
+    return request.post('/api/system/ai/test', data, { timeout: config.LONG_REQUEST_TIMEOUT })
+  },
+  getStats(params = {}) {
+    return request.get('/api/system/ai/stats', { params })
+  },
+  getLogs(params = {}) {
+    return request.get('/api/system/ai/logs', { params })
+  },
+  getLogDetail(id) {
+    return request.get(`/api/system/ai/logs/${id}`)
   },
 }
 

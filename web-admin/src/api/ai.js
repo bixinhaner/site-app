@@ -14,4 +14,10 @@ export const aiAPI = {
   async translateBatch(payload) {
     return request.post(`${API_BASE}/translate/batch`, payload, { timeout: config.LONG_REQUEST_TIMEOUT })
   },
+  async analyzeCheckItem(checkItemId, payload) {
+    return request.post(`${API_BASE}/check-items/${checkItemId}/analyze`, payload, { timeout: config.LONG_REQUEST_TIMEOUT })
+  },
+  async applyCheckItem(checkItemId) {
+    return request.post(`${API_BASE}/check-items/${checkItemId}/apply`, {}, { timeout: config.LONG_REQUEST_TIMEOUT })
+  },
 }

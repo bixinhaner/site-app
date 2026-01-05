@@ -123,16 +123,32 @@
             </el-table-column>
           </el-table>
         </el-card>
-        <div class="section-header">
-          <div class="section-title">
-            <h3>检查项审核</h3>
-            <el-radio-group v-model="reviewListMode" size="small">
-              <el-radio-button label="全部" />
-              <el-radio-button label="仅看需复审" />
-            </el-radio-group>
-          </div>
-          <div v-if="summary">
-            <el-tag type="success">通过 {{ summary.pass_count }}</el-tag>
+	        <div class="section-header">
+	          <div class="section-title">
+	            <h3>检查项审核</h3>
+	            <el-radio-group v-model="reviewListMode" size="small">
+	              <el-radio-button label="全部" />
+	              <el-radio-button label="仅看需复审" />
+	            </el-radio-group>
+	            <el-dropdown
+	              style="margin-left: 12px;"
+	              trigger="click"
+	              @command="runAiCheckBatch"
+	            >
+	              <el-button size="small" type="primary" :disabled="itemsLoading || aiCheckProgress.running">
+	                <el-icon><MagicStick /></el-icon>一键AI检查
+	                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+	              </el-button>
+	              <template #dropdown>
+	                <el-dropdown-menu>
+	                  <el-dropdown-item command="missing">仅未生成</el-dropdown-item>
+	                  <el-dropdown-item command="all">全部</el-dropdown-item>
+	                </el-dropdown-menu>
+	              </template>
+	            </el-dropdown>
+	          </div>
+	          <div v-if="summary">
+	            <el-tag type="success">通过 {{ summary.pass_count }}</el-tag>
             <el-tag type="warning" style="margin-left:8px;">警告 {{ summary.warning_count }}</el-tag>
             <el-tag type="danger" style="margin-left:8px;">不合格 {{ summary.fail_count }}</el-tag>
             <el-tag style="margin-left:8px;">待审 {{ summary.pending_count }}</el-tag>
@@ -195,27 +211,43 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="review_status" label="审核结果" width="120">
-            <template #default="{ row }">
-              <el-tag v-if="row.review_status === 'pass'" type="success">通过</el-tag>
-              <el-tag v-else-if="row.review_status === 'warning'" type="warning">警告</el-tag>
-              <el-tag v-else-if="row.review_status === 'fail'" type="danger">不合格</el-tag>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="review_comments" label="审核意见" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="notes" label="现场备注" min-width="200" show-overflow-tooltip />
-          <el-table-column label="操作" width="280" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="viewItemDetail(row)">详情</el-button>
-              <el-button link type="success" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'pass')">通过</el-button>
-              <el-button link type="warning" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'warning')">警告</el-button>
-              <el-button link type="danger" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'fail')">不合格</el-button>
-              <el-tooltip v-if="!canReviewCheckItem(row)" :content="checkItemReviewDisabledReason(row)" placement="top">
-                <span class="help-tip">?</span>
-              </el-tooltip>
-            </template>
-          </el-table-column>
+	          <el-table-column prop="review_status" label="审核结果" width="120">
+	            <template #default="{ row }">
+	              <el-tag v-if="row.review_status === 'pass'" type="success">通过</el-tag>
+	              <el-tag v-else-if="row.review_status === 'warning'" type="warning">警告</el-tag>
+	              <el-tag v-else-if="row.review_status === 'fail'" type="danger">不合格</el-tag>
+	              <span v-else>-</span>
+	            </template>
+	          </el-table-column>
+	          <el-table-column label="AI建议" width="140">
+	            <template #default="{ row }">
+	              <el-tag v-if="row.ai_status === 'running'" type="info" size="small">生成中</el-tag>
+	              <el-tooltip v-else-if="row.ai_status === 'failed'" :content="row.ai_error || 'AI检查失败'" placement="top">
+	                <el-tag type="danger" size="small">失败</el-tag>
+	              </el-tooltip>
+	              <template v-else-if="row.ai_status === 'done' && row.ai_result">
+	                <el-tag :type="aiSuggestedTagType(row.ai_result?.suggested_review_status)" size="small">
+	                  {{ aiSuggestedStatusText(row.ai_result?.suggested_review_status) }}
+	                </el-tag>
+	              </template>
+	              <span v-else>-</span>
+	            </template>
+	          </el-table-column>
+	          <el-table-column prop="review_comments" label="审核意见" min-width="200" show-overflow-tooltip />
+	          <el-table-column prop="notes" label="现场备注" min-width="200" show-overflow-tooltip />
+	          <el-table-column label="操作" width="360" fixed="right">
+	            <template #default="{ row }">
+	              <el-button link type="primary" size="small" @click="viewItemDetail(row)">详情</el-button>
+	              <el-button link type="primary" size="small" :disabled="aiCheckProgress.running" @click="aiCheckSingle(row)">AI检查</el-button>
+	              <el-button link type="success" size="small" :disabled="!canApplyAi(row)" @click="applyAiSuggestion(row)">采纳AI</el-button>
+	              <el-button link type="success" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'pass')">通过</el-button>
+	              <el-button link type="warning" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'warning')">警告</el-button>
+	              <el-button link type="danger" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'fail')">不合格</el-button>
+	              <el-tooltip v-if="!canReviewCheckItem(row)" :content="checkItemReviewDisabledReason(row)" placement="top">
+	                <span class="help-tip">?</span>
+	              </el-tooltip>
+	            </template>
+	          </el-table-column>
         </el-table>
 
 
@@ -273,10 +305,10 @@
     <!-- 检查项详情弹窗 -->
     <el-dialog v-model="itemDetailVisible" title="检查项详情" width="800px">
       <div v-if="selectedItem">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="检查项名称">{{ selectedItem.item_name }}</el-descriptions-item>
-          <el-descriptions-item label="类型">
-            <el-tag v-if="selectedItem.required_type === 'photo'" type="info" size="small">照片</el-tag>
+	        <el-descriptions :column="2" border>
+	          <el-descriptions-item label="检查项名称">{{ selectedItem.item_name }}</el-descriptions-item>
+	          <el-descriptions-item label="类型">
+	            <el-tag v-if="selectedItem.required_type === 'photo'" type="info" size="small">照片</el-tag>
             <el-tag v-else-if="selectedItem.required_type === 'data'" type="warning" size="small">数据</el-tag>
             <el-tag v-else-if="selectedItem.required_type === 'both'" type="primary" size="small">数据+照片</el-tag>
           </el-descriptions-item>
@@ -292,9 +324,74 @@
             <el-tag v-else-if="selectedItem.review_status === 'fail'" type="danger">不合格</el-tag>
             <span v-else>待审核</span>
           </el-descriptions-item>
-          <el-descriptions-item label="审核意见">{{ selectedItem.review_comments || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="现场备注">{{ selectedItem.notes || '-' }}</el-descriptions-item>
-        </el-descriptions>
+	          <el-descriptions-item label="审核意见">{{ selectedItem.review_comments || '-' }}</el-descriptions-item>
+	          <el-descriptions-item label="现场备注">{{ selectedItem.notes || '-' }}</el-descriptions-item>
+	        </el-descriptions>
+
+	        <!-- AI 建议 -->
+	        <div style="margin-top: 16px;">
+	          <div style="display: flex; align-items: center; justify-content: space-between;">
+	            <h4 style="margin: 0;">AI 建议（需人工确认后采纳）</h4>
+	            <el-space>
+	              <el-button size="small" type="primary" :disabled="aiCheckProgress.running" @click="aiCheckSingle(selectedItem)">
+	                <el-icon><MagicStick /></el-icon>AI检查
+	              </el-button>
+	              <el-button size="small" type="success" :disabled="!canApplyAi(selectedItem)" @click="applyAiSuggestion(selectedItem)">
+	                采纳AI
+	              </el-button>
+	            </el-space>
+	          </div>
+
+	          <div style="margin-top: 8px;">
+	            <el-tag v-if="selectedItem.ai_status === 'running'" type="info" size="small">生成中</el-tag>
+	            <el-tooltip v-else-if="selectedItem.ai_status === 'failed'" :content="selectedItem.ai_error || 'AI检查失败'" placement="top">
+	              <el-tag type="danger" size="small">失败</el-tag>
+	            </el-tooltip>
+	            <el-tag v-else-if="selectedItem.ai_status === 'done'" type="success" size="small">已生成</el-tag>
+	            <el-tag v-else size="small">未生成</el-tag>
+	          </div>
+
+	          <div v-if="selectedItem.ai_status === 'done' && selectedItem.ai_result" style="margin-top: 10px;">
+	            <el-descriptions :column="3" size="small" border>
+	              <el-descriptions-item label="建议结论">
+	                <el-tag :type="aiSuggestedTagType(selectedItem.ai_result?.suggested_review_status)" size="small">
+	                  {{ aiSuggestedStatusText(selectedItem.ai_result?.suggested_review_status) }}
+	                </el-tag>
+	              </el-descriptions-item>
+	              <el-descriptions-item label="建议分数">
+	                {{ (selectedItem.ai_result?.suggested_score ?? '-') }}
+	              </el-descriptions-item>
+	              <el-descriptions-item label="置信度">
+	                {{ (selectedItem.ai_result?.confidence ?? '-') }}
+	              </el-descriptions-item>
+	            </el-descriptions>
+
+	            <el-alert
+	              v-if="selectedItem.ai_result?.summary"
+	              type="info"
+	              :closable="false"
+	              show-icon
+	              style="margin-top: 10px;"
+	              :title="selectedItem.ai_result.summary"
+	            />
+
+	            <div v-if="Array.isArray(selectedItem.ai_result?.analysis) && selectedItem.ai_result.analysis.length" style="margin-top: 10px;">
+	              <div style="font-weight: 600; margin-bottom: 6px;">分析要点</div>
+	              <ul style="margin: 0; padding-left: 18px;">
+	                <li v-for="(it, idx) in selectedItem.ai_result.analysis" :key="idx">{{ it }}</li>
+	              </ul>
+	            </div>
+
+	            <div v-if="Array.isArray(selectedItem.ai_result?.missing_evidence) && selectedItem.ai_result.missing_evidence.length" style="margin-top: 10px;">
+	              <div style="font-weight: 600; margin-bottom: 6px;">缺材料/需补充</div>
+	              <el-space wrap>
+	                <el-tag v-for="(it, idx) in selectedItem.ai_result.missing_evidence" :key="idx" type="warning" size="small">
+	                  {{ it }}
+	                </el-tag>
+	              </el-space>
+	            </div>
+	          </div>
+	        </div>
 
 	        <!-- 数据内容 -->
 	        <div v-if="itemDetailFieldRows.length > 0" style="margin-top: 20px;">
@@ -671,9 +768,9 @@
       </template>
     </el-dialog>
 
-    <el-dialog
-      v-model="aiReviewI18nProgressVisible"
-      title="AI翻译进度"
+	    <el-dialog
+	      v-model="aiReviewI18nProgressVisible"
+	      title="AI翻译进度"
       width="520px"
       :show-close="false"
       :close-on-click-modal="false"
@@ -707,9 +804,44 @@
           关闭
         </el-button>
       </template>
-    </el-dialog>
-  </div>
-</template>
+	    </el-dialog>
+
+	    <el-dialog
+	      v-model="aiCheckProgressVisible"
+	      title="AI检查进度"
+	      width="520px"
+	      :show-close="false"
+	      :close-on-click-modal="false"
+	      :close-on-press-escape="false"
+	    >
+	      <div class="ai-progress">
+	        <el-progress :percentage="aiCheckProgressPercent" :status="aiCheckProgressBarStatus" />
+	        <div class="ai-progress-meta">
+	          <div class="ai-progress-main">
+	            已完成 {{ aiCheckProgress.done }}/{{ aiCheckProgress.total }}
+	          </div>
+	          <div class="ai-progress-time" v-if="aiCheckProgress.elapsedSeconds">
+	            用时 {{ formatDuration(aiCheckProgress.elapsedSeconds) }}
+	          </div>
+	        </div>
+	        <div class="ai-progress-status">{{ aiCheckProgress.message }}</div>
+	        <el-alert
+	          v-if="aiCheckProgress.error"
+	          type="error"
+	          :closable="false"
+	          show-icon
+	          style="margin-top: 12px;"
+	          :title="aiCheckProgress.error"
+	        />
+	      </div>
+	      <template #footer>
+	        <el-button v-if="!aiCheckProgress.running" type="primary" @click="closeAiCheckProgress">
+	          关闭
+	        </el-button>
+	      </template>
+	    </el-dialog>
+	  </div>
+	</template>
 
 <script setup>
 	import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
@@ -717,7 +849,7 @@
 	import request from '@/utils/request'
 	import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 	import { aiAPI } from '@/api/ai'
-	import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled, ChatDotRound, MagicStick } from '@element-plus/icons-vue'
+		import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled, ChatDotRound, MagicStick, ArrowDown } from '@element-plus/icons-vue'
 	import { useUserStore } from '@/stores/user'
 	import ProgressImage from '@/components/common/ProgressImage.vue'
 	import { createObjectUrl, loadImageBlob, revokeObjectUrl, resolveImageUrl } from '@/utils/imageLoader'
@@ -843,12 +975,66 @@ const closeAiReviewI18nProgress = () => {
   aiReviewI18nProgress.error = ''
 }
 
-const formatDuration = (seconds) => {
-  const s = Math.max(0, Number(seconds || 0))
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
-}
+	const formatDuration = (seconds) => {
+	  const s = Math.max(0, Number(seconds || 0))
+	  const m = Math.floor(s / 60)
+	  const r = s % 60
+	  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
+	}
+
+	// 一键 AI 检查（检查项）
+	const aiCheckProgressVisible = ref(false)
+	const aiCheckProgress = reactive({
+	  total: 0,
+	  done: 0,
+	  message: '',
+	  error: '',
+	  running: false,
+	  elapsedSeconds: 0,
+	})
+
+	let aiCheckProgressTimer = null
+	let aiCheckProgressStartedAt = 0
+
+	const aiCheckProgressPercent = computed(() => {
+	  if (!aiCheckProgress.total) return 0
+	  const v = Math.floor((aiCheckProgress.done / aiCheckProgress.total) * 100)
+	  return Math.min(100, Math.max(0, v))
+	})
+
+	const aiCheckProgressBarStatus = computed(() => {
+	  if (aiCheckProgress.error) return 'exception'
+	  if (!aiCheckProgress.running && aiCheckProgress.total > 0 && aiCheckProgress.done >= aiCheckProgress.total) return 'success'
+	  return ''
+	})
+
+	const startAiCheckProgressTimer = () => {
+	  if (aiCheckProgressTimer) {
+	    clearInterval(aiCheckProgressTimer)
+	    aiCheckProgressTimer = null
+	  }
+	  aiCheckProgressStartedAt = Date.now()
+	  aiCheckProgress.elapsedSeconds = 0
+	  aiCheckProgressTimer = setInterval(() => {
+	    aiCheckProgress.elapsedSeconds = Math.max(
+	      0,
+	      Math.floor((Date.now() - aiCheckProgressStartedAt) / 1000),
+	    )
+	  }, 1000)
+	}
+
+	const stopAiCheckProgressTimer = () => {
+	  if (!aiCheckProgressTimer) return
+	  clearInterval(aiCheckProgressTimer)
+	  aiCheckProgressTimer = null
+	}
+
+	const closeAiCheckProgress = () => {
+	  if (aiCheckProgress.running) return
+	  aiCheckProgressVisible.value = false
+	  aiCheckProgress.message = ''
+	  aiCheckProgress.error = ''
+	}
 
 const statuses = [
   { label: '待分配', value: 'PENDING' },
@@ -885,17 +1071,47 @@ const checkItemStatusText = (status) => {
   return mapping[value] || (value || '-')
 }
 
-const checkItemStatusTagType = (status) => {
-  const value = (status ?? '').toString()
-  const mapping = {
-    pending: 'info',
-    in_progress: 'warning',
-    completed: 'success',
-    failed: 'danger',
-    skipped: 'info',
-  }
-  return mapping[value] || 'info'
-}
+	const checkItemStatusTagType = (status) => {
+	  const value = (status ?? '').toString()
+	  const mapping = {
+	    pending: 'info',
+	    in_progress: 'warning',
+	    completed: 'success',
+	    failed: 'danger',
+	    skipped: 'info',
+	  }
+	  return mapping[value] || 'info'
+	}
+
+	const aiSuggestedStatusText = (status) => {
+	  const v = String(status || '').trim()
+	  const mapping = {
+	    pass: '通过',
+	    warning: '警告',
+	    fail: '不合格',
+	  }
+	  return mapping[v] || (v || '-')
+	}
+
+	const aiSuggestedTagType = (status) => {
+	  const v = String(status || '').trim()
+	  const mapping = {
+	    pass: 'success',
+	    warning: 'warning',
+	    fail: 'danger',
+	  }
+	  return mapping[v] || 'info'
+	}
+
+	const canApplyAi = (row) => {
+	  if (!row) return false
+	  if (row.review_status === 'pass' || row.review_status === 'warning' || row.review_status === 'fail') return false
+	  const status = String(row.status || '').trim()
+	  if (status !== 'completed') return false
+	  if (String(row.ai_status || '') !== 'done') return false
+	  const suggested = row.ai_result?.suggested_review_status
+	  return ['pass', 'warning', 'fail'].includes(String(suggested || '').trim())
+	}
 
 const canReviewCheckItem = (item) => {
   const status = (item?.status ?? '').toString()
@@ -1255,24 +1471,141 @@ const runAiReviewI18n = async () => {
     aiReviewI18nProgress.message = '已中止'
     aiReviewI18nProgress.running = false
     ElMessage.error(detail)
+	} finally {
+	  aiReviewI18nLoading.value = false
+	  aiReviewI18nProgress.running = false
+	  stopAiReviewI18nProgressTimer()
+	}
+}
+
+const applyAiAnalyzeResultToRow = (row, res) => {
+  if (!row || !res) return
+  row.ai_status = res.ai_status
+  row.ai_mode = res.ai_mode
+  row.ai_model = res.ai_model
+  row.ai_input_hash = res.ai_input_hash
+  row.ai_result = res.ai_result
+  row.ai_error = res.ai_error
+  row.ai_checked_by = res.ai_checked_by
+  row.ai_checked_at = res.ai_checked_at
+}
+
+const aiCheckSingle = async (row) => {
+  if (!row?.id) return
+  const loadingInstance = ElLoading.service({ text: 'AI 检查中...' })
+  try {
+    const res = await aiAPI.analyzeCheckItem(row.id, {
+      mode: 'auto',
+      force: false,
+      max_images: 5,
+      image_detail: 'low',
+    })
+    applyAiAnalyzeResultToRow(row, res)
+    ElMessage.success('AI 建议已生成')
+  } catch (error) {
+    console.error('AI 检查失败:', error)
+    ElMessage.error(error?.response?.data?.detail || error?.message || 'AI 检查失败')
   } finally {
-    aiReviewI18nLoading.value = false
-    aiReviewI18nProgress.running = false
-    stopAiReviewI18nProgressTimer()
+    loadingInstance.close()
   }
 }
 
-const startReview = async () => {
-  const id = route.query.id
+const runAiCheckBatch = async (command) => {
+  const cmd = String(command || '').trim()
+  if (aiCheckProgress.running) return
+
+  const list = Array.isArray(items.value) ? items.value : []
+  const targets = cmd === 'all'
+    ? list
+    : list.filter((row) => String(row?.ai_status || '') !== 'done' || !row?.ai_result)
+
+  if (!targets.length) {
+    ElMessage.info('没有需要 AI 检查的检查项')
+    return
+  }
+
+  aiCheckProgressVisible.value = true
+  aiCheckProgress.total = targets.length
+  aiCheckProgress.done = 0
+  aiCheckProgress.message = '准备开始...'
+  aiCheckProgress.error = ''
+  aiCheckProgress.running = true
+  startAiCheckProgressTimer()
+
   try {
-    await request.post(`/api/work-orders/${id}/review/start`)
-    ElMessage.success('已进入审核中')
-    await refresh()
-  } catch (e) {
-    console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '认领失败')
+    for (let i = 0; i < targets.length; i += 1) {
+      const row = targets[i]
+      const name = row?.item_name || row?.item_id || row?.id
+      aiCheckProgress.message = `检查中（${i + 1}/${targets.length}）：${name}`
+      const res = await aiAPI.analyzeCheckItem(row.id, {
+        mode: 'auto',
+        force: false,
+        max_images: 5,
+        image_detail: 'low',
+      })
+      applyAiAnalyzeResultToRow(row, res)
+      aiCheckProgress.done = i + 1
+      await nextTick()
+    }
+
+    aiCheckProgress.message = '已完成'
+    ElMessage.success('AI 检查已完成')
+  } catch (error) {
+    console.error('AI 检查失败:', error)
+    const detail = error?.response?.data?.detail || error?.message || 'AI 检查失败'
+    aiCheckProgress.error = detail
+    aiCheckProgress.message = '已中止'
+    ElMessage.error(detail)
+  } finally {
+    aiCheckProgress.running = false
+    stopAiCheckProgressTimer()
   }
 }
+
+const applyAiSuggestion = async (row) => {
+  if (!row?.id) return
+  if (!canApplyAi(row)) {
+    ElMessage.warning('当前检查项不满足采纳条件')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `将 AI 建议写入“审核结果/审核意见”？\n检查项：${row.item_name || row.item_id || row.id}`,
+      '采纳 AI 建议',
+      { type: 'warning', confirmButtonText: '采纳', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+
+  const loadingInstance = ElLoading.service({ text: '采纳中...' })
+  try {
+    const res = await aiAPI.applyCheckItem(row.id)
+    row.review_status = res?.review_status
+    row.review_comments = res?.review_comments
+    row.reviewed_at = res?.reviewed_at
+    ElMessage.success('已采纳 AI 建议')
+    await loadSummary()
+  } catch (error) {
+    console.error('采纳 AI 失败:', error)
+    ElMessage.error(error?.response?.data?.detail || error?.message || '采纳失败')
+  } finally {
+    loadingInstance.close()
+  }
+}
+
+		const startReview = async () => {
+		  const id = route.query.id
+		  try {
+		    await request.post(`/api/work-orders/${id}/review/start`)
+	    ElMessage.success('已进入审核中')
+	    await refresh()
+	  } catch (e) {
+	    console.error(e)
+	    ElMessage.error(e?.response?.data?.detail || '认领失败')
+	  }
+	}
 
 const reviewItem = async (row, action) => {
   itemReviewRow.value = row

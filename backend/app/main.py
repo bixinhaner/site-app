@@ -25,12 +25,13 @@ from app.models import opening_archive as _opening_archive_models  # noqa: F401
 from app.models import ssv_archive as _ssv_archive_models  # noqa: F401
 from app.models import omc_cellname_sync as _omc_cellname_sync_models  # noqa: F401
 from app.models import system_config as _system_config_models  # noqa: F401
+from app.models import ai_call_log as _ai_call_log_models  # noqa: F401
 from app.models import geocode_cache as _geocode_cache_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.models import app_version as _app_version_models  # noqa: F401
 from app.models import mobile_client_log as _mobile_client_log_models  # noqa: F401
 from app.models.user import User
-from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai
+from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai, ai_management
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
 from app.api import operation_logs, app_version
 from app.api import mobile_client_logs
@@ -112,6 +113,7 @@ app.include_router(operation_logs.router, prefix="/api", tags=["操作日志"])
 app.include_router(mobile_client_logs.router, prefix="/api", tags=["移动端日志"])
 app.include_router(mobile_settings.router, prefix="/api/system", tags=["系统配置"])
 app.include_router(geocode_cache.router, prefix="/api/system", tags=["地理编码缓存"])
+app.include_router(ai_management.router, prefix="/api/system/ai", tags=["AI管理"])
 app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])
 app.include_router(survey_archives.router, prefix="/api/survey-archives", tags=["勘察档案"])
 app.include_router(opening_archives.router, prefix="/api/opening-archives", tags=["开站档案"])
@@ -200,6 +202,25 @@ def _ensure_default_admin_user() -> None:
 @app.on_event("startup")
 def _startup_ensure_default_admin():
     _ensure_default_admin_user()
+
+@app.on_event("startup")
+def _startup_apply_ai_config():
+    """
+    启动时从 DB 读取 AI 配置，并热更新到运行中的 settings。
+
+    - 支持“后台页面修改后即时生效”
+    - DB 未配置时不影响启动
+    """
+    db = SessionLocal()
+    try:
+        from app.services.ai_config_service import apply_ai_config_to_settings, load_ai_config
+
+        cfg = load_ai_config(db)
+        apply_ai_config_to_settings(cfg)
+    except Exception as e:
+        print(f"⚠️ AI 配置加载失败: {e}")
+    finally:
+        db.close()
 
 
 @app.on_event("startup")

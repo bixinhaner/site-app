@@ -244,11 +244,28 @@ class InspectionCheckItemResponse(BaseModel):
     review_comments: Optional[str]
     review_comments_i18n: Optional[Dict[str, str]] = None
     reviewed_at: Optional[datetime]
+    ai_status: Optional[str] = None
+    ai_mode: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_input_hash: Optional[str] = None
+    ai_result: Optional[Dict[str, Any]] = None
+    ai_error: Optional[str] = None
+    ai_checked_by: Optional[int] = None
+    ai_checked_at: Optional[datetime] = None
+    ai_applied_by: Optional[int] = None
+    ai_applied_at: Optional[datetime] = None
     photos: List[InspectionPhotoResponse] = []
     created_at: datetime
     updated_at: datetime
 
-    @field_serializer('checked_at', 'reviewed_at', 'created_at', 'updated_at')
+    @field_serializer(
+        'checked_at',
+        'reviewed_at',
+        'ai_checked_at',
+        'ai_applied_at',
+        'created_at',
+        'updated_at',
+    )
     def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
         return to_utc_iso(dt)
     

@@ -15,6 +15,16 @@ def ensure_inspection_schema(engine: Engine) -> None:
         "inspection_check_items": {
             "notes": "notes TEXT",
             "review_comments_i18n": "review_comments_i18n TEXT",
+            "ai_status": "ai_status TEXT",
+            "ai_mode": "ai_mode TEXT",
+            "ai_model": "ai_model TEXT",
+            "ai_input_hash": "ai_input_hash TEXT",
+            "ai_result": "ai_result TEXT",
+            "ai_error": "ai_error TEXT",
+            "ai_checked_by": "ai_checked_by INTEGER",
+            "ai_checked_at": "ai_checked_at DATETIME",
+            "ai_applied_by": "ai_applied_by INTEGER",
+            "ai_applied_at": "ai_applied_at DATETIME",
         },
         "inspection_photos": {
             "field_id": "field_id TEXT",

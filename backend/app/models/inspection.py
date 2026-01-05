@@ -189,6 +189,18 @@ class InspectionCheckItem(Base):
     review_comments_i18n = Column(JSON)
     reviewed_by = Column(Integer, ForeignKey("users.id"))
     reviewed_at = Column(DateTime)
+
+    # AI 检查（建议项；需人工确认采纳后才写回审核结果）
+    ai_status = Column(String(20))  # none, queued, running, done, failed, canceled
+    ai_mode = Column(String(10))  # auto, text, vision
+    ai_model = Column(String(100))
+    ai_input_hash = Column(String(64))
+    ai_result = Column(JSON)
+    ai_error = Column(Text)
+    ai_checked_by = Column(Integer, ForeignKey("users.id"))
+    ai_checked_at = Column(DateTime)
+    ai_applied_by = Column(Integer, ForeignKey("users.id"))
+    ai_applied_at = Column(DateTime)
     
     # 系统字段
     created_at = Column(DateTime, server_default=func.now())

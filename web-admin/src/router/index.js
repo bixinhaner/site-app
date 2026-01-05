@@ -217,6 +217,12 @@ const routes = [
             name: 'AppVersionStats',
             component: () => import('../views/system/AppVersionStats.vue'),
             meta: { title: 'App使用统计', icon: 'DataAnalysis', hidden: true, roles: ['admin', 'manager'] }
+          },
+          {
+            path: 'ai',
+            name: 'AiManagement',
+            component: () => import('../views/system/AiManagement.vue'),
+            meta: { title: 'AI管理', icon: 'MagicStick', roles: ['admin', 'manager', 'reviewer'] }
           }
         ]
       },

@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.core.config import settings
@@ -45,6 +46,44 @@ class AiTranslateService:
         if translation is None:
             raise RuntimeError(f"AI 翻译解析失败: {content[:200]}")
         return translation
+
+    def translate_with_trace(
+        self,
+        *,
+        text: str,
+        target_locale: str,
+        source_locale: Optional[str] = None,
+    ) -> tuple[str, Dict[str, Any]]:
+        src = self._normalize_locale(source_locale) or "auto"
+        tgt = self._normalize_locale(target_locale) or target_locale
+        messages = _build_single_messages(text=text, source_locale=src, target_locale=tgt)
+        started = time.time()
+        content, usage, raw = self._client.create_chat_completion_with_meta(
+            messages=messages,
+            model=_ensure_ai_model(),
+            temperature=settings.AI_TEMPERATURE,
+            max_tokens=settings.AI_MAX_TOKENS,
+        )
+        duration_ms = int((time.time() - started) * 1000)
+
+        obj = _extract_json_object(content)
+        translation = _coerce_translation(obj)
+        if translation is None:
+            raise RuntimeError(f"AI 翻译解析失败: {content[:200]}")
+
+        trace = {
+            "duration_ms": duration_ms,
+            "messages": messages,
+            "usage": usage,
+            "raw": raw,
+            "content": content,
+            "input": {
+                "text": text,
+                "source_locale": src,
+                "target_locale": tgt,
+            },
+        }
+        return translation, trace
 
     def translate_batch(
         self,
@@ -96,6 +135,74 @@ class AiTranslateService:
         if missing:
             raise RuntimeError(f"AI 批量翻译缺少结果: {missing[:20]}")
         return [v or "" for v in out]
+
+    def translate_batch_with_traces(
+        self,
+        *,
+        items: Sequence[Tuple[str, str, Optional[str], Optional[str]]],
+        chunk_size: Optional[int] = None,
+    ) -> tuple[List[str], List[Dict[str, Any]]]:
+        """批量翻译（附带每个分段请求的 trace 列表）。"""
+        if not items:
+            return [], []
+        size = int(chunk_size or settings.AI_BATCH_CHUNK_SIZE or 20)
+        if size <= 0:
+            size = 20
+
+        out: List[Optional[str]] = [None] * len(items)
+        model = _ensure_ai_model()
+        traces: List[Dict[str, Any]] = []
+
+        chunks = _chunk_items(list(enumerate(items)), size)
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            payload_items = []
+            for idx, (text, target_locale, source_locale, key) in chunk:
+                payload_items.append(
+                    {
+                        "id": idx,
+                        "key": key,
+                        "source_locale": self._normalize_locale(source_locale) or "auto",
+                        "target_locale": self._normalize_locale(target_locale) or target_locale,
+                        "text": text,
+                    }
+                )
+            messages = _build_batch_messages(payload_items)
+            started = time.time()
+            content, usage, raw = self._client.create_chat_completion_with_meta(
+                messages=messages,
+                model=model,
+                temperature=settings.AI_TEMPERATURE,
+                max_tokens=settings.AI_MAX_TOKENS,
+            )
+            duration_ms = int((time.time() - started) * 1000)
+
+            obj = _extract_json_object(content)
+            mapping = _coerce_batch_translations(obj)
+            if mapping is None:
+                raise RuntimeError(f"AI 批量翻译解析失败: {content[:200]}")
+            for idx, trans in mapping.items():
+                if 0 <= idx < len(out):
+                    out[idx] = trans
+
+            traces.append(
+                {
+                    "duration_ms": duration_ms,
+                    "messages": messages,
+                    "usage": usage,
+                    "raw": raw,
+                    "content": content,
+                    "input": {
+                        "chunk_index": chunk_index,
+                        "chunk_total": len(chunks),
+                        "items": payload_items,
+                    },
+                }
+            )
+
+        missing = [i for i, v in enumerate(out) if not v and v != ""]
+        if missing:
+            raise RuntimeError(f"AI 批量翻译缺少结果: {missing[:20]}")
+        return [v or "" for v in out], traces
 
 
 def _ensure_ai_model() -> str:
