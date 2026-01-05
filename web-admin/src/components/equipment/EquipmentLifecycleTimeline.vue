@@ -1,5 +1,14 @@
 <template>
   <el-card v-loading="loading">
+    <el-alert
+      v-if="errorMessage"
+      type="error"
+      :closable="true"
+      show-icon
+      title="生命周期加载失败"
+      :description="errorMessage"
+      class="mb12"
+    />
     <!-- 设备信息概览 -->
     <div v-if="equipmentInfo" class="equipment-overview">
       <el-descriptions :column="3" border>
@@ -129,8 +138,12 @@
     </div>
 
     <el-empty
-      v-else-if="sn && !loading"
+      v-else-if="sn && !loading && !errorMessage"
       description="未找到设备信息或暂无生命周期记录"
+    />
+    <el-empty
+      v-else-if="sn && !loading && errorMessage"
+      description="生命周期加载失败"
     />
     <el-empty
       v-else-if="!sn && !loading"
@@ -155,6 +168,7 @@ const props = defineProps({
 const loading = ref(false)
 const equipmentInfo = ref(null)
 const lifecycleEvents = ref([])
+const errorMessage = ref('')
 const omcLoading = ref(false)
 const omcStatus = ref(null)
 const refreshCooldown = ref(0)
@@ -217,41 +231,30 @@ const loadLifecycle = async () => {
   loading.value = true
   equipmentInfo.value = null
   lifecycleEvents.value = []
+  errorMessage.value = ''
 
   try {
-    // 优先使用新接口（统一返回设备信息 + 事件列表）
-    const res = await request.get(`/api/equipment/instances/${props.sn}/lifecycle-events`).catch(() => null)
-    if (res && res.equipment) {
-      equipmentInfo.value = res.equipment
-      lifecycleEvents.value = Array.isArray(res.events) ? res.events : []
-    } else {
-      // 兼容降级：旧接口拼装（事件不完整，但可用）
-      const [equipmentRes, historyRes] = await Promise.all([
-        request
-          .get('/api/equipment/instances/search', { params: { serial_number: props.sn } })
-          .catch(() => null),
-        request
-          .get(`/api/inspections/equipment-history/${props.sn}`)
-          .catch(() => ({ history: [] }))
-      ])
-      equipmentInfo.value = equipmentRes
-      const history = (historyRes && historyRes.history) ? historyRes.history : []
-      const fallback = []
-      if (equipmentRes?.created_at) {
-        fallback.push({ action: 'stock_in', operated_at: equipmentRes.created_at, details: {} })
-      }
-      if (equipmentRes?.issued_at) {
-        fallback.push({ action: 'stock_out', operated_at: equipmentRes.issued_at, details: {} })
-      }
-      lifecycleEvents.value = [...history, ...fallback]
-    }
+    const res = await request.get(`/api/equipment/instances/${props.sn}/lifecycle-events`)
+    equipmentInfo.value = res?.equipment || null
+    lifecycleEvents.value = Array.isArray(res?.events) ? res.events : []
 
     if (!equipmentInfo.value && lifecycleEvents.value.length === 0) {
       ElMessage.warning('未找到该设备的信息')
     }
   } catch (error) {
     console.error('查询设备生命周期失败:', error)
-    ElMessage.error('查询设备生命周期失败')
+    const status = error?.response?.status
+    const detail = error?.response?.data?.detail
+    const detailText = typeof detail === 'string' ? detail : ''
+    const statusText = status ? `HTTP ${status}` : '网络/服务异常'
+    let hint = '请检查后端服务是否已启动，以及版本是否已升级支持 lifecycle-events 接口。'
+    if (status === 404) {
+      hint = '接口不存在（可能后端未升级或路由未注册）。'
+    } else if (status === 401 || status === 403) {
+      hint = '权限不足或登录失效，请重新登录后再试。'
+    }
+    errorMessage.value = `${statusText}${detailText ? `：${detailText}` : ''}。${hint}`
+    ElMessage.error(errorMessage.value)
   } finally {
     loading.value = false
   }
