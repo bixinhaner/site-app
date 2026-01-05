@@ -38,14 +38,69 @@
         <div>模板：{{ content.meta?.template?.name }} v{{ content.meta?.template?.version }}</div>
       </div>
 
-      <archive-form-renderer
-        :content="content"
-        :disabled="!editing"
-        @change="onFieldChange"
-        @upload-photo="onUploadPhoto"
-        @delete-photo="onDeletePhoto"
-      />
-    </el-card>
+	      <archive-form-renderer
+	        :content="content"
+	        :disabled="!editing"
+	        @change="onFieldChange"
+	        @upload-photo="onUploadPhoto"
+	        @delete-photo="onDeletePhoto"
+	      />
+
+	      <el-divider />
+	      <div class="attachments">
+	        <div class="attachments-header">
+	          <div class="attachments-title">附件</div>
+	          <el-upload
+	            v-if="editing && isAdmin"
+	            multiple
+	            :show-file-list="false"
+	            :http-request="onUploadAttachment"
+	          >
+	            <el-button size="small" type="primary" plain>上传附件</el-button>
+	          </el-upload>
+	        </div>
+
+	        <el-table
+	          v-if="Array.isArray(content.attachments) && content.attachments.length"
+	          :data="content.attachments"
+	          size="small"
+	          border
+	        >
+	          <el-table-column label="文件名" min-width="260">
+	            <template #default="{ row }">
+	              <div class="att-name">
+	                <el-link :href="fileUrl(row.file_path)" target="_blank" :underline="false">
+	                  {{ row.original_name || row.file_name || row.file_path }}
+	                </el-link>
+	                <el-tag v-if="row.pending" size="small" type="warning" class="att-pending">未保存</el-tag>
+	              </div>
+	              <div v-if="row.description" class="att-desc">{{ row.description }}</div>
+	            </template>
+	          </el-table-column>
+	          <el-table-column label="大小" width="120">
+	            <template #default="{ row }">{{ formatBytes(row.file_size) }}</template>
+	          </el-table-column>
+	          <el-table-column label="类型" min-width="160">
+	            <template #default="{ row }">{{ row.mime_type || '-' }}</template>
+	          </el-table-column>
+	          <el-table-column label="操作" width="140" fixed="right">
+	            <template #default="{ row }">
+	              <el-link :href="fileUrl(row.file_path)" target="_blank" :underline="false">下载</el-link>
+	              <el-button
+	                v-if="editing && isAdmin"
+	                link
+	                type="danger"
+	                size="small"
+	                @click="onDeleteAttachment(row)"
+	              >
+	                删除
+	              </el-button>
+	            </template>
+	          </el-table-column>
+	        </el-table>
+	        <div v-else class="muted">暂无附件</div>
+	      </div>
+	    </el-card>
 
     <el-drawer v-model="historyVisible" title="变更历史" size="60%">
       <el-table :data="history" height="70vh" v-loading="historyLoading">
@@ -79,6 +134,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { openingArchivesApi } from '@/api/openingArchives'
 import ArchiveFormRenderer from '@/components/archives/ArchiveFormRenderer.vue'
 import { useUserStore } from '@/stores/user'
+import { resolveImageUrl } from '@/utils/imageLoader'
 
 const route = useRoute()
 const router = useRouter()
@@ -97,6 +153,9 @@ const edits = reactive(new Map()) // key: json pointer, value: new value
 // 照片变更在前端暂存，保存时一次性通过 JSON Patch 提交
 const photoAdds = ref([]) // { categoryId, itemId, level, sectorId?, cellId?, photo }
 const photoDeletes = ref([]) // { categoryId, itemId, level, sectorId?, cellId?, photoId }
+// 附件变更：编辑态先预上传，保存时再写入 content.attachments[]
+const attachmentAdds = ref([]) // { attachment }
+const attachmentDeletes = ref([]) // { attachmentId }
 
 const history = ref([])
 const historyLoading = ref(false)
@@ -129,13 +188,15 @@ const load = async (preserveEdits = false) => {
     content.value = safeClone(res.content)
     if (preserveEdits) {
       applyLocalEdits()
-    } else {
-      edits.clear()
-      editing.value = false
-      photoAdds.value = []
-      photoDeletes.value = []
-    }
-  } catch (e) {
+	    } else {
+	      edits.clear()
+	      editing.value = false
+	      photoAdds.value = []
+	      photoDeletes.value = []
+	      attachmentAdds.value = []
+	      attachmentDeletes.value = []
+	    }
+	  } catch (e) {
     console.error(e)
     ElMessage.error('加载失败')
   } finally {
@@ -276,18 +337,34 @@ function applyLocalEdits() {
       }
     }
     // 应用本地待删除的照片
-    for (const rec of photoDeletes.value) {
-      const { categoryId, itemId, level, sectorId, cellId, photoId } = rec
-      const loc = resolvePhotosContainer(content.value, categoryId, itemId, level, sectorId, cellId)
-      if (!loc) continue
-      const photos = Array.isArray(loc.container.photos) ? loc.container.photos : []
-      const idx = photos.findIndex((p) => String(p.id) === String(photoId))
-      if (idx >= 0) photos.splice(idx, 1)
-    }
-  } catch (e) {
-    console.warn('applyLocalEdits failed:', e)
-  }
-}
+	    for (const rec of photoDeletes.value) {
+	      const { categoryId, itemId, level, sectorId, cellId, photoId } = rec
+	      const loc = resolvePhotosContainer(content.value, categoryId, itemId, level, sectorId, cellId)
+	      if (!loc) continue
+	      const photos = Array.isArray(loc.container.photos) ? loc.container.photos : []
+	      const idx = photos.findIndex((p) => String(p.id) === String(photoId))
+	      if (idx >= 0) photos.splice(idx, 1)
+	    }
+	    // 应用本地待新增附件
+	    if (!Array.isArray(content.value.attachments)) content.value.attachments = []
+	    for (const rec of attachmentAdds.value) {
+	      const att = rec?.attachment
+	      if (!att) continue
+	      if (!content.value.attachments.find((x) => String(x.id) === String(att.id))) {
+	        content.value.attachments.push(att)
+	      }
+	    }
+	    // 应用本地待删除附件
+	    for (const rec of attachmentDeletes.value) {
+	      const attachmentId = rec?.attachmentId
+	      if (!attachmentId) continue
+	      const idx = (content.value.attachments || []).findIndex((x) => String(x.id) === String(attachmentId))
+	      if (idx >= 0) content.value.attachments.splice(idx, 1)
+	    }
+	  } catch (e) {
+	    console.warn('applyLocalEdits failed:', e)
+	  }
+	}
 
 function onFieldChange({ categoryId, itemId, fieldId, value }) {
   if (!editing.value) return
@@ -350,24 +427,54 @@ async function saveChanges() {
       if (!removeGroups.has(base)) removeGroups.set(base, [])
       removeGroups.get(base).push(idx)
     }
-    for (const [base, indexes] of removeGroups.entries()) {
-      indexes
-        .filter((x) => Number.isInteger(x))
-        .sort((a, b) => b - a)
-        .forEach((idx) => patchOps.push({ op: 'remove', path: `${base}/${idx}` }))
-    }
-    if (patchOps.length === 0) {
-      ElMessage.info('没有更改')
-      return
-    }
+	    for (const [base, indexes] of removeGroups.entries()) {
+	      indexes
+	        .filter((x) => Number.isInteger(x))
+	        .sort((a, b) => b - a)
+	        .forEach((idx) => patchOps.push({ op: 'remove', path: `${base}/${idx}` }))
+	    }
+
+	    // 附件新增/删除
+	    const originAttachments = Array.isArray(origin.value?.attachments) ? origin.value.attachments : null
+	    if (attachmentAdds.value.length) {
+	      const addList = attachmentAdds.value
+	        .map((x) => x?.attachment)
+	        .filter(Boolean)
+	        .map((a) => {
+	          const v = { ...a }
+	          delete v.pending
+	          delete v._temp
+	          return v
+	        })
+	      if (addList.length) {
+	        if (originAttachments) {
+	          addList.forEach((a) => patchOps.push({ op: 'add', path: '/attachments/-', value: a }))
+	        } else {
+	          patchOps.push({ op: 'add', path: '/attachments', value: addList })
+	        }
+	      }
+	    }
+	    if (attachmentDeletes.value.length && originAttachments) {
+	      const idxs = attachmentDeletes.value
+	        .map((x) => originAttachments.findIndex((a) => String(a?.id) === String(x?.attachmentId)))
+	        .filter((i) => i >= 0)
+	        .sort((a, b) => b - a)
+	      idxs.forEach((i) => patchOps.push({ op: 'remove', path: `/attachments/${i}` }))
+	    }
+	    if (patchOps.length === 0) {
+	      ElMessage.info('没有更改')
+	      return
+	    }
     
     await openingArchivesApi.patch(id, patchOps, archive.value.current_version, '前端编辑')
     ElMessage.success('已保存')
-    edits.clear()
-    photoAdds.value = []
-    photoDeletes.value = []
-    await load()
-    editing.value = false
+	    edits.clear()
+	    photoAdds.value = []
+	    photoDeletes.value = []
+	    attachmentAdds.value = []
+	    attachmentDeletes.value = []
+	    await load()
+	    editing.value = false
   } catch (e) {
     console.error(e)
     if (String(e?.response?.status) === '409') {
@@ -448,6 +555,54 @@ async function onUploadPhoto(payload) {
   }
 }
 
+async function onUploadAttachment(opt) {
+  try {
+    if (!editing.value) return
+    const file = opt?.file
+    if (!file) return
+    const res = await openingArchivesApi.uploadTempAttachment(id, { file })
+    const att = {
+      ...res,
+      original_name: res?.original_name || file.name,
+      file_size: res?.file_size ?? file.size,
+      mime_type: res?.mime_type || file.type,
+      pending: true,
+    }
+    if (!Array.isArray(content.value.attachments)) content.value.attachments = []
+    if (!content.value.attachments.find((x) => String(x.id) === String(att.id))) {
+      content.value.attachments.push(att)
+    }
+    attachmentAdds.value.push({ attachment: att })
+    ElMessage.success('附件已上传（未保存）')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('上传附件失败')
+  }
+}
+
+async function onDeleteAttachment(row) {
+  try {
+    if (!editing.value) return
+    const attachmentId = row?.id
+    if (!attachmentId) return
+    if (row?.pending) {
+      const idx = attachmentAdds.value.findIndex((x) => String(x?.attachment?.id) === String(attachmentId))
+      if (idx >= 0) attachmentAdds.value.splice(idx, 1)
+    } else {
+      if (!attachmentDeletes.value.find((x) => String(x?.attachmentId) === String(attachmentId))) {
+        attachmentDeletes.value.push({ attachmentId })
+      }
+    }
+    const list = Array.isArray(content.value.attachments) ? content.value.attachments : []
+    const i = list.findIndex((x) => String(x.id) === String(attachmentId))
+    if (i >= 0) list.splice(i, 1)
+    ElMessage.success('已移除附件（保存后生效）')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('删除失败')
+  }
+}
+
 async function onDeletePhoto(payload) {
   try {
     if (!editing.value) return
@@ -494,7 +649,7 @@ function startEdit() {
 }
 
 async function cancelEdit() {
-  if (edits.size > 0) {
+  if (edits.size > 0 || photoAdds.value.length || photoDeletes.value.length || attachmentAdds.value.length || attachmentDeletes.value.length) {
     try {
       await ElMessageBox.confirm('放弃未保存的修改？', '提示', { type: 'warning' })
     } catch (e) {
@@ -506,12 +661,28 @@ async function cancelEdit() {
   edits.clear()
   photoAdds.value = []
   photoDeletes.value = []
+  attachmentAdds.value = []
+  attachmentDeletes.value = []
   editing.value = false
   try { console.debug('[ArchiveDetail] Cancel edit and restore content') } catch (_) {}
 }
 
 function goBack() {
   router.push({ name: 'OpeningArchives' })
+}
+
+function fileUrl(p) { return resolveImageUrl(p) }
+
+function formatBytes(v) {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0) return '-'
+  const kb = 1024
+  const mb = kb * 1024
+  const gb = mb * 1024
+  if (n >= gb) return `${(n / gb).toFixed(2)} GB`
+  if (n >= mb) return `${(n / mb).toFixed(2)} MB`
+  if (n >= kb) return `${(n / kb).toFixed(2)} KB`
+  return `${n} B`
 }
 </script>
 
@@ -523,4 +694,10 @@ function goBack() {
 .hist-lines { margin: 0; padding-left: 18px; }
 .hist-lines li { list-style: disc; line-height: 1.6; }
 .muted { color: #999; }
+.attachments { margin-top: 8px; }
+.attachments-header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
+.attachments-title { font-weight: 600; }
+.att-name { display:flex; align-items:center; gap: 8px; flex-wrap: wrap; }
+.att-pending { margin-left: 4px; }
+.att-desc { color: #777; font-size: 12px; margin-top: 4px; }
 </style>

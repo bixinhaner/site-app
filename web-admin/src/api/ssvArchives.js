@@ -46,6 +46,14 @@ export const ssvArchivesApi = {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
   },
+  uploadTempAttachment(id, { file, description }) {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (description != null && String(description).trim() !== '') fd.append('description', description)
+    return request.post(`/api/ssv-archives/${id}/attachments/temp`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
   deletePhoto(id, photoId) {
     return request.delete(`/api/ssv-archives/${id}/photos/${photoId}`)
   },

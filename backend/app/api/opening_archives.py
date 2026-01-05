@@ -718,6 +718,64 @@ async def export_archive_pdf(
         if ci != len(cats):
             story.append(PageBreak())
 
+    # 附件清单（档案级补充信息）
+    attachments = (a.content or {}).get("attachments") or []
+    att_rows = []
+
+    def fmt_size(num):
+        try:
+            n = float(num)
+            if n <= 0:
+                return "-"
+            kb = 1024.0
+            mb = kb * 1024.0
+            gb = mb * 1024.0
+            if n >= gb:
+                return f"{n / gb:.2f} GB"
+            if n >= mb:
+                return f"{n / mb:.2f} MB"
+            if n >= kb:
+                return f"{n / kb:.2f} KB"
+            return f"{int(n)} B"
+        except Exception:
+            return "-"
+
+    for att in attachments:
+        if not isinstance(att, dict):
+            continue
+        fp = att.get("file_path")
+        if not fp:
+            continue
+        exists = os.path.exists(fp)
+        name = att.get("original_name") or os.path.basename(fp)
+        mime = att.get("mime_type") or "-"
+        size = att.get("file_size") or (os.path.getsize(fp) if exists else None)
+        status_txt = "" if exists else "缺失"
+        att_rows.append([name, mime, fmt_size(size), status_txt])
+
+    if att_rows:
+        story.append(PageBreak())
+        story.append(Paragraph("附件", styles["H2CN"]))
+        t = Table([["文件", "类型", "大小", "状态"]] + att_rows, colWidths=[8.5*cm, 4.0*cm, 2.5*cm, 2.0*cm])
+        t.setStyle(TableStyle([
+            ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
+            ('FONTSIZE', (0,0), (-1,-1), 10),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('BACKGROUND', (0,0), (-1,0), primary),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
+            ('LINEAFTER', (0,0), (-1,-1), 0.25, border),
+            ('LINEABOVE', (0,0), (-1,-1), 0.25, border),
+            ('LINEBELOW', (0,0), (-1,-1), 0.25, border),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, primary_light]),
+            ('LEFTPADDING', (0,0), (-1,-1), 6),
+            ('RIGHTPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(t)
+
     doc.build(story, onFirstPage=draw_page_frame, onLaterPages=draw_page_frame)
     buf.seek(0)
     # 构造更有信息量的 PDF 文件名
@@ -823,6 +881,39 @@ async def upload_temp_photo(
         "_temp": True,
         "category_id": category_id,
         "item_id": item_id,
+    }
+
+
+@router.post("/{archive_id}/attachments/temp")
+async def upload_temp_attachment(
+    archive_id: str,
+    file: UploadFile = File(...),
+    description: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """仅上传附件到存储并返回元数据，不修改档案内容、不生成版本。"""
+    _require_editor(current_user)
+
+    arc = db.query(SiteOpeningArchive).filter(SiteOpeningArchive.id == archive_id).first()
+    if not arc:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    stored_path = await save_uploaded_file(file, category="opening_archives", sub_folder=f"{archive_id}/attachments")
+    file_hash = calculate_file_hash(stored_path)
+    file_size = os.path.getsize(stored_path) if os.path.exists(stored_path) else None
+
+    return {
+        "id": uuid.uuid4().hex,
+        "original_name": file.filename,
+        "description": description,
+        "file_path": stored_path,
+        "file_size": file_size,
+        "mime_type": file.content_type,
+        "hash_value": file_hash,
+        "uploaded_by": current_user.id,
+        "uploaded_at": to_utc_iso(datetime.utcnow()),
+        "_temp": True,
     }
 
 
