@@ -296,59 +296,26 @@ async def export_archive_zip(
     if not a:
         raise HTTPException(status_code=404, detail="档案不存在")
 
-    mem_zip = io.BytesIO()
-    with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        # 概览与内容
-        overview = {
-            "id": a.id,
-            "site_id": a.site_id,
-            "site_code": a.site.site_code if a.site else None,
-            "site_name": a.site.site_name if a.site else None,
-            "work_order_id": a.work_order_id,
-            "inspection_id": a.inspection_id,
-            "inspector_name": getattr(getattr(a.inspection, 'inspector', None), 'full_name', None),
-            "reviewer_name": getattr(getattr(a.inspection, 'reviewer', None), 'full_name', None),
-            "template_id": a.template_id,
-            "template_version": a.template_version,
-            "current_version": a.current_version,
-            "updated_at": to_utc_iso(a.updated_at) if a.updated_at else None,
-        }
-        import json as _json
-        zf.writestr("overview.json", _json.dumps(overview, ensure_ascii=False, indent=2))
-        zf.writestr("content.json", _json.dumps(a.content or {}, ensure_ascii=False, indent=2))
-
-        # CSV总览
-        csv_buf = io.StringIO()
-        w = csv.writer(csv_buf)
-        w.writerow(["key", "value"])
-        for k, v in overview.items():
-            w.writerow([k, v])
-        zf.writestr("overview.csv", csv_buf.getvalue())
-
-        # 写入照片与清单
-        files_csv = io.StringIO()
-        fw = csv.writer(files_csv)
-        fw.writerow(["category","item","file_name","zip_path","mime_type","file_size"])
-        cats = (a.content or {}).get("check_categories") or []
-        for cat in cats:
-            cat_name = cat.get("category_name") or cat.get("category_id")
-            for it in (cat.get("items") or []):
-                item_name = it.get("item_name") or it.get("item_id")
-                for p in (it.get("photos") or []):
-                    fp = p.get("file_path")
-                    if not fp or not os.path.exists(fp):
-                        continue
-                    base = os.path.basename(fp)
-                    subdir = f"photos/{cat_name}/{item_name}"
-                    arcname = f"{subdir}/{base}"
-                    try:
-                        zf.write(fp, arcname=arcname)
-                    except Exception:
-                        continue
-                    fw.writerow([cat_name, item_name, base, arcname, p.get("mime_type"), (os.path.getsize(fp) if os.path.exists(fp) else None)])
-        zf.writestr("files.csv", files_csv.getvalue())
-
-    mem_zip.seek(0)
+    overview = {
+        "id": a.id,
+        "site_id": a.site_id,
+        "site_code": a.site.site_code if a.site else None,
+        "site_name": a.site.site_name if a.site else None,
+        "work_order_id": a.work_order_id,
+        "inspection_id": a.inspection_id,
+        "inspector_name": getattr(getattr(a.inspection, 'inspector', None), 'full_name', None),
+        "reviewer_name": getattr(getattr(a.inspection, 'reviewer', None), 'full_name', None),
+        "template_id": a.template_id,
+        "template_version": a.template_version,
+        "current_version": a.current_version,
+        "updated_at": to_utc_iso(a.updated_at) if a.updated_at else None,
+    }
+    from app.utils.archive_export import build_archive_zip
+    mem_zip = build_archive_zip(
+        overview=overview,
+        content=a.content or {},
+        archive_title="勘察档案",
+    )
     # 构造更有信息量的文件名
     site_code = a.site.site_code if a.site else None
     site_name = a.site.site_name if a.site else None
@@ -436,6 +403,8 @@ async def export_archive_pdf(
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="TitleCN", fontName=FONT_BOLD, fontSize=24, leading=30, textColor=primary, spaceAfter=10))
     styles.add(ParagraphStyle(name="H2CN", fontName=FONT_BOLD, fontSize=16, leading=22, textColor=primary, spaceBefore=10, spaceAfter=6))
+    styles.add(ParagraphStyle(name="H3CN", fontName=FONT_BOLD, fontSize=13, leading=18, textColor=text_color, spaceBefore=6, spaceAfter=4))
+    styles.add(ParagraphStyle(name="H4CN", fontName=FONT_BOLD, fontSize=11, leading=16, textColor=colors.HexColor('#555555'), spaceBefore=4, spaceAfter=2, leftIndent=6))
     styles.add(ParagraphStyle(name="BodyCN", fontName=FONT_MAIN, fontSize=11, leading=16, textColor=text_color))
     styles.add(ParagraphStyle(name="MetaCN", fontName=FONT_MAIN, fontSize=10, leading=14, textColor=colors.HexColor('#555555')))
     styles.add(ParagraphStyle(name="CaptionCN", fontName=FONT_MAIN, fontSize=9, leading=12, textColor=colors.HexColor('#666666'), alignment=1))
@@ -469,6 +438,7 @@ async def export_archive_pdf(
         ["勘察人", str(getattr(getattr(a.inspection, 'inspector', None), 'full_name', '-') or '-')],
         ["审核人", str(getattr(getattr(a.inspection, 'reviewer', None), 'full_name', '-') or '-')],
         ["更新时间", (a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-')],
+        ["导出时间", datetime.utcnow().strftime('%Y-%m-%d %H:%M')],
     ]
     meta_tbl = Table(meta_rows, colWidths=[3*cm, 12*cm])
     meta_tbl.setStyle(TableStyle([
@@ -488,7 +458,18 @@ async def export_archive_pdf(
     story.append(meta_tbl)
     story.append(Spacer(1, 10))
 
-    # 内容概览表（字段值）
+    # 目录（按分类列出，便于导航）
+    cats = (a.content or {}).get("check_categories") or []
+    if cats:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("目录", styles["H2CN"]))
+        for i, cat in enumerate(cats, start=1):
+            cat_name = cat.get("category_name") or str(cat.get("category_id") or "未命名分类")
+            cnt = len(cat.get("items") or [])
+            story.append(Paragraph(f"{i}. {cat_name}（{cnt}项）", styles["MetaCN"]))
+        story.append(PageBreak())
+
+    # 内容（字段值/层级/照片）
     def decimals_from_step(step_val) -> int:
         try:
             s = str(step_val)
@@ -497,6 +478,15 @@ async def export_archive_pdf(
             return 0
         except Exception:
             return 0
+
+    def is_blank_raw(v):
+        if v is None:
+            return True
+        if isinstance(v, str):
+            return v.strip() == ""
+        if isinstance(v, (list, dict)):
+            return len(v) == 0
+        return False
 
     def opt_label(options, v):
         try:
@@ -508,12 +498,20 @@ async def export_archive_pdf(
         return v
 
     def fmt_value_by_field(fd: dict, v):
-        if v is None or v == '':
-            return '-'
+        if is_blank_raw(v):
+            return None
         try:
             t = str((fd or {}).get('type') or '').lower()
             cons = (fd or {}).get('constraints') or {}
             unit = cons.get('unit') or cons.get('suffix') or ''
+            if t == 'rich_text':
+                import re as _re
+                import html as _html
+                s = str(v)
+                s = _re.sub(r'(?is)<\s*br\s*/?\s*>', '\n', s)
+                s = _re.sub(r'(?is)<[^>]+>', '', s)
+                s = _html.unescape(s).strip()
+                return s if s else None
             # boolean
             if t == 'boolean' or isinstance(v, bool):
                 return ('是' if (v is True or str(v).lower() in ('1','true','yes','y')) else '否') + (f" {unit}" if unit else '')
@@ -537,7 +535,7 @@ async def export_archive_pdf(
             if t == 'select_multi':
                 arr = v if isinstance(v, list) else ([v] if v not in (None, '') else [])
                 labeled = [str(opt_label((fd or {}).get('options'), x)) for x in arr]
-                return '、'.join(labeled) if labeled else '-'
+                return '、'.join(labeled) if labeled else None
             # dates
             if t in ('date','time','datetime'):
                 from datetime import datetime as _dt
@@ -559,14 +557,38 @@ async def export_archive_pdf(
             # objects/arrays
             if isinstance(v, (dict, list)):
                 import json as _json
-                return _json.dumps(v, ensure_ascii=False)
+                return _json.dumps(v, ensure_ascii=False, indent=2)
             # default
             return str(v)
         except Exception:
             return str(v)
-    cats = (a.content or {}).get("check_categories") or []
+
+    def xml_escape(s: str) -> str:
+        return (
+            str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#39;")
+        )
+
+    def value_cell(s: str):
+        if s is None:
+            return ""
+        txt = str(s)
+        if "\n" in txt:
+            return Paragraph(xml_escape(txt).replace("\n", "<br/>"), styles["BodyCN"])
+        if len(txt) > 80:
+            return Paragraph(xml_escape(txt), styles["BodyCN"])
+        return txt
+
     # 照片网格辅助
     def make_photo_grid(photo_list, cols=2):
+        try:
+            from reportlab.lib.utils import ImageReader
+        except Exception:
+            ImageReader = None
         cells = []
         row = []
         for p in photo_list:
@@ -574,7 +596,18 @@ async def export_archive_pdf(
             if not fp or not os.path.exists(fp):
                 continue
             try:
-                im = Image(fp, width=7.2*cm if cols==2 else 5.0*cm, height=5.4*cm if cols==2 else 3.8*cm)
+                max_w = 7.2*cm if cols == 2 else 5.0*cm
+                max_h = 5.4*cm if cols == 2 else 3.8*cm
+                if ImageReader:
+                    ir = ImageReader(fp)
+                    iw, ih = ir.getSize()
+                    if iw and ih:
+                        scale = min(max_w / float(iw), max_h / float(ih), 1.0)
+                        im = Image(fp, width=float(iw) * scale, height=float(ih) * scale)
+                    else:
+                        im = Image(fp, width=max_w, height=max_h)
+                else:
+                    im = Image(fp, width=max_w, height=max_h)
                 caption = Paragraph(os.path.basename(fp), styles['CaptionCN'])
                 row.append([im, caption])
                 if len(row) == cols:
@@ -601,26 +634,44 @@ async def export_archive_pdf(
         ]))
         return t
 
-    for cat in cats:
-        story.append(Paragraph(cat.get("category_name") or str(cat.get("category_id")), styles["H2CN"]))
-        for it in (cat.get("items") or []):
-            title = f"{it.get('item_name') or it.get('item_id')}"
-            story.append(Paragraph(title, styles["BodyCN"]))
-            tbl_data = [["字段", "值"]]
+    def build_value_rows(fields, values):
+        rows = []
+        used = set()
+        for fd in (fields or []):
+            fid = fd.get("field_id")
+            label = fd.get("label") or fid
+            raw = (values or {}).get(fid)
+            val = fmt_value_by_field(fd, raw)
+            if val is None:
+                continue
+            rows.append([label, value_cell(val)])
+            used.add(str(fid))
+        for k, v in (values or {}).items():
+            if str(k) in used:
+                continue
+            if is_blank_raw(v):
+                continue
+            rows.append([str(k), value_cell(str(v))])
+        return rows
+
+    for ci, cat in enumerate(cats, start=1):
+        story.append(Paragraph(f"{ci}. {cat.get('category_name') or str(cat.get('category_id') or '未命名分类')}", styles["H2CN"]))
+        items = cat.get("items") or []
+        for ii, it in enumerate(items, start=1):
+            title = f"{ci}.{ii} {it.get('item_name') or it.get('item_id') or '未命名检查项'}"
+            story.append(Paragraph(title, styles["H3CN"]))
+
             fields = it.get("fields") or []
             values = it.get("values") or {}
-            for fd in fields:
-                label = fd.get("label") or fd.get("field_id")
-                raw = values.get(fd.get("field_id"))
-                val = fmt_value_by_field(fd, raw)
-                tbl_data.append([label, val])
-            if len(tbl_data) > 1:
+            rows = build_value_rows(fields, values)
+            if rows:
+                tbl_data = [["字段", "值"]] + rows
                 t = Table(tbl_data, colWidths=[5*cm, 9*cm])
                 t.setStyle(TableStyle([
                     ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
                     ('FONTSIZE', (0,0), (-1,-1), 10),
                     ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
                     ('BACKGROUND', (0,0), (-1,0), primary),
                     ('TEXTCOLOR', (0,0), (-1,0), colors.white),
                     ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
@@ -635,13 +686,87 @@ async def export_archive_pdf(
                 ]))
                 story.append(t)
                 story.append(Spacer(1, 6))
-            # 照片缩略表格
+
+            # 站点级照片
             if with_thumbs:
                 grid = make_photo_grid((it.get("photos") or []), cols=2)
                 if grid:
+                    story.append(Paragraph("站点照片", styles["H4CN"]))
                     story.append(grid)
                     story.append(Spacer(1, 6))
-        story.append(PageBreak())
+
+            # 扇区/小区层级
+            for sec in (it.get("sectors") or []):
+                sec_id = sec.get("sector_id")
+                sec_rows = build_value_rows(fields, sec.get("values") or {})
+                sec_photos = sec.get("photos") or []
+                if not sec_rows and not sec_photos:
+                    continue
+                story.append(Paragraph(f"扇区：{sec_id}", styles["H4CN"]))
+                if sec_rows:
+                    sec_tbl = Table([["字段", "值"]] + sec_rows, colWidths=[5*cm, 9*cm])
+                    sec_tbl.setStyle(TableStyle([
+                        ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
+                        ('FONTSIZE', (0,0), (-1,-1), 10),
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#FDEFE6")),
+                        ('TEXTCOLOR', (0,0), (-1,0), primary),
+                        ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
+                        ('LINEAFTER', (0,0), (-1,-1), 0.25, border),
+                        ('LINEABOVE', (0,0), (-1,-1), 0.25, border),
+                        ('LINEBELOW', (0,0), (-1,-1), 0.25, border),
+                        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, primary_light]),
+                        ('LEFTPADDING', (0,0), (-1,-1), 6),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                        ('TOPPADDING', (0,0), (-1,-1), 4),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                    ]))
+                    story.append(sec_tbl)
+                    story.append(Spacer(1, 6))
+                if with_thumbs and sec_photos:
+                    grid = make_photo_grid(sec_photos, cols=2)
+                    if grid:
+                        story.append(grid)
+                        story.append(Spacer(1, 6))
+
+            for cell in (it.get("cells") or []):
+                cell_id = cell.get("cell_id")
+                cell_rows = build_value_rows(fields, cell.get("values") or {})
+                cell_photos = cell.get("photos") or []
+                if not cell_rows and not cell_photos:
+                    continue
+                head = f"小区：{cell_id}"
+                if cell.get("sector_id"):
+                    head += f"（扇区 {cell.get('sector_id')}）"
+                if cell.get("band"):
+                    head += f" 频段 {cell.get('band')}"
+                story.append(Paragraph(head, styles["H4CN"]))
+                if cell_rows:
+                    cell_tbl = Table([["字段", "值"]] + cell_rows, colWidths=[5*cm, 9*cm])
+                    cell_tbl.setStyle(TableStyle([
+                        ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
+                        ('FONTSIZE', (0,0), (-1,-1), 10),
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#FDEFE6")),
+                        ('TEXTCOLOR', (0,0), (-1,0), primary),
+                        ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
+                        ('LINEAFTER', (0,0), (-1,-1), 0.25, border),
+                        ('LINEABOVE', (0,0), (-1,-1), 0.25, border),
+                        ('LINEBELOW', (0,0), (-1,-1), 0.25, border),
+                        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, primary_light]),
+                        ('LEFTPADDING', (0,0), (-1,-1), 6),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                        ('TOPPADDING', (0,0), (-1,-1), 4),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                    ]))
+                    story.append(cell_tbl)
+                    story.append(Spacer(1, 6))
+                if with_thumbs and cell_photos:
+                    grid = make_photo_grid(cell_photos, cols=2)
+                    if grid:
+                        story.append(grid)
+                        story.append(Spacer(1, 6))
+
+        if ci != len(cats):
+            story.append(PageBreak())
 
     doc.build(story, onFirstPage=draw_page_frame, onLaterPages=draw_page_frame)
     buf.seek(0)
