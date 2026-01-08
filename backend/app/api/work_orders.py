@@ -91,6 +91,62 @@ def _ensure_surveyor_wo_type(wo: WorkOrder, u: User):
         raise HTTPException(status_code=403, detail="仅可操作勘察工单")
 
 
+def _has_bound_device_check_items(db: Session, wo: WorkOrder) -> bool:
+    """判断工单是否仍存在“设备级”检查项绑定（equipment_sn 未解绑）。
+
+    与库存侧扫码解绑逻辑保持一致：
+    - 仅要求“设备级”检查项解绑
+    - 设备级定义：sector_id + band 存在，且 cell_id 为空或等于 f"{sector_id}_{band}"
+    """
+    from sqlalchemy import or_
+
+    inspection_filters = [SiteInspection.work_order_id == wo.id]
+    if getattr(wo, "inspection_id", None):
+        inspection_filters.append(SiteInspection.id == wo.inspection_id)
+    inspection_cond = (
+        or_(*inspection_filters) if len(inspection_filters) > 1 else inspection_filters[0]
+    )
+
+    device_key_expr = InspectionCheckItem.sector_id + "_" + InspectionCheckItem.band
+
+    exists_row = (
+        db.query(InspectionCheckItem.id)
+        .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+        .filter(
+            inspection_cond,
+            InspectionCheckItem.equipment_sn.isnot(None),
+            InspectionCheckItem.equipment_sn != "",
+            InspectionCheckItem.sector_id.isnot(None),
+            InspectionCheckItem.sector_id != "",
+            InspectionCheckItem.band.isnot(None),
+            InspectionCheckItem.band != "",
+            or_(
+                InspectionCheckItem.cell_id.is_(None),
+                InspectionCheckItem.cell_id == "",
+                InspectionCheckItem.cell_id == device_key_expr,
+            ),
+        )
+        .first()
+    )
+    return bool(exists_row)
+
+
+def _detach_stock_records_from_work_order(db: Session, wo: WorkOrder) -> None:
+    """解除库存记录与工单的绑定，保留库存数据（A方案）。
+
+    - StockTransaction.work_order_id 可置空
+    - PickupRecord.work_order_id 为非空字段：改写为 MANUAL-{picker_id}（与 scan-checkout 的手工领料一致）
+    """
+    db.query(StockTransaction).filter(StockTransaction.work_order_id == wo.id).update(
+        {StockTransaction.work_order_id: None},
+        synchronize_session=False,
+    )
+
+    pickup_records = db.query(PickupRecord).filter(PickupRecord.work_order_id == wo.id).all()
+    for pr in pickup_records:
+        pr.work_order_id = f"MANUAL-{pr.picker_id}"
+
+
 def _touch_inspection_item_and_clear_review(item: InspectionCheckItem, now: datetime) -> bool:
     """检查项内容有变更时：更新时间，并清空该检查项的审核结果（若已审核过）。
 
@@ -720,16 +776,14 @@ async def delete_work_order(
     if wo.status not in [WorkOrderStatusEnum.PENDING, WorkOrderStatusEnum.ACTIVE]:
         raise HTTPException(status_code=400, detail=f"无法删除{wo.status}状态的工单")
 
+    # 解绑检查项要求：存在设备级绑定则禁止删除
+    if _has_bound_device_check_items(db, wo):
+        raise HTTPException(status_code=409, detail="该工单存在已绑定设备检查项，无法删除；请先在APP解绑设备")
+
     # 记录原始状态用于审计
     old_status = wo.status
     old_wo_type = wo.type
     old_site_id = wo.site_id
-
-    # 若存在出入库/领料等库存业务数据，禁止删除（避免破坏库存链路）
-    if db.query(PickupRecord).filter(PickupRecord.work_order_id == wo.id).first():
-        raise HTTPException(status_code=409, detail="该工单已产生领料记录，无法删除；请先撤销领料/出库相关记录")
-    if db.query(StockTransaction).filter(StockTransaction.work_order_id == wo.id).first():
-        raise HTTPException(status_code=409, detail="该工单已关联出入库单据，无法删除；请先撤销相关出入库单据")
 
     # 若已生成档案，禁止删除（保证可追溯性）
     if db.query(SiteSurveyArchive).filter(SiteSurveyArchive.work_order_id == wo.id).first():
@@ -749,6 +803,9 @@ async def delete_work_order(
         ).count()
 
     try:
+        # 若历史库存记录绑定了工单，先解除绑定（保留库存数据）
+        _detach_stock_records_from_work_order(db, wo)
+
         # 如果有关联的检查记录，需要同时删除
         inspections_to_delete = []
         seen_inspection_ids = set()
@@ -2222,6 +2279,7 @@ async def batch_work_order_operation(
     updated_count = 0
     error_count = 0
     errors = []
+    rolled_back_site_ids = set()
     
     for wo in work_orders:
         try:
@@ -2232,8 +2290,53 @@ async def batch_work_order_operation(
                     error_count += 1
                     continue
 
+                # 解绑检查项要求：存在设备级绑定则禁止删除
+                if _has_bound_device_check_items(db, wo):
+                    errors.append(f"工单 {wo.id} 存在已绑定设备检查项，无法删除；请先在APP解绑设备")
+                    error_count += 1
+                    continue
+
+                # 若已生成档案，禁止删除（保证可追溯性）
+                if db.query(SiteSurveyArchive).filter(SiteSurveyArchive.work_order_id == wo.id).first():
+                    errors.append(f"工单 {wo.id} 已生成勘察档案，无法删除")
+                    error_count += 1
+                    continue
+                if db.query(SiteOpeningArchive).filter(SiteOpeningArchive.work_order_id == wo.id).first():
+                    errors.append(f"工单 {wo.id} 已生成开站档案，无法删除")
+                    error_count += 1
+                    continue
+                if db.query(SiteSSVArchive).filter(SiteSSVArchive.work_order_id == wo.id).first():
+                    errors.append(f"工单 {wo.id} 已生成 SSV 档案，无法删除")
+                    error_count += 1
+                    continue
+
                 # 记录原始状态用于审计
                 old_status = wo.status
+                old_wo_type = wo.type
+                old_site_id = wo.site_id
+
+                # 删除安装工单时：若该站点删除后无安装工单，则回滚站点状态到 planned（批量删除：按“删除集合后”计算）
+                remaining_opening_orders = None
+                if (
+                    old_wo_type == WorkOrderTypeEnum.OPENING_INSPECTION
+                    and old_site_id not in rolled_back_site_ids
+                ):
+                    remaining_opening_orders = db.query(WorkOrder).filter(
+                        WorkOrder.site_id == old_site_id,
+                        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+                        ~WorkOrder.id.in_(operation.work_order_ids),
+                    ).count()
+
+                # 若历史库存记录绑定了工单，先解除绑定（保留库存数据）
+                _detach_stock_records_from_work_order(db, wo)
+
+                # 删除/解绑与工单相关的勘察草稿（SiteSurvey）
+                surveys = db.query(SiteSurvey).filter(SiteSurvey.work_order_id == wo.id).all()
+                for s in surveys:
+                    db.delete(s)
+
+                # 删除可能遗留的 work_order_items（历史表）
+                db.query(WorkOrderItem).filter(WorkOrderItem.work_order_id == wo.id).delete(synchronize_session=False)
 
                 # 如果有关联的检查记录，需要同时删除，逻辑与单条删除保持一致
                 inspections_to_delete = []
@@ -2261,6 +2364,26 @@ async def batch_work_order_operation(
 
                 # 删除工单
                 db.delete(wo)
+
+                # 站点状态回滚：删除安装工单且删除后不存在其它安装工单
+                if (
+                    old_wo_type == WorkOrderTypeEnum.OPENING_INSPECTION
+                    and remaining_opening_orders == 0
+                    and old_site_id not in rolled_back_site_ids
+                ):
+                    site = db.query(Site).filter(Site.id == old_site_id).first()
+                    if site and site.status != "planned":
+                        old_site_status = site.status
+                        site.status = "planned"
+                        _audit_site_status_change(
+                            db,
+                            old_site_id,
+                            old_site_status,
+                            site.status,
+                            "批量删除安装工单，站点状态回滚至 planned",
+                        )
+                    rolled_back_site_ids.add(old_site_id)
+
                 _audit(db, "work_order", wo.id, "batch_delete", current_user.id,
                        from_status=old_status.value, to_status="deleted")
                 updated_count += 1
