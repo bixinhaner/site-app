@@ -129,28 +129,6 @@
 			</view>
 		</view>
 		
-		<!-- 统计信息 -->
-		<view class="stats-section">
-			<view class="stat-item">
-				<text class="stat-number">{{ userStats.totalSites }}</text>
-				<text class="stat-label">{{ $t('home.totalSites') }}</text>
-			</view>
-			
-			<view class="stat-divider"></view>
-			
-			<view class="stat-item">
-				<text class="stat-number">{{ userStats.completedInspections }}</text>
-				<text class="stat-label">{{ $t('home.completedToday') }}</text>
-			</view>
-			
-			<view class="stat-divider"></view>
-			
-			<view class="stat-item">
-				<text class="stat-number">{{ userStats.pendingTasks }}</text>
-				<text class="stat-label">{{ $t('home.pendingItems') }}</text>
-			</view>
-		</view>
-		
 		<!-- 功能菜单 -->
 		<view class="menu-section">
 			<view class="menu-group">
@@ -309,8 +287,6 @@
 <script setup>
 	import { ref, reactive, computed, onMounted, watch, getCurrentInstance } from 'vue'
 	import { useUserStore } from '@/stores/user'
-	import { useSiteStore } from '@/stores/site'
-	import { useInspectionStore } from '@/stores/inspection'
 	import { useLanguageStore } from '@/stores/language'
 	import { useUpgradeStore } from '@/stores/upgrade'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
@@ -318,8 +294,6 @@
 	import UpdateDialog from '@/components/UpdateDialog.vue'
 	
 	const userStore = useUserStore()
-	const siteStore = useSiteStore()
-	const inspectionStore = useInspectionStore()
 	const languageStore = useLanguageStore()
 	const upgradeStore = useUpgradeStore()
 	
@@ -418,12 +392,6 @@
 	})
 
 	const passwordSaving = ref(false)
-	
-	const userStats = reactive({
-		totalSites: 0,
-		completedInspections: 0,
-		pendingTasks: 0
-	})
 	
 const userInfo = computed(() => userStore.userInfo)
 const isAdmin = computed(() => userStore.isAdmin)
@@ -704,36 +672,6 @@ const isAdmin = computed(() => userStore.isAdmin)
 			}
 		})
 	}
-	
-	// 加载用户统计数据
-	const loadUserStats = async () => {
-		try {
-			// 加载站点数据
-			const sitesResult = await siteStore.getSites()
-			if (sitesResult.success) {
-				// 计算用户负责的站点数
-				const userSites = sitesResult.data.filter(site => 
-					site.assigned_to === userInfo.value?.id || 
-					site.created_by === userInfo.value?.id
-				)
-				userStats.totalSites = userSites.length
-			}
-			
-			// 加载检查数据
-			const inspectionsResult = await inspectionStore.getInspections()
-			if (inspectionsResult.success) {
-				const userInspections = inspectionsResult.data.filter(inspection => 
-					inspection.inspector_id === userInfo.value?.id
-				)
-				userStats.completedInspections = userInspections.filter(i => i.status === 'completed').length
-				userStats.pendingTasks = userInspections.filter(i => 
-					i.status === 'pending' || i.status === 'in_progress'
-				).length
-			}
-		} catch (error) {
-			console.error('Load user stats error:', error)
-		}
-	}
 
 	const openPasswordModal = () => {
 		passwordForm.current = ''
@@ -840,10 +778,6 @@ const isAdmin = computed(() => userStore.isAdmin)
 		// #ifndef APP-PLUS
 		appVersion.value = getVersion()
 		// #endif
-		
-		if (userInfo.value) {
-			loadUserStats()
-		}
 	})
 </script>
 
@@ -862,6 +796,8 @@ const isAdmin = computed(() => userStore.isAdmin)
 		display: flex;
 		align-items: center;
 		gap: 20px;
+		border-bottom-left-radius: var(--radius-lg);
+		border-bottom-right-radius: var(--radius-lg);
 	}
 	
 	.avatar-section {
@@ -928,38 +864,8 @@ const isAdmin = computed(() => userStore.isAdmin)
 		opacity: 0.8;
 	}
 	
-	// 统计信息
-	.stats-section {
-		background: var(--bg-elevated);
-		margin: -10px 20px 20px;
-		border-radius: var(--radius-md);
-		padding: 20px;
-		display: flex;
-		align-items: center;
-		box-shadow: var(--shadow-card);
-	}
-	
-	.stat-item {
-		flex: 1;
-		text-align: center;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-	}
-	
-	.stat-number { font-size: 24px; font-weight: 600; color: var(--color-primary); margin-bottom: 4px; }
-	
-	.stat-label { font-size: 12px; color: var(--text-secondary); }
-	
-	.stat-divider {
-		width: 1px;
-		height: 40px;
-		background: #f3f4f6;
-		margin: 0 20px;
-	}
-	
 	// 功能菜单
-	.menu-section { padding: 0 20px; }
+	.menu-section { padding: 16px 20px 0; }
 	
 	.menu-group {
 		background: var(--bg-elevated);
