@@ -82,7 +82,7 @@
 					</view>
 					<view class="info-row" v-if="workOrderData">
 						<text class="info-label">{{ $t('inspection.workOrderType') }}:</text>
-						<text class="info-value">{{ getWorkOrderTypeText(workOrderData.task_type) }}</text>
+						<text class="info-value">{{ getWorkOrderTypeText(workOrderData.type || workOrderData.task_type) }}</text>
 					</view>
 					<view class="info-row" v-if="inspectionData.start_time">
 						<text class="info-label">{{ $t('inspection.startTime') }}:</text>
@@ -1601,16 +1601,24 @@
 	}
 	
 	// 获取工单类型文本
-	const getWorkOrderTypeText = (taskType) => {
-		const typeMap = {
-			opening_inspection: $t('inspection.opening'),
-			maintenance: $t('inspection.maintenance'),
-			power_issue: $t('workorder.types.power_issue'),
-			transmission_issue: $t('workorder.types.transmission_issue'),
-			gps_issue: $t('workorder.types.gps_issue'),
-			signal_issue: $t('workorder.types.signal_issue')
+	const normalizeWorkOrderType = (rawType) => {
+		if (rawType === null || rawType === undefined) return ''
+		let val = rawType
+		if (typeof rawType === 'object') {
+			val = rawType.value || rawType.type || rawType.name || rawType
 		}
-		return typeMap[taskType] || $t('workorder.types.other')
+		let s = String(val).trim()
+		if (!s) return ''
+		if (s.includes('.')) s = s.split('.').pop()
+		return String(s).trim().toLowerCase()
+	}
+
+	const getWorkOrderTypeText = (rawType) => {
+		const type = normalizeWorkOrderType(rawType)
+		if (!type) return $t('workorder.types.other')
+		const key = `workorder.types.${type}`
+		const text = $t(key)
+		return text === key ? $t('workorder.types.other') : text
 	}
 
 	const getStatusText = (status) => {
