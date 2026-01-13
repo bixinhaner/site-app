@@ -130,6 +130,13 @@
 	              <el-radio-button label="全部" />
 	              <el-radio-button label="仅看需复审" />
 	            </el-radio-group>
+	            <el-radio-group v-model="scopeFilter" size="small">
+	              <el-radio-button label="全部范围" />
+	              <el-radio-button label="站点" />
+	              <el-radio-button label="扇区" />
+	              <el-radio-button label="小区" />
+	              <el-radio-button label="设备" />
+	            </el-radio-group>
 	            <el-dropdown
 	              style="margin-left: 12px;"
 	              trigger="click"
@@ -147,40 +154,79 @@
 	              </template>
 	            </el-dropdown>
 	          </div>
-	          <div v-if="summary">
-	            <el-tag type="success">通过 {{ summary.pass_count }}</el-tag>
-            <el-tag type="warning" style="margin-left:8px;">警告 {{ summary.warning_count }}</el-tag>
-            <el-tag type="danger" style="margin-left:8px;">不合格 {{ summary.fail_count }}</el-tag>
-            <el-tag style="margin-left:8px;">待审 {{ summary.pending_count }}</el-tag>
-            <!-- 审核状态提示 -->
-            <el-alert 
-              v-if="hasPendingItems" 
-              style="margin-left:16px; display:inline-block;" 
-              type="warning" 
-              size="small"
-              :closable="false"
-              :title="`还有 ${pendingItemsCount} 项检查项未完成审核，请先完成所有检查项的审核！`"
-            />
-            <el-alert 
-              v-else-if="hasFailedItems" 
-              style="margin-left:16px; display:inline-block;" 
-              type="error" 
-              size="small"
-              :closable="false"
-              title="存在不合格检查项，工单无法通过审核！"
-            />
-            <el-alert 
-              v-else-if="!hasPendingItems && !hasFailedItems" 
-              style="margin-left:16px; display:inline-block;" 
-              type="success" 
-              size="small"
-              :closable="false"
-              title="所有检查项已审核完成，可以进行最终审核"
-            />
-          </div>
+	          <div v-if="summary" class="review-summary">
+	            <div class="review-summary__counts">
+	              <el-tag type="success" effect="plain" round size="small" class="review-summary__count-tag">
+	                通过 {{ summary.pass_count }}
+	              </el-tag>
+	              <el-tag type="warning" effect="plain" round size="small" class="review-summary__count-tag">
+	                警告 {{ summary.warning_count }}
+	              </el-tag>
+	              <el-tag type="danger" effect="plain" round size="small" class="review-summary__count-tag">
+	                不合格 {{ summary.fail_count }}
+	              </el-tag>
+	              <el-tag effect="plain" round size="small" class="review-summary__count-tag">
+	                待审 {{ summary.pending_count }}
+	              </el-tag>
+	            </div>
+
+	            <el-tooltip
+	              v-if="reviewHeaderHint.tooltip"
+	              :content="reviewHeaderHint.tooltip"
+	              placement="top"
+	            >
+	              <el-tag
+	                :type="reviewHeaderHint.type"
+	                effect="plain"
+	                round
+	                size="small"
+	                class="review-summary__hint"
+	              >
+	                <el-icon class="review-summary__hint-icon">
+	                  <component :is="reviewHeaderHint.icon" />
+	                </el-icon>
+	                {{ reviewHeaderHint.text }}
+	              </el-tag>
+	            </el-tooltip>
+	          </div>
         </div>
         <el-table :data="displayedItems" size="small" stripe v-loading="itemsLoading">
           <el-table-column prop="item_name" label="检查项" min-width="220" />
+          <el-table-column label="范围" min-width="180">
+            <template #default="{ row }">
+              <div class="scope-cell">
+                <el-tag :type="scopeTagType(row)" size="small" class="mr4">
+                  {{ getItemScopeLevel(row) }}
+                </el-tag>
+                <template v-if="getItemScopeLevel(row) === '设备' && row.equipment_sn">
+                  <span class="scope-text">{{ row.equipment_sn }}</span>
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    @click="copyToClipboard(row.equipment_sn)"
+                  >
+                    <el-icon><CopyDocument /></el-icon>
+                  </el-button>
+                </template>
+                <template v-else-if="getItemScopeLevel(row) === '小区'">
+                  <el-tooltip
+                    :content="`扇区 ${row.sector_id || '-'} / Band ${row.band || '-'} / Cell ${row.cell_id || '-'}`"
+                    placement="top"
+                  >
+                    <span class="scope-text">
+                      S{{ row.sector_id || '-' }}/{{ row.band || '-' }}/{{ row.cell_id || '-' }}
+                    </span>
+                  </el-tooltip>
+                </template>
+                <template v-else-if="getItemScopeLevel(row) === '扇区'">
+                  <el-tooltip :content="`扇区 ${row.sector_id || '-'}`" placement="top">
+                    <span class="scope-text">S{{ row.sector_id || '-' }}</span>
+                  </el-tooltip>
+                </template>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column prop="required_type" label="类型" width="100">
             <template #default="{ row }">
               <el-tag v-if="row.required_type === 'photo'" type="info" size="small">照片</el-tag>
@@ -189,7 +235,7 @@
               <span v-else>{{ row.required_type }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="内容" width="200">
+          <el-table-column label="内容" width="120">
             <template #default="{ row }">
               <div>
                 <div v-if="row.data_value && row.data_value.length > 0" style="margin-bottom: 4px;">
@@ -235,14 +281,39 @@
 	          </el-table-column>
 	          <el-table-column prop="review_comments" label="审核意见" min-width="200" show-overflow-tooltip />
 	          <el-table-column prop="notes" label="现场备注" min-width="200" show-overflow-tooltip />
-	          <el-table-column label="操作" width="360" fixed="right">
+	          <el-table-column label="操作" width="220" fixed="right">
 	            <template #default="{ row }">
-	              <el-button link type="primary" size="small" @click="viewItemDetail(row)">详情</el-button>
-	              <el-button link type="primary" size="small" :disabled="aiCheckProgress.running" @click="aiCheckSingle(row)">AI检查</el-button>
-	              <el-button link type="success" size="small" :disabled="!canApplyAi(row)" @click="applyAiSuggestion(row)">采纳AI</el-button>
-	              <el-button link type="success" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'pass')">通过</el-button>
-	              <el-button link type="warning" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'warning')">警告</el-button>
-	              <el-button link type="danger" size="small" :disabled="!canReviewCheckItem(row)" @click="reviewItem(row, 'fail')">不合格</el-button>
+	              <div class="action-cell">
+	                <el-button link type="primary" size="small" @click="viewItemDetail(row)">详情</el-button>
+	                <el-dropdown trigger="click" @command="(cmd) => handleAiAction(cmd, row)">
+	                  <el-button link type="primary" size="small">
+	                    AI <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+	                  </el-button>
+	                  <template #dropdown>
+	                    <el-dropdown-menu>
+	                      <el-dropdown-item :disabled="aiCheckProgress.running" command="check">AI检查</el-dropdown-item>
+	                      <el-dropdown-item :disabled="!canApplyAi(row)" command="apply">采纳AI</el-dropdown-item>
+	                    </el-dropdown-menu>
+	                  </template>
+	                </el-dropdown>
+
+	                <el-dropdown
+	                  trigger="click"
+	                  :disabled="!canReviewCheckItem(row)"
+	                  @command="(cmd) => handleReviewAction(cmd, row)"
+	                >
+	                  <el-button link type="primary" size="small" :disabled="!canReviewCheckItem(row)">
+	                    审核 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+	                  </el-button>
+	                  <template #dropdown>
+	                    <el-dropdown-menu>
+	                      <el-dropdown-item command="pass">通过</el-dropdown-item>
+	                      <el-dropdown-item command="warning">警告</el-dropdown-item>
+	                      <el-dropdown-item command="fail">不合格</el-dropdown-item>
+	                    </el-dropdown-menu>
+	                  </template>
+	                </el-dropdown>
+	              </div>
 	              <el-tooltip v-if="!canReviewCheckItem(row)" :content="checkItemReviewDisabledReason(row)" placement="top">
 	                <span class="help-tip">?</span>
 	              </el-tooltip>
@@ -849,7 +920,7 @@
 	import request from '@/utils/request'
 	import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 	import { aiAPI } from '@/api/ai'
-		import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled, ChatDotRound, MagicStick, ArrowDown } from '@element-plus/icons-vue'
+		import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled, ChatDotRound, MagicStick, ArrowDown, CopyDocument, CircleCheckFilled, CircleCloseFilled, WarningFilled } from '@element-plus/icons-vue'
 	import { useUserStore } from '@/stores/user'
 	import ProgressImage from '@/components/common/ProgressImage.vue'
 	import { createObjectUrl, loadImageBlob, revokeObjectUrl, resolveImageUrl } from '@/utils/imageLoader'
@@ -864,6 +935,7 @@ const summary = ref(null)
 const comments = ref('')
 const commentsI18n = reactive({ en: '', id: '' })
 const reviewListMode = ref('全部')
+const scopeFilter = ref('全部范围')
 const photoDetailVisible = ref(false)
 const selectedPhoto = ref(null)
 const itemDetailVisible = ref(false)
@@ -1128,11 +1200,67 @@ const hasFailedItems = computed(() => {
   return items.value.some(item => item.review_status === 'fail')
 })
 
-const displayedItems = computed(() => {
-  if (reviewListMode.value === '仅看需复审') {
-    return items.value.filter(item => !item.review_status || item.review_status === 'pending')
+const getItemScopeLevel = (item) => {
+  if (!item) return '站点'
+  const equipmentSn = String(item?.equipment_sn || '').trim()
+  if (equipmentSn) return '设备'
+  const cellId = String(item?.cell_id || '').trim()
+  if (cellId) return '小区'
+  const sectorId = String(item?.sector_id || '').trim()
+  if (sectorId) return '扇区'
+  const band = String(item?.band || '').trim()
+  if (band) return '小区'
+  return '站点'
+}
+
+const scopeTagType = (item) => {
+  const level = getItemScopeLevel(item)
+  if (level === '设备') return 'success'
+  if (level === '小区') return 'primary'
+  if (level === '扇区') return 'warning'
+  return 'info'
+}
+
+const copyToClipboard = async (text) => {
+  const v = String(text || '').trim()
+  if (!v) return
+  try {
+    await navigator.clipboard.writeText(v)
+    ElMessage.success('SN已复制到剪贴板')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('复制失败')
   }
-  return items.value
+}
+
+const handleAiAction = (command, row) => {
+  const cmd = String(command || '').trim()
+  if (!row) return
+  if (cmd === 'check') {
+    aiCheckSingle(row)
+    return
+  }
+  if (cmd === 'apply') {
+    applyAiSuggestion(row)
+  }
+}
+
+const handleReviewAction = (command, row) => {
+  const cmd = String(command || '').trim()
+  if (!row) return
+  if (!['pass', 'warning', 'fail'].includes(cmd)) return
+  reviewItem(row, cmd)
+}
+
+const displayedItems = computed(() => {
+  let list = items.value
+  if (reviewListMode.value === '仅看需复审') {
+    list = list.filter(item => !item.review_status || item.review_status === 'pending')
+  }
+  if (scopeFilter.value && scopeFilter.value !== '全部范围') {
+    list = list.filter(item => getItemScopeLevel(item) === scopeFilter.value)
+  }
+  return list
 })
 
 // 检查是否有未审核的检查项
@@ -1143,6 +1271,32 @@ const hasPendingItems = computed(() => {
 // 获取未审核检查项的数量
 const pendingItemsCount = computed(() => {
   return items.value.filter(item => !item.review_status || item.review_status === 'pending').length
+})
+
+const reviewHeaderHint = computed(() => {
+  if (hasPendingItems.value) {
+    const count = pendingItemsCount.value
+    return {
+      type: 'warning',
+      text: `未审核 ${count} 项`,
+      tooltip: `还有 ${count} 项检查项未完成审核，请先完成所有检查项的审核，再进行最终审核。`,
+      icon: WarningFilled,
+    }
+  }
+  if (hasFailedItems.value) {
+    return {
+      type: 'danger',
+      text: '存在不合格',
+      tooltip: '存在不合格检查项，工单无法通过审核。',
+      icon: CircleCloseFilled,
+    }
+  }
+  return {
+    type: 'success',
+    text: '可最终审核',
+    tooltip: '所有检查项已审核完成，可以进行最终审核。',
+    icon: CircleCheckFilled,
+  }
 })
 
 // 只有在没有不合格检查项时才能通过
@@ -2286,7 +2440,47 @@ onMounted(refresh)
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .section-header { display:flex; justify-content: space-between; align-items:center; margin: 8px 0; }
-.section-title { display:flex; align-items:center; gap: 12px; }
+.section-title { display:flex; align-items:center; gap: 12px; flex-wrap: wrap; }
+
+.review-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.review-summary__counts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.review-summary__count-tag {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.review-summary__hint {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+}
+
+.review-summary__hint.el-tag--success {
+  background-color: var(--el-color-success-light-9);
+}
+.review-summary__hint.el-tag--warning {
+  background-color: var(--el-color-warning-light-9);
+}
+.review-summary__hint.el-tag--danger {
+  background-color: var(--el-color-danger-light-9);
+}
+
+.review-summary__hint-icon {
+  margin-right: 4px;
+}
 
 .status-cell {
   display: flex;
@@ -2295,6 +2489,28 @@ onMounted(refresh)
 }
 .mr4 {
   margin-right: 4px;
+}
+
+.scope-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scope-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #606266;
+}
+
+.action-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .help-tip {
