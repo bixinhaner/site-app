@@ -162,24 +162,15 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
     wo.status = WorkOrderStatusEnum.COMPLETED
     wo.completed_at = datetime.utcnow()
 
-    # 站点状态：当该站点所有开站工单都完成后，进入 operational
-    opening_work_orders = db.query(WorkOrder).filter(
-      WorkOrder.site_id == wo.site_id,
-      WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-    ).all()
-    all_completed = all(
-      item.status == WorkOrderStatusEnum.COMPLETED for item in opening_work_orders
-    )
-
-    if all_completed and opening_work_orders:
-      site = db.query(Site).filter(Site.id == wo.site_id).first()
-      if site and site.status != "operational":
-        old_site_status = site.status
-        site.status = "operational"
-        print(
-          f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) 所有开站工单已完成，"
-          f"状态从 {old_site_status} 更新为 {site.status}"
-        )
+    # 规则：站点设备已激活（ever）即视为已开通，站点进入 operational（不要求所有开站工单都完成）
+    site = db.query(Site).filter(Site.id == wo.site_id).first()
+    if site and site.status not in ("operational", "maintenance"):
+      old_site_status = site.status
+      site.status = "operational"
+      print(
+        f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) 站点设备已激活，"
+        f"状态从 {old_site_status} 更新为 {site.status}"
+      )
 
     print(
       f"[工单自动更新] 开站工单 {wo.id} 全部设备已激活，状态从 {old_status} 更新为 {wo.status}"
@@ -221,6 +212,10 @@ def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
 
   site = db.query(Site).filter(Site.id == site_id).first()
 
+  # 规则：站点设备已激活（ever）即视为已开通，站点进入 operational（不要求所有开站工单都完成）
+  if ever_all_activated and site and site.status not in ("operational", "maintenance"):
+    site.status = "operational"
+
   for wo in wos:
     changed = False
     # ever 全在线 -> 已上线待激活
@@ -236,14 +231,6 @@ def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
       wo.status = WorkOrderStatusEnum.COMPLETED
       wo.completed_at = datetime.utcnow()
       changed = True
-      if site:
-        # 如果该站点所有开站工单都已完成，则站点 operational
-        opening_wos = db.query(WorkOrder).filter(
-          WorkOrder.site_id == site_id,
-          WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-        ).all()
-        if opening_wos and all(item.status == WorkOrderStatusEnum.COMPLETED for item in opening_wos):
-          site.status = "operational"
 
     if changed:
       result["work_orders"].append({"id": wo.id, "status": wo.status.value})

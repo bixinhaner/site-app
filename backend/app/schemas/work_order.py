@@ -49,7 +49,8 @@ class WorkOrderCreate(BaseModel):
     priority: WorkOrderPriorityEnum = WorkOrderPriorityEnum.NORMAL
     due_date: Optional[datetime] = None
     template_id: Optional[str] = None
-    # 若同站点已存在安装工单，前端需提示并在确认后将其置为True以允许继续创建
+    # 仅当同站点存在“历史”安装工单（已完成/已驳回）时，前端可提示并在确认后置为 True 以允许继续创建；
+    # 若存在“进行中”的安装工单，则后端会直接拒绝创建（不允许通过 confirm_duplicate 绕过）。
     confirm_duplicate: Optional[bool] = False
 
 

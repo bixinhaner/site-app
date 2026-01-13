@@ -642,7 +642,7 @@ const submitCreate = () => {
         dupSiteCode.value = detail?.site_code || ''
         dupVisible.value = true
       } else {
-        ElMessage.error((typeof detail === 'string' && detail) || '创建失败')
+        ElMessage.error((typeof detail === 'string' && detail) || detail?.message || '创建失败')
       }
     } finally {
       creating.value = false
@@ -669,7 +669,8 @@ const confirmDuplicateCreate = async () => {
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '创建失败')
+    const detail = e?.response?.data?.detail
+    ElMessage.error((typeof detail === 'string' && detail) || detail?.message || '创建失败')
   } finally {
     creating.value = false
   }

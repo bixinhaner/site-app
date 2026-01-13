@@ -214,8 +214,7 @@ def _update_site_status_on_work_order_create(db: Session, site_id: int, work_ord
 def _update_site_status_on_work_order_complete(db: Session, site_id: int, work_order_type: WorkOrderTypeEnum):
     """
     工单完成时自动更新站点状态
-    - 如果是安装工单(opening_inspection)完成，检查该站点的所有安装工单
-    - 如果所有安装工单都已完成，将站点状态改为operational
+    - 如果是安装工单(opening_inspection)完成，将站点状态改为 operational
     """
     # 勘察工单审核通过 -> 站点进入规划阶段
     if work_order_type == WorkOrderTypeEnum.SITE_SURVEY:
@@ -232,30 +231,17 @@ def _update_site_status_on_work_order_complete(db: Session, site_id: int, work_o
             )
 
     if work_order_type == WorkOrderTypeEnum.OPENING_INSPECTION:
-        # 查询该站点下所有安装工单
-        opening_work_orders = db.query(WorkOrder).filter(
-            WorkOrder.site_id == site_id,
-            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION
-        ).all()
-        
-        # 检查是否所有安装工单都已完成
-        all_completed = all(
-            wo.status == WorkOrderStatusEnum.COMPLETED 
-            for wo in opening_work_orders
-        )
-        
-        if all_completed and opening_work_orders:
-            site = db.query(Site).filter(Site.id == site_id).first()
-            if site and site.status != "operational":
-                old_status = site.status
-                site.status = "operational"
-                print(f"[站点状态自动更新] 站点 {site_id} ({site.site_name}) 所有安装工单已完成，状态从 {old_status} 更新为 {site.status}")
-                
-                # 记录审计日志
-                _audit_site_status_change(
-                    db, site_id, old_status, site.status,
-                    f"所有{len(opening_work_orders)}个安装工单已完成，站点投入运营"
-                )
+        site = db.query(Site).filter(Site.id == site_id).first()
+        if site and site.status not in ("operational", "maintenance"):
+            old_status = site.status
+            site.status = "operational"
+            print(f"[站点状态自动更新] 站点 {site_id} ({site.site_name}) 安装工单已完成，状态从 {old_status} 更新为 {site.status}")
+
+            # 记录审计日志
+            _audit_site_status_change(
+                db, site_id, old_status, site.status,
+                "安装工单已完成，站点投入运营"
+            )
 
 
 def _get_template_id_from_extra_data(extra_data):
@@ -560,15 +546,28 @@ async def create_work_order(
         if existing_ssv:
             raise HTTPException(status_code=409, detail="该站点已有进行中的 SSV 工单")
 
-    # 重复校验：仅针对安装工单，任意状态都视为存在历史记录，需用户确认后方可继续
-    if data.type == WorkOrderTypeEnum.OPENING_INSPECTION and not (getattr(data, "confirm_duplicate", False)):
-        existing_wos = db.query(WorkOrder).filter(
+    # 开站工单创建规则（去重）：
+    # - 同一站点仅允许存在一条“进行中的”开站工单
+    # - 若仅存在历史开站工单（已完成/已驳回），则允许前端二次确认后继续创建
+    if data.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        in_progress_statuses = [
+            WorkOrderStatusEnum.PENDING,
+            WorkOrderStatusEnum.ACTIVE,
+            WorkOrderStatusEnum.SUBMITTED,
+            WorkOrderStatusEnum.UNDER_REVIEW,
+            WorkOrderStatusEnum.APPROVED,
+            WorkOrderStatusEnum.ACTIVATED,
+        ]
+
+        existing_in_progress = db.query(WorkOrder).filter(
             WorkOrder.site_id == data.site_id,
-            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status.in_(in_progress_statuses),
         ).order_by(WorkOrder.assigned_at.desc()).all()
-        if existing_wos:
+
+        if existing_in_progress:
             existing_brief = []
-            for e in existing_wos[:10]:  # 最多返回10条以控制响应体
+            for e in existing_in_progress[:10]:
                 enriched = _enrich_work_order_response(db, e)
                 existing_brief.append({
                     "id": enriched.get("id"),
@@ -582,15 +581,46 @@ async def create_work_order(
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "code": "DUPLICATE_OPENING_ORDER",
-                    "message": "该站点已存在安装工单，确认后仍可继续创建",
+                    "code": "DUPLICATE_OPENING_ORDER_IN_PROGRESS",
+                    "message": "该站点已存在进行中的安装工单，不允许重复创建；请先关闭/作废原工单",
                     "site_id": data.site_id,
                     "site_name": getattr(site, "site_name", None),
                     "site_code": getattr(site, "site_code", None),
-                    "require_confirm_duplicate": True,
                     "existing_work_orders": existing_brief,
-                }
+                },
             )
+
+        if not (getattr(data, "confirm_duplicate", False)):
+            existing_history = db.query(WorkOrder).filter(
+                WorkOrder.site_id == data.site_id,
+                WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+                WorkOrder.status.in_([WorkOrderStatusEnum.COMPLETED, WorkOrderStatusEnum.REJECTED]),
+            ).order_by(WorkOrder.assigned_at.desc()).all()
+            if existing_history:
+                existing_brief = []
+                for e in existing_history[:10]:  # 最多返回10条以控制响应体
+                    enriched = _enrich_work_order_response(db, e)
+                    existing_brief.append({
+                        "id": enriched.get("id"),
+                        "title": enriched.get("title"),
+                        "status": enriched.get("status").value if hasattr(enriched.get("status"), 'value') else str(enriched.get("status")),
+                        "assigned_to": enriched.get("assigned_to"),
+                        "assignee_name": enriched.get("assignee_name"),
+                        "assigner_name": enriched.get("assigner_name"),
+                        "assigned_at": to_utc_iso(enriched.get("assigned_at")) if enriched.get("assigned_at") else None,
+                    })
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "DUPLICATE_OPENING_ORDER",
+                        "message": "该站点存在历史安装工单，确认后仍可继续创建",
+                        "site_id": data.site_id,
+                        "site_name": getattr(site, "site_name", None),
+                        "site_code": getattr(site, "site_code", None),
+                        "require_confirm_duplicate": True,
+                        "existing_work_orders": existing_brief,
+                    }
+                )
 
     # SSV 工单创建规则校验：站点需为 operational，且同一站点同时间只允许一条进行中的 SSV 工单
     if data.type == WorkOrderTypeEnum.SSV:
