@@ -40,7 +40,7 @@
           </view>
           <view class="progress-info">
             <text class="progress-text">{{ progressText }}</text>
-            <text class="progress-percent">{{ downloadProgress }}%</text>
+            <text class="progress-percent">{{ $formatPercentInt(downloadProgress) }}</text>
           </view>
         </view>
         

@@ -282,7 +282,7 @@
 										@click.stop="onPhotoStatusTap(photo)"
 									>
 										<text v-if="getPhotoDisplayStatus(photo) === 'downloading'" class="photo-status-text">
-											{{ getPhotoProgress(photo) }}%
+											{{ $formatPercentInt(getPhotoProgress(photo)) }}
 										</text>
 										<view v-else-if="getPhotoDisplayStatus(photo) === 'error'" class="photo-status-error">
 											<text class="photo-status-text">{{ $t('site.loadFailed') }}</text>
@@ -531,7 +531,7 @@
 													@click.stop="onPhotoStatusTap(photo)"
 												>
 													<text v-if="getPhotoDisplayStatus(photo) === 'downloading'" class="photo-status-text">
-														{{ getPhotoProgress(photo) }}%
+														{{ $formatPercentInt(getPhotoProgress(photo)) }}
 													</text>
 													<view v-else-if="getPhotoDisplayStatus(photo) === 'error'" class="photo-status-error">
 														<text class="photo-status-text">{{ $t('site.loadFailed') }}</text>
@@ -579,7 +579,7 @@
 												@click.stop="onPhotoStatusTap(photo)"
 											>
 												<text v-if="getPhotoDisplayStatus(photo) === 'downloading'" class="photo-status-text">
-													{{ getPhotoProgress(photo) }}%
+													{{ $formatPercentInt(getPhotoProgress(photo)) }}
 												</text>
 												<view v-else-if="getPhotoDisplayStatus(photo) === 'error'" class="photo-status-error">
 													<text class="photo-status-text">{{ $t('site.loadFailed') }}</text>
@@ -691,7 +691,7 @@
 				<view class="preview-loading-bar">
 					<view class="preview-loading-bar-fill" :style="{ width: previewProgress.percent + '%' }"></view>
 				</view>
-				<text class="preview-loading-percent">{{ previewProgress.percent }}%</text>
+				<text class="preview-loading-percent">{{ $formatPercentInt(previewProgress.percent) }}</text>
 			</view>
 		</view>
 	</template>

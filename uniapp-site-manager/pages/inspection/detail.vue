@@ -27,10 +27,10 @@
 			
 			<!-- 进度条 -->
 			<view class="progress-container">
-				<view class="progress-info">
-					<text class="progress-text">{{ workOrderProgress ? $t('workorder.progress') : $t('inspection.progress') }}</text>
-					<text class="progress-rate">{{ workOrderProgress ? workOrderProgress.percentage : (inspectionData.completion_rate || 0) }}%</text>
-				</view>
+					<view class="progress-info">
+						<text class="progress-text">{{ workOrderProgress ? $t('workorder.progress') : $t('inspection.progress') }}</text>
+						<text class="progress-rate">{{ $formatPercentInt(workOrderProgress ? workOrderProgress.percentage : (inspectionData.completion_rate || 0)) }}</text>
+					</view>
 				<view class="progress-bar">
 					<view 
 						class="progress-fill" 
@@ -512,9 +512,9 @@
 										:class="'photo-status-' + getPhotoDisplayStatus(photo)"
 										@click.stop="onPhotoStatusTap(photo)"
 									>
-										<text v-if="getPhotoDisplayStatus(photo) === 'downloading'" class="photo-status-text">
-											{{ getPhotoProgress(photo) }}%
-										</text>
+											<text v-if="getPhotoDisplayStatus(photo) === 'downloading'" class="photo-status-text">
+												{{ $formatPercentInt(getPhotoProgress(photo)) }}
+											</text>
 										<view v-else-if="getPhotoDisplayStatus(photo) === 'error'" class="photo-status-error">
 											<text class="photo-status-text">{{ $t('site.loadFailed') }}</text>
 											<text class="photo-status-sub">{{ $t('releaseNotes.retry') }}</text>
@@ -616,7 +616,7 @@
 				<view class="preview-loading-bar">
 					<view class="preview-loading-bar-fill" :style="{ width: previewProgress.percent + '%' }"></view>
 				</view>
-				<text class="preview-loading-percent">{{ previewProgress.percent }}%</text>
+					<text class="preview-loading-percent">{{ $formatPercentInt(previewProgress.percent) }}</text>
 			</view>
 		</view>
 	</view>

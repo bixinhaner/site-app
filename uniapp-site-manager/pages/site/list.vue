@@ -26,21 +26,27 @@
 			</view>
 		</view>
 
-		<view class="filter-tabs">
-			<scroll-view class="filter-tabs-scroll" scroll-x :show-scrollbar="false">
-				<view class="filter-tabs-row">
-					<view
-						class="tab"
-						:class="{ active: currentFilter === filter.value }"
-						v-for="filter in filters"
-						:key="filter.value"
-						@click="selectFilter(filter.value)"
-					>
-						{{ filter.label }}
+			<view class="filter-tabs">
+				<view class="filter-tabs-wrapper">
+					<scroll-view class="filter-tabs-scroll" scroll-x :show-scrollbar="false">
+						<view class="filter-tabs-row">
+							<view
+								class="tab"
+								:class="{ active: currentFilter === filter.value }"
+								v-for="filter in visibleFilters"
+								:key="filter.value"
+								@click="selectFilter(filter.value)"
+							>
+								{{ filter.label }}
+							</view>
+						</view>
+					</scroll-view>
+					<view class="filter-more" @click="openStatusFilterSheet">
+						<text class="filter-more-text">{{ $t('common.more') }}</text>
+						<text class="filter-more-icon">⋯</text>
 					</view>
 				</view>
-			</scroll-view>
-		</view>
+			</view>
 
 		<scroll-view
 			class="sites-scroll"
@@ -193,13 +199,48 @@
 
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 
-	const filters = ref([
-		{ label: $t('common.all'), value: 'all' },
-		{ label: $t('site.planning'), value: 'planning' },
-		{ label: $t('site.construction'), value: 'construction' },
-		{ label: $t('site.operational'), value: 'operational' },
-		{ label: $t('site.maintenance'), value: 'maintenance' }
-	])
+	const allFilters = computed(() => {
+		// 依赖语言，确保切换语言后能更新显示
+		const _ = languageStore.currentLocale
+		return [
+			{ label: $t('common.all'), value: 'all' },
+			{ label: $t('site.surveyPending'), value: 'survey_pending' },
+			{ label: $t('site.planning'), value: 'planning' },
+			{ label: $t('site.planned'), value: 'planned' },
+			{ label: $t('site.construction'), value: 'construction' },
+			{ label: $t('site.pendingOnline'), value: 'pending_online' },
+			{ label: $t('site.onlinePendingActivation'), value: 'online_pending_activation' },
+			{ label: $t('site.operational'), value: 'operational' },
+			{ label: $t('site.maintenance'), value: 'maintenance' },
+		]
+	})
+
+	const visibleFilters = computed(() => {
+		const baseValues = ['all', 'survey_pending', 'planning', 'construction', 'operational', 'maintenance']
+		const current = currentFilter.value
+		const values = [...baseValues]
+
+		if (current && current !== 'all' && !values.includes(current)) {
+			values.splice(1, 0, current)
+			if (values.length > baseValues.length) values.pop()
+		}
+
+		const filterMap = new Map(allFilters.value.map(f => [f.value, f]))
+		return values.map(v => filterMap.get(v)).filter(Boolean)
+	})
+
+	const openStatusFilterSheet = () => {
+		const items = allFilters.value
+		uni.showActionSheet({
+			title: $t('messages.filterSiteStatus'),
+			itemList: items.map(i => i.label),
+			success: (res) => {
+				const selected = items[res.tapIndex]
+				if (!selected) return
+				selectFilter(selected.value)
+			}
+		})
+	}
 	
 	// 过滤后的站点列表
 	const filteredSites = computed(() => {
@@ -296,8 +337,12 @@
 	// 获取状态样式类
 	const getStatusClass = (status) => {
 		const classMap = {
+			'survey_pending': 'status-survey-pending',
 			'planning': 'status-planning',
+			'planned': 'status-planned',
 			'construction': 'status-construction', 
+			'pending_online': 'status-pending-online',
+			'online_pending_activation': 'status-online-pending-activation',
 			'operational': 'status-operational',
 			'maintenance': 'status-maintenance'
 		}
@@ -307,8 +352,12 @@
 	// 获取状态文本
 	const getStatusText = (status) => {
 		const statusMap = {
+			'survey_pending': $t('site.surveyPending'),
 			'planning': $t('site.planning'),
+			'planned': $t('site.planned'),
 			'construction': $t('site.construction'),
+			'pending_online': $t('site.pendingOnline'),
+			'online_pending_activation': $t('site.onlinePendingActivation'),
 			'operational': $t('site.operational'),
 			'maintenance': $t('site.maintenance')
 		}
@@ -468,40 +517,68 @@
 	}
 
 	// 筛选标签 - 紧凑布局
-	.filter-tabs {
-		background: var(--bg-elevated);
-		box-shadow: var(--shadow-card);
-	}
-
-	.filter-tabs-scroll {
-		white-space: nowrap;
-	}
-
-	.filter-tabs-row {
-		display: flex;
-		gap: 12rpx;
-		padding: 16rpx 24rpx;
-	}
-
-	.tab {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-		min-height: 68rpx;
-		padding: 0 20rpx;
-		border-radius: 20rpx;
-		background: #f8f9fa;
-		color: #6b7280;
-		font-size: 26rpx;
-		transition: all 0.3s ease;
-
-		&.active {
-			background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-			color: #fff;
-			box-shadow: 0 2rpx 8rpx rgba(var(--color-primary-rgb), 0.24);
+		.filter-tabs {
+			background: var(--bg-elevated);
+			box-shadow: var(--shadow-card);
 		}
-	}
+
+		.filter-tabs-wrapper {
+			position: relative;
+		}
+
+		.filter-tabs-scroll {
+			white-space: nowrap;
+		}
+
+		.filter-tabs-row {
+			display: flex;
+			gap: 12rpx;
+			padding: 16rpx 140rpx 16rpx 24rpx;
+		}
+
+		.filter-more {
+			position: absolute;
+			right: 0;
+			top: 0;
+			height: 100%;
+			display: flex;
+			align-items: center;
+			padding: 0 20rpx;
+			background: var(--bg-elevated);
+			border-left: 1rpx solid var(--border-soft);
+		}
+
+		.filter-more-text {
+			font-size: 24rpx;
+			color: #6b7280;
+			margin-right: 8rpx;
+		}
+
+		.filter-more-icon {
+			font-size: 32rpx;
+			color: #6b7280;
+			line-height: 1;
+		}
+
+		.tab {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			flex-shrink: 0;
+			min-height: 68rpx;
+			padding: 0 20rpx;
+			border-radius: 20rpx;
+			background: #f8f9fa;
+			color: #6b7280;
+			font-size: 26rpx;
+			transition: all 0.3s ease;
+
+			&.active {
+				background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+				color: #fff;
+				box-shadow: 0 2rpx 8rpx rgba(var(--color-primary-rgb), 0.24);
+			}
+		}
 	
 	// 滚动容器
 	.sites-scroll {
@@ -550,16 +627,41 @@
 
 	.site-code { font-size: 24rpx; color: var(--text-secondary); }
 
-	.site-status {
-		font-size: 24rpx;
-		padding: 8rpx 16rpx;
-		border-radius: 16rpx;
-		font-weight: 500;
-		
-		&.status-planning {
-			background: #f3f4f6;
-			color: #6b7280;
-		}
+		.site-status {
+			font-size: 24rpx;
+			padding: 8rpx 16rpx;
+			border-radius: 16rpx;
+			font-weight: 500;
+
+			&.status-default {
+				background: #f3f4f6;
+				color: #6b7280;
+			}
+
+			&.status-survey-pending {
+				background: #e0f2fe;
+				color: #0369a1;
+			}
+
+			&.status-planned {
+				background: #ede9fe;
+				color: #6d28d9;
+			}
+
+			&.status-pending-online {
+				background: #ffedd5;
+				color: #c2410c;
+			}
+
+			&.status-online-pending-activation {
+				background: #ccfbf1;
+				color: #0f766e;
+			}
+			
+			&.status-planning {
+				background: #f3f4f6;
+				color: #6b7280;
+			}
 		
 		&.status-construction {
 			background: #fef3c7;

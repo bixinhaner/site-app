@@ -161,7 +161,7 @@
 				<view class="upload-progress-bar">
 					<view class="upload-progress-fill" :style="{ width: uploadProgress + '%' }"></view>
 				</view>
-				<text class="upload-text">{{ uploadProgress }}% ({{ uploadSpeed }})</text>
+					<text class="upload-text">{{ $formatPercentInt(uploadProgress) }} ({{ uploadSpeed }})</text>
 			</view>
 		</view>
 	</view>

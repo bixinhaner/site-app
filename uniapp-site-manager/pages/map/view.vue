@@ -1,7 +1,7 @@
 <template>
 	<view class="map-container">
 		<!-- 使用 web-view 显示在线地图 -->
-		<web-view :src="mapUrl" @message="handleMessage"></web-view>
+		<web-view :src="mapUrl" :key="mapUrl" @message="handleMessage"></web-view>
 		
 		<!-- 顶部信息栏 -->
 		<view class="map-header">

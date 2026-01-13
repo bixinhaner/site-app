@@ -44,6 +44,48 @@ from app.services.omc_monitor import advance_opening_work_orders_by_ever
 
 router = APIRouter()
 
+SITE_VIEW_ALL_ROLES = {"admin", "planner"}
+
+
+def _can_view_all_sites(current_user: User) -> bool:
+    return getattr(current_user, "role", None) in SITE_VIEW_ALL_ROLES
+
+
+def _apply_site_visibility_filter(query, db: Session, current_user: User):
+    """Apply site visibility rules based on the current user's role.
+
+    Rules:
+    - admin/manager/planner: can view all sites
+      (manager is mapped to admin by get_current_user)
+    - all other roles: can only view sites that have work orders assigned to them,
+      including completed work orders.
+    """
+    if _can_view_all_sites(current_user):
+        return query
+
+    site_ids = (
+        db.query(WorkOrder.site_id)
+        .filter(WorkOrder.assigned_to == current_user.id)
+        .distinct()
+    )
+    return query.filter(Site.id.in_(site_ids))
+
+
+def _ensure_site_visible(site_id: int, db: Session, current_user: User) -> None:
+    if _can_view_all_sites(current_user):
+        return
+
+    exists = (
+        db.query(WorkOrder.id)
+        .filter(
+            WorkOrder.site_id == site_id,
+            WorkOrder.assigned_to == current_user.id,
+        )
+        .first()
+    )
+    if not exists:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
 
 class SiteDeleteCheckResponse(BaseModel):
     can_delete: bool
@@ -138,17 +180,18 @@ async def get_sites(
 ):
     query = db.query(Site)
 
-    # 权限控制：inspector和admin/manager都可以查看所有站点（只读）
-    # 只有普通user需要过滤assigned_to
-    if current_user.role == "user":
-        query = query.filter(Site.assigned_to == current_user.id)
+    # 权限控制：
+    # - admin/manager/planner：可查看全部站点
+    # - 其他角色：仅可查看“分配给自己”的工单关联站点（包含已完成工单）
+    query = _apply_site_visibility_filter(query, db, current_user)
 
     # 应用过滤条件
     if status:
         query = query.filter(Site.status == status)
     if site_type:
         query = query.filter(Site.site_type == site_type)
-    if assigned_to:
+    # assigned_to 仍表示 Site.assigned_to，仅允许管理员/规划角色使用该筛选，避免限制角色误过滤
+    if assigned_to and _can_view_all_sites(current_user):
         query = query.filter(Site.assigned_to == assigned_to)
 
     sites = query.offset(skip).limit(limit).all()
@@ -171,9 +214,7 @@ async def search_sites(
     """站点搜索与分页列表（返回总数）"""
     query = db.query(Site)
 
-    # 权限控制：普通 user 只能看到分配给自己的站点
-    if current_user.role == "user":
-        query = query.filter(Site.assigned_to == current_user.id)
+    query = _apply_site_visibility_filter(query, db, current_user)
 
     # 关键词搜索
     if keyword:
@@ -190,7 +231,7 @@ async def search_sites(
         query = query.filter(Site.status == status)
     if site_type:
         query = query.filter(Site.site_type == site_type)
-    if assigned_to:
+    if assigned_to and _can_view_all_sites(current_user):
         query = query.filter(Site.assigned_to == assigned_to)
 
     total = query.count()
@@ -248,9 +289,7 @@ async def export_sites(
         .outerjoin(creator_user, Site.created_by == creator_user.id)
     )
 
-    # 权限控制：普通 user 只能导出分配给自己的站点
-    if current_user.role == "user":
-        query = query.filter(Site.assigned_to == current_user.id)
+    query = _apply_site_visibility_filter(query, db, current_user)
 
     # 关键词搜索
     if keyword:
@@ -267,7 +306,7 @@ async def export_sites(
         query = query.filter(Site.status == status)
     if site_type:
         query = query.filter(Site.site_type == site_type)
-    if assigned_to:
+    if assigned_to and _can_view_all_sites(current_user):
         query = query.filter(Site.assigned_to == assigned_to)
 
     records = query.order_by(Site.id.asc()).all()
@@ -942,15 +981,7 @@ async def get_site(
             detail="Site not found"
         )
 
-    # 权限控制：inspector可以查看所有站点详情（只读）
-    # 只有普通user需要检查assigned_to权限
-    if (current_user.role == "user" and
-        site.assigned_to != current_user.id and
-        site.created_by != current_user.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    _ensure_site_visible(site_id, db, current_user)
 
     return SiteResponse.from_orm(site)
 
@@ -1235,10 +1266,7 @@ async def get_site_omc_devices(
     if not site:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
 
-    # 权限：管理员/经理/巡检角色可以查看任意站点；普通 user 仅允许查看自己站点
-    if current_user.role == "user":
-        if site.assigned_to not in (None, current_user.id) and site.created_by != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_visible(site_id, db, current_user)
 
     # 1. 基于绑定历史推导当前 SN 及扇区信息
     # 取每个 SN 最新一条记录，且 action != UNBIND
@@ -1408,9 +1436,7 @@ async def get_site_omc_devices_ever(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
 
     # 权限规则与 /omc/devices 保持一致
-    if current_user.role == "user":
-        if site.assigned_to not in (None, current_user.id) and site.created_by != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_visible(site_id, db, current_user)
 
     summary = summarize_site_omc_state(db, site_id)
 

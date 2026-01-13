@@ -55,10 +55,26 @@
         }
         
         /* 不同状态的标记颜色 */
+        .marker-survey-pending .marker-pin {
+            background: #0369a1;
+        }
+
+        .marker-planned .marker-pin {
+            background: #6d28d9;
+        }
+
         .marker-operational .marker-pin {
             background: #10b981;
         }
-        
+
+        .marker-pending-online .marker-pin {
+            background: #c2410c;
+        }
+
+        .marker-online-pending-activation .marker-pin {
+            background: #0f766e;
+        }
+
         .marker-construction .marker-pin {
             background: #f59e0b;
         }
@@ -103,12 +119,32 @@
             font-weight: 500;
             margin-top: 8px;
         }
-        
+
+        .status-survey-pending {
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .status-planned {
+            background: #ede9fe;
+            color: #6d28d9;
+        }
+
         .status-operational {
             background: #d1fae5;
             color: #059669;
         }
-        
+
+        .status-pending-online {
+            background: #ffedd5;
+            color: #c2410c;
+        }
+
+        .status-online-pending-activation {
+            background: #ccfbf1;
+            color: #0f766e;
+        }
+
         .status-construction {
             background: #fef3c7;
             color: #d97706;
@@ -130,6 +166,8 @@
     
     <!-- Leaflet JS -->
     <script src="./leaflet.js"></script>
+    <!-- uni-app web-view JSBridge -->
+    <script src="./uni.webview.1.5.6.js"></script>
     
     <script>
         // 初始化地图（默认中心点：北京）
@@ -165,23 +203,65 @@
         tileLayerGroup.addTo(map);
         
         // 存储标记对象
-        const markers = {};
-        
-        // 获取状态文本
-        function getStatusText(status) {
-            const statusMap = {
+        let markers = {};
+
+        // i18n（由 UniApp 注入；若未注入则使用默认中文兜底）
+        let mapI18n = {
+            title: (typeof document !== 'undefined' && document.title) ? document.title : '',
+            noAddress: '暂无地址',
+            statusTextMap: {
+                survey_pending: '勘察中',
+                planned: '已规划',
                 operational: '运营中',
+                pending_online: '待上线',
+                online_pending_activation: '上线待激活',
                 construction: '建设中',
                 maintenance: '维护中',
                 planning: '规划中'
-            };
-            return statusMap[status] || status;
+            }
+        };
+
+        function setMapI18n(payload) {
+            try {
+                if (!payload || typeof payload !== 'object') return;
+
+                if (typeof payload.title === 'string' && payload.title) {
+                    mapI18n.title = payload.title;
+                    if (typeof document !== 'undefined') document.title = payload.title;
+                }
+
+                if (typeof payload.noAddress === 'string') {
+                    mapI18n.noAddress = payload.noAddress;
+                }
+
+                if (payload.statusTextMap && typeof payload.statusTextMap === 'object') {
+                    mapI18n.statusTextMap = mapI18n.statusTextMap || {};
+                    Object.keys(payload.statusTextMap).forEach(function(key) {
+                        mapI18n.statusTextMap[key] = payload.statusTextMap[key];
+                    });
+                }
+            } catch (e) {
+                console.error('setMapI18n failed:', e);
+            }
+        }
+
+        window.setMapI18n = setMapI18n;
+
+        // 获取状态文本
+        function getStatusText(status) {
+            const text = mapI18n && mapI18n.statusTextMap ? mapI18n.statusTextMap[status] : null;
+            return text || status;
+        }
+
+        function normalizeStatusClass(status) {
+            return String(status || '').replace(/_/g, '-');
         }
         
         // 创建自定义标记图标
         function createCustomIcon(status) {
+            const statusClass = normalizeStatusClass(status);
             return L.divIcon({
-                className: `custom-marker marker-${status}`,
+                className: `custom-marker marker-${statusClass}`,
                 html: '<div class="marker-pin"></div>',
                 iconSize: [30, 30],
                 iconAnchor: [15, 30],
@@ -192,6 +272,7 @@
         // 添加站点标记
         function addSiteMarker(site) {
             const { id, latitude, longitude, site_name, address, status } = site;
+            const statusClass = normalizeStatusClass(status);
             
             // 创建标记
             const marker = L.marker([latitude, longitude], {
@@ -200,11 +281,12 @@
             });
             
             // 创建弹出窗口内容
+            const safeAddress = address || (mapI18n ? mapI18n.noAddress : '');
             const popupContent = `
                 <div class="popup-content">
                     <div class="popup-title">${site_name}</div>
-                    <div class="popup-info">${address || '暂无地址'}</div>
-                    <div class="popup-status status-${status}">${getStatusText(status)}</div>
+                    <div class="popup-info">${safeAddress}</div>
+                    <div class="popup-status status-${statusClass}">${getStatusText(status)}</div>
                 </div>
             `;
             
@@ -239,6 +321,27 @@
         function setMapView(lat, lon, zoom) {
             map.setView([lat, lon], zoom);
         }
+
+        // 批量应用站点标记（供 App 端通过 evalJS 调用）
+        function applySiteMarkers(siteList) {
+            try {
+                clearAllMarkers();
+                var count = 0;
+                if (Array.isArray(siteList)) {
+                    siteList.forEach(function(site) {
+                        if (!site || site.latitude == null || site.longitude == null) return;
+                        addSiteMarker(site);
+                        count += 1;
+                    });
+                }
+                fitBounds();
+                notifyParent('markersApplied', { count: count });
+            } catch (e) {
+                console.error('applySiteMarkers failed:', e);
+            }
+        }
+
+        window.applySiteMarkers = applySiteMarkers;
         
         // 适应所有标记
         function fitBounds() {
@@ -272,9 +375,16 @@
         
         // 监听来自父页面的消息
         window.addEventListener('message', function(event) {
-            const { action, data } = event.data;
+            const message = event ? event.data : null;
+            if (!message || typeof message !== 'object') return;
+
+            const action = message.action;
+            const data = message.data;
             
             switch(action) {
+                case 'setI18n':
+                    setMapI18n(data);
+                    break;
                 case 'addMarker':
                     addSiteMarker(data);
                     break;

@@ -6,6 +6,7 @@ import i18n from './utils/i18n.js'
 import { setI18nInstance } from './stores/language.js'
 import { trackPageView } from './utils/operationTrack.js'
 import { useUserStore } from './stores/user.js'
+import { formatPercentInt, toPercentInt } from './utils/number.js'
 
 // 统一拦截 showToast
 // 解决 UniApp 原生 toast 带图标时文字长度限制问题（通常最多7个汉字）
@@ -48,6 +49,8 @@ export function createApp() {
 
 	// 全局组件：确保 Options API / script setup 均可直接使用
 	app.component('CustomNavbar', CustomNavbar)
+	app.config.globalProperties.$formatPercentInt = formatPercentInt
+	app.config.globalProperties.$toPercentInt = toPercentInt
 
 	// 设置i18n实例给语言store使用
 	setI18nInstance(i18n)

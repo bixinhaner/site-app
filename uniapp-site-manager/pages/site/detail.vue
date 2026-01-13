@@ -315,8 +315,12 @@
 	// 获取状态样式类
 	const getStatusClass = (status) => {
 		const classMap = {
+			'survey_pending': 'status-survey-pending',
 			'planning': 'status-planning',
+			'planned': 'status-planned',
 			'construction': 'status-construction', 
+			'pending_online': 'status-pending-online',
+			'online_pending_activation': 'status-online-pending-activation',
 			'operational': 'status-operational',
 			'maintenance': 'status-maintenance'
 		}
@@ -326,8 +330,12 @@
 	// 获取状态文本
 	const getStatusText = (status) => {
 		const statusMap = {
+			'survey_pending': $t('site.surveyPending'),
 			'planning': $t('site.planning'),
+			'planned': $t('site.planned'),
 			'construction': $t('site.construction'),
+			'pending_online': $t('site.pendingOnline'),
+			'online_pending_activation': $t('site.onlinePendingActivation'),
 			'operational': $t('site.operational'),
 			'maintenance': $t('site.maintenance')
 		}
@@ -611,21 +619,51 @@
 		margin-bottom: 12px;
 	}
 
-	.site-status {
-		padding: 4px 10px;
-		border-radius: 999px;
-		font-size: 12px;
-		font-weight: 500;
-		background: #ffffff;
-		color: #111827;
-		border: 1px solid rgba(148, 163, 184, 0.5);
-		box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
-		white-space: nowrap;
-		
-		&.status-operational {
-			background: #dcfce7;
-			color: #166534;
-			border-color: rgba(22, 101, 52, 0.35);
+		.site-status {
+			padding: 4px 10px;
+			border-radius: 999px;
+			font-size: 12px;
+			font-weight: 500;
+			background: #ffffff;
+			color: #111827;
+			border: 1px solid rgba(148, 163, 184, 0.5);
+			box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+			white-space: nowrap;
+
+			&.status-default {
+				background: #ffffff;
+				color: #111827;
+				border-color: rgba(148, 163, 184, 0.5);
+			}
+
+			&.status-survey-pending {
+				background: #e0f2fe;
+				color: #0369a1;
+				border-color: rgba(3, 105, 161, 0.35);
+			}
+
+			&.status-planned {
+				background: #ede9fe;
+				color: #6d28d9;
+				border-color: rgba(109, 40, 217, 0.35);
+			}
+
+			&.status-pending-online {
+				background: #ffedd5;
+				color: #c2410c;
+				border-color: rgba(194, 65, 12, 0.35);
+			}
+
+			&.status-online-pending-activation {
+				background: #ccfbf1;
+				color: #0f766e;
+				border-color: rgba(15, 118, 110, 0.35);
+			}
+			
+			&.status-operational {
+				background: #dcfce7;
+				color: #166534;
+				border-color: rgba(22, 101, 52, 0.35);
 		}
 		
 		&.status-maintenance {
