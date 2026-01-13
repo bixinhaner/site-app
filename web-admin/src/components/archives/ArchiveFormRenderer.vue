@@ -247,42 +247,15 @@
 	                  </div>
 	                </div>
 	              </div>
-	
-	              <div
-	                v-if="(!it.fields || !(it.fields || []).length) && ((sec.photos && sec.photos.length) || (!disabled && needsPhoto(it)))"
-	                class="photos"
-	              >
-	                <div class="photos-header" v-if="sec.photos && sec.photos.length">照片</div>
-	                <div class="grid" v-if="sec.photos && sec.photos.length">
-	                  <div v-for="(p, idx) in sec.photos" :key="p.id" class="item photo-card">
-	                    <ProgressImage class="photo-card-image" :src="fileUrl(p.file_path)" fit="cover" @click.stop="openPhotoPreview(sec.photos, idx)" />
-	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
-	                    <div class="meta compact">
-	                      <div class="meta-actions">
-	                        <el-button
-	                          v-if="!disabled"
-	                          link
-	                          type="danger"
-	                          size="small"
-	                          @click="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'sector', sectorId: sec.sector_id, photoId: p.id, photo: p })"
-	                          title="删除"
-	                          aria-label="删除"
-	                        >
-	                          <el-icon><Delete /></el-icon>
-	                        </el-button>
-	                      </div>
-	                    </div>
-	                  </div>
-	                </div>
-	                <div class="upload-bar" v-if="!disabled && needsPhoto(it)">
-	                  <el-upload
-	                    :show-file-list="false"
-	                    :http-request="(opt) => onUploadForField(cat, it, { level: 'sector', sectorId: sec.sector_id }, opt)"
-	                    accept="image/*"
-	                  >
-	                    <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
-	                  </el-upload>
-	                </div>
+
+	              <div v-if="!disabled && !(it.fields || []).length && needsPhoto(it)" class="upload-bar">
+	                <el-upload
+	                  :show-file-list="false"
+	                  :http-request="(opt) => onUploadForField(cat, it, { level: 'sector', sectorId: sec.sector_id }, opt)"
+	                  accept="image/*"
+	                >
+	                  <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
+	                </el-upload>
 	              </div>
 	            </el-card>
 	          </div>
@@ -378,42 +351,15 @@
 	                  </div>
 	                </div>
 	              </div>
-	
-	              <div
-	                v-if="(!it.fields || !(it.fields || []).length) && ((cell.photos && cell.photos.length) || (!disabled && needsPhoto(it)))"
-	                class="photos"
-	              >
-	                <div class="photos-header" v-if="cell.photos && cell.photos.length">照片</div>
-	                <div class="grid" v-if="cell.photos && cell.photos.length">
-	                  <div v-for="(p, idx) in cell.photos" :key="p.id" class="item photo-card">
-	                    <ProgressImage class="photo-card-image" :src="fileUrl(p.file_path)" fit="cover" @click.stop="openPhotoPreview(cell.photos, idx)" />
-	                    <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
-	                    <div class="meta compact">
-	                      <div class="meta-actions">
-	                        <el-button
-	                          v-if="!disabled"
-	                          link
-	                          type="danger"
-	                          size="small"
-	                          @click="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'cell', cellId: cell.cell_id, photoId: p.id, photo: p })"
-	                          title="删除"
-	                          aria-label="删除"
-	                        >
-	                          <el-icon><Delete /></el-icon>
-	                        </el-button>
-	                      </div>
-	                    </div>
-	                  </div>
-	                </div>
-	                <div class="upload-bar" v-if="!disabled && needsPhoto(it)">
-	                  <el-upload
-	                    :show-file-list="false"
-	                    :http-request="(opt) => onUploadForField(cat, it, { level: 'cell', cellId: cell.cell_id }, opt)"
-	                    accept="image/*"
-	                  >
-	                    <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
-	                  </el-upload>
-	                </div>
+
+	              <div v-if="!disabled && !(it.fields || []).length && needsPhoto(it)" class="upload-bar">
+	                <el-upload
+	                  :show-file-list="false"
+	                  :http-request="(opt) => onUploadForField(cat, it, { level: 'cell', cellId: cell.cell_id }, opt)"
+	                  accept="image/*"
+	                >
+	                  <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
+	                </el-upload>
 	              </div>
 	            </el-card>
 	          </div>
@@ -448,43 +394,15 @@
 	            </div>
 	          </div>
 	        </div>
-	
-	        <!-- 照片类检查项但无字段定义：按检查项展示照片 -->
-	        <div
-	          v-if="(!(it.fields || []).length) && ((it.photos && it.photos.length) || (!disabled && needsPhoto(it)))"
-	          class="photos"
-	        >
-	          <div class="photos-header" v-if="it.photos && it.photos.length">照片</div>
-	          <div class="grid" v-if="it.photos && it.photos.length">
-	            <div v-for="(p, idx) in it.photos" :key="p.id" class="item photo-card">
-	              <ProgressImage class="photo-card-image" :src="fileUrl(p.file_path)" fit="cover" @click.stop="openPhotoPreview(it.photos, idx)" />
-	              <el-tag v-if="p.pending" size="small" type="warning" class="badge-pending">未保存</el-tag>
-	              <div class="meta compact">
-	                <div class="meta-actions">
-	                  <el-button
-	                    v-if="!disabled"
-	                    link
-	                    type="danger"
-	                    size="small"
-	                    @click="$emit('delete-photo', { categoryId: cat.category_id, itemId: it.item_id, level: 'site', photoId: p.id, photo: p })"
-	                    title="删除"
-	                    aria-label="删除"
-	                  >
-	                    <el-icon><Delete /></el-icon>
-	                  </el-button>
-	                </div>
-	              </div>
-	            </div>
-	          </div>
-	          <div class="upload-bar" v-if="!disabled && needsPhoto(it)">
-	            <el-upload
-	              :show-file-list="false"
-	              :http-request="(opt) => onUploadForField(cat, it, { level: 'site' }, opt)"
-	              accept="image/*"
-	            >
-	              <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
-	            </el-upload>
-	          </div>
+
+	        <div v-if="!disabled && !(it.fields || []).length && needsPhoto(it)" class="upload-bar">
+	          <el-upload
+	            :show-file-list="false"
+	            :http-request="(opt) => onUploadForField(cat, it, { level: 'site' }, opt)"
+	            accept="image/*"
+	          >
+	            <el-button size="small" type="primary"><el-icon><Upload /></el-icon>选择图片</el-button>
+	          </el-upload>
 	        </div>
 	      </el-card>
 	    </div>
@@ -1063,15 +981,8 @@ function dateDisplayFormat(type) {
 .kv-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .kv-key { color: #606266; font-weight: 600; }
 .kv-val { color: #303133; }
-.photos { margin-top: 12px; }
 .upload-bar { margin-top: 8px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-.photo-card { position: relative; border: 1px solid #f0f0f0; border-radius: 8px; overflow: hidden; background: #fff; }
-.photo-card-image { width: 100%; height: auto !important; aspect-ratio: 4 / 3; }
 .badge-pending { position: absolute; top: 8px; right: 8px; pointer-events: none; }
-.meta { display:flex; justify-content: flex-end; align-items:center; padding:6px 8px; font-size:12px; background:#fafafa; }
-.meta.compact { gap: 8px; }
-.muted { color: #999; font-weight: normal; }
 
 /* 预览准备进度 */
 .preview-loading-overlay {
