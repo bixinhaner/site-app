@@ -33,15 +33,14 @@
             <div class="card-header">
               <span>开站设备在线 / 激活状态</span>
               <div>
-                <span v-if="deviceStatusCheckedAt" style="margin-right: 12px; color: #909399;">
-                  最近检查时间：{{ formatDateTime(deviceStatusCheckedAt) }}
-                </span>
-                <el-button size="small" @click="loadDeviceStatus(false)">加载</el-button>
-                <el-button
-                  size="small"
-                  type="primary"
-                  :disabled="deviceRefreshCooldown > 0"
-                  @click="loadDeviceStatus(true)"
+	                <span v-if="deviceStatusCheckedAt" style="margin-right: 12px; color: #909399;">
+	                  最近检查时间：{{ formatDateTime(deviceStatusCheckedAt) }}
+	                </span>
+	                <el-button
+	                  size="small"
+	                  type="primary"
+	                  :disabled="deviceRefreshCooldown > 0"
+	                  @click="loadDeviceStatus(true)"
                 >
                   <span v-if="deviceRefreshCooldown > 0">
                     刷新状态 ({{ deviceRefreshCooldown }}s)
