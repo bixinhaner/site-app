@@ -3,12 +3,10 @@ import time
 from datetime import datetime
 from typing import Dict, List, Tuple
 
-from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.utils.timezone import to_utc_iso
-from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
 from app.models.site import Site
 from app.models.work_order import (
   WorkOrder,
@@ -23,45 +21,12 @@ from app.services.omc_client import (
   is_success_status_payload,
 )
 from app.services.omc_state import (
+  get_bound_sns_for_site,
   upsert_omc_device_state,
   summarize_site_omc_state,
 )
 
 _monitor_thread: threading.Thread | None = None
-
-
-def _get_bound_sns_for_site(db: Session, site_id: int) -> List[str]:
-  """
-  基于设备绑定历史，推导当前站点已绑定的设备 SN 列表。
-  规则：同一 SN 取最新一条记录，若 action != UNBIND 则视为仍然绑定。
-  """
-  subq = (
-    db.query(
-      EquipmentBindingHistory.equipment_sn.label("sn"),
-      func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
-    )
-    .filter(EquipmentBindingHistory.site_id == site_id)
-    .group_by(EquipmentBindingHistory.equipment_sn)
-    .subquery()
-  )
-
-  latest_rows: List[EquipmentBindingHistory] = (
-    db.query(EquipmentBindingHistory)
-    .join(
-      subq,
-      and_(
-        EquipmentBindingHistory.equipment_sn == subq.c.sn,
-        EquipmentBindingHistory.operated_at == subq.c.latest_at,
-      ),
-    )
-    .all()
-  )
-
-  sns: List[str] = []
-  for row in latest_rows:
-    if row.action != BindingActionEnum.UNBIND and row.equipment_sn:
-      sns.append(row.equipment_sn)
-  return sns
 
 
 def _check_site_devices_status(
@@ -139,7 +104,7 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
   if wo.type != WorkOrderTypeEnum.OPENING_INSPECTION:
     return {}
 
-  sns = _get_bound_sns_for_site(db, wo.site_id)
+  sns = get_bound_sns_for_site(db, wo.site_id)
   if not sns:
     summary = {
       "sns": [],

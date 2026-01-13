@@ -40,6 +40,36 @@ uni.showToast = function (options = {}) {
 	return originalShowToast.call(uni, options)
 }
 
+// 统一拦截 showModal
+// 修复不同语言下默认按钮文案仍为中文（如“确定/取消”）的问题
+const originalShowModal = uni.showModal
+uni.showModal = function (options = {}) {
+	try {
+		const t = i18n?.global?.t?.bind(i18n.global)
+		if (!t) return originalShowModal.call(uni, options)
+
+		const nextOptions = { ...options }
+		const showCancel = nextOptions.showCancel !== false
+
+		if (showCancel) {
+			if (nextOptions.confirmText === undefined || nextOptions.confirmText === null || nextOptions.confirmText === '') {
+				nextOptions.confirmText = t('common.confirm')
+			}
+			if (nextOptions.cancelText === undefined || nextOptions.cancelText === null || nextOptions.cancelText === '') {
+				nextOptions.cancelText = t('common.cancel')
+			}
+		} else {
+			if (nextOptions.confirmText === undefined || nextOptions.confirmText === null || nextOptions.confirmText === '') {
+				nextOptions.confirmText = t('common.ok')
+			}
+		}
+
+		return originalShowModal.call(uni, nextOptions)
+	} catch (e) {
+		return originalShowModal.call(uni, options)
+	}
+}
+
 export function createApp() {
 	const app = createSSRApp(App)
 	const pinia = createPinia()

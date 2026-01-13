@@ -85,7 +85,10 @@ def get_bound_sns_for_site(db: Session, site_id: int) -> List[str]:
     - 同一 SN 取最新一条记录
     - 若 action != UNBIND 则视为仍然绑定
     """
-    subq = (
+    # 注意：同一 SN 在同一时刻可能产生多条绑定记录（例如多个检查项写入了相同 SN），
+    # 仅用 max(operated_at) 会造成 join 命中多行，从而出现 SN 重复。
+    # 这里增加二次聚合：在 (SN, latest_at) 的候选集中取 max(id) 作为唯一“最新”记录。
+    latest_at_subq = (
         db.query(
             EquipmentBindingHistory.equipment_sn.label("sn"),
             func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
@@ -95,15 +98,27 @@ def get_bound_sns_for_site(db: Session, site_id: int) -> List[str]:
         .subquery()
     )
 
-    latest_rows: List[EquipmentBindingHistory] = (
-        db.query(EquipmentBindingHistory)
+    latest_id_subq = (
+        db.query(
+            EquipmentBindingHistory.equipment_sn.label("sn"),
+            func.max(EquipmentBindingHistory.id).label("latest_id"),
+        )
         .join(
-            subq,
+            latest_at_subq,
             and_(
-                EquipmentBindingHistory.equipment_sn == subq.c.sn,
-                EquipmentBindingHistory.operated_at == subq.c.latest_at,
+                EquipmentBindingHistory.equipment_sn == latest_at_subq.c.sn,
+                EquipmentBindingHistory.operated_at == latest_at_subq.c.latest_at,
             ),
         )
+        .filter(EquipmentBindingHistory.site_id == site_id)
+        .group_by(EquipmentBindingHistory.equipment_sn)
+        .subquery()
+    )
+
+    latest_rows: List[EquipmentBindingHistory] = (
+        db.query(EquipmentBindingHistory)
+        .join(latest_id_subq, EquipmentBindingHistory.id == latest_id_subq.c.latest_id)
+        .order_by(EquipmentBindingHistory.equipment_sn)
         .all()
     )
 

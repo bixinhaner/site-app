@@ -202,7 +202,7 @@ async def list_omc_device_states(
   # 查询当前绑定站点（按 SN 维度）
   sns = [s.sn for s in states]
 
-  binding_subq = (
+  binding_latest_at_subq = (
     db.query(
       EquipmentBindingHistory.equipment_sn.label("sn"),
       func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
@@ -212,15 +212,26 @@ async def list_omc_device_states(
     .subquery()
   )
 
-  latest_bindings = (
-    db.query(EquipmentBindingHistory, Site)
+  binding_latest_id_subq = (
+    db.query(
+      EquipmentBindingHistory.equipment_sn.label("sn"),
+      func.max(EquipmentBindingHistory.id).label("latest_id"),
+    )
     .join(
-      binding_subq,
+      binding_latest_at_subq,
       and_(
-        EquipmentBindingHistory.equipment_sn == binding_subq.c.sn,
-        EquipmentBindingHistory.operated_at == binding_subq.c.latest_at,
+        EquipmentBindingHistory.equipment_sn == binding_latest_at_subq.c.sn,
+        EquipmentBindingHistory.operated_at == binding_latest_at_subq.c.latest_at,
       ),
     )
+    .filter(EquipmentBindingHistory.equipment_sn.in_(sns))
+    .group_by(EquipmentBindingHistory.equipment_sn)
+    .subquery()
+  )
+
+  latest_bindings = (
+    db.query(EquipmentBindingHistory, Site)
+    .join(binding_latest_id_subq, EquipmentBindingHistory.id == binding_latest_id_subq.c.latest_id)
     .join(Site, EquipmentBindingHistory.site_id == Site.id)
     .filter(EquipmentBindingHistory.action != BindingActionEnum.UNBIND)
     .all()

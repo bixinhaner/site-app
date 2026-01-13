@@ -21,7 +21,7 @@ from app.schemas.site import (
     SiteListResponse,
 )
 from app.api.auth import get_current_user
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, and_
 from pydantic import BaseModel
 from app.models.work_order import AuditEvent, WorkOrder, WorkOrderTypeEnum, WorkOrderStatusEnum
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
@@ -1270,7 +1270,7 @@ async def get_site_omc_devices(
 
     # 1. 基于绑定历史推导当前 SN 及扇区信息
     # 取每个 SN 最新一条记录，且 action != UNBIND
-    subq = (
+    latest_at_subq = (
         db.query(
             EquipmentBindingHistory.equipment_sn.label("sn"),
             func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
@@ -1280,15 +1280,27 @@ async def get_site_omc_devices(
         .subquery()
     )
 
+    latest_id_subq = (
+        db.query(
+            EquipmentBindingHistory.equipment_sn.label("sn"),
+            func.max(EquipmentBindingHistory.id).label("latest_id"),
+        )
+        .join(
+            latest_at_subq,
+            and_(
+                EquipmentBindingHistory.equipment_sn == latest_at_subq.c.sn,
+                EquipmentBindingHistory.operated_at == latest_at_subq.c.latest_at,
+            ),
+        )
+        .filter(EquipmentBindingHistory.site_id == site_id)
+        .group_by(EquipmentBindingHistory.equipment_sn)
+        .subquery()
+    )
+
     latest_rows: list[EquipmentBindingHistory] = (
         db.query(EquipmentBindingHistory)
         .options(joinedload(EquipmentBindingHistory.operator))
-        .join(
-            subq,
-            (EquipmentBindingHistory.equipment_sn == subq.c.sn)
-            & (EquipmentBindingHistory.operated_at == subq.c.latest_at),
-        )
-        .filter(EquipmentBindingHistory.site_id == site_id)
+        .join(latest_id_subq, EquipmentBindingHistory.id == latest_id_subq.c.latest_id)
         .all()
     )
 

@@ -11,7 +11,7 @@ def _latest_binding_for_sn(db: Session, sn: str) -> Optional[EquipmentBindingHis
     return (
         db.query(EquipmentBindingHistory)
         .filter(EquipmentBindingHistory.equipment_sn == sn)
-        .order_by(EquipmentBindingHistory.operated_at.desc())
+        .order_by(EquipmentBindingHistory.operated_at.desc(), EquipmentBindingHistory.id.desc())
         .first()
     )
 
