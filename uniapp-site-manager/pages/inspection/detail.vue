@@ -57,6 +57,7 @@
 			@refresherrefresh="handleRefresh"
 			refresher-background="#f7f8fb"
 		>
+			<view class="detail-content-inner">
 			<!-- 基本信息卡片 -->
 			<view class="detail-card">
 				<view class="card-header">
@@ -122,33 +123,6 @@
 				</view>
 			</view>
 			
-			<!-- 检查项统计 -->
-			<view class="detail-card">
-				<view class="card-header">
-					<text class="card-title">{{ $t('inspection.checkItemsStats') }}</text>
-				</view>
-				<view class="card-content">
-					<view class="stats-grid">
-						<view class="stat-item">
-							<text class="stat-number">{{ inspectionData.total_items || 0 }}</text>
-							<text class="stat-label">{{ $t('inspection.totalCheckItems') }}</text>
-						</view>
-						<view class="stat-item">
-							<text class="stat-number success">{{ inspectionData.completed_items || 0 }}</text>
-							<text class="stat-label">{{ $t('inspection.completedChecks') }}</text>
-						</view>
-						<view class="stat-item">
-							<text class="stat-number warning">{{ inspectionData.failed_items || 0 }}</text>
-							<text class="stat-label">{{ $t('inspection.failedChecks') }}</text>
-						</view>
-						<view class="stat-item">
-							<text class="stat-number info">{{ (inspectionData.total_items || 0) - (inspectionData.completed_items || 0) - (inspectionData.failed_items || 0) }}</text>
-							<text class="stat-label">{{ $t('inspection.pendingChecks') }}</text>
-						</view>
-					</view>
-				</view>
-			</view>
-			
 			<!-- 驳回意见卡片 -->
 			<view class="detail-card reject-card" v-if="inspectionData.status === 'rejected' && inspectionData.review_comments">
 				<view class="card-header">
@@ -183,21 +157,31 @@
 			
 			<!-- 检查项详情 -->
 			<view class="detail-card">
-				<view class="card-header">
+				<view class="card-header check-items-header">
 					<text class="card-title">{{ $t('inspection.checkItems') }}</text>
-					<view class="filter-tabs">
-						<view 
-							class="filter-tab"
-							:class="{ active: currentFilter === filter.value }"
-							v-for="filter in statusFilters"
-							:key="filter.value"
-							@click="switchFilter(filter.value)"
-						>
-							<text class="tab-text">{{ filter.label }}</text>
+					<view class="filter-trigger u-pressable-subtle" :class="getFilterChipClass(currentFilter)" @click="openFilterSheet">
+						<text class="filter-trigger-text">{{ currentFilterMeta.label }}</text>
+						<view class="filter-trigger-badge">
+							<text class="filter-trigger-badge-text">{{ currentFilterMeta.count }}</text>
 						</view>
+						<text class="filter-trigger-icon">▾</text>
 					</view>
 				</view>
 				<view class="card-content">
+					<view class="filter-chips">
+						<view
+							class="filter-chip u-pressable-subtle"
+							v-for="filter in statusFilters"
+							:key="filter.value"
+							:class="[getFilterChipClass(filter.value), { active: currentFilter === filter.value }]"
+							@click="switchFilter(filter.value)"
+						>
+							<text class="filter-chip-label">{{ filter.label }}</text>
+							<view class="filter-chip-badge" :class="getFilterBadgeClass(filter.value)">
+								<text class="filter-chip-badge-text">{{ getFilterCount(filter.value) }}</text>
+							</view>
+						</view>
+					</view>
 					<view class="check-items-list">
 							<view 
 								class="check-item"
@@ -313,6 +297,7 @@
 					</view>
 				</view>
 			</view>
+			</view>
 		</scroll-view>
 		
 		<!-- 未绑定设备列表弹窗 -->
@@ -336,6 +321,38 @@
 						<text class="unbound-item-arrow">→</text>
 					</view>
 				</scroll-view>
+			</view>
+		</view>
+
+		<!-- 检查项筛选弹窗 -->
+		<view class="filter-sheet-overlay" v-if="showFilterSheet" @click="closeFilterSheet">
+			<view class="filter-sheet" @click.stop>
+				<view class="filter-sheet-header">
+					<text class="filter-sheet-title">{{ $t('inspection.status') }}</text>
+					<view class="filter-sheet-close u-pressable-subtle" @click="closeFilterSheet">
+						<text class="filter-sheet-close-icon">×</text>
+					</view>
+				</view>
+				<view class="filter-sheet-list">
+					<view
+						class="filter-sheet-item u-pressable-subtle"
+						v-for="filter in statusFilters"
+						:key="filter.value"
+						:class="[{ active: currentFilter === filter.value }, getFilterChipClass(filter.value)]"
+						@click="selectFilterFromSheet(filter.value)"
+					>
+						<view class="filter-sheet-item-left">
+							<text class="filter-sheet-item-label">{{ filter.label }}</text>
+						</view>
+						<view class="filter-sheet-item-right">
+							<view class="filter-sheet-badge" :class="getFilterBadgeClass(filter.value)">
+								<text class="filter-sheet-badge-text">{{ getFilterCount(filter.value) }}</text>
+							</view>
+							<text v-if="currentFilter === filter.value" class="filter-sheet-check">✓</text>
+						</view>
+					</view>
+				</view>
+				<view class="filter-sheet-safe"></view>
 			</view>
 		</view>
 		
@@ -680,6 +697,7 @@
 	const refreshing = ref(false)
 	const isPageVisible = ref(false)
 	const showMapSelector = ref(false)
+	const showFilterSheet = ref(false)
 
 	// 图片缓存/加载状态（按 photo.id 或 file_path）
 	const photoCacheCtx = computed(() => createPhotoCacheContext(userStore.userInfo))
@@ -705,6 +723,61 @@
 		{ label: $t('inspection.inProgress'), value: 'in_progress' },
 		{ label: $t('inspection.pendingChecks'), value: 'pending' }
 	]
+
+	const filterCounts = computed(() => {
+		const items = checkItems.value || []
+		const counts = {
+			all: items.length,
+			completed: 0,
+			issue: 0,
+			in_progress: 0,
+			pending: 0
+		}
+
+		items.forEach(item => {
+			if (!item) return
+			if (item.status === 'completed') counts.completed += 1
+			if (item.status === 'in_progress') counts.in_progress += 1
+			if (item.status === 'pending') counts.pending += 1
+			if (isIssueItem(item)) counts.issue += 1
+		})
+
+		return counts
+	})
+
+	const getFilterCount = (filterValue) => {
+		return filterCounts.value?.[filterValue] ?? 0
+	}
+
+	const getFilterChipClass = (filterValue) => {
+		const mapping = {
+			all: 'filter-chip--all',
+			completed: 'filter-chip--completed',
+			issue: 'filter-chip--issue',
+			in_progress: 'filter-chip--in-progress',
+			pending: 'filter-chip--pending'
+		}
+		return mapping[filterValue] || 'filter-chip--all'
+	}
+
+	const getFilterBadgeClass = (filterValue) => {
+		const mapping = {
+			all: 'filter-badge--all',
+			completed: 'filter-badge--completed',
+			issue: 'filter-badge--issue',
+			in_progress: 'filter-badge--in-progress',
+			pending: 'filter-badge--pending'
+		}
+		return mapping[filterValue] || 'filter-badge--all'
+	}
+
+	const currentFilterMeta = computed(() => {
+		const filter = statusFilters.find(f => f.value === currentFilter.value)
+		return {
+			label: filter ? filter.label : $t('common.all'),
+			count: getFilterCount(currentFilter.value)
+		}
+	})
 	
 	// 计算属性
 	const filteredCheckItems = computed(() => {
@@ -1217,10 +1290,18 @@
 	const switchFilter = (filterValue) => {
 		currentFilter.value = filterValue
 	}
-	
-	const getCurrentFilterText = () => {
-		const filter = statusFilters.find(f => f.value === currentFilter.value)
-		return filter ? filter.label : $t('common.all')
+
+	const openFilterSheet = () => {
+		showFilterSheet.value = true
+	}
+
+	const closeFilterSheet = () => {
+		showFilterSheet.value = false
+	}
+
+	const selectFilterFromSheet = (filterValue) => {
+		switchFilter(filterValue)
+		closeFilterSheet()
 	}
 	
 	const viewCheckItem = (item) => {
@@ -1890,7 +1971,12 @@
 		flex: 1;
 		height: 0;
 		min-height: 0;
-		padding: 0 20rpx 120rpx;
+	}
+
+	.detail-content-inner {
+		padding: 0 20rpx;
+		padding-bottom: calc(160rpx + env(safe-area-inset-bottom));
+		box-sizing: border-box;
 	}
 	
 	.detail-card {
@@ -1899,6 +1985,8 @@
 		margin-bottom: 20rpx;
 		box-shadow: var(--shadow-card);
 		overflow: hidden;
+		width: 100%;
+		box-sizing: border-box;
 	}
 	
 	/* 驳回意见卡片特殊样式 */
@@ -1994,69 +2082,295 @@
 		color: var(--text-primary);
 		flex: 1;
 	}
-	
-	/* 统计网格 */
-	.stats-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr 1fr 1fr;
-		gap: 20rpx;
+
+	/* 检查项：统计 + 筛选（合并） */
+	.check-items-header {
+		gap: 16rpx;
 	}
-	
-	.stat-item {
-		text-align: center;
-		padding: 20rpx;
-		background: #f8f9fa;
-		border-radius: 15rpx;
-	}
-	
-	.stat-number {
-		font-size: 32rpx;
-		font-weight: bold;
-		color: #333;
-		display: block;
-		margin-bottom: 8rpx;
-	}
-	
-	.stat-number.success {
-		color: #28a745;
-	}
-	
-	.stat-number.warning {
-		color: #ffc107;
-	}
-	
-	.stat-number.info {
-		color: #17a2b8;
-	}
-	
-	.stat-label {
-		font-size: 24rpx;
-		color: #666;
-	}
-	
-	/* 筛选标签 */
-	.filter-tabs {
-		display: flex;
+
+	.filter-trigger {
+		display: inline-flex;
+		align-items: center;
 		gap: 10rpx;
+		max-width: 60%;
+		padding: 10rpx 14rpx;
+		border-radius: 999rpx;
+		background: rgba(var(--color-primary-rgb), 0.10);
+		border: 1rpx solid rgba(var(--color-primary-rgb), 0.18);
+		box-sizing: border-box;
 	}
-	
-	.filter-tab {
+
+	.filter-trigger-text {
+		font-size: 24rpx;
+		font-weight: 700;
+		color: var(--color-primary);
+		max-width: 100%;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.filter-trigger-badge {
+		flex-shrink: 0;
+		min-width: 44rpx;
+		padding: 4rpx 10rpx;
+		border-radius: 999rpx;
+		background: rgba(var(--color-primary-rgb), 0.18);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-height: 88rpx; /* >=44px */
-		padding: 0 24rpx;
-		background: #f8f9fa;
-		border-radius: 22rpx;
-		font-size: 26rpx;
-		color: #666;
-		transition: all 0.3s ease;
 	}
-	
-	.filter-tab.active { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); color: #fff; }
-	
-	.tab-text {
+
+	.filter-trigger-badge-text {
+		font-size: 22rpx;
+		font-weight: 800;
+		color: var(--color-primary);
+	}
+
+	.filter-trigger-icon {
+		flex-shrink: 0;
+		font-size: 24rpx;
+		color: var(--color-primary);
+		opacity: 0.85;
+	}
+
+	.filter-trigger.filter-chip--completed {
+		background: rgba(34, 197, 94, 0.10);
+		border-color: rgba(34, 197, 94, 0.18);
+	}
+
+	.filter-trigger.filter-chip--completed .filter-trigger-text,
+	.filter-trigger.filter-chip--completed .filter-trigger-icon,
+	.filter-trigger.filter-chip--completed .filter-trigger-badge-text { color: #16a34a; }
+
+	.filter-trigger.filter-chip--completed .filter-trigger-badge { background: rgba(34, 197, 94, 0.18); }
+
+	.filter-trigger.filter-chip--issue {
+		background: rgba(239, 68, 68, 0.10);
+		border-color: rgba(239, 68, 68, 0.18);
+	}
+
+	.filter-trigger.filter-chip--issue .filter-trigger-text,
+	.filter-trigger.filter-chip--issue .filter-trigger-icon,
+	.filter-trigger.filter-chip--issue .filter-trigger-badge-text { color: #dc2626; }
+
+	.filter-trigger.filter-chip--issue .filter-trigger-badge { background: rgba(239, 68, 68, 0.18); }
+
+	.filter-trigger.filter-chip--in-progress {
+		background: rgba(59, 130, 246, 0.10);
+		border-color: rgba(59, 130, 246, 0.18);
+	}
+
+	.filter-trigger.filter-chip--in-progress .filter-trigger-text,
+	.filter-trigger.filter-chip--in-progress .filter-trigger-icon,
+	.filter-trigger.filter-chip--in-progress .filter-trigger-badge-text { color: #2563eb; }
+
+	.filter-trigger.filter-chip--in-progress .filter-trigger-badge { background: rgba(59, 130, 246, 0.18); }
+
+	.filter-trigger.filter-chip--pending {
+		background: rgba(100, 116, 139, 0.10);
+		border-color: rgba(100, 116, 139, 0.18);
+	}
+
+	.filter-trigger.filter-chip--pending .filter-trigger-text,
+	.filter-trigger.filter-chip--pending .filter-trigger-icon,
+	.filter-trigger.filter-chip--pending .filter-trigger-badge-text { color: #475569; }
+
+	.filter-trigger.filter-chip--pending .filter-trigger-badge { background: rgba(100, 116, 139, 0.18); }
+
+	.filter-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 12rpx;
+		padding-bottom: 24rpx;
+		margin-bottom: 24rpx;
+		border-bottom: 1rpx solid var(--border-soft);
+	}
+
+	.filter-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 10rpx;
+		padding: 10rpx 14rpx;
+		border-radius: 999rpx;
+		background: rgba(15, 23, 42, 0.03);
+		border: 1rpx solid rgba(15, 23, 42, 0.08);
+		box-sizing: border-box;
+		max-width: 100%;
+	}
+
+	.filter-chip-label {
+		font-size: 24rpx;
+		font-weight: 700;
+		color: #374151;
 		white-space: nowrap;
+	}
+
+	.filter-chip-badge,
+	.filter-sheet-badge {
+		min-width: 44rpx;
+		padding: 4rpx 10rpx;
+		border-radius: 999rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.filter-chip-badge-text,
+	.filter-sheet-badge-text {
+		font-size: 22rpx;
+		font-weight: 800;
+		color: #fff;
+	}
+
+	.filter-badge--all { background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light)); }
+	.filter-badge--completed { background: linear-gradient(135deg, #22c55e, #16a34a); }
+	.filter-badge--issue { background: linear-gradient(135deg, #ef4444, #dc2626); }
+	.filter-badge--in-progress { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+	.filter-badge--pending { background: linear-gradient(135deg, #64748b, #475569); }
+
+	.filter-chip--all.active {
+		background: rgba(var(--color-primary-rgb), 0.10);
+		border-color: rgba(var(--color-primary-rgb), 0.18);
+	}
+
+	.filter-chip--completed.active {
+		background: rgba(34, 197, 94, 0.10);
+		border-color: rgba(34, 197, 94, 0.18);
+	}
+
+	.filter-chip--issue.active {
+		background: rgba(239, 68, 68, 0.10);
+		border-color: rgba(239, 68, 68, 0.18);
+	}
+
+	.filter-chip--in-progress.active {
+		background: rgba(59, 130, 246, 0.10);
+		border-color: rgba(59, 130, 246, 0.18);
+	}
+
+	.filter-chip--pending.active {
+		background: rgba(100, 116, 139, 0.10);
+		border-color: rgba(100, 116, 139, 0.18);
+	}
+
+	.filter-chip.active .filter-chip-label { color: #111827; }
+	.filter-chip--all.active .filter-chip-label { color: var(--color-primary); }
+	.filter-chip--completed.active .filter-chip-label { color: #16a34a; }
+	.filter-chip--issue.active .filter-chip-label { color: #dc2626; }
+	.filter-chip--in-progress.active .filter-chip-label { color: #2563eb; }
+	.filter-chip--pending.active .filter-chip-label { color: #475569; }
+
+	/* 筛选弹窗（自定义） */
+	.filter-sheet-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.48);
+		z-index: 1200;
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+	}
+
+	.filter-sheet {
+		width: 100%;
+		max-width: 750rpx;
+		background: var(--bg-elevated);
+		border-radius: 28rpx 28rpx 0 0;
+		padding: 24rpx 24rpx 0;
+		box-sizing: border-box;
+		box-shadow: 0 -24rpx 80rpx rgba(0, 0, 0, 0.22);
+	}
+
+	.filter-sheet-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16rpx;
+		margin-bottom: 16rpx;
+	}
+
+	.filter-sheet-title {
+		font-size: 30rpx;
+		font-weight: 800;
+		color: var(--text-primary);
+	}
+
+	.filter-sheet-close {
+		width: 72rpx;
+		height: 72rpx;
+		border-radius: 36rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(15, 23, 42, 0.04);
+		border: 1rpx solid rgba(15, 23, 42, 0.06);
+	}
+
+	.filter-sheet-close-icon {
+		font-size: 44rpx;
+		line-height: 1;
+		color: #6b7280;
+	}
+
+	.filter-sheet-list {
+		display: flex;
+		flex-direction: column;
+		gap: 12rpx;
+		max-height: 62vh;
+		overflow-y: auto;
+		padding-bottom: 20rpx;
+	}
+
+	.filter-sheet-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16rpx;
+		padding: 18rpx 18rpx;
+		border-radius: 18rpx;
+		background: rgba(15, 23, 42, 0.03);
+		border: 1rpx solid rgba(15, 23, 42, 0.06);
+	}
+
+	.filter-sheet-item-left {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.filter-sheet-item-label {
+		font-size: 28rpx;
+		font-weight: 700;
+		color: #111827;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.filter-sheet-item-right {
+		display: inline-flex;
+		align-items: center;
+		gap: 12rpx;
+		flex-shrink: 0;
+	}
+
+	.filter-sheet-check {
+		font-size: 30rpx;
+		font-weight: 800;
+		color: var(--color-primary);
+	}
+
+	.filter-sheet-item.filter-chip--completed.active .filter-sheet-check { color: #16a34a; }
+	.filter-sheet-item.filter-chip--issue.active .filter-sheet-check { color: #dc2626; }
+	.filter-sheet-item.filter-chip--in-progress.active .filter-sheet-check { color: #2563eb; }
+	.filter-sheet-item.filter-chip--pending.active .filter-sheet-check { color: #475569; }
+
+	.filter-sheet-safe {
+		height: calc(24rpx + env(safe-area-inset-bottom));
 	}
 	
 	/* 检查项列表 */
