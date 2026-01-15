@@ -193,18 +193,24 @@
           <el-table-column prop="item_name" label="检查项" min-width="220" />
           <el-table-column label="范围" min-width="180">
             <template #default="{ row }">
-              <div class="scope-cell">
+              <div
+                class="scope-cell"
+                :class="{ 'scope-cell--multiline': getItemScopeLevel(row) === '设备' && row.equipment_sn }"
+              >
                 <el-tag :type="scopeTagType(row)" size="small" class="mr4">
                   {{ getItemScopeLevel(row) }}
                 </el-tag>
                 <template v-if="getItemScopeLevel(row) === '设备' && row.equipment_sn">
-                  <el-tooltip :content="row.equipment_sn" placement="top">
-                    <span class="scope-text">{{ row.equipment_sn }}</span>
-                  </el-tooltip>
+                  <div class="scope-sn">
+                    <el-tooltip :content="row.equipment_sn" placement="top">
+                      <span class="scope-text scope-text--multiline">{{ row.equipment_sn }}</span>
+                    </el-tooltip>
+                  </div>
                   <el-button
                     link
                     type="primary"
                     size="small"
+                    class="scope-copy-btn"
                     @click="copyToClipboard(row.equipment_sn)"
                   >
                     <el-icon><CopyDocument /></el-icon>
@@ -2499,12 +2505,36 @@ onMounted(refresh)
   min-width: 0;
 }
 
+.scope-cell--multiline {
+  align-items: flex-start;
+}
+
+.scope-sn {
+  flex: 1;
+  min-width: 0;
+}
+
 .scope-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #606266;
+}
+
+.scope-text--multiline {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.scope-copy-btn {
+  align-self: flex-start;
 }
 
 .action-cell {
