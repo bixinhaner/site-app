@@ -223,11 +223,15 @@ async def scan_equipment_checkout(
     serial_number = None
     mac1 = None
     mac2 = None
+    mac3 = None
+    mac4 = None
     
     if parsed_barcode and parsed_barcode.get("success"):
         serial_number = parsed_barcode.get("sn")
         mac1 = parsed_barcode.get("mac1")
         mac2 = parsed_barcode.get("mac2")
+        mac3 = parsed_barcode.get("mac3")
+        mac4 = parsed_barcode.get("mac4")
     
     # 使用SN查询设备，如果没有SN则使用原始条码
     search_code = serial_number if serial_number else barcode
@@ -457,6 +461,8 @@ async def scan_equipment_checkout(
         serial_number=serial_number,  # 记录SN
         mac_address_1=mac1,  # 记录MAC1
         mac_address_2=mac2,  # 记录MAC2
+        mac_address_3=mac3,  # 记录MAC3
+        mac_address_4=mac4,  # 记录MAC4
         equipment_instance_id=equipment_instance.id if equipment_instance else None,  # 关联设备实例
         scan_location=gps_location,
         is_confirmed=True,  # 直接设置为已确认
@@ -790,6 +796,8 @@ async def get_my_pickup_records(
             "serial_number": record.serial_number,
             "mac_address_1": record.mac_address_1,
             "mac_address_2": record.mac_address_2,
+            "mac_address_3": record.mac_address_3,
+            "mac_address_4": record.mac_address_4,
             "equipment_instance": {
                 "id": record.equipment_instance.id if record.equipment_instance else None,
                 "status": record.equipment_instance.status if record.equipment_instance else None,

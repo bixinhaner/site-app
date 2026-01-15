@@ -37,6 +37,8 @@ export function parseBarcode(scanResult) {
     sn: null,
     mac1: null,
     mac2: null,
+    mac3: null,
+    mac4: null,
     rawData: scanResult.trim(),
     format: 'unknown'
   }
@@ -46,9 +48,10 @@ export function parseBarcode(scanResult) {
   console.log('🔍 [parseBarcode] 字符串长度:', trimmed.length)
 
   try {
-    // 格式1: SN,MAC (逗号分隔)
+    // 格式1: SN,MAC 或 SN,MAC1,MAC2,MAC3,MAC4 (逗号分隔)
     // 例如: 1211000124233API0001,48BF742DDF43
-    console.log('🔍 [parseBarcode] 检查格式1: SN,MAC (逗号分隔)')
+    // 例如: 120200089725BKB0030,48BF743904E0,48BF743904FE,48BF7439051C,48BF7439053A
+    console.log('🔍 [parseBarcode] 检查格式1: SN,MAC(1-4) (逗号分隔)')
     console.log('🔍 [parseBarcode] 包含逗号?:', trimmed.includes(','))
     console.log('🔍 [parseBarcode] 包含冒号?:', trimmed.includes(':'))
     
@@ -64,8 +67,17 @@ export function parseBarcode(scanResult) {
         result.format = 'sn_mac_comma'
         console.log('✅ [parseBarcode] 格式1解析成功:', result)
         return result
+      } else if (parts.length === 5) {
+        result.sn = parts[0]
+        result.mac1 = parts[1]
+        result.mac2 = parts[2]
+        result.mac3 = parts[3]
+        result.mac4 = parts[4]
+        result.format = 'sn_mac4_comma'
+        console.log('✅ [parseBarcode] 格式1(5段)解析成功:', result)
+        return result
       } else {
-        console.log('❌ [parseBarcode] 格式1分割数量不正确')
+        console.log('❌ [parseBarcode] 格式1分割数量不正确（期望2或5）')
       }
     }
 
@@ -96,6 +108,14 @@ export function parseBarcode(scanResult) {
             case 'MAC2':
               result.mac2 = value
               console.log('🔍 [parseBarcode] 设置MAC2:', value)
+              break
+            case 'MAC3':
+              result.mac3 = value
+              console.log('🔍 [parseBarcode] 设置MAC3:', value)
+              break
+            case 'MAC4':
+              result.mac4 = value
+              console.log('🔍 [parseBarcode] 设置MAC4:', value)
               break
           }
         }
@@ -217,6 +237,14 @@ export function getParseResultSummary(parseResult) {
   
   if (parseResult.mac2) {
     parts.push(`MAC2: ${formatMacAddress(parseResult.mac2)}`)
+  }
+
+  if (parseResult.mac3) {
+    parts.push(`MAC3: ${formatMacAddress(parseResult.mac3)}`)
+  }
+
+  if (parseResult.mac4) {
+    parts.push(`MAC4: ${formatMacAddress(parseResult.mac4)}`)
   }
 
   return parts.join(' | ') || '无有效数据'

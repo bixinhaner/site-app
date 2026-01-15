@@ -837,6 +837,8 @@ const messages = {
       macAddress: 'MAC地址',
       macAddress1: 'MAC地址1',
       macAddress2: 'MAC地址2',
+      macAddress3: 'MAC地址3',
+      macAddress4: 'MAC地址4',
       // 领料界面新增
       selectWorkOrderOptional: '选择关联工单 (可选)',
       noWorkOrder: '无关联工单',
@@ -940,6 +942,7 @@ const messages = {
       returnConfirmContent: '确认将该设备标记为已归还？',
       // 条码格式显示
       formatSnMacComma: 'SN,MAC格式',
+      formatSnMac4Comma: 'SN,MAC1-4格式',
       formatKeyValuePairs: '键值对格式',
       formatPureSn: '纯SN格式',
       formatUnknown: '未知格式'
@@ -1876,6 +1879,8 @@ const messages = {
       macAddress: 'MAC Address',
       macAddress1: 'MAC Address 1',
       macAddress2: 'MAC Address 2',
+      macAddress3: 'MAC Address 3',
+      macAddress4: 'MAC Address 4',
       // Pickup view additions
       selectWorkOrderOptional: 'Select Work Order (optional)',
       noWorkOrder: 'No work order',
@@ -1979,6 +1984,7 @@ const messages = {
       returnConfirmContent: 'Mark this device as returned?',
       // Barcode format display
       formatSnMacComma: 'SN,MAC format',
+      formatSnMac4Comma: 'SN,MAC1-4 format',
       formatKeyValuePairs: 'Key-Value pairs',
       formatPureSn: 'Pure SN',
       formatUnknown: 'Unknown format'
@@ -2751,6 +2757,8 @@ const messages = {
       serialNumber: 'Nomor Seri',
       macAddress1: 'Alamat MAC 1',
       macAddress2: 'Alamat MAC 2',
+      macAddress3: 'Alamat MAC 3',
+      macAddress4: 'Alamat MAC 4',
       barcodeLabel: 'Barcode',
       copySn: 'Salin SN',
       rescan: 'Pindai Ulang',
@@ -2830,6 +2838,7 @@ const messages = {
       selectReturnWarehouse: 'Pilih gudang pengembalian',
       warehouse: 'Gudang',
       formatSnMacComma: 'Format SN, MAC',
+      formatSnMac4Comma: 'Format SN, MAC1-4',
       formatKeyValuePairs: 'Pasangan Kunci-Nilai',
       formatPureSn: 'SN Saja',
       formatUnknown: 'Format Tidak Diketahui',

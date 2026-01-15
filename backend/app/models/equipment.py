@@ -312,6 +312,8 @@ class PickupRecord(Base):
     serial_number = Column(String(100))  # 设备序列号
     mac_address_1 = Column(String(50))  # MAC地址1
     mac_address_2 = Column(String(50))  # MAC地址2
+    mac_address_3 = Column(String(50))  # MAC地址3
+    mac_address_4 = Column(String(50))  # MAC地址4
     equipment_instance_id = Column(String(32), ForeignKey("equipment_instances.id"))  # 关联设备实例
     scan_location = Column(JSON)  # GPS位置
     scan_ip = Column(String(45))  # 扫描IP

@@ -66,6 +66,12 @@ const routes = [
             meta: { title: '出入库记录', icon: 'Document' }
           },
           {
+            path: 'pickups',
+            name: 'PickupRecords',
+            component: () => import('../views/stock/PickupRecords.vue'),
+            meta: { title: '领料记录', icon: 'Tickets' }
+          },
+          {
             path: 'warehouses',
             name: 'Warehouses',
             component: () => import('../views/stock/WarehouseList.vue'),

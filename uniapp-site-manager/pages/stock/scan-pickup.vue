@@ -44,21 +44,31 @@
                   <text class="parse-title">{{ $t('stock.identifiedInfo') }}:</text>
                   <text class="parse-format">[{{ getFormatName(parsedBarcode.format) }}]</text>
                 </view>
-                
+
                 <view class="parse-details">
                   <view v-if="parsedBarcode.sn" class="detail-item">
                     <text class="detail-label">{{ $t('stock.serialNumber') }}:</text>
                     <text class="detail-value sn-value">{{ parsedBarcode.sn }}</text>
                   </view>
-                  
+
                   <view v-if="parsedBarcode.mac1" class="detail-item">
                     <text class="detail-label">{{ $t('stock.macAddress1') }}:</text>
                     <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac1) }}</text>
                   </view>
-                  
+
                   <view v-if="parsedBarcode.mac2" class="detail-item">
                     <text class="detail-label">{{ $t('stock.macAddress2') }}:</text>
                     <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac2) }}</text>
+                  </view>
+
+                  <view v-if="parsedBarcode.mac3" class="detail-item">
+                    <text class="detail-label">{{ $t('stock.macAddress3') }}:</text>
+                    <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac3) }}</text>
+                  </view>
+
+                  <view v-if="parsedBarcode.mac4" class="detail-item">
+                    <text class="detail-label">{{ $t('stock.macAddress4') }}:</text>
+                    <text class="detail-value mac-value">{{ formatMacAddress(parsedBarcode.mac4) }}</text>
                   </view>
                 </view>
               </view>
@@ -189,9 +199,9 @@
           
           <!-- 次要信息（可选）：条码与MAC -->
           <view
-            v-if="(record.main_device_barcode && record.main_device_barcode !== record.serial_number) || record.mac_address_1 || record.mac_address_2"
-            class="history-parsed-info"
-          >
+	            v-if="(record.main_device_barcode && record.main_device_barcode !== record.serial_number) || record.mac_address_1 || record.mac_address_2 || record.mac_address_3 || record.mac_address_4"
+	            class="history-parsed-info"
+	          >
             <view
               v-if="record.main_device_barcode && record.main_device_barcode !== record.serial_number"
               class="parsed-info-item"
@@ -206,6 +216,14 @@
             <view v-if="record.mac_address_2" class="parsed-info-item">
               <text class="parsed-label">{{ $t('stock.macAddress2') }}:</text>
               <text class="parsed-value">{{ formatMacAddress(record.mac_address_2) }}</text>
+            </view>
+            <view v-if="record.mac_address_3" class="parsed-info-item">
+              <text class="parsed-label">{{ $t('stock.macAddress3') }}:</text>
+              <text class="parsed-value">{{ formatMacAddress(record.mac_address_3) }}</text>
+            </view>
+            <view v-if="record.mac_address_4" class="parsed-info-item">
+              <text class="parsed-label">{{ $t('stock.macAddress4') }}:</text>
+              <text class="parsed-value">{{ formatMacAddress(record.mac_address_4) }}</text>
             </view>
           </view>
         </view>
@@ -238,17 +256,33 @@
 
         <view class="device-modal-body" v-if="deviceDetailRecord">
           <view class="device-summary">
-            <view class="summary-row">
-              <text class="summary-label">{{ $t('stock.serialNumber') }}</text>
-              <view class="summary-value-wrap">
-                <text class="summary-value mono">{{ deviceDetailSn }}</text>
-                <text class="summary-action" @click="copyDeviceSn">{{ $t('stock.copySn') }}</text>
-              </view>
-            </view>
-            <view v-if="deviceDetailRecord.package_name" class="summary-row">
-              <text class="summary-label">{{ $t('stock.packageLabel') }}</text>
-              <text class="summary-value">{{ deviceDetailRecord.package_name }}</text>
-            </view>
+	            <view class="summary-row">
+	              <text class="summary-label">{{ $t('stock.serialNumber') }}</text>
+	              <view class="summary-value-wrap">
+	                <text class="summary-value mono">{{ deviceDetailSn }}</text>
+	                <text class="summary-action" @click="copyDeviceSn">{{ $t('stock.copySn') }}</text>
+	              </view>
+	            </view>
+	            <view v-if="deviceDetailRecord.mac_address_1" class="summary-row">
+	              <text class="summary-label">{{ $t('stock.macAddress1') }}</text>
+	              <text class="summary-value mono">{{ formatMacAddress(deviceDetailRecord.mac_address_1) }}</text>
+	            </view>
+	            <view v-if="deviceDetailRecord.mac_address_2" class="summary-row">
+	              <text class="summary-label">{{ $t('stock.macAddress2') }}</text>
+	              <text class="summary-value mono">{{ formatMacAddress(deviceDetailRecord.mac_address_2) }}</text>
+	            </view>
+	            <view v-if="deviceDetailRecord.mac_address_3" class="summary-row">
+	              <text class="summary-label">{{ $t('stock.macAddress3') }}</text>
+	              <text class="summary-value mono">{{ formatMacAddress(deviceDetailRecord.mac_address_3) }}</text>
+	            </view>
+	            <view v-if="deviceDetailRecord.mac_address_4" class="summary-row">
+	              <text class="summary-label">{{ $t('stock.macAddress4') }}</text>
+	              <text class="summary-value mono">{{ formatMacAddress(deviceDetailRecord.mac_address_4) }}</text>
+	            </view>
+	            <view v-if="deviceDetailRecord.package_name" class="summary-row">
+	              <text class="summary-label">{{ $t('stock.packageLabel') }}</text>
+	              <text class="summary-value">{{ deviceDetailRecord.package_name }}</text>
+	            </view>
             <view class="summary-row">
               <text class="summary-label">{{ $t('common.status') }}</text>
               <text class="status-badge" :class="deviceStatusBadgeClass">{{ deviceStatusBadgeText }}</text>
@@ -920,6 +954,8 @@ export default {
         console.log('SN:', this.parsedBarcode.sn)
         console.log('MAC1:', this.parsedBarcode.mac1)
         console.log('MAC2:', this.parsedBarcode.mac2)
+        console.log('MAC3:', this.parsedBarcode.mac3)
+        console.log('MAC4:', this.parsedBarcode.mac4)
         console.log('格式:', this.parsedBarcode.format)
         
         if (!this.parsedBarcode.success) {
@@ -1004,6 +1040,12 @@ export default {
           }
           if (parsedData.mac2) {
             message += `\n${this.$t('stock.macAddress2')}: ${this.formatMacAddress(parsedData.mac2)}`
+          }
+          if (parsedData.mac3) {
+            message += `\n${this.$t('stock.macAddress3')}: ${this.formatMacAddress(parsedData.mac3)}`
+          }
+          if (parsedData.mac4) {
+            message += `\n${this.$t('stock.macAddress4')}: ${this.formatMacAddress(parsedData.mac4)}`
           }
           message += `\n\n${this.$t(hintKey)}`
 
@@ -1218,6 +1260,7 @@ export default {
     getFormatName(format) {
       const map = {
         'sn_mac_comma': this.$t('stock.formatSnMacComma'),
+        'sn_mac4_comma': this.$t('stock.formatSnMac4Comma'),
         'key_value_pairs': this.$t('stock.formatKeyValuePairs'),
         'pure_sn': this.$t('stock.formatPureSn')
       }

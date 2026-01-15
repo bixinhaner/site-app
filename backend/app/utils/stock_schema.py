@@ -85,6 +85,10 @@ def ensure_stock_schema(engine: Engine) -> None:
             "vendor": "vendor VARCHAR(100)",
             "item_notes": "item_notes TEXT",
         },
+        "pickup_records": {
+            "mac_address_3": "mac_address_3 VARCHAR(50)",
+            "mac_address_4": "mac_address_4 VARCHAR(50)",
+        },
     }
 
     inspector = inspect(engine)
