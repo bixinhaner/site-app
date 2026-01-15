@@ -1184,6 +1184,29 @@ export default {
         console.log('🚀 [confirmPickup] 响应状态码:', response.statusCode)
         
         const responseData = response.data
+        const statusCode = Number(response.statusCode || 0)
+
+        // HTTP 非 200：优先按后端返回的 action 处理，否则提示错误信息
+        if (statusCode && statusCode !== 200) {
+          if (responseData?.action === 'select_package' && Array.isArray(responseData?.available_packages)) {
+            this.availablePackages = responseData.available_packages
+            this.selectedPackageIndex = 0
+            uni.showToast({
+              title: responseData.message || this.$t('stock.pleaseSelectPackage'),
+              icon: 'none',
+              duration: 2500
+            })
+            return
+          }
+
+          const msg = responseData?.detail || responseData?.message || this.$t('messages.operationFailed')
+          uni.showToast({
+            title: this.$t('stock.pickupFailedPrefix') + msg,
+            icon: 'none',
+            duration: 3000
+          })
+          return
+        }
         
         if (responseData.action === 'checkout_success') {
           uni.showModal({
@@ -1216,6 +1239,14 @@ export default {
             title: this.$t('stock.insufficientStockTitle'),
             content: shortage,
             showCancel: false
+          })
+        } else if (responseData.action === 'select_package' && Array.isArray(responseData?.available_packages)) {
+          this.availablePackages = responseData.available_packages
+          this.selectedPackageIndex = 0
+          uni.showToast({
+            title: responseData.message || this.$t('stock.pleaseSelectPackage'),
+            icon: 'none',
+            duration: 2500
           })
         } else {
           console.warn('🚀 [confirmPickup] 未知的响应类型:', responseData.action)

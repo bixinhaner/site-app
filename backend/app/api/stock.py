@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, desc, func, case
 from typing import List, Optional, Dict
@@ -204,6 +205,7 @@ async def scan_equipment_checkout(
     """扫码出库 - 核心功能"""
     barcode = scan_data.get("barcode")
     parsed_barcode = scan_data.get("parsed_barcode")  # 解析后的条码数据
+    package_id = scan_data.get("package_id")
     # 出库/领料属于库存链路，为避免影响工单业务，这里不再关联工单ID。
     gps_location = scan_data.get("gps_location")
     warehouse_id = scan_data.get("warehouse_id") or 1
@@ -292,37 +294,86 @@ async def scan_equipment_checkout(
     if not equipment:
         raise HTTPException(status_code=404, detail="未识别的设备条码")
     
-    # 2. 查找包含此设备的套装
-    packages = db.query(EquipmentPackage).filter(
+    # 2. 查找包含此设备的套装（仅启用）
+    active_packages = db.query(EquipmentPackage).filter(
         EquipmentPackage.main_equipment_id == equipment.id,
         EquipmentPackage.status == EquipmentStatusEnum.ACTIVE
     ).all()
     
-    if not packages:
+    if not active_packages:
         raise HTTPException(status_code=404, detail="该设备未配置套装")
-    
-    # 如果有多个套装，返回供选择
-    if len(packages) > 1:
-        package_options = []
-        for pkg in packages:
-            package_options.append({
-                "id": pkg.id,
-                "package_code": pkg.package_code,
-                "package_name": pkg.package_name,
-                "site_type": pkg.site_type
-            })
-        return {
-            "action": "select_package",
-            "equipment": {
-                "code": equipment.equipment_code,
-                "name": equipment.equipment_name
-            },
-            "available_packages": package_options
-        }
-    
-    # 3. 使用第一个套装进行出库
-    package = packages[0]
 
+    def _build_package_options(pkgs: List[EquipmentPackage]) -> List[dict]:
+        options = []
+        for pkg in pkgs:
+            options.append(
+                {
+                    "id": pkg.id,
+                    "package_code": pkg.package_code,
+                    "package_name": pkg.package_name,
+                    "site_type": pkg.site_type,
+                }
+            )
+        return options
+
+    # 2.1 兼容：如果客户端显式传入 package_id，则强制使用该套装（并校验合法性/启用状态）
+    if package_id is not None:
+        try:
+            selected_package_id = int(package_id)
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "action": "select_package",
+                    "message": "package_id 不合法，请重新选择设备套装",
+                    "available_packages": _build_package_options(active_packages),
+                },
+            )
+
+        selected_package = db.query(EquipmentPackage).filter(EquipmentPackage.id == selected_package_id).first()
+        if not selected_package:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "action": "select_package",
+                    "message": "所选设备套装不存在，请重新选择",
+                    "available_packages": _build_package_options(active_packages),
+                },
+            )
+        if selected_package.status != EquipmentStatusEnum.ACTIVE:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "action": "select_package",
+                    "message": "所选设备套装已停用，请重新选择",
+                    "available_packages": _build_package_options(active_packages),
+                },
+            )
+        if selected_package.main_equipment_id != equipment.id:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "action": "select_package",
+                    "message": "所选设备套装与当前主设备不匹配，请重新选择",
+                    "available_packages": _build_package_options(active_packages),
+                },
+            )
+        package = selected_package
+    else:
+        # 如果有多个套装，返回供选择（兼容旧客户端）
+        if len(active_packages) > 1:
+            return {
+                "action": "select_package",
+                "equipment": {
+                    "code": equipment.equipment_code,
+                    "name": equipment.equipment_name
+                },
+                "available_packages": _build_package_options(active_packages),
+            }
+
+        # 3. 使用第一个套装进行出库
+        package = active_packages[0]
+    
     # 3.1 生成出库明细（兼容历史套装：若明细缺主设备，则运行时补齐）
     checkout_requirements = []
     has_main_item = False
@@ -474,6 +525,7 @@ async def scan_equipment_checkout(
 
     # 若找到了具体设备实例，则同步实例的出库状态与领料人
     if equipment_instance:
+        equipment_instance.package_id = int(package.id)
         equipment_instance.status = InventoryStatusEnum.ISSUED
         equipment_instance.issued_to = current_user.id
         equipment_instance.issued_date = datetime.now()
