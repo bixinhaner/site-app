@@ -198,7 +198,9 @@
                   {{ getItemScopeLevel(row) }}
                 </el-tag>
                 <template v-if="getItemScopeLevel(row) === '设备' && row.equipment_sn">
-                  <span class="scope-text">{{ row.equipment_sn }}</span>
+                  <el-tooltip :content="row.equipment_sn" placement="top">
+                    <span class="scope-text">{{ row.equipment_sn }}</span>
+                  </el-tooltip>
                   <el-button
                     link
                     type="primary"
@@ -917,6 +919,7 @@
 	import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 	import { useRoute } from 'vue-router'
 	import request from '@/utils/request'
+	import { copyTextToClipboard } from '@/utils/clipboard'
 	import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 	import { aiAPI } from '@/api/ai'
 		import { ZoomIn, ZoomOut, FullScreen, Aim, Download, Clock, Right, QuestionFilled, ChatDotRound, MagicStick, ArrowDown, CopyDocument, CircleCheckFilled, CircleCloseFilled, WarningFilled } from '@element-plus/icons-vue'
@@ -1223,13 +1226,12 @@ const scopeTagType = (item) => {
 const copyToClipboard = async (text) => {
   const v = String(text || '').trim()
   if (!v) return
-  try {
-    await navigator.clipboard.writeText(v)
+  const ok = await copyTextToClipboard(v)
+  if (ok) {
     ElMessage.success('SN已复制到剪贴板')
-  } catch (e) {
-    console.error(e)
-    ElMessage.error('复制失败')
+    return
   }
+  ElMessage.error('复制失败')
 }
 
 const handleAiAction = (command, row) => {

@@ -164,6 +164,7 @@ import { ref, onMounted, reactive } from 'vue'
 import { useRoute } from 'vue-router'
 import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { copyTextToClipboard } from '@/utils/clipboard'
 import { CircleCheck, CopyDocument, Search } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -223,12 +224,13 @@ const resolvePhotoFieldLabel = (photo) => {
   return field?.label || String(fieldId)
 }
 
-const copyToClipboard = (text) => {
-  navigator.clipboard.writeText(text).then(() => {
+const copyToClipboard = async (text) => {
+  const ok = await copyTextToClipboard(text)
+  if (ok) {
     ElMessage.success('设备SN已复制到剪贴板')
-  }).catch(() => {
-    ElMessage.error('复制失败')
-  })
+    return
+  }
+  ElMessage.error('复制失败')
 }
 
 const loadItems = async () => {

@@ -177,6 +177,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockApi } from '../../api/stock'
 import { ElMessage } from 'element-plus'
+import { copyTextToClipboard } from '@/utils/clipboard'
 import { equipmentApi } from '../../api/equipment'
 import { Document } from '@element-plus/icons-vue'
 import EquipmentLifecycleTimeline from '@/components/equipment/EquipmentLifecycleTimeline.vue'
@@ -276,12 +277,12 @@ const loadEquipments = async () => {
 }
 
 const copy = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text)
+  const ok = await copyTextToClipboard(text)
+  if (ok) {
     ElMessage.success('已复制')
-  } catch (e) {
-    ElMessage.error('复制失败')
+    return
   }
+  ElMessage.error('复制失败')
 }
 
 // 跳转到设备生命周期追踪页面，并自动带入 SN

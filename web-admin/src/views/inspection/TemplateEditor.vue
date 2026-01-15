@@ -706,6 +706,7 @@
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import { copyTextToClipboard } from '@/utils/clipboard'
 import { 
   ArrowLeft, Check, View, Plus, Delete, DocumentCopy, QuestionFilled, MagicStick, ChatDotRound
 } from '@element-plus/icons-vue'
@@ -1467,12 +1468,12 @@ const previewTemplate = () => {
 }
 
 const copyJson = async () => {
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(templateData, null, 2))
+  const ok = await copyTextToClipboard(JSON.stringify(templateData, null, 2))
+  if (ok) {
     ElMessage.success('JSON 已复制到剪贴板')
-  } catch (error) {
-    ElMessage.error('复制失败')
+    return
   }
+  ElMessage.error('复制失败')
 }
 
 const goBack = () => {
