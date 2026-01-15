@@ -138,12 +138,19 @@ export function parseBarcode(scanResult) {
       console.log('✅ [parseBarcode] 匹配格式3')
       console.log('🔍 [parseBarcode] 长度检查:', trimmed.length, '>=8?:', trimmed.length >= 8)
       console.log('🔍 [parseBarcode] 字符检查:', /^[A-Za-z0-9]+$/.test(trimmed))
+      console.log('🔍 [parseBarcode] 全数字?:', /^\d+$/.test(trimmed))
       
       // 简单验证SN格式（可根据实际业务规则调整）
-      if (trimmed.length >= 8 && /^[A-Za-z0-9]+$/.test(trimmed)) {
+      if (validateSerialNumber(trimmed)) {
         result.sn = trimmed
         result.format = 'pure_sn'
         console.log('✅ [parseBarcode] 格式3解析成功:', result)
+        return result
+      } else if (/^\d+$/.test(trimmed) && trimmed.length >= 8) {
+        // 纯数字结果直接判为无效（避免误扫）
+        result.success = false
+        result.error = t('stock.invalidBarcode')
+        console.log('❌ [parseBarcode] 格式3为纯数字，判为无效:', result)
         return result
       } else {
         console.log('❌ [parseBarcode] 格式3验证失败')
@@ -210,9 +217,14 @@ export function formatMacAddress(mac) {
  */
 export function validateSerialNumber(sn) {
   if (!sn) return false
-  
+
+  const trimmed = String(sn).trim()
+
+  // 纯SN不允许全数字（避免误扫 EAN8/EAN13 或局部二维码导致随机数字通过）
+  if (/^\d+$/.test(trimmed)) return false
+
   // 基本验证：长度8-30位，只包含字母数字
-  return sn.length >= 8 && sn.length <= 30 && /^[A-Za-z0-9]+$/.test(sn)
+  return trimmed.length >= 8 && trimmed.length <= 30 && /^[A-Za-z0-9]+$/.test(trimmed)
 }
 
 /**

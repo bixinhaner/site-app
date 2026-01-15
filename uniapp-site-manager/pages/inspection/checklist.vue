@@ -3276,6 +3276,18 @@
 					fail: reject
 				})
 			})
+
+			// 仅允许二维码 / Code128（避免误扫 EAN8/EAN13 等导致随机数字）
+			const normalizeScanType = (value) => String(value || '').trim().toUpperCase().replace(/[-\s]/g, '_')
+			const scanType = normalizeScanType(result?.scanType)
+			const allowedScanTypes = new Set(['QR_CODE', 'QRCODE', 'QR', 'CODE_128', 'CODE128'])
+			if (!scanType || !allowedScanTypes.has(scanType)) {
+				uni.showToast({
+					title: $t('stock.unsupportedScanType', { type: scanType || 'UNKNOWN' }),
+					icon: 'none'
+				})
+				return
+			}
 			
 			console.log('扫码结果:', result.result)
 			
