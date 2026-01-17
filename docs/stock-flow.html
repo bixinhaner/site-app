@@ -1,0 +1,1147 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>物料申请-出入库流程说明（基于当前代码实现）</title>
+    <style>
+      :root {
+        --bg: #f6f7fb;
+        --card: #ffffff;
+        --text: #111827;
+        --muted: #6b7280;
+        --border: rgba(17, 24, 39, 0.10);
+        --border-strong: rgba(17, 24, 39, 0.16);
+        --shadow: 0 10px 26px rgba(17, 24, 39, 0.08);
+        --shadow-sm: 0 6px 14px rgba(17, 24, 39, 0.06);
+        --blue: #2563eb;
+        --green: #10b981;
+        --orange: #f97316;
+        --red: #ef4444;
+        --purple: #7c3aed;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB",
+          "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", Arial, sans-serif;
+        --radius: 16px;
+        --radius-sm: 12px;
+        --ring: 0 0 0 4px rgba(37, 99, 235, 0.12);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        font-family: var(--sans);
+        background: radial-gradient(900px 300px at 10% 0%, rgba(249, 115, 22, 0.12), transparent 60%),
+          radial-gradient(900px 320px at 90% 10%, rgba(37, 99, 235, 0.10), transparent 60%),
+          var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+
+      a { color: var(--blue); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      .container { max-width: 1100px; margin: 0 auto; padding: 28px 18px 64px; }
+      .header {
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.90));
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .header-inner { padding: 22px 22px 18px; }
+      .title { display: flex; flex-direction: column; gap: 8px; }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: 0.2px;
+      }
+      .sub { color: var(--muted); font-size: 13px; }
+      .meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 14px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.7);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .dot { width: 10px; height: 10px; border-radius: 999px; background: var(--blue); box-shadow: var(--ring); }
+      .dot.orange { background: var(--orange); box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.14); }
+      .dot.green { background: var(--green); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.14); }
+      .dot.purple { background: var(--purple); box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.12); }
+      .dot.red { background: var(--red); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12); }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 12px 14px 14px;
+        border-top: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.78);
+      }
+      .btn {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--text);
+        border-radius: 999px;
+        padding: 9px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        box-shadow: var(--shadow-sm);
+      }
+      .btn:hover { border-color: var(--border-strong); }
+      .btn:focus { outline: none; box-shadow: var(--shadow-sm), var(--ring); }
+      .btn.primary { border-color: rgba(37, 99, 235, 0.25); }
+      .btn.primary:hover { border-color: rgba(37, 99, 235, 0.38); }
+
+      .grid { display: grid; grid-template-columns: 320px 1fr; gap: 18px; margin-top: 18px; }
+      @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--card);
+        box-shadow: var(--shadow-sm);
+      }
+      .card.pad { padding: 16px; }
+      .card h2 { margin: 0 0 12px; font-size: 16px; }
+      .card h3 { margin: 18px 0 10px; font-size: 14px; }
+      .card p { margin: 10px 0; }
+      .muted { color: var(--muted); }
+      .mono { font-family: var(--mono); }
+      .k { color: var(--muted); font-size: 12px; }
+
+      .toc a { display: block; padding: 8px 10px; border-radius: 10px; }
+      .toc a:hover { background: rgba(37, 99, 235, 0.07); text-decoration: none; }
+      .toc .small { font-size: 12px; color: var(--muted); padding-left: 10px; padding-bottom: 8px; }
+
+      .section { scroll-margin-top: 14px; }
+      .section-card { padding: 16px 16px 18px; }
+      .section-title {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+      }
+      .section-title h2 { margin: 0; }
+      .badge {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 12px;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 6px 10px;
+        background: rgba(255, 255, 255, 0.8);
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+      }
+      .table th, .table td {
+        padding: 10px 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+        font-size: 13px;
+      }
+      .table th { text-align: left; color: #374151; background: rgba(17, 24, 39, 0.03); }
+      .table tr:last-child td { border-bottom: none; }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.8);
+      }
+      .tag.ok { border-color: rgba(16, 185, 129, 0.25); color: #065f46; }
+      .tag.warn { border-color: rgba(249, 115, 22, 0.26); color: #9a3412; }
+      .tag.err { border-color: rgba(239, 68, 68, 0.24); color: #991b1b; }
+      .tag.info { border-color: rgba(37, 99, 235, 0.24); color: #1d4ed8; }
+
+      details {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 10px 12px;
+        margin: 10px 0;
+      }
+      details[open] { box-shadow: var(--shadow-sm); border-color: var(--border-strong); }
+      summary { cursor: pointer; font-weight: 700; }
+      summary::marker { color: var(--muted); }
+      .details-body { padding-top: 8px; color: #1f2937; }
+
+      .note {
+        border: 1px solid rgba(37, 99, 235, 0.18);
+        background: rgba(37, 99, 235, 0.06);
+        border-radius: 14px;
+        padding: 12px;
+        color: #1f2937;
+        margin: 12px 0;
+      }
+      .note .title { font-weight: 800; margin-bottom: 6px; }
+      .warnbox {
+        border: 1px solid rgba(249, 115, 22, 0.22);
+        background: rgba(249, 115, 22, 0.08);
+        border-radius: 14px;
+        padding: 12px;
+        margin: 12px 0;
+      }
+
+      .svg-wrap {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.86));
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+        margin: 12px 0;
+      }
+      .svg-caption { padding: 10px 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+      .svg { width: 100%; height: auto; display: block; }
+      .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+
+      .footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
+      .toplink { position: fixed; right: 14px; bottom: 14px; }
+      .toplink a { display: inline-flex; padding: 10px 12px; border-radius: 999px; border: 1px solid var(--border); background: #fff; box-shadow: var(--shadow-sm); }
+
+      @media print {
+        body { background: #fff; }
+        .toplink, .toolbar { display: none !important; }
+        .header, .card, .svg-wrap { box-shadow: none !important; }
+        .container { max-width: none; padding: 0; }
+        a { color: #111827; text-decoration: none; }
+        details { border: 1px solid #ddd; }
+        details:not([open]) summary { color: #111827; }
+        details { break-inside: avoid; }
+        .svg-wrap { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container" id="top">
+      <header class="header">
+        <div class="header-inner">
+          <div class="title">
+            <h1>物料申请-出入库流程说明（基于当前代码实现）</h1>
+            <div class="sub">
+              覆盖：Web-Admin + UniApp；含主设备/辅料；含申请/出库/入库/退库/收货；含状态机与常见场景。
+            </div>
+          </div>
+          <div class="meta-row">
+            <div class="pill"><span class="dot"></span>新流程：申请 → 审批 → 自助领料 → 仓库确认出库</div>
+            <div class="pill"><span class="dot orange"></span>兜底：无申请快速出库 / 扫码出库（套装）</div>
+            <div class="pill"><span class="dot green"></span>入库：手动入库 / SN导入 / 辅料批量入库</div>
+            <div class="pill"><span class="dot purple"></span>退库：申请 → 仓库收货确认（支持部分收货）</div>
+            <div class="pill"><span class="dot red"></span>生成时间：2026-01-17（以当时代码为准）</div>
+          </div>
+          <div class="note">
+            <div class="title">阅读提示</div>
+            <div>
+              本文描述“系统当前实际会发生什么”（而非理想业务流程），依据后端 <span class="mono">backend/app/api/stock.py</span>、
+              <span class="mono">backend/app/models/*</span> 与前端页面/路由 <span class="mono">web-admin/src/views/stock/*</span>、
+              <span class="mono">uniapp-site-manager/pages/stock/*</span> 梳理。
+            </div>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button class="btn primary" data-action="expand">展开全部场景</button>
+          <button class="btn" data-action="collapse">收起全部场景</button>
+          <button class="btn" data-action="print">打印 / 导出PDF</button>
+        </div>
+      </header>
+
+      <div class="grid">
+        <aside class="card pad toc">
+          <h2>目录</h2>
+          <div class="small">点击跳转；建议按“泳道图 → 状态机 → 场景”阅读</div>
+          <a href="#scope">1. 范围与术语</a>
+          <a href="#switches">2. 流程开关（系统配置）</a>
+          <a href="#entry">3. 入口导航（Web/UniApp）</a>
+          <a href="#flows">4. 三条主线流程总览</a>
+          <a href="#swimlane">5. 新流程泳道图（申请人/仓库）</a>
+          <a href="#statemachines">6. 状态机（申请单/领料单/退库单/实例）</a>
+          <a href="#roles">7. 角色动线（操作手册）</a>
+          <a href="#scenarios">8. 场景与异常处理</a>
+          <a href="#api">9. 接口/字段索引（对照用）</a>
+        </aside>
+
+        <main class="card section-card">
+          <section class="section" id="scope">
+            <div class="section-title">
+              <h2>1. 范围与术语</h2>
+              <span class="badge">核心：主设备按SN逐台、辅料按数量</span>
+            </div>
+
+            <table class="table">
+              <tr>
+                <th>概念</th>
+                <th>系统实现（关键点）</th>
+              </tr>
+              <tr>
+                <td>物料</td>
+                <td>
+                  设备类型 <span class="mono">Equipment</span>，分两类：<span class="mono">main_device</span>（主设备）、
+                  <span class="mono">auxiliary</span>（辅料/辅材）。
+                </td>
+              </tr>
+              <tr>
+                <td>主设备实例</td>
+                <td>
+                  <span class="mono">EquipmentInstance</span>（每台一条）。主设备出入库靠实例状态流转；入库必须提供
+                  <span class="mono">SN(serial_number)</span>。
+                </td>
+              </tr>
+              <tr>
+                <td>辅料库存</td>
+                <td>不建实例，按数量走；在 <span class="mono">Inventory/StockTransactionItem</span> 里体现。</td>
+              </tr>
+              <tr>
+                <td>库存汇总</td>
+                <td>
+                  <span class="mono">Inventory</span>（按“仓库+物料”聚合）：<span class="mono">current_stock</span>（现存）、
+                  <span class="mono">available_stock</span>（可用）、<span class="mono">allocated_stock</span>（已分配/在外）。
+                </td>
+              </tr>
+              <tr>
+                <td>申请单</td>
+                <td><span class="mono">MaterialRequest(REQ-...)</span> + 明细 <span class="mono">MaterialRequestItem</span>。</td>
+              </tr>
+              <tr>
+                <td>领料单/待确认出库</td>
+                <td>
+                  <span class="mono">IssueDraft(ISD-...)</span>：
+                  主设备SN清单 <span class="mono">IssueDraftSerial</span> + 辅料行 <span class="mono">IssueDraftItem</span>。
+                </td>
+              </tr>
+              <tr>
+                <td>出入库单</td>
+                <td><span class="mono">StockTransaction</span>（入库/出库/退库/调整等）+ 明细 <span class="mono">StockTransactionItem</span>。</td>
+              </tr>
+              <tr>
+                <td>退库单</td>
+                <td>
+                  本质也是一张 <span class="mono">StockTransaction(transaction_type=return)</span>，其状态在
+                  <span class="mono">approval_status</span> 字段（待收货/部分收货/已收货/拒收/取消）。
+                </td>
+              </tr>
+              <tr>
+                <td>扫码出库(套装)的领料记录</td>
+                <td><span class="mono">PickupRecord</span>：主要用于“我的设备/领料记录”展示与退库入口。</td>
+              </tr>
+            </table>
+
+            <div class="warnbox">
+              <div><strong>重要：扣库存发生点</strong></div>
+              <div class="muted">
+                在“新流程”里：申请/审批/自助领料只形成单据与待确认清单，<strong>不扣库存</strong>；真正扣库存发生在“仓库确认出库”。
+                因此“已批准”不等于“必然能发得出来”，库存不足会在出库确认阶段拦截并支持部分确认。
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="switches">
+            <div class="section-title">
+              <h2>2. 流程开关（系统配置）</h2>
+              <span class="badge">Web：库存管理 → 流程设置</span>
+            </div>
+
+            <table class="table">
+              <tr>
+                <th>配置键（<span class="mono">stock_flow_settings</span>）</th>
+                <th>默认</th>
+                <th>影响</th>
+              </tr>
+              <tr>
+                <td><span class="mono">enable_material_request</span></td>
+                <td><span class="tag ok">true</span></td>
+                <td>关闭后：物料申请/自助领料/待确认出库相关接口会直接拒绝（页面入口也应不可用）。</td>
+              </tr>
+              <tr>
+                <td><span class="mono">request_requires_approval</span></td>
+                <td><span class="tag ok">true</span></td>
+                <td>
+                  关闭后：申请提交即“系统自动全量批准”，申请单直接进入 <span class="mono">approved</span>（不占用库存）。
+                </td>
+              </tr>
+              <tr>
+                <td><span class="mono">issue_requires_warehouse_confirm</span></td>
+                <td><span class="tag ok">true</span></td>
+                <td>
+                  关闭后：领料单提交时会直接出库（由提交人作为操作人），不再等待仓库确认（慎用）。
+                </td>
+              </tr>
+              <tr>
+                <td><span class="mono">allow_quick_stock_out</span></td>
+                <td><span class="tag ok">true</span></td>
+                <td>关闭后：扫码出库/快速出库接口将返回“快捷出库已关闭”。</td>
+              </tr>
+            </table>
+          </section>
+
+          <section class="section" id="entry">
+            <div class="section-title">
+              <h2>3. 入口导航（Web / UniApp）</h2>
+              <span class="badge">面向用户的“从哪点进去”</span>
+            </div>
+
+            <h3>3.1 Web-Admin（仓库侧主要入口）</h3>
+            <table class="table">
+              <tr>
+                <th>功能</th>
+                <th>菜单路径</th>
+                <th>备注</th>
+              </tr>
+              <tr>
+                <td>入库管理</td>
+                <td>库存管理 → 入库管理</td>
+                <td>支持：手动入库 / SN批量导入 / 辅料批量入库（本质创建入库单）。</td>
+              </tr>
+              <tr>
+                <td>物料申请（审批工作台）</td>
+                <td>库存管理 → 物料申请</td>
+                <td>仅仓库/管理员可见；可代建申请、可审批。</td>
+              </tr>
+              <tr>
+                <td>待确认出库（出库确认）</td>
+                <td>库存管理 → 待确认出库</td>
+                <td>仓库确认出库支持“部分确认”。</td>
+              </tr>
+              <tr>
+                <td>退库收货</td>
+                <td>库存管理 → 退库收货</td>
+                <td>仓库收货确认（支持部分收货、可拒收）。</td>
+              </tr>
+              <tr>
+                <td>快速出库（无申请）</td>
+                <td>库存管理 → 快速出库</td>
+                <td>主设备逐台SN + 辅料数量；可选领取人。</td>
+              </tr>
+              <tr>
+                <td>领料记录 / 出入库记录</td>
+                <td>库存管理 → 领料记录 / 出入库记录</td>
+                <td>用于查询与追溯。</td>
+              </tr>
+              <tr>
+                <td>流程设置</td>
+                <td>库存管理 → 流程设置</td>
+                <td>配置本页第2节四个开关。</td>
+              </tr>
+            </table>
+
+            <h3>3.2 UniApp（申请人/现场人员主要入口）</h3>
+            <table class="table">
+              <tr>
+                <th>功能</th>
+                <th>页面入口</th>
+                <th>备注</th>
+              </tr>
+              <tr>
+                <td>物料申请</td>
+                <td>物料申请（列表/新建/详情）</td>
+                <td>申请人侧：草稿/提交/取消；已批准后可“开始领料”。</td>
+              </tr>
+              <tr>
+                <td>自助领料</td>
+                <td>领料草稿（扫码SN/填辅料）→ 提交</td>
+                <td>提交后默认进入“等待仓库确认”。</td>
+              </tr>
+              <tr>
+                <td>领料单状态</td>
+                <td>领料单状态页</td>
+                <td>查看待确认/已确认；可继续发起新的领料草稿。</td>
+              </tr>
+              <tr>
+                <td>我的设备（扫码出库/退库入口）</td>
+                <td>我的设备</td>
+                <td>仓库/管理员会显示“扫码领货(套装出库)”；所有人可在此发起退库（受权限与绑定约束）。</td>
+              </tr>
+              <tr>
+                <td>退库申请</td>
+                <td>退库申请（列表/新建）</td>
+                <td>可按“出库单维度”选择退库内容（主设备逐台SN、辅料按数量）。</td>
+              </tr>
+              <tr>
+                <td>快速出库</td>
+                <td>快速出库</td>
+                <td>仅仓库/管理员适用；逻辑同 Web 的“快速出库”。</td>
+              </tr>
+            </table>
+          </section>
+
+          <section class="section" id="flows">
+            <div class="section-title">
+              <h2>4. 三条主线流程总览</h2>
+              <span class="badge">建议先看新流程，再看兜底与入库</span>
+            </div>
+
+            <details open>
+              <summary>主线A：新流程（申请 → 审批 → 自助领料 → 仓库确认出库 →（可选）退库收货）</summary>
+              <div class="details-body">
+                <ol>
+                  <li>申请人（UniApp）创建申请单（<span class="mono">draft</span>）→ 提交（<span class="mono">submitted</span>）。</li>
+                  <li>仓库侧审批：可全量批准（<span class="mono">approved</span>）或部分批准（<span class="mono">partially_approved</span>），也可驳回（<span class="mono">rejected</span>）。</li>
+                  <li>申请人创建/进入领料草稿（<span class="mono">IssueDraft:draft</span>）：主设备逐台扫码SN；辅料填写计划数量。</li>
+                  <li>提交领料单：默认变为 <span class="mono">pending_confirm</span>，等待仓库确认出库（可部分确认、多次确认）。</li>
+                  <li>仓库确认出库后，库存扣减（现存/可用减少，已分配增加），主设备实例变为 <span class="mono">issued</span>。</li>
+                  <li>可选：发起退库申请（变为待收货），仓库收货确认后回库（主设备实例回 <span class="mono">in_stock</span>）。</li>
+                </ol>
+                <div class="warnbox">
+                  <strong>关键限制：</strong>
+                  <div class="muted">
+                    领料扫码时会校验：SN存在、在申请仓库、实例状态为 <span class="mono">in_stock</span>、且型号在申请单中、且不超过“可领上限”。
+                    仓库确认出库时若库存不足会返回短缺清单，可改为“部分确认”。
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <details>
+              <summary>主线B：无申请直接出库（兜底）</summary>
+              <div class="details-body">
+                <ul>
+                  <li><strong>快速出库（Web/UniApp）</strong>：仓库/管理员录入主设备SN列表 + 辅料数量 → 生成出库单并扣库存。</li>
+                  <li>
+                    <strong>扫码出库（套装出库，UniApp“我的设备”）</strong>：扫主设备条码/SN → 选套装 →
+                    系统按套装明细一次性出库并产生领料记录（用于“我的设备/领料记录/退库入口”）。
+                  </li>
+                </ul>
+                <div class="note">
+                  <div class="title">建议</div>
+                  <div class="muted">生产环境通常保留“快速出库/扫码出库”作为兜底，但尽量让现场人员走“申请→领料→仓库确认”的可追溯链路。</div>
+                </div>
+              </div>
+            </details>
+
+            <details>
+              <summary>主线C：入库（手动入库 / SN批量导入 / 辅料批量入库）</summary>
+              <div class="details-body">
+                <ul>
+                  <li>手动入库：主设备必须SN，且数量必须为1；辅料只填数量。</li>
+                  <li>SN批量导入：导入成功会生成导入记录，并额外生成一条入库单据（便于在出入库记录中追溯）。</li>
+                  <li>辅料批量入库：前端解析Excel后直接调用“入库”接口创建入库单。</li>
+                </ul>
+              </div>
+            </details>
+          </section>
+
+          <section class="section" id="swimlane">
+            <div class="section-title">
+              <h2>5. 新流程泳道图（申请人 / 仓库）</h2>
+              <span class="badge">默认配置：申请需审批 + 领料需仓库确认出库</span>
+            </div>
+
+            <div class="svg-wrap">
+              <svg class="svg" viewBox="0 0 1200 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="新流程泳道图">
+                <title>新流程泳道图</title>
+                <defs>
+                  <linearGradient id="laneA" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0" stop-color="#ffffff"/>
+                    <stop offset="1" stop-color="#f8fafc"/>
+                  </linearGradient>
+                  <linearGradient id="laneB" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0" stop-color="#ffffff"/>
+                    <stop offset="1" stop-color="#fdf7ed"/>
+                  </linearGradient>
+                  <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+                    <path d="M0,0 L12,6 L0,12 Z" fill="#334155" />
+                  </marker>
+                  <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="rgba(17,24,39,0.16)"/>
+                  </filter>
+                </defs>
+
+                <!-- lanes -->
+                <rect x="20" y="20" width="560" height="480" rx="18" fill="url(#laneA)" stroke="rgba(17,24,39,0.14)"/>
+                <rect x="620" y="20" width="560" height="480" rx="18" fill="url(#laneB)" stroke="rgba(17,24,39,0.14)"/>
+
+                <text x="44" y="54" font-size="16" font-weight="800" fill="#0f172a">申请人（UniApp为主）</text>
+                <text x="644" y="54" font-size="16" font-weight="800" fill="#0f172a">仓库侧（Web/仓库角色）</text>
+
+                <!-- step boxes helper -->
+                <g font-family="system-ui, sans-serif" font-size="13" fill="#0f172a">
+                  <!-- Applicant steps -->
+                  <g filter="url(#shadow)">
+                    <rect x="60" y="92" width="480" height="60" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.14)"/>
+                  </g>
+                  <text x="78" y="118" font-weight="800">① 创建申请单（draft）</text>
+                  <text x="78" y="140" fill="#475569">选仓库 + 明细（主设备/辅料）+ 备注</text>
+
+                  <g filter="url(#shadow)">
+                    <rect x="60" y="170" width="480" height="60" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.14)"/>
+                  </g>
+                  <text x="78" y="196" font-weight="800">② 提交申请（submitted）</text>
+                  <text x="78" y="218" fill="#475569">默认需要仓库审批（可关闭）</text>
+
+                  <g filter="url(#shadow)">
+                    <rect x="60" y="290" width="480" height="76" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.14)"/>
+                  </g>
+                  <text x="78" y="316" font-weight="800">④ 自助领料（IssueDraft:draft）</text>
+                  <text x="78" y="338" fill="#475569">主设备：逐台扫码SN；辅料：填计划数量</text>
+                  <text x="78" y="360" fill="#475569">校验：在申请仓库 + in_stock + 不超上限</text>
+
+                  <g filter="url(#shadow)">
+                    <rect x="60" y="388" width="480" height="60" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.14)"/>
+                  </g>
+                  <text x="78" y="414" font-weight="800">⑤ 提交领料单（pending_confirm）</text>
+                  <text x="78" y="436" fill="#475569">默认等待仓库确认出库（可关闭）</text>
+
+                  <!-- Warehouse steps -->
+                  <g filter="url(#shadow)">
+                    <rect x="660" y="170" width="480" height="92" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.14)"/>
+                  </g>
+                  <text x="678" y="196" font-weight="800">③ 仓库审批申请单</text>
+                  <text x="678" y="218" fill="#475569">通过：approved/partially_approved；驳回：rejected</text>
+                  <text x="678" y="240" fill="#475569">提示：批准不扣库存；扣库存在出库确认阶段</text>
+
+                  <g filter="url(#shadow)">
+                    <rect x="660" y="332" width="480" height="92" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.14)"/>
+                  </g>
+                  <text x="678" y="358" font-weight="800">⑥ 仓库确认出库（可部分、多次）</text>
+                  <text x="678" y="380" fill="#475569">勾选SN + 输入辅料确认数量</text>
+                  <text x="678" y="402" fill="#475569">库存不足会返回短缺清单</text>
+
+                  <g filter="url(#shadow)">
+                    <rect x="660" y="438" width="480" height="56" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.14)"/>
+                  </g>
+                  <text x="678" y="463" font-weight="800">⑦ 申请单自动关闭（closed）</text>
+                  <text x="678" y="483" fill="#475569">当“已发放 ≥ 已批准”且无待确认</text>
+                </g>
+
+                <!-- arrows between steps -->
+                <path d="M540 200 C 600 200 600 216 650 216" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+                <path d="M650 262 C 600 262 600 328 540 328" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+                <path d="M540 418 C 600 418 600 378 650 378" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+                <path d="M900 424 C 900 438 900 438 900 438" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+                <!-- notes -->
+                <text x="60" y="486" font-size="12" fill="#64748b">
+                  注：若关闭“申请需审批”，②后直接进入 approved；若关闭“仓库确认出库”，⑤提交后会直接出库成功。
+                </text>
+              </svg>
+              <div class="svg-caption">泳道图只展示主链路；退库（申请→收货确认）见第6节与第8节场景。</div>
+            </div>
+          </section>
+
+          <section class="section" id="statemachines">
+            <div class="section-title">
+              <h2>6. 状态机（按状态→可执行动作）</h2>
+              <span class="badge">四张：申请单 / 领料单 / 退库单 / 主设备实例</span>
+            </div>
+
+            <h3>6.1 申请单（MaterialRequest.status）</h3>
+            <div class="svg-wrap">
+              <svg class="svg" viewBox="0 0 1200 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="申请单状态机">
+                <title>申请单状态机</title>
+                <defs>
+                  <marker id="arrow2" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+                    <path d="M0,0 L12,6 L0,12 Z" fill="#334155" />
+                  </marker>
+                </defs>
+                <g font-family="system-ui, sans-serif" font-size="13" fill="#0f172a">
+                  <rect x="40" y="70" width="190" height="58" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.16)"/>
+                  <text x="60" y="98" font-weight="800">draft</text>
+                  <text x="60" y="120" fill="#64748b">可编辑/提交/取消</text>
+
+                  <rect x="280" y="70" width="190" height="58" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.16)"/>
+                  <text x="300" y="98" font-weight="800">submitted</text>
+                  <text x="300" y="120" fill="#64748b">待仓库审批</text>
+
+                  <rect x="520" y="40" width="210" height="58" rx="14" fill="#ffffff" stroke="rgba(16,185,129,0.30)"/>
+                  <text x="540" y="68" font-weight="800">approved</text>
+                  <text x="540" y="90" fill="#64748b">已批准（全量）</text>
+
+                  <rect x="520" y="114" width="210" height="58" rx="14" fill="#ffffff" stroke="rgba(249,115,22,0.30)"/>
+                  <text x="540" y="142" font-weight="800">partially_approved</text>
+                  <text x="540" y="164" fill="#64748b">部分批准</text>
+
+                  <rect x="780" y="70" width="180" height="58" rx="14" fill="#ffffff" stroke="rgba(124,58,237,0.28)"/>
+                  <text x="800" y="98" font-weight="800">closed</text>
+                  <text x="800" y="120" fill="#64748b">已发完自动关闭</text>
+
+                  <rect x="1000" y="30" width="170" height="58" rx="14" fill="#ffffff" stroke="rgba(239,68,68,0.30)"/>
+                  <text x="1020" y="58" font-weight="800">rejected</text>
+                  <text x="1020" y="80" fill="#64748b">驳回（终态）</text>
+
+                  <rect x="1000" y="112" width="170" height="58" rx="14" fill="#ffffff" stroke="rgba(107,114,128,0.30)"/>
+                  <text x="1020" y="140" font-weight="800">canceled</text>
+                  <text x="1020" y="162" fill="#64748b">取消（终态）</text>
+
+                  <!-- transitions -->
+                  <path d="M230 99 L280 99" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow2)"/>
+                  <text x="240" y="86" font-size="12" fill="#64748b">提交</text>
+
+                  <path d="M470 92 C 500 92 500 68 520 68" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow2)"/>
+                  <text x="488" y="62" font-size="12" fill="#64748b">全量批准</text>
+
+                  <path d="M470 106 C 500 106 500 142 520 142" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow2)"/>
+                  <text x="488" y="156" font-size="12" fill="#64748b">部分批准</text>
+
+                  <path d="M730 99 L780 99" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow2)"/>
+                  <text x="732" y="86" font-size="12" fill="#64748b">发完自动关闭</text>
+
+                  <path d="M470 70 C 700 10 900 10 1000 58" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow2)"/>
+                  <text x="720" y="30" font-size="12" fill="#64748b">驳回（仓库）</text>
+
+                  <path d="M230 120 C 520 220 820 220 1000 141" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow2)"/>
+                  <text x="520" y="230" font-size="12" fill="#64748b">取消（仅 draft/submitted）</text>
+                </g>
+              </svg>
+              <div class="svg-caption">
+                显示值为状态字段的真实取值（如 <span class="mono">draft</span>）。审批关闭时，“提交”可直接进入 <span class="mono">approved</span>。
+              </div>
+            </div>
+
+            <h3>6.2 领料单（IssueDraft.status）</h3>
+            <div class="svg-wrap">
+              <svg class="svg" viewBox="0 0 1200 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="领料单状态机">
+                <title>领料单状态机</title>
+                <defs>
+                  <marker id="arrow3" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+                    <path d="M0,0 L12,6 L0,12 Z" fill="#334155" />
+                  </marker>
+                </defs>
+                <g font-family="system-ui, sans-serif" font-size="13" fill="#0f172a">
+                  <rect x="50" y="130" width="200" height="60" rx="14" fill="#ffffff" stroke="rgba(17,24,39,0.16)"/>
+                  <text x="70" y="158" font-weight="800">draft</text>
+                  <text x="70" y="180" fill="#64748b">扫码SN/填辅料/提交</text>
+
+                  <rect x="310" y="80" width="240" height="60" rx="14" fill="#ffffff" stroke="rgba(249,115,22,0.30)"/>
+                  <text x="330" y="108" font-weight="800">pending_confirm</text>
+                  <text x="330" y="130" fill="#64748b">等待仓库确认出库</text>
+
+                  <rect x="310" y="160" width="240" height="60" rx="14" fill="#ffffff" stroke="rgba(249,115,22,0.30)"/>
+                  <text x="330" y="188" font-weight="800">partially_confirmed</text>
+                  <text x="330" y="210" fill="#64748b">已部分出库，可继续确认</text>
+
+                  <rect x="610" y="120" width="210" height="60" rx="14" fill="#ffffff" stroke="rgba(16,185,129,0.30)"/>
+                  <text x="630" y="148" font-weight="800">confirmed</text>
+                  <text x="630" y="170" fill="#64748b">全部确认出库</text>
+
+                  <rect x="880" y="70" width="170" height="60" rx="14" fill="#ffffff" stroke="rgba(239,68,68,0.30)"/>
+                  <text x="900" y="98" font-weight="800">rejected</text>
+                  <text x="900" y="120" fill="#64748b">驳回（终态）</text>
+
+                  <rect x="880" y="170" width="170" height="60" rx="14" fill="#ffffff" stroke="rgba(107,114,128,0.30)"/>
+                  <text x="900" y="198" font-weight="800">canceled</text>
+                  <text x="900" y="220" fill="#64748b">取消（终态）</text>
+
+                  <!-- transitions -->
+                  <path d="M250 160 C 280 160 280 110 310 110" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow3)"/>
+                  <text x="262" y="118" font-size="12" fill="#64748b">提交</text>
+
+                  <path d="M250 160 C 280 160 280 190 310 190" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow3)"/>
+                  <text x="260" y="206" font-size="12" fill="#64748b">提交后仓库部分确认</text>
+
+                  <path d="M550 110 C 580 110 580 150 610 150" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow3)"/>
+                  <text x="560" y="98" font-size="12" fill="#64748b">确认出库（可部分）</text>
+
+                  <path d="M550 190 C 580 190 580 150 610 150" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow3)"/>
+                  <text x="560" y="230" font-size="12" fill="#64748b">继续确认直到发完</text>
+
+                  <path d="M550 90 C 740 40 820 40 880 90" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow3)"/>
+                  <text x="700" y="40" font-size="12" fill="#64748b">仓库驳回（仅未发生部分确认）</text>
+
+                  <path d="M250 190 C 540 300 760 300 880 200" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow3)"/>
+                  <text x="510" y="312" font-size="12" fill="#64748b">取消（仅 draft/pending_confirm 且未发生部分确认）</text>
+
+                  <!-- note -->
+                  <text x="50" y="40" font-size="12" fill="#64748b">
+                    注：若关闭“领料单需仓库确认出库”，提交领料单会直接出库成功（直接进入 confirmed/partially_confirmed）。
+                  </text>
+                </g>
+              </svg>
+              <div class="svg-caption">“部分确认/多次确认”是领料单的核心能力，用于解决库存不足或分批发料场景。</div>
+            </div>
+
+            <h3>6.3 退库单（return 的 approval_status）</h3>
+            <div class="svg-wrap">
+              <svg class="svg" viewBox="0 0 1200 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="退库单状态机">
+                <title>退库单状态机</title>
+                <defs>
+                  <marker id="arrow4" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+                    <path d="M0,0 L12,6 L0,12 Z" fill="#334155" />
+                  </marker>
+                </defs>
+                <g font-family="system-ui, sans-serif" font-size="13" fill="#0f172a">
+                  <rect x="50" y="90" width="240" height="60" rx="14" fill="#ffffff" stroke="rgba(249,115,22,0.30)"/>
+                  <text x="70" y="118" font-weight="800">pending_receive</text>
+                  <text x="70" y="140" fill="#64748b">待仓库收货确认</text>
+
+                  <rect x="340" y="40" width="240" height="60" rx="14" fill="#ffffff" stroke="rgba(249,115,22,0.30)"/>
+                  <text x="360" y="68" font-weight="800">partially_received</text>
+                  <text x="360" y="90" fill="#64748b">部分收货，可继续收</text>
+
+                  <rect x="340" y="140" width="240" height="60" rx="14" fill="#ffffff" stroke="rgba(16,185,129,0.30)"/>
+                  <text x="360" y="168" font-weight="800">received</text>
+                  <text x="360" y="190" fill="#64748b">已收货（终态）</text>
+
+                  <rect x="650" y="50" width="200" height="60" rx="14" fill="#ffffff" stroke="rgba(239,68,68,0.30)"/>
+                  <text x="670" y="78" font-weight="800">rejected</text>
+                  <text x="670" y="100" fill="#64748b">拒收（终态）</text>
+
+                  <rect x="650" y="140" width="200" height="60" rx="14" fill="#ffffff" stroke="rgba(107,114,128,0.30)"/>
+                  <text x="670" y="168" font-weight="800">canceled</text>
+                  <text x="670" y="190" fill="#64748b">取消（终态）</text>
+
+                  <path d="M290 110 C 320 110 320 70 340 70" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow4)"/>
+                  <text x="304" y="72" font-size="12" fill="#64748b">部分收货</text>
+
+                  <path d="M290 130 C 320 130 320 170 340 170" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow4)"/>
+                  <text x="304" y="188" font-size="12" fill="#64748b">收完</text>
+
+                  <path d="M580 70 C 620 70 620 80 650 80" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow4)"/>
+                  <text x="585" y="56" font-size="12" fill="#64748b">拒收（仅未发生部分收货）</text>
+
+                  <path d="M290 150 C 520 240 610 240 650 170" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow4)"/>
+                  <text x="420" y="244" font-size="12" fill="#64748b">取消（仅 pending_receive 且未发生部分收货）</text>
+                </g>
+              </svg>
+              <div class="svg-caption">退库单“收货确认”支持部分收货；一旦部分收货发生，就禁止取消/拒收整单。</div>
+            </div>
+
+            <h3>6.4 主设备实例（EquipmentInstance.status）</h3>
+            <div class="svg-wrap">
+              <svg class="svg" viewBox="0 0 1200 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="主设备实例状态机">
+                <title>主设备实例状态机</title>
+                <defs>
+                  <marker id="arrow5" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+                    <path d="M0,0 L12,6 L0,12 Z" fill="#334155" />
+                  </marker>
+                </defs>
+                <g font-family="system-ui, sans-serif" font-size="13" fill="#0f172a">
+                  <rect x="60" y="130" width="200" height="60" rx="14" fill="#ffffff" stroke="rgba(16,185,129,0.30)"/>
+                  <text x="80" y="158" font-weight="800">in_stock</text>
+                  <text x="80" y="180" fill="#64748b">在库可用</text>
+
+                  <rect x="320" y="130" width="200" height="60" rx="14" fill="#ffffff" stroke="rgba(37,99,235,0.28)"/>
+                  <text x="340" y="158" font-weight="800">issued</text>
+                  <text x="340" y="180" fill="#64748b">已出库（在外）</text>
+
+                  <rect x="580" y="60" width="260" height="60" rx="14" fill="#ffffff" stroke="rgba(249,115,22,0.30)"/>
+                  <text x="600" y="88" font-weight="800">pending_inspection</text>
+                  <text x="600" y="110" fill="#64748b">已绑定检查，待检查</text>
+
+                  <rect x="580" y="140" width="260" height="60" rx="14" fill="#ffffff" stroke="rgba(249,115,22,0.30)"/>
+                  <text x="600" y="168" font-weight="800">inspected</text>
+                  <text x="600" y="190" fill="#64748b">检查完成（已检查）</text>
+
+                  <rect x="900" y="130" width="260" height="60" rx="14" fill="#ffffff" stroke="rgba(124,58,237,0.28)"/>
+                  <text x="920" y="158" font-weight="800">return_pending_receive</text>
+                  <text x="920" y="180" fill="#64748b">退库待收货</text>
+
+                  <!-- transitions -->
+                  <path d="M260 160 L320 160" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+                  <text x="268" y="144" font-size="12" fill="#64748b">出库</text>
+
+                  <path d="M520 160 C 560 160 560 90 580 90" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+                  <text x="520" y="78" font-size="12" fill="#64748b">检查绑定</text>
+
+                  <path d="M520 160 C 560 160 560 170 580 170" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+                  <text x="520" y="212" font-size="12" fill="#64748b">检查完成</text>
+
+                  <path d="M840 90 C 880 90 880 160 900 160" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+                  <text x="852" y="78" font-size="12" fill="#64748b">发起退库申请</text>
+
+                  <path d="M840 170 C 880 170 880 160 900 160" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+
+                  <path d="M900 160 C 600 300 220 260 160 190" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+                  <text x="520" y="304" font-size="12" fill="#64748b">仓库收货确认 → 回库（in_stock）</text>
+
+                  <path d="M900 190 C 720 260 480 260 420 190" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+                  <text x="650" y="254" font-size="12" fill="#64748b">取消/拒收 → 回退 issued</text>
+
+                  <path d="M580 90 C 500 40 420 80 420 130" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+                  <path d="M580 170 C 500 220 420 200 420 190" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow5)"/>
+                  <text x="420" y="40" font-size="12" fill="#64748b">一键解绑（仅设备级检查项）→ 回退 issued</text>
+                </g>
+              </svg>
+              <div class="svg-caption">
+                仅展示与“出入库/检查/退库”强相关的状态；另外还有 <span class="mono">damaged/repairing/scrapped</span> 等终态/特殊态。
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="roles">
+            <div class="section-title">
+              <h2>7. 角色动线（操作手册）</h2>
+              <span class="badge">按“谁来做”说明</span>
+            </div>
+
+            <details open>
+              <summary>7.1 申请人（现场人员，UniApp为主）</summary>
+              <div class="details-body">
+                <ol>
+                  <li>
+                    <strong>创建申请</strong>：进入“物料申请 → 新建申请”，选择仓库，添加明细（主设备/辅料）。
+                    可先保存草稿（<span class="mono">draft</span>），确认后提交（<span class="mono">submitted</span>）。
+                  </li>
+                  <li><strong>等待审批</strong>：申请详情页会提示“待审批”。仓库驳回会显示原因。</li>
+                  <li>
+                    <strong>开始领料</strong>：当申请状态为 <span class="mono">approved/partially_approved</span> 且“剩余可领&gt;0”时，
+                    点“开始领料”自动创建领料草稿（<span class="mono">IssueDraft:draft</span>）。
+                  </li>
+                  <li>
+                    <strong>领料草稿</strong>：
+                    <ul>
+                      <li>主设备：逐台扫码/输入SN；系统会校验是否在申请仓库且在库（<span class="mono">in_stock</span>）。</li>
+                      <li>辅料：填写“本次计划领料数量”，不能超过“剩余可领上限”。</li>
+                    </ul>
+                  </li>
+                  <li>
+                    <strong>提交领料单</strong>：默认提交后变为 <span class="mono">pending_confirm</span>，等待仓库确认出库；
+                    若系统配置关闭“仓库确认出库”，提交即出库成功。
+                  </li>
+                  <li>
+                    <strong>退库（需要时）</strong>：
+                    <ul>
+                      <li>从“我的设备”里点设备进入退库流程，或从“退库申请 → 新建退库”按出库单选择退库内容。</li>
+                      <li>若提示“需先解绑检查项”，可按提示执行“一键解绑”（会清空检查内容并删除相关照片）。</li>
+                    </ul>
+                  </li>
+                </ol>
+              </div>
+            </details>
+
+            <details>
+              <summary>7.2 仓库管理员 / 管理员 / 项目经理（仓库侧，Web-Admin为主）</summary>
+              <div class="details-body">
+                <div class="note">
+                  <div class="title">权限口径</div>
+                  <div class="muted">
+                    后端鉴权将 <span class="mono">manager</span> 视作 <span class="mono">admin</span> 等同权限；仓库管理员通常仅能操作/查看自己管理的仓库。
+                  </div>
+                </div>
+
+                <ol>
+                  <li>
+                    <strong>入库</strong>：库存管理 → 入库管理。主设备必须SN且数量=1；辅料可直接填数量；批量导入会生成入库记录。
+                  </li>
+                  <li>
+                    <strong>审批申请单</strong>：库存管理 → 物料申请。进入详情后对每行填“批准数量”并通过，或驳回并填写原因。
+                  </li>
+                  <li>
+                    <strong>确认出库（关键）</strong>：库存管理 → 待确认出库 → 出库确认。勾选本次确认SN、填写辅料确认数量后确认出库。
+                    若库存不足会给出短缺清单，可改为部分确认。
+                  </li>
+                  <li>
+                    <strong>退库收货</strong>：库存管理 → 退库收货。支持部分收货；若本次收货包含主设备，会要求SN核验。
+                    可拒收（仅待收货且未发生部分收货）。
+                  </li>
+                  <li>
+                    <strong>无申请出库兜底</strong>：库存管理 → 快速出库。录入主设备SN列表 + 辅料数量（可选指定领取人）完成出库。
+                  </li>
+                </ol>
+              </div>
+            </details>
+          </section>
+
+          <section class="section" id="scenarios">
+            <div class="section-title">
+              <h2>8. 场景与异常处理</h2>
+              <span class="badge">建议用“展开全部场景”快速浏览</span>
+            </div>
+
+            <details>
+              <summary>场景1：库存不足（确认出库/快速出库/扫码出库）</summary>
+              <div class="details-body">
+                <div><strong>触发点</strong>：仓库确认出库、快速出库、扫码出库。</div>
+                <div><strong>表现</strong>：返回“库存不足”并附带短缺清单（需要/可用/现存）。</div>
+                <div><strong>处理建议</strong>：改为部分确认、减少辅料数量、或拆单/等补货后再确认。</div>
+              </div>
+            </details>
+
+            <details>
+              <summary>场景2：部分批准 / 部分确认出库（分批发料）</summary>
+              <div class="details-body">
+                <div><strong>部分批准</strong>：仓库审批时按行填写批准数量（≤申请数量）。</div>
+                <div><strong>部分确认</strong>：出库确认可仅勾选部分SN、仅确认部分辅料数量，多次确认直到发完。</div>
+                <div class="muted">系统会计算“待确认(pending)与剩余可发(remaining)”来限制再次领料/确认。</div>
+              </div>
+            </details>
+
+            <details>
+              <summary>场景3：申请/领料的取消与驳回限制</summary>
+              <div class="details-body">
+                <ul>
+                  <li>申请单仅 <span class="mono">draft/submitted</span> 可取消。</li>
+                  <li>领料单取消：仅 <span class="mono">draft/pending_confirm</span> 且“未发生任何部分确认”可取消。</li>
+                  <li>领料单驳回：仅 <span class="mono">pending_confirm</span> 且“未发生任何部分确认”可驳回整单。</li>
+                </ul>
+              </div>
+            </details>
+
+            <details>
+              <summary>场景4：主设备退库受“检查绑定”约束（需解绑/不可解绑）</summary>
+              <div class="details-body">
+                <div><strong>预览可能返回两类提示</strong>：</div>
+                <ul>
+                  <li><span class="tag warn">need_unbind</span>：存在可解绑的设备级检查项，可执行“一键解绑”（会清空检查内容并删除照片文件）。</li>
+                  <li><span class="tag err">unbind_blocked</span>：存在不可解绑/不属于当前用户的绑定（如检查已提交/审核等），禁止发起退库。</li>
+                </ul>
+                <div class="muted">目的：避免“设备在检查流程中”与“库存退库”并发造成账实错乱。</div>
+              </div>
+            </details>
+
+            <details>
+              <summary>场景5：退库支持“只退辅料/只退主设备/部分退辅料”，且可多次退</summary>
+              <div class="details-body">
+                <ul>
+                  <li>辅料：按数量退，且不允许超出“原出库数量 - 已申请退库数量”。</li>
+                  <li>主设备：逐台SN；同一台设备在 <span class="mono">return_pending_receive</span> 时不可再次发起退库。</li>
+                  <li>可多次发起退库单，直到可退数量归零。</li>
+                </ul>
+              </div>
+            </details>
+
+            <details>
+              <summary>场景6：退库收货支持部分收货，但一旦部分收货发生就不能拒收/取消整单</summary>
+              <div class="details-body">
+                <div><strong>收货确认</strong>：可逐行输入“本次收货数量”，主设备默认每台1。</div>
+                <div><strong>SN核验</strong>：若本次收货包含主设备，会要求再次输入/扫码SN核验。</div>
+                <div><strong>拒收</strong>：仅 <span class="mono">pending_receive</span> 且未发生部分收货才允许。</div>
+              </div>
+            </details>
+
+            <details>
+              <summary>场景7：扫码出库（套装）与快速出库的差异</summary>
+              <div class="details-body">
+                <ul>
+                  <li>扫码出库：基于“主设备 → 套装配置”生成出库明细，并生成领料记录（PickupRecord）。</li>
+                  <li>快速出库：主设备SN列表 + 辅料数量自定义，支持指定领取人（issued_to）。</li>
+                  <li class="muted">两者都属于“无申请出库”的兜底路径，受开关 <span class="mono">allow_quick_stock_out</span> 控制。</li>
+                </ul>
+              </div>
+            </details>
+
+            <details>
+              <summary>场景8：SN重复/导错入库怎么处理（撤销入库+重导）</summary>
+              <div class="details-body">
+                <div>SN批量导入/手动入库都会校验SN唯一性；重复会被拦截或跳过。</div>
+                <div>
+                  若导错且设备仍在库（<span class="mono">in_stock</span> 且未出库），仓库/管理员可执行“撤销入库（作废实例）”，系统会：
+                  <ul>
+                    <li>将实例标记为作废（释放SN以便重导）</li>
+                    <li>生成一条“调整”单据记录这次撤销</li>
+                    <li>回扣对应库存数量</li>
+                  </ul>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="section" id="api">
+            <div class="section-title">
+              <h2>9. 接口/字段索引（对照用）</h2>
+              <span class="badge">用户培训可跳过；开发排查建议看</span>
+            </div>
+
+            <details open>
+              <summary>9.1 流程开关</summary>
+              <div class="details-body">
+                <ul>
+                  <li><span class="mono">GET /api/stock/flow-settings</span></li>
+                  <li><span class="mono">PUT /api/stock/flow-settings</span>（仅 admin/manager）</li>
+                </ul>
+              </div>
+            </details>
+
+            <details>
+              <summary>9.2 物料申请（申请单）</summary>
+              <div class="details-body">
+                <ul>
+                  <li><span class="mono">POST /api/stock/material-requests</span>（创建草稿；支持仓库/管理员代建）</li>
+                  <li><span class="mono">PATCH /api/stock/material-requests/{id}</span>（仅 draft 可编辑）</li>
+                  <li><span class="mono">POST /api/stock/material-requests/{id}/submit</span></li>
+                  <li><span class="mono">POST /api/stock/material-requests/{id}/cancel</span></li>
+                  <li><span class="mono">POST /api/stock/material-requests/{id}/approve</span> / <span class="mono">reject</span></li>
+                  <li><span class="mono">GET /api/stock/material-requests</span> / <span class="mono">GET /api/stock/material-requests/{id}</span></li>
+                </ul>
+                <div class="muted">状态字段：<span class="mono">draft/submitted/approved/partially_approved/rejected/canceled/closed</span></div>
+              </div>
+            </details>
+
+            <details>
+              <summary>9.3 领料单（待确认出库）</summary>
+              <div class="details-body">
+                <ul>
+                  <li><span class="mono">POST /api/stock/issue-drafts</span>（基于申请单创建/复用领料草稿）</li>
+                  <li><span class="mono">POST /api/stock/issue-drafts/{id}/scan-main</span>（申请人扫码SN加入草稿）</li>
+                  <li><span class="mono">DELETE /api/stock/issue-drafts/{draft_id}/serials/{serial_id}</span></li>
+                  <li><span class="mono">PUT /api/stock/issue-drafts/{id}/aux-items</span>（辅料计划数量）</li>
+                  <li><span class="mono">POST /api/stock/issue-drafts/{id}/submit</span></li>
+                  <li><span class="mono">GET /api/stock/issue-drafts</span>（仓库侧工作台）</li>
+                  <li><span class="mono">POST /api/stock/issue-drafts/{id}/confirm</span>（仓库确认出库；可部分）</li>
+                  <li><span class="mono">POST /api/stock/issue-drafts/{id}/reject</span> / <span class="mono">cancel</span></li>
+                </ul>
+              </div>
+            </details>
+
+            <details>
+              <summary>9.4 出库/入库/退库</summary>
+              <div class="details-body">
+                <ul>
+                  <li><span class="mono">POST /api/stock/stock-in</span>（入库）</li>
+                  <li><span class="mono">POST /api/stock/import-sn</span>（SN批量导入）</li>
+                  <li><span class="mono">POST /api/stock/scan-checkout</span>（扫码出库：套装）</li>
+                  <li><span class="mono">POST /api/stock/manual-stock-out</span>（无申请快速出库）</li>
+                  <li><span class="mono">POST /api/stock/scan-return/preview</span> / <span class="mono">request</span> / <span class="mono">cancel</span> / <span class="mono">receive</span> / <span class="mono">reject</span></li>
+                  <li><span class="mono">POST /api/stock/returns</span>（退库v2：按出库单选择内容，可多SN）</li>
+                  <li><span class="mono">GET /api/stock/transactions</span>（出入库记录查询）</li>
+                </ul>
+              </div>
+            </details>
+
+            <div class="footer">
+              <div>如需对照代码：重点看 <span class="mono">backend/app/api/stock.py</span> 中 “物料申请/领料单/退库/入库/快速出库” 分区。</div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="toplink"><a href="#top">回到顶部</a></div>
+
+    <script>
+      (function () {
+        const buttons = document.querySelectorAll('[data-action]');
+        function setAllDetails(open) {
+          document.querySelectorAll('details').forEach((d) => {
+            d.open = open;
+          });
+        }
+        buttons.forEach((b) => {
+          b.addEventListener('click', () => {
+            const action = b.getAttribute('data-action');
+            if (action === 'expand') setAllDetails(true);
+            if (action === 'collapse') setAllDetails(false);
+            if (action === 'print') window.print();
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>
