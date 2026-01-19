@@ -33,31 +33,31 @@ const routes = [
             path: 'equipment',
             name: 'Equipment',
             component: () => import('../views/equipment/EquipmentList.vue'),
-            meta: { title: '设备类型管理', icon: 'Box' }
+            meta: { title: '设备类型管理', icon: 'Box', group: 'asset', order: 2 }
           },
           {
             path: 'packages',
             name: 'Packages',
             component: () => import('../views/package/PackageList.vue'),
-            meta: { title: '设备套装配置', icon: 'Collection' }
+            meta: { title: '设备套装配置', icon: 'Collection', group: 'asset', order: 3 }
           },
           {
             path: 'list',
             name: 'InventoryList',
             component: () => import('../views/stock/InventoryList.vue'),
-            meta: { title: '设备库存管理', icon: 'List' }
+            meta: { title: '设备库存管理', icon: 'List', group: 'flow', order: 1 }
           },
           {
             path: 'stock-in',
             name: 'StockIn',
             component: () => import('../views/stock/StockIn.vue'),
-            meta: { title: '入库管理', icon: 'Upload' }
+            meta: { title: '入库管理', icon: 'Upload', group: 'flow', order: 2 }
           },
           {
             path: 'material-requests',
             name: 'MaterialRequestList',
             component: () => import('../views/stock/MaterialRequestList.vue'),
-            meta: { title: '物料申请', icon: 'DocumentAdd', roles: ['admin', 'warehouse_manager', 'manager'] }
+            meta: { title: '物料申请', icon: 'DocumentAdd', roles: ['admin', 'warehouse_manager', 'manager'], group: 'flow', order: 3 }
           },
           {
             path: 'material-requests/:id',
@@ -69,7 +69,7 @@ const routes = [
             path: 'issue-drafts',
             name: 'IssueDraftList',
             component: () => import('../views/stock/IssueDraftList.vue'),
-            meta: { title: '待确认出库', icon: 'DocumentChecked', roles: ['admin', 'warehouse_manager', 'manager'] }
+            meta: { title: '待确认出库', icon: 'DocumentChecked', roles: ['admin', 'warehouse_manager', 'manager'], group: 'flow', order: 4 }
           },
           {
             path: 'issue-drafts/:id',
@@ -81,49 +81,49 @@ const routes = [
             path: 'manual-stock-out',
             name: 'ManualStockOut',
             component: () => import('../views/stock/ManualStockOut.vue'),
-            meta: { title: '快速出库（无申请）', icon: 'Position', roles: ['admin', 'warehouse_manager', 'manager'] }
+            meta: { title: '快速出库（无申请）', icon: 'Position', roles: ['admin', 'warehouse_manager', 'manager'], group: 'flow', order: 6 }
           },
           {
             path: 'return-receiving',
             name: 'ReturnReceiving',
             component: () => import('../views/stock/ReturnReceiving.vue'),
-            meta: { title: '退库收货', icon: 'CircleCheck', roles: ['admin', 'warehouse_manager', 'manager'] }
+            meta: { title: '退库收货', icon: 'CircleCheck', roles: ['admin', 'warehouse_manager', 'manager'], group: 'flow', order: 5 }
           },
           {
             path: 'flow-settings',
             name: 'StockFlowSettings',
             component: () => import('../views/stock/StockFlowSettings.vue'),
-            meta: { title: '库存流程设置', icon: 'Setting', roles: ['admin', 'warehouse_manager', 'manager'] }
+            meta: { title: '库存流程设置', icon: 'Setting', roles: ['admin', 'warehouse_manager', 'manager'], group: 'asset', order: 4 }
           },
           {
             path: 'history',
             name: 'StockHistory',
             component: () => import('../views/stock/StockHistory.vue'),
-            meta: { title: '出入库记录', icon: 'Document' }
+            meta: { title: '出入库记录', icon: 'Document', group: 'ledger', order: 1 }
           },
           {
             path: 'pickups',
             name: 'PickupRecords',
             component: () => import('../views/stock/PickupRecords.vue'),
-            meta: { title: '领料记录', icon: 'Tickets' }
+            meta: { title: '领料记录', icon: 'Tickets', group: 'ledger', order: 2 }
           },
           {
             path: 'warehouses',
             name: 'Warehouses',
             component: () => import('../views/stock/WarehouseList.vue'),
-            meta: { title: '仓库管理', icon: 'OfficeBuilding' }
+            meta: { title: '仓库管理', icon: 'OfficeBuilding', group: 'asset', order: 1 }
           },
           {
             path: 'instances',
             name: 'EquipmentInstances',
             component: () => import('../views/equipment/EquipmentInstances.vue'),
-            meta: { title: '设备实例清单', icon: 'Tickets' }
+            meta: { title: '设备实例清单', icon: 'Tickets', group: 'ledger', order: 3 }
           },
           {
             path: 'lifecycle',
             name: 'EquipmentLifecycle',
             component: () => import('../views/equipment/EquipmentLifecycle.vue'),
-            meta: { title: '设备生命周期', icon: 'TrendCharts' }
+            meta: { title: '设备生命周期', icon: 'TrendCharts', group: 'ledger', order: 4 }
           }
         ]
       },

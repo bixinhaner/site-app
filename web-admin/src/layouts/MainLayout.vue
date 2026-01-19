@@ -48,15 +48,39 @@
                 <el-icon><component :is="route.meta.icon" /></el-icon>
                 <span>{{ route.meta.title }}</span>
               </template>
-              <el-menu-item
-                v-for="child in visibleChildren(route)"
-                :key="child.name"
-                :index="child.name"
-                :route="{ name: child.name }"
-              >
-                <el-icon><component :is="child.meta?.icon || route.meta.icon" /></el-icon>
-                <span>{{ child.meta?.title || child.name }}</span>
-              </el-menu-item>
+              <!-- 库存管理菜单：按 group 分组展示（默认全部展开）；侧边栏折叠时回退为普通列表 -->
+              <template v-if="isInventoryRoute(route) && !sidebarCollapsed">
+                <el-menu-item-group v-for="g in inventoryChildGroups(route)" :key="g.key">
+                  <template #title>
+                    <div class="menu-group-title" :data-group="g.key">
+                      <span class="menu-group-dot" :data-group="g.key" />
+                      <span class="menu-group-text">{{ g.title }}</span>
+                    </div>
+                  </template>
+
+                  <el-menu-item
+                    v-for="child in g.items"
+                    :key="child.name"
+                    :index="child.name"
+                    :route="{ name: child.name }"
+                  >
+                    <el-icon><component :is="child.meta?.icon || route.meta.icon" /></el-icon>
+                    <span>{{ child.meta?.title || child.name }}</span>
+                  </el-menu-item>
+                </el-menu-item-group>
+              </template>
+
+              <template v-else>
+                <el-menu-item
+                  v-for="child in (isInventoryRoute(route) ? inventoryMenuChildren(route) : visibleChildren(route))"
+                  :key="child.name"
+                  :index="child.name"
+                  :route="{ name: child.name }"
+                >
+                  <el-icon><component :is="child.meta?.icon || route.meta.icon" /></el-icon>
+                  <span>{{ child.meta?.title || child.name }}</span>
+                </el-menu-item>
+              </template>
             </el-sub-menu>
             
             <!-- 一级菜单：无children或children都隐藏 -->
@@ -125,6 +149,52 @@ const currentRoute = computed(() => route)
 const visibleChildren = (route) => {
   if (!route.children) return []
   return route.children.filter(c => !c.meta?.hidden && c.meta?.title && hasRoleAccess(c))
+}
+
+const isInventoryRoute = (r) => r?.name === 'InventoryMgmt'
+
+const INVENTORY_GROUP_META = [
+  { key: 'flow', title: '出入库流程', order: 1 },
+  { key: 'asset', title: '资产配置', order: 2 },
+  { key: 'ledger', title: '台账记录', order: 3 },
+  { key: 'other', title: '其他', order: 99 },
+]
+
+const inventoryChildGroups = (route) => {
+  const children = visibleChildren(route)
+  const groupOrderMap = new Map(INVENTORY_GROUP_META.map((g) => [g.key, g.order]))
+  const groupTitleMap = new Map(INVENTORY_GROUP_META.map((g) => [g.key, g.title]))
+
+  const groups = new Map()
+  for (const child of children) {
+    const key = child?.meta?.group || 'other'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(child)
+  }
+
+  const sortedGroups = Array.from(groups.entries())
+    .map(([key, items]) => {
+      const sortedItems = [...items].sort((a, b) => {
+        const ao = Number(a?.meta?.order ?? 9999)
+        const bo = Number(b?.meta?.order ?? 9999)
+        if (ao !== bo) return ao - bo
+        return String(a?.meta?.title || a?.name || '').localeCompare(String(b?.meta?.title || b?.name || ''), 'zh-CN')
+      })
+      return {
+        key,
+        title: groupTitleMap.get(key) || String(key),
+        order: groupOrderMap.get(key) ?? 99,
+        items: sortedItems,
+      }
+    })
+    .sort((a, b) => a.order - b.order)
+
+  return sortedGroups
+}
+
+const inventoryMenuChildren = (route) => {
+  if (!isInventoryRoute(route)) return visibleChildren(route)
+  return inventoryChildGroups(route).flatMap((g) => g.items)
 }
 
 // 切换侧边栏折叠状态
@@ -262,6 +332,49 @@ onMounted(async () => {
         margin-right: 8px;
         font-size: 16px;
       }
+    }
+
+    :deep(.el-menu-item-group__title) {
+      padding: 14px 20px 8px;
+      height: auto;
+      line-height: 1;
+      color: var(--text-secondary);
+      font-size: 12px;
+      letter-spacing: 0.2px;
+      opacity: 0.95;
+    }
+
+    .menu-group-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .menu-group-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(100, 116, 139, 0.9);
+      box-shadow: 0 0 0 4px rgba(100, 116, 139, 0.12);
+    }
+
+    .menu-group-dot[data-group='flow'] {
+      background: rgba(249, 115, 22, 0.95);
+      box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.16);
+    }
+
+    .menu-group-dot[data-group='asset'] {
+      background: rgba(37, 99, 235, 0.95);
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+    }
+
+    .menu-group-dot[data-group='ledger'] {
+      background: rgba(16, 185, 129, 0.95);
+      box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.14);
+    }
+
+    .menu-group-text {
+      font-weight: 650;
     }
   }
 }
