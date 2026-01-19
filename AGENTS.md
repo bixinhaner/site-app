@@ -7,6 +7,7 @@
 - Always do not generate .md file when running tasks if user do not ask.
 - If temporary verification and test scripts or code are generated during the task, please create them in the project's temp directory. If the directory does not exist, create it.Other temporary files or code that do not affect business operations during the task should also be placed in the temp directory.
 - python都是用虚拟环境运行的。
+- 不要使用git相关操作。
 
 ## Project Structure & Module Organization
 - Root helpers: `start_backend.py` boots the FastAPI server; `docs/` holds reference material; DB snapshots live under `db/`.
@@ -30,10 +31,6 @@
 - Backend tests are standalone scripts; ensure the API is running before executing them.
 - Name new tests `backend/test_<feature>.py` and target local endpoints.
 - No automated frontend tests; validate critical UI flows manually and capture evidence for PRs.
-
-## Commit & Pull Request Guidelines
-- Use Conventional Commit headers, e.g., `feat(web-admin): add stock history view`; keep messages concise and imperative.
-- PRs should summarize motivation, link issues, list verification steps, attach UI screenshots when UI changes, and call out config or env updates.
 
 ## Security & Configuration Tips
 - Load backend config from `backend/.env` (copy from `.env.example`); never commit secrets or `.db` artifacts.
