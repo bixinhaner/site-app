@@ -231,6 +231,8 @@ class StockTransaction(Base):
     
     # 操作信息
     operator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # 领取人（用于“仓库代发/快速出库/申请出库”等场景，便于退库按出库单追溯）
+    issued_to = Column(Integer, ForeignKey("users.id"), index=True)
     operation_time = Column(DateTime, server_default=func.now())
     
     # 扫码信息
@@ -257,6 +259,7 @@ class StockTransaction(Base):
     warehouse = relationship("Warehouse")
     package = relationship("EquipmentPackage")
     operator = relationship("User", foreign_keys=[operator_id])
+    receiver = relationship("User", foreign_keys=[issued_to])
     approver = relationship("User", foreign_keys=[approved_by])
     transaction_items = relationship("StockTransactionItem", back_populates="transaction", cascade="all, delete-orphan")
 
@@ -271,6 +274,8 @@ class StockTransactionItem(Base):
     
     # 数量
     quantity = Column(Integer, nullable=False)
+    # 退库收货：已收货数量（仅 return 单据使用；支持部分收货）
+    received_qty = Column(Integer, default=0)
     
     # 批次信息
     batch_number = Column(String(50))

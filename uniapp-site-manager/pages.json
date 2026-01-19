@@ -104,6 +104,62 @@
 			}
 		},
 		{
+			"path": "pages/stock/material-requests/list",
+			"style": {
+				"navigationBarTitleText": "物料申请",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/material-requests/create",
+			"style": {
+				"navigationBarTitleText": "新建申请",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/material-requests/detail",
+			"style": {
+				"navigationBarTitleText": "申请详情",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/issue-drafts/pick",
+			"style": {
+				"navigationBarTitleText": "领料",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/issue-drafts/detail",
+			"style": {
+				"navigationBarTitleText": "领料单",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/manual-stock-out",
+			"style": {
+				"navigationBarTitleText": "快速出库",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/returns/list",
+			"style": {
+				"navigationBarTitleText": "退库申请",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/returns/create",
+			"style": {
+				"navigationBarTitleText": "新建退库",
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/test/logging-test",
 			"style": {
 				"navigationBarTitleText": "日志测试",

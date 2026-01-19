@@ -54,10 +54,46 @@ const routes = [
             meta: { title: '入库管理', icon: 'Upload' }
           },
           {
+            path: 'material-requests',
+            name: 'MaterialRequestList',
+            component: () => import('../views/stock/MaterialRequestList.vue'),
+            meta: { title: '物料申请', icon: 'DocumentAdd', roles: ['admin', 'warehouse_manager', 'manager'] }
+          },
+          {
+            path: 'material-requests/:id',
+            name: 'MaterialRequestDetail',
+            component: () => import('../views/stock/MaterialRequestDetail.vue'),
+            meta: { title: '申请单详情', hidden: true, roles: ['admin', 'warehouse_manager', 'manager'] }
+          },
+          {
+            path: 'issue-drafts',
+            name: 'IssueDraftList',
+            component: () => import('../views/stock/IssueDraftList.vue'),
+            meta: { title: '待确认出库', icon: 'DocumentChecked', roles: ['admin', 'warehouse_manager', 'manager'] }
+          },
+          {
+            path: 'issue-drafts/:id',
+            name: 'IssueDraftDetail',
+            component: () => import('../views/stock/IssueDraftDetail.vue'),
+            meta: { title: '出库确认', hidden: true, roles: ['admin', 'warehouse_manager', 'manager'] }
+          },
+          {
+            path: 'manual-stock-out',
+            name: 'ManualStockOut',
+            component: () => import('../views/stock/ManualStockOut.vue'),
+            meta: { title: '快速出库（无申请）', icon: 'Position', roles: ['admin', 'warehouse_manager', 'manager'] }
+          },
+          {
             path: 'return-receiving',
             name: 'ReturnReceiving',
             component: () => import('../views/stock/ReturnReceiving.vue'),
             meta: { title: '退库收货', icon: 'CircleCheck', roles: ['admin', 'warehouse_manager', 'manager'] }
+          },
+          {
+            path: 'flow-settings',
+            name: 'StockFlowSettings',
+            component: () => import('../views/stock/StockFlowSettings.vue'),
+            meta: { title: '库存流程设置', icon: 'Setting', roles: ['admin', 'warehouse_manager', 'manager'] }
           },
           {
             path: 'history',

@@ -423,7 +423,7 @@
               <tr>
                 <td>物料申请（审批工作台）</td>
                 <td>库存管理 → 物料申请</td>
-                <td>仅仓库/管理员可见；可代建申请、可审批。</td>
+                <td>仅仓库/管理员可见；用于审批与查询（申请由 UniApp 发起）。</td>
               </tr>
               <tr>
                 <td>待确认出库（出库确认）</td>
@@ -447,7 +447,7 @@
               </tr>
               <tr>
                 <td>流程设置</td>
-                <td>库存管理 → 流程设置</td>
+                <td>库存管理 → 库存流程设置</td>
                 <td>配置本页第2节四个开关。</td>
               </tr>
             </table>
@@ -948,7 +948,7 @@
                     若库存不足会给出短缺清单，可改为部分确认。
                   </li>
                   <li>
-                    <strong>退库收货</strong>：库存管理 → 退库收货。支持部分收货；若本次收货包含主设备，会要求SN核验。
+                    <strong>退库收货</strong>：库存管理 → 退库收货。支持部分收货；主设备按 SN 勾选收货（可扫码快速选择），辅料按数量收货。
                     可拒收（仅待收货且未发生部分收货）。
                   </li>
                   <li>
@@ -1020,8 +1020,8 @@
             <details>
               <summary>场景6：退库收货支持部分收货，但一旦部分收货发生就不能拒收/取消整单</summary>
               <div class="details-body">
-                <div><strong>收货确认</strong>：可逐行输入“本次收货数量”，主设备默认每台1。</div>
-                <div><strong>SN核验</strong>：若本次收货包含主设备，会要求再次输入/扫码SN核验。</div>
+                <div><strong>收货确认</strong>：主设备按 SN 勾选本次收货；辅料逐行输入“本次收货数量”。</div>
+                <div><strong>主设备收货</strong>：支持扫码快速定位并勾选 SN（仅可勾选待收货的 SN）。</div>
                 <div><strong>拒收</strong>：仅 <span class="mono">pending_receive</span> 且未发生部分收货才允许。</div>
               </div>
             </details>
@@ -1073,7 +1073,7 @@
               <summary>9.2 物料申请（申请单）</summary>
               <div class="details-body">
                 <ul>
-                  <li><span class="mono">POST /api/stock/material-requests</span>（创建草稿；支持仓库/管理员代建）</li>
+                  <li><span class="mono">POST /api/stock/material-requests</span>（创建草稿；前端入口在 UniApp，Web-Admin 默认仅做审批/处理）</li>
                   <li><span class="mono">PATCH /api/stock/material-requests/{id}</span>（仅 draft 可编辑）</li>
                   <li><span class="mono">POST /api/stock/material-requests/{id}/submit</span></li>
                   <li><span class="mono">POST /api/stock/material-requests/{id}/cancel</span></li>

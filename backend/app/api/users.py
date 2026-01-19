@@ -26,7 +26,8 @@ async def search_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role not in ["admin", "manager"]:
+    # 仓库侧也需要搜索用户（如快速出库选择领取人）
+    if current_user.role not in ["admin", "manager", "warehouse_manager"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"

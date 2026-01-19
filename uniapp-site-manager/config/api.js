@@ -236,6 +236,23 @@ export const API_ENDPOINTS = {
   // 库存相关
   STOCK: {
     INVENTORY: '/api/stock/inventory',
+    // 新流程：物料申请 / 领料单 / 快速出库 / 退库（按出库单明细）
+    FLOW_SETTINGS: '/api/stock/flow-settings',
+    MATERIAL_REQUESTS: '/api/stock/material-requests',
+    MATERIAL_REQUEST_DETAIL: (id) => `/api/stock/material-requests/${id}`,
+    MATERIAL_REQUEST_SUBMIT: (id) => `/api/stock/material-requests/${id}/submit`,
+    MATERIAL_REQUEST_CANCEL: (id) => `/api/stock/material-requests/${id}/cancel`,
+    ISSUE_DRAFTS: '/api/stock/issue-drafts',
+    ISSUE_DRAFT_DETAIL: (id) => `/api/stock/issue-drafts/${id}`,
+    ISSUE_DRAFT_SCAN_MAIN: (id) => `/api/stock/issue-drafts/${id}/scan-main`,
+    ISSUE_DRAFT_SERIAL_DELETE: (draftId, serialId) => `/api/stock/issue-drafts/${draftId}/serials/${serialId}`,
+    ISSUE_DRAFT_AUX_ITEMS: (id) => `/api/stock/issue-drafts/${id}/aux-items`,
+    ISSUE_DRAFT_SUBMIT: (id) => `/api/stock/issue-drafts/${id}/submit`,
+    ISSUE_DRAFT_CANCEL: (id) => `/api/stock/issue-drafts/${id}/cancel`,
+    MANUAL_STOCK_OUT: '/api/stock/manual-stock-out',
+    MY_STOCK_OUTS: '/api/stock/my-stock-outs',
+    CREATE_RETURN: '/api/stock/returns',
+    MY_RETURNS: '/api/stock/my-returns',
     SCAN_CHECKOUT: '/api/stock/scan-checkout',
     CONFIRM_PICKUP: '/api/stock/confirm-pickup',
     MY_PICKUPS: '/api/stock/my-pickups',

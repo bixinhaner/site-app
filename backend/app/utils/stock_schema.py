@@ -80,10 +80,12 @@ def ensure_stock_schema(engine: Engine) -> None:
         },
         "stock_transactions": {
             "related_transaction_id": "related_transaction_id VARCHAR(36)",
+            "issued_to": "issued_to INTEGER",
         },
         "stock_transaction_items": {
             "vendor": "vendor VARCHAR(100)",
             "item_notes": "item_notes TEXT",
+            "received_qty": "received_qty INTEGER DEFAULT 0",
         },
         "pickup_records": {
             "mac_address_3": "mac_address_3 VARCHAR(50)",

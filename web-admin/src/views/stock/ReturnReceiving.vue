@@ -50,7 +50,8 @@
 
         <el-col :span="4">
           <el-select v-model="statusFilter" placeholder="状态" style="width: 100%" @change="resetAndLoad">
-            <el-option label="待收货" value="pending_receive" />
+            <el-option label="待收货（含部分）" value="pending_receive" />
+            <el-option label="部分收货" value="partially_received" />
             <el-option label="已收货" value="received" />
             <el-option label="已拒收" value="rejected" />
             <el-option label="已取消" value="canceled" />
@@ -61,7 +62,7 @@
         <el-col :span="6">
           <el-input
             v-model="keyword"
-            placeholder="搜索：退库单号 / 申请人 / SN"
+            placeholder="搜索：退库单号 / 出库单号 / SN"
             clearable
             @keyup.enter="resetAndLoad"
           >
@@ -83,15 +84,19 @@
 
       <el-table :data="records" v-loading="loading" stripe style="width: 100%">
         <el-table-column prop="document_number" label="退库单号" min-width="220" />
-        <el-table-column prop="scan_barcode" label="主设备SN" min-width="180" />
+        <el-table-column prop="out_document_number" label="关联出库单" min-width="220" />
         <el-table-column prop="warehouse_name" label="退入仓库" width="160" />
         <el-table-column prop="operator_name" label="申请人" width="140" />
+        <el-table-column label="待收货" width="180">
+          <template #default="{ row }">
+            <span>主 {{ mainPending(row) }} · 辅 {{ auxPending(row) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="申请时间" width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.created_at || row.operation_time) }}
           </template>
         </el-table-column>
-        <el-table-column prop="out_document_number" label="关联出库单" min-width="220" />
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)">
@@ -105,7 +110,7 @@
               size="small"
               type="success"
               @click="openReceive(row)"
-              :disabled="row.status !== 'pending_receive'"
+              :disabled="!canReceiveRow(row)"
             >
               收货确认
             </el-button>
@@ -114,7 +119,7 @@
               type="danger"
               plain
               @click="openReject(row)"
-              :disabled="row.status !== 'pending_receive'"
+              :disabled="!canRejectRow(row)"
             >
               拒收
             </el-button>
@@ -135,37 +140,97 @@
     </el-card>
 
     <!-- 收货确认 -->
-    <el-dialog v-model="receiveDialogVisible" title="收货确认" width="680px" @closed="focusSnInput">
-      <div v-if="currentRecord">
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="退库单号">{{ currentRecord.document_number }}</el-descriptions-item>
-          <el-descriptions-item label="退入仓库">{{ currentRecord.warehouse_name }}</el-descriptions-item>
-          <el-descriptions-item label="主设备SN">{{ currentRecord.scan_barcode }}</el-descriptions-item>
-          <el-descriptions-item label="申请人">{{ currentRecord.operator_name }}</el-descriptions-item>
-          <el-descriptions-item label="关联出库单">{{ currentRecord.out_document_number || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="出库仓库">{{ currentRecord.out_warehouse_name || '-' }}</el-descriptions-item>
-        </el-descriptions>
+    <el-dialog v-model="receiveDialogVisible" title="收货确认（可部分）" width="880px" @closed="focusSnInput">
+      <div v-loading="receiveLoading">
+        <div v-if="currentRecord">
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="退库单号">{{ currentRecord.document_number }}</el-descriptions-item>
+            <el-descriptions-item label="退入仓库">{{ currentRecord.warehouse_name }}</el-descriptions-item>
+            <el-descriptions-item label="申请人">{{ currentRecord.operator_name }}</el-descriptions-item>
+            <el-descriptions-item label="关联出库单">{{ currentRecord.out_document_number || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="出库仓库">{{ currentRecord.out_warehouse_name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="状态">{{ statusText(currentRecord.status) }}</el-descriptions-item>
+          </el-descriptions>
 
-        <el-divider content-position="left">退库明细（整单）</el-divider>
-        <el-table :data="currentRecord.items || []" size="small" border max-height="260px">
-          <el-table-column prop="equipment_name" label="物料" min-width="240" />
-          <el-table-column prop="equipment_code" label="编码" width="140" />
-          <el-table-column prop="quantity" label="数量" width="100" />
-          <el-table-column prop="unit" label="单位" width="80" />
-        </el-table>
+          <el-divider content-position="left">本次收货概览</el-divider>
+          <div class="chips">
+            <div class="chip">
+              <div class="k">待收 SN</div>
+              <div class="v">{{ pendingMainItems.length }}</div>
+            </div>
+            <div class="chip">
+              <div class="k">已选 SN</div>
+              <div class="v">{{ selectedMainSns.size }}</div>
+            </div>
+            <div class="chip">
+              <div class="k">辅料本次收货</div>
+              <div class="v">{{ auxReceiveTotal }}</div>
+            </div>
+            <div class="chip accent">
+              <div class="k">本次总收货</div>
+              <div class="v">{{ totalReceive }}</div>
+            </div>
+          </div>
 
-        <el-form label-width="100px" class="dialog-form">
-          <el-form-item label="SN核验" required>
+          <div class="scanner">
+            <div class="label">扫码快速选择 SN（仅选择待收货的 SN）</div>
             <el-input
-              v-model="receiveForm.sn_input"
-              placeholder="请再次输入/扫码SN进行核验"
-              @keyup.enter="submitReceive"
-            />
-          </el-form-item>
-          <el-form-item label="备注">
-            <el-input v-model="receiveForm.receive_notes" type="textarea" :rows="2" placeholder="可选" />
-          </el-form-item>
-        </el-form>
+              v-model="mainScanInput"
+              placeholder="用扫码枪扫 SN 后回车"
+              clearable
+              @keyup.enter="onMainScanEnter"
+            >
+              <template #prefix>
+                <el-icon><Aim /></el-icon>
+              </template>
+              <template #append>
+                <el-button @click="onMainScanEnter">选择</el-button>
+              </template>
+            </el-input>
+            <div class="scanner-sub">提示：未输入 SN 时，点击“选择”无动作</div>
+          </div>
+
+          <el-divider content-position="left">主设备（SN）</el-divider>
+          <el-table :data="mainItems" size="small" border max-height="240px">
+            <el-table-column label="" width="56">
+              <template #default="{ row }">
+                <el-checkbox
+                  :model-value="selectedMainSns.has(String(row.serial_number || ''))"
+                  :disabled="!canSelectMain(row)"
+                  @change="(v) => toggleMain(row.serial_number, v)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column prop="serial_number" label="SN" min-width="180" />
+            <el-table-column prop="equipment_name" label="物料" min-width="220" />
+            <el-table-column prop="pending_quantity" label="待收" width="100" />
+            <el-table-column prop="received_quantity" label="已收" width="100" />
+          </el-table>
+
+          <el-divider content-position="left">辅料</el-divider>
+          <el-table :data="auxRows" size="small" border max-height="260px">
+            <el-table-column prop="equipment_name" label="物料" min-width="240" />
+            <el-table-column prop="pending_quantity" label="待收" width="120" />
+            <el-table-column label="本次收货" width="200">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="row._receive_qty"
+                  :min="0"
+                  :max="row.pending_quantity"
+                  controls-position="right"
+                  :disabled="row.pending_quantity <= 0 || !canReceiveCurrent"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column prop="unit" label="单位" width="90" />
+          </el-table>
+
+          <el-form label-width="90px" class="dialog-form">
+            <el-form-item label="备注">
+              <el-input v-model="receiveNotes" type="textarea" :rows="2" placeholder="可选" />
+            </el-form-item>
+          </el-form>
+        </div>
       </div>
       <template #footer>
         <el-button @click="receiveDialogVisible = false">取消</el-button>
@@ -189,7 +254,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { stockApi } from '@/api/stock'
 import { useUserStore } from '@/stores/user'
@@ -197,6 +262,7 @@ import { useUserStore } from '@/stores/user'
 const userStore = useUserStore()
 
 const loading = ref(false)
+const receiveLoading = ref(false)
 const submitting = ref(false)
 
 const snInputRef = ref(null)
@@ -224,7 +290,11 @@ const receiveDialogVisible = ref(false)
 const rejectDialogVisible = ref(false)
 const currentRecord = ref(null)
 
-const receiveForm = ref({ sn_input: '', receive_notes: '' })
+const mainScanInput = ref('')
+const selectedMainSns = reactive(new Set())
+const auxRows = ref([])
+const receiveNotes = ref('')
+
 const rejectForm = ref({ reason: '' })
 
 const formatDateTime = (iso) => {
@@ -238,6 +308,7 @@ const formatDateTime = (iso) => {
 const statusText = (s) => {
   const map = {
     pending_receive: '待收货',
+    partially_received: '部分收货',
     received: '已收货',
     rejected: '已拒收',
     canceled: '已取消',
@@ -247,11 +318,25 @@ const statusText = (s) => {
 
 const statusTagType = (s) => {
   if (s === 'pending_receive') return 'warning'
+  if (s === 'partially_received') return 'warning'
   if (s === 'received') return 'success'
   if (s === 'rejected') return 'danger'
   if (s === 'canceled') return 'info'
   return 'info'
 }
+
+const mainPending = (row) => {
+  const items = Array.isArray(row?.items) ? row.items : []
+  return items.filter((it) => it?.is_main_device).reduce((sum, it) => sum + Number(it?.pending_quantity || 0), 0)
+}
+
+const auxPending = (row) => {
+  const items = Array.isArray(row?.items) ? row.items : []
+  return items.filter((it) => !it?.is_main_device).reduce((sum, it) => sum + Number(it?.pending_quantity || 0), 0)
+}
+
+const canReceiveRow = (row) => ['pending_receive', 'partially_received'].includes(String(row?.status || ''))
+const canRejectRow = (row) => String(row?.status || '') === 'pending_receive'
 
 const focusSnInput = async () => {
   await nextTick()
@@ -285,7 +370,7 @@ const loadData = async () => {
       params.warehouse_ids = selectedWarehouseIds.value.join(',')
     }
 
-    const res = await stockApi.getReturnRequests(params)
+    const res = await stockApi.listReturnsWorkbench(params)
     records.value = res.records || []
     total.value = res.total || 0
   } catch (error) {
@@ -316,7 +401,7 @@ const handleQuickLookup = async () => {
       params.warehouse_ids = selectedWarehouseIds.value.join(',')
     }
 
-    const res = await stockApi.getReturnRequests(params)
+    const res = await stockApi.listReturnsWorkbench(params)
     const list = res.records || []
     if (list.length === 0) {
       ElMessage.warning('未找到该SN对应的待收货退库单')
@@ -338,32 +423,129 @@ const handleQuickLookup = async () => {
   }
 }
 
-const openReceive = async (row, scannedSn = '') => {
-  currentRecord.value = row
-  receiveForm.value = { sn_input: scannedSn || row.scan_barcode || '', receive_notes: '' }
-  receiveDialogVisible.value = true
-  await nextTick()
+const clearSelectedMain = () => {
+  selectedMainSns.forEach((v) => selectedMainSns.delete(v))
 }
 
-const openReject = (row) => {
-  currentRecord.value = row
+const normalizeAuxRows = (record) => {
+  const items = Array.isArray(record?.items) ? record.items : []
+  auxRows.value = items
+    .filter((it) => !it?.is_main_device)
+    .map((it) => ({
+      ...it,
+      _receive_qty: 0,
+    }))
+}
+
+const openReceive = async (row, scannedSn = '') => {
+  receiveDialogVisible.value = true
+  currentRecord.value = null
+  receiveNotes.value = ''
+  mainScanInput.value = scannedSn || ''
+  clearSelectedMain()
+  auxRows.value = []
+
+  try {
+    receiveLoading.value = true
+    const res = await stockApi.getReturnDetail(row.id)
+    currentRecord.value = res.record || row
+  } catch (error) {
+    console.error('加载退库单详情失败:', error)
+    ElMessage.error(error?.response?.data?.detail || '加载退库单详情失败')
+    currentRecord.value = row
+  } finally {
+    receiveLoading.value = false
+    normalizeAuxRows(currentRecord.value)
+    if (scannedSn) {
+      const hit = (currentRecord.value?.items || []).find((it) => it?.is_main_device && String(it.serial_number || '') === scannedSn)
+      if (hit && Number(hit.pending_quantity || 0) > 0) {
+        selectedMainSns.add(scannedSn)
+      }
+    }
+    await nextTick()
+  }
+}
+
+const openReject = async (row) => {
   rejectForm.value = { reason: '' }
+  try {
+    const res = await stockApi.getReturnDetail(row.id)
+    currentRecord.value = res.record || row
+  } catch (error) {
+    currentRecord.value = row
+  }
   rejectDialogVisible.value = true
+}
+
+const canReceiveCurrent = computed(() => canReceiveRow(currentRecord.value))
+
+const mainItems = computed(() => {
+  const items = Array.isArray(currentRecord.value?.items) ? currentRecord.value.items : []
+  return items.filter((it) => it?.is_main_device)
+})
+
+const pendingMainItems = computed(() => mainItems.value.filter((it) => Number(it?.pending_quantity || 0) > 0))
+
+const auxReceiveTotal = computed(() => {
+  return auxRows.value.reduce((sum, it) => sum + Number(it?._receive_qty || 0), 0)
+})
+
+const totalReceive = computed(() => selectedMainSns.size + auxReceiveTotal.value)
+
+const canSelectMain = (row) => {
+  if (!canReceiveCurrent.value) return false
+  const sn = String(row?.serial_number || '')
+  if (!sn) return false
+  return Number(row?.pending_quantity || 0) > 0
+}
+
+const toggleMain = (sn, checked) => {
+  const snv = String(sn || '').trim()
+  if (!snv) return
+  if (checked) selectedMainSns.add(snv)
+  else selectedMainSns.delete(snv)
+}
+
+const onMainScanEnter = async () => {
+  const snv = String(mainScanInput.value || '').trim()
+  if (!snv) return
+  const hit = pendingMainItems.value.find((it) => String(it.serial_number || '') === snv)
+  if (!hit) {
+    ElMessage.warning('该SN不在待收货列表中')
+    mainScanInput.value = ''
+    return
+  }
+  selectedMainSns.add(snv)
+  mainScanInput.value = ''
+  await nextTick()
 }
 
 const submitReceive = async () => {
   if (!currentRecord.value?.id) return
-  if (!receiveForm.value.sn_input?.trim()) {
-    ElMessage.warning('请填写SN核验')
+  if (!canReceiveCurrent.value) {
+    ElMessage.warning('当前状态不可收货确认')
+    return
+  }
+
+  const main_sns = Array.from(selectedMainSns)
+  const aux_items = auxRows.value
+    .filter((r) => Number(r?._receive_qty || 0) > 0)
+    .map((r) => ({
+      equipment_id: r.equipment_id,
+      quantity: Number(r._receive_qty || 0),
+    }))
+
+  if (main_sns.length === 0 && aux_items.length === 0) {
+    ElMessage.warning('请至少选择1个SN或填写辅料收货数量')
     return
   }
 
   try {
     submitting.value = true
-    await stockApi.receiveReturn({
-      return_transaction_id: currentRecord.value.id,
-      sn_input: receiveForm.value.sn_input.trim(),
-      receive_notes: receiveForm.value.receive_notes?.trim() || '',
+    await stockApi.receiveReturnV2(currentRecord.value.id, {
+      main_sns,
+      aux_items,
+      receive_notes: (receiveNotes.value || '').trim(),
     })
     ElMessage.success('收货确认成功')
     receiveDialogVisible.value = false
@@ -386,8 +568,7 @@ const submitReject = async () => {
 
   try {
     submitting.value = true
-    await stockApi.rejectReturn({
-      return_transaction_id: currentRecord.value.id,
+    await stockApi.rejectReturnV2(currentRecord.value.id, {
       reason: rejectForm.value.reason.trim(),
     })
     ElMessage.success('已拒收退库申请')
@@ -437,6 +618,53 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.chips {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.chip {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.chip .k {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chip .v {
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.chip.accent {
+  border-color: rgba(59, 130, 246, 0.34);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.scanner {
+  margin: 6px 0 12px;
+}
+
+.scanner .label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.scanner-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .dialog-form {

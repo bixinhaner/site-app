@@ -7,10 +7,6 @@
       </div>
 
       <div class="header-actions">
-        <el-button v-if="isWarehouseOperator" type="primary" @click="openCreate">
-          <el-icon><Plus /></el-icon>
-          新建申请
-        </el-button>
         <el-button @click="load" :loading="loading">
           <el-icon><Refresh /></el-icon>
           刷新

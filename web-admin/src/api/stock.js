@@ -93,4 +93,63 @@ export const stockApi = {
 
   rejectReturn: (data) =>
     request.post('/api/stock/scan-return/reject', data),
+
+  // ===== 流程设置 =====
+  getFlowSettings: () =>
+    request.get('/api/stock/flow-settings'),
+
+  updateFlowSettings: (data) =>
+    request.put('/api/stock/flow-settings', data),
+
+  // ===== 物料申请（新流程）=====
+  listMaterialRequests: (params = {}) =>
+    request.get('/api/stock/material-requests', { params }),
+
+  getMaterialRequestDetail: (id) =>
+    request.get(`/api/stock/material-requests/${id}`),
+
+  updateMaterialRequest: (id, data) =>
+    request.put(`/api/stock/material-requests/${id}`, data),
+
+  submitMaterialRequest: (id) =>
+    request.post(`/api/stock/material-requests/${id}/submit`),
+
+  cancelMaterialRequest: (id, data) =>
+    request.post(`/api/stock/material-requests/${id}/cancel`, data),
+
+  approveMaterialRequest: (id, data) =>
+    request.post(`/api/stock/material-requests/${id}/approve`, data),
+
+  rejectMaterialRequest: (id, data) =>
+    request.post(`/api/stock/material-requests/${id}/reject`, data),
+
+  // ===== 领料单 / 待确认出库 =====
+  listIssueDrafts: (params = {}) =>
+    request.get('/api/stock/issue-drafts', { params }),
+
+  getIssueDraftDetail: (id) =>
+    request.get(`/api/stock/issue-drafts/${id}`),
+
+  confirmIssueDraft: (id, data) =>
+    request.post(`/api/stock/issue-drafts/${id}/confirm`, data),
+
+  rejectIssueDraft: (id, data) =>
+    request.post(`/api/stock/issue-drafts/${id}/reject`, data),
+
+  // ===== 快速出库（无申请）=====
+  manualStockOut: (data) =>
+    request.post('/api/stock/manual-stock-out', data),
+
+  // ===== 退库（新方案：按出库单明细，可部分收货）=====
+  listReturnsWorkbench: (params = {}) =>
+    request.get('/api/stock/returns', { params }),
+
+  getReturnDetail: (id) =>
+    request.get(`/api/stock/returns/${id}`),
+
+  receiveReturnV2: (id, data) =>
+    request.post(`/api/stock/returns/${id}/receive`, data),
+
+  rejectReturnV2: (id, data) =>
+    request.post(`/api/stock/returns/${id}/reject`, data),
 }

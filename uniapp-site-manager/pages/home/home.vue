@@ -118,6 +118,24 @@
 						<view class="action-icon">📦</view>
 						<text class="action-label">{{ $t('stock.scanPickup') }}</text>
 					</view>
+
+					<!-- 物料申请（新流程） - 勘察员不可用 -->
+					<view class="action-item u-pressable" v-if="!isSurveyor" @click="goToMaterialRequests">
+						<view class="action-icon">🧾</view>
+						<text class="action-label">{{ $t('stock.materialRequestEntry') }}</text>
+					</view>
+
+					<!-- 退库申请（新流程） - 勘察员不可用 -->
+					<view class="action-item u-pressable" v-if="!isSurveyor" @click="goToReturnRequests">
+						<view class="action-icon">↩️</view>
+						<text class="action-label">{{ $t('stock.returnEntry') }}</text>
+					</view>
+
+					<!-- 快速出库（无申请） - 仅管理员/经理 -->
+					<view class="action-item u-pressable" v-if="isAdmin || isManager" @click="goToManualStockOut">
+						<view class="action-icon">🚚</view>
+						<text class="action-label">{{ $t('stock.manualStockOutTitle') }}</text>
+					</view>
 					
 					<!-- 公共功能 -->
 					<view class="action-item u-pressable" @click="goToMap">
@@ -407,6 +425,18 @@
 	const goToScanPickup = () => {
 		// 跳转到扫码领料页面
 		uni.navigateTo({ url: '/pages/stock/scan-pickup' })
+	}
+
+	const goToMaterialRequests = () => {
+		uni.navigateTo({ url: '/pages/stock/material-requests/list' })
+	}
+
+	const goToReturnRequests = () => {
+		uni.navigateTo({ url: '/pages/stock/returns/list' })
+	}
+
+	const goToManualStockOut = () => {
+		uni.navigateTo({ url: '/pages/stock/manual-stock-out' })
 	}
 	
 	const showUserMenu = () => {
