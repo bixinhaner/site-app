@@ -4664,13 +4664,18 @@ async def manual_stock_out(
     if managed_ids is not None and wh.id not in managed_ids:
         raise HTTPException(status_code=403, detail="无权限操作该仓库")
 
-    # 领取人（可选）：不填默认自己
+    # 领取人（必填）：必须明确选择，避免“人货不一致”
+    if issued_to is None or str(issued_to).strip() == "":
+        raise HTTPException(status_code=400, detail="请选择领取人")
     try:
-        issued_to = int(issued_to) if issued_to is not None else None
+        issued_to = int(issued_to)
     except Exception:
-        issued_to = None
-    if not issued_to:
-        issued_to = current_user.id
+        raise HTTPException(status_code=400, detail="请选择领取人")
+    if issued_to <= 0:
+        raise HTTPException(status_code=400, detail="请选择领取人")
+    issued_to_user = db.query(User).filter(User.id == issued_to).first()
+    if not issued_to_user or not bool(getattr(issued_to_user, "is_active", True)):
+        raise HTTPException(status_code=400, detail="领取人不存在或已禁用")
 
     # 主设备：SN去重
     sn_set = []

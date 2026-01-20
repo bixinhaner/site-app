@@ -28,7 +28,7 @@
               </el-select>
             </div>
             <div class="field">
-              <div class="label">领取人（可选）</div>
+              <div class="label">领取人（必选）</div>
               <el-select
                 v-model="form.issued_to_user"
                 filterable
@@ -322,6 +322,8 @@ const reset = () => {
 const buildPayload = () => {
   const warehouse_id = Number(form.value.warehouse_id || 0)
   if (!warehouse_id) throw new Error('请选择出库仓库')
+  const issued_to = Number(form.value.issued_to_user?.id || 0)
+  if (!issued_to) throw new Error('请选择领取人')
   const main_sns = snList.value.slice()
   const aux_map = new Map()
   for (const row of auxRows.value) {
@@ -337,7 +339,7 @@ const buildPayload = () => {
     warehouse_id,
     main_sns,
     aux_items: Array.from(aux_map.entries()).map(([equipment_id, quantity]) => ({ equipment_id, quantity })),
-    issued_to: form.value.issued_to_user?.id,
+    issued_to,
     notes: (form.value.notes || '').trim(),
   }
 }
