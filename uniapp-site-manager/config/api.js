@@ -302,7 +302,6 @@ export const buildApiUrl = (endpoint) => {
   let path = String(endpoint || '')
 
   const url = `${baseUrl}${path}`
-  log('Building API URL:', url)
   return url
 }
 

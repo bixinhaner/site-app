@@ -2,6 +2,9 @@ import { createSSRApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import CustomNavbar from './components/CustomNavbar.vue'
+import CustomTabbar from './components/custom-tabbar/custom-tabbar.vue'
+import UniIcons from './uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
+import UniLoadMore from './uni_modules/uni-load-more/components/uni-load-more/uni-load-more.vue'
 import i18n from './utils/i18n.js'
 import { setI18nInstance } from './stores/language.js'
 import { trackPageView } from './utils/operationTrack.js'
@@ -79,6 +82,10 @@ export function createApp() {
 
 	// 全局组件：确保 Options API / script setup 均可直接使用
 	app.component('CustomNavbar', CustomNavbar)
+	// 生产包兜底：显式注册常用组件，避免 easycom/自动解析异常导致不渲染
+	app.component('custom-tabbar', CustomTabbar)
+	app.component('uni-icons', UniIcons)
+	app.component('uni-load-more', UniLoadMore)
 	app.config.globalProperties.$formatPercentInt = formatPercentInt
 	app.config.globalProperties.$toPercentInt = toPercentInt
 
