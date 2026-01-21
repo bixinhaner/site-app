@@ -36,7 +36,7 @@
 					<view class="u-form-item">
 						<text class="u-form-label">{{ $t('stock.materialRequestNotes') }}</text>
 						<textarea
-							class="u-textarea"
+							class="u-textarea notes-textarea"
 							v-model="notes"
 							:placeholder="$t('stock.materialRequestNotesPlaceholder')"
 							maxlength="200"
@@ -655,14 +655,28 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 10px;
-		padding: 12px 12px;
+		padding: 10px 12px;
+		min-height: 44px;
+		box-sizing: border-box;
 		border: 1px solid var(--border-color);
-		border-radius: 12px;
+		border-radius: 10px;
 		background: rgba(255, 255, 255, 0.72);
 		color: #111827;
+		font-size: 14px;
+		line-height: 20px;
 	}
 	.picker-input.placeholder { color: #9ca3af; }
-	.picker-arrow { color: #9ca3af; font-size: 12px; }
+	.picker-arrow { color: #9ca3af; font-size: 10px; }
+
+	.notes-textarea {
+		height: 64px;
+		min-height: 64px;
+		font-size: 14px;
+		line-height: 20px;
+		padding: 12px 12px;
+		box-sizing: border-box;
+		resize: none;
+	}
 
 	.section { margin: 16px; border-radius: var(--radius-lg); overflow: hidden; }
 	.hint { font-size: 12px; color: #9ca3af; }
@@ -851,4 +865,3 @@
 	.modal-empty { padding: 18px; display: flex; justify-content: center; }
 	.modal-empty-text { color: #9ca3af; font-size: 13px; }
 </style>
-
