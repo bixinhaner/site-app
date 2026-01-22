@@ -5431,9 +5431,19 @@ async def receive_return_items(
             inv_src = db.query(Inventory).filter(
                 and_(Inventory.warehouse_id == source_warehouse_id, Inventory.equipment_id == equipment_id)
             ).first()
-            if not inv_src or int(inv_src.allocated_stock or 0) < qty:
-                raise HTTPException(status_code=400, detail="库存回滚失败：源仓已分配库存不足")
-            inv_src.allocated_stock -= qty
+            if is_flow_v2:
+                if not inv_src or int(inv_src.allocated_stock or 0) < qty:
+                    raise HTTPException(status_code=400, detail="库存回滚失败：源仓已分配库存不足")
+                inv_src.allocated_stock -= qty
+            else:
+                if (
+                    not inv_src
+                    or int(inv_src.allocated_stock or 0) < qty
+                    or int(inv_src.current_stock or 0) < qty
+                ):
+                    raise HTTPException(status_code=400, detail="库存回滚失败：源仓库存不足")
+                inv_src.allocated_stock -= qty
+                inv_src.current_stock -= qty
             inv_src.last_updated_by = current_user.id
 
             inv_tgt = db.query(Inventory).filter(
