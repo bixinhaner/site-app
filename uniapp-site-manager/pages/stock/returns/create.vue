@@ -137,6 +137,17 @@
 				</view>
 			</view>
 
+			<!-- 4) 线下单据（可选） -->
+			<view class="section u-card">
+				<view class="u-card-header">
+					<text class="u-card-title">{{ $t('stock.offlineDocTitle') }}</text>
+					<text class="hint">{{ $t('common.optional') }}</text>
+				</view>
+				<view class="u-card-content">
+					<OfflineDocumentSection v-model="offlineDocumentId" :disabled="submitting" :showHeader="false" />
+				</view>
+			</view>
+
 			<view class="footer">
 				<button class="u-btn u-btn-primary u-pressable" :disabled="submitting" @click="submit">
 					{{ submitting ? $t('stock.processing') : $t('stock.submitReturnRequest') }}
@@ -173,6 +184,7 @@
 	const selectedOut = ref(null)
 	const selectedMainSns = ref([])
 	const auxQtyMap = ref({})
+	const offlineDocumentId = ref(null)
 
 	const submitting = ref(false)
 
@@ -387,15 +399,14 @@
 						return_warehouse_id: selectedWarehouse.value.id,
 						main_sns: selectedMainSns.value,
 						aux_items: auxItemsPayload,
+						offline_document_id: offlineDocumentId.value || undefined,
 					}
 				})
 			})
 
 			if (res.statusCode === 200) {
 				uni.showToast({ title: $t('stock.createReturnSuccess'), icon: 'success' })
-				setTimeout(() => {
-					uni.redirectTo({ url: '/pages/stock/returns/list' })
-				}, 500)
+				setTimeout(() => uni.redirectTo({ url: '/pages/stock/returns/list' }), 500)
 				return
 			}
 
@@ -502,4 +513,3 @@
 	.spacer { height: 24px; }
 	.mono { font-family: monospace; }
 </style>
-

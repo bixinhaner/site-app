@@ -216,6 +216,42 @@ class Inventory(Base):
     equipment = relationship("Equipment", back_populates="inventory_records")
     updater = relationship("User", foreign_keys=[last_updated_by])
 
+
+class OfflineDocument(Base):
+    """线下票据（可复用）：一张票据可关联多笔出/入库单据。"""
+
+    __tablename__ = "offline_documents"
+
+    id = Column(String(32), primary_key=True)
+    remark = Column(Text)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    creator = relationship("User", foreign_keys=[created_by])
+    photos = relationship("OfflineDocumentPhoto", back_populates="document", cascade="all, delete-orphan")
+    transactions = relationship("StockTransaction", back_populates="offline_document")
+
+
+class OfflineDocumentPhoto(Base):
+    """线下票据照片"""
+
+    __tablename__ = "offline_document_photos"
+
+    id = Column(String(32), primary_key=True)
+    document_id = Column(String(32), ForeignKey("offline_documents.id"), nullable=False, index=True)
+
+    original_name = Column(String(255))
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer)
+    mime_type = Column(String(100))
+
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    document = relationship("OfflineDocument", back_populates="photos")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
 class StockTransaction(Base):
     """出入库记录表"""
     __tablename__ = "stock_transactions"
@@ -228,6 +264,7 @@ class StockTransaction(Base):
     package_id = Column(Integer, ForeignKey("equipment_packages.id"))  # 关联套装
     work_order_id = Column(String(32), ForeignKey("work_orders.id"))  # 关联工单
     related_transaction_id = Column(String(36), index=True)  # 关联的原始单据ID（如退库关联出库）
+    offline_document_id = Column(String(32), ForeignKey("offline_documents.id"), index=True)  # 关联线下票据（可选）
     
     # 操作信息
     operator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -262,6 +299,27 @@ class StockTransaction(Base):
     receiver = relationship("User", foreign_keys=[issued_to])
     approver = relationship("User", foreign_keys=[approved_by])
     transaction_items = relationship("StockTransactionItem", back_populates="transaction", cascade="all, delete-orphan")
+    documents = relationship("StockTransactionDocument", back_populates="transaction", cascade="all, delete-orphan")
+    offline_document = relationship("OfflineDocument", back_populates="transactions")
+
+
+class StockTransactionDocument(Base):
+    """出入库单据照片（线下单据拍照上传）"""
+    __tablename__ = "stock_transaction_documents"
+
+    id = Column(String(32), primary_key=True)
+    transaction_id = Column(String(32), ForeignKey("stock_transactions.id"), nullable=False, index=True)
+
+    original_name = Column(String(255))
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer)
+    mime_type = Column(String(100))
+
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    transaction = relationship("StockTransaction", back_populates="documents")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
 
 class StockTransactionItem(Base):
     """出入库明细表"""

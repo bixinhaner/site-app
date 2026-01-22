@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload, aliased
 from sqlalchemy import and_, or_, desc, func, case
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 import uuid
+import os
 from datetime import datetime
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
@@ -17,8 +19,11 @@ from app.models.equipment import (
     EquipmentInstance,
     Warehouse,
     Inventory,
+    OfflineDocument,
+    OfflineDocumentPhoto,
     StockTransaction,
     StockTransactionItem,
+    StockTransactionDocument,
     PickupRecord,
     SNImportRecord,
     SNImportDetail,
@@ -41,6 +46,7 @@ from app.models.issue_draft import (
 )
 from app.models.work_order import AuditEvent
 from app.models.inspection import InspectionCheckItem, InspectionPhoto, SiteInspection, InspectionStatusEnum, CheckItemStatusEnum
+from app.utils.file_handler import save_uploaded_file, validate_image_on_disk, ImageValidationError
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -223,6 +229,8 @@ async def scan_equipment_checkout(
     # 出库/领料属于库存链路，为避免影响工单业务，这里不再关联工单ID。
     gps_location = scan_data.get("gps_location")
     warehouse_id = scan_data.get("warehouse_id") or 1
+    offline_document_id = scan_data.get("offline_document_id")
+    offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
 
     if not barcode:
         raise HTTPException(status_code=400, detail="条码不能为空")
@@ -471,6 +479,7 @@ async def scan_equipment_checkout(
         warehouse_id=warehouse_id,
         package_id=package.id,
         operator_id=current_user.id,
+        offline_document_id=offline_doc.id if offline_doc else None,
         scan_barcode=barcode,
         # 扫描时间使用服务器本地时间记录
         scan_time=datetime.now(),
@@ -1219,6 +1228,8 @@ async def scan_return_request(
     gps_location = payload.get("gps_location")
     return_warehouse_id = payload.get("return_warehouse_id")
     notes = (payload.get("notes") or "").strip()
+    offline_document_id = payload.get("offline_document_id")
+    offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
 
     sn = _extract_sn_from_scan(barcode, parsed_barcode)
     if not sn:
@@ -1266,6 +1277,7 @@ async def scan_return_request(
         transaction_type=TransactionTypeEnum.RETURN,
         warehouse_id=return_warehouse_id,
         operator_id=current_user.id,
+        offline_document_id=offline_doc.id if offline_doc else None,
         scan_barcode=sn,
         scan_time=now,
         scan_location=gps_location,
@@ -1656,6 +1668,8 @@ async def return_equipment_pickup(
     serial_number: Optional[str] = return_data.get("serial_number")
     warehouse_id: Optional[int] = return_data.get("warehouse_id")
     notes: str = return_data.get("notes", "")
+    offline_document_id = return_data.get("offline_document_id")
+    offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
 
     if not pickup_record_id and not serial_number:
         raise HTTPException(status_code=400, detail="缺少 pickup_record_id 或 serial_number")
@@ -1713,6 +1727,7 @@ async def return_equipment_pickup(
         transaction_type=TransactionTypeEnum.RETURN,
         warehouse_id=return_warehouse_id,
         operator_id=current_user.id,
+        offline_document_id=offline_doc.id if offline_doc else None,
         scan_barcode=sn,
         scan_time=datetime.now(),
         scan_location=return_data.get("gps_location"),
@@ -1764,6 +1779,8 @@ async def create_stock_in(
     
     warehouse_id = stock_in_data.get("warehouse_id", 1)  # 默认仓库
     items = stock_in_data.get("items", [])
+    offline_document_id = stock_in_data.get("offline_document_id")
+    offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
     
     if not items:
         raise HTTPException(status_code=400, detail="入库明细不能为空")
@@ -1803,6 +1820,7 @@ async def create_stock_in(
         transaction_type=TransactionTypeEnum.STOCK_IN,
         warehouse_id=warehouse_id,
         operator_id=current_user.id,
+        offline_document_id=offline_doc.id if offline_doc else None,
         document_number=document_number,
         total_quantity=sum([item["quantity"] for item in items]),
         notes=stock_in_data.get("notes", "")
@@ -1957,12 +1975,389 @@ async def get_stock_transactions(
             "scan_barcode": trans.scan_barcode,
             "notes": trans.notes,
             "related_transaction_id": getattr(trans, "related_transaction_id", None),
+            "offline_document_id": getattr(trans, "offline_document_id", None),
             "items": items,
             "task_id": None,
             "package_name": trans.package.package_name if trans.package else None
         })
     
     return {"transactions": result, "total": len(result)}
+
+# ===== 线下票据（可复用） =====
+
+MAX_OFFLINE_DOCUMENT_PHOTOS = 10
+
+
+def _ensure_can_manage_offline_document(current_user: User, doc: OfflineDocument) -> None:
+    if current_user.role in ["admin", "warehouse_manager", "manager"]:
+        return
+    if doc.created_by == current_user.id:
+        return
+    raise HTTPException(status_code=403, detail="无权限操作该线下票据")
+
+
+def _get_offline_document_for_use(
+    db: Session, *, current_user: User, offline_document_id: Optional[str]
+) -> Optional[OfflineDocument]:
+    doc_id = str(offline_document_id or "").strip()
+    if not doc_id:
+        return None
+    doc = db.query(OfflineDocument).filter(OfflineDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="线下票据不存在")
+    _ensure_can_manage_offline_document(current_user, doc)
+    return doc
+
+
+def _serialize_offline_document_photo(p: OfflineDocumentPhoto) -> dict:
+    return {
+        "id": p.id,
+        "document_id": p.document_id,
+        "original_name": p.original_name,
+        "file_path": p.file_path,
+        "file_size": p.file_size,
+        "mime_type": p.mime_type,
+        "uploaded_by": p.uploaded_by,
+        "created_at": to_utc_iso(p.created_at) if p.created_at else None,
+    }
+
+
+def _serialize_offline_document(doc: OfflineDocument) -> dict:
+    photos = [_serialize_offline_document_photo(p) for p in (doc.photos or [])]
+    photos.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return {
+        "id": doc.id,
+        "remark": doc.remark,
+        "created_by": doc.created_by,
+        "created_at": to_utc_iso(doc.created_at) if doc.created_at else None,
+        "photos": photos,
+        "photo_count": len(photos),
+    }
+
+
+@router.post("/offline-documents")
+async def create_offline_document(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """创建线下票据（不含照片）。照片请调用 /offline-documents/{id}/photos 上传。"""
+    _ensure_not_surveyor(current_user)
+
+    remark = ""
+    if isinstance(payload, dict):
+        remark = str(payload.get("remark") or "").strip()
+        if len(remark) > 500:
+            remark = remark[:500]
+
+    doc = OfflineDocument(
+        id=uuid.uuid4().hex,
+        remark=remark or None,
+        created_by=current_user.id,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _serialize_offline_document(doc)
+
+
+@router.get("/offline-documents/{document_id}")
+async def get_offline_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取线下票据及照片列表。"""
+    _ensure_not_surveyor(current_user)
+
+    doc = (
+        db.query(OfflineDocument)
+        .options(joinedload(OfflineDocument.photos))
+        .filter(OfflineDocument.id == document_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="线下票据不存在")
+    _ensure_can_manage_offline_document(current_user, doc)
+    return _serialize_offline_document(doc)
+
+
+@router.post("/offline-documents/{document_id}/photos")
+async def upload_offline_document_photo(
+    document_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """上传线下票据照片：单张上传，最多 10 张（jpg/jpeg/png）。"""
+    _ensure_not_surveyor(current_user)
+
+    doc = db.query(OfflineDocument).filter(OfflineDocument.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="线下票据不存在")
+    _ensure_can_manage_offline_document(current_user, doc)
+
+    existing_count = (
+        db.query(func.count(OfflineDocumentPhoto.id))
+        .filter(OfflineDocumentPhoto.document_id == document_id)
+        .scalar()
+        or 0
+    )
+    if int(existing_count) >= MAX_OFFLINE_DOCUMENT_PHOTOS:
+        raise HTTPException(status_code=400, detail=f"票据照片已达到上限（{MAX_OFFLINE_DOCUMENT_PHOTOS}张）")
+
+    filename = (file.filename or "").strip()
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_STOCK_DOCUMENT_EXTS:
+        raise HTTPException(status_code=400, detail="仅支持 jpg/jpeg/png 图片")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="仅支持图片文件")
+
+    stored_path = await save_uploaded_file(file, category="stock_offline_documents", sub_folder=document_id)
+
+    try:
+        validate_image_on_disk(stored_path, detect_blank_bottom=False)
+    except ImageValidationError as e:
+        try:
+            if stored_path and os.path.exists(stored_path):
+                os.remove(stored_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        max_bytes = int(getattr(settings, "MAX_FILE_SIZE", 10 * 1024 * 1024) or 10 * 1024 * 1024)
+    except Exception:
+        max_bytes = 10 * 1024 * 1024
+
+    file_size = None
+    try:
+        if stored_path and os.path.exists(stored_path):
+            file_size = int(os.path.getsize(stored_path))
+    except Exception:
+        file_size = None
+    if file_size is not None and file_size > max_bytes:
+        try:
+            if stored_path and os.path.exists(stored_path):
+                os.remove(stored_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=f"图片大小超过限制（{max_bytes // (1024 * 1024)}MB）")
+
+    photo = OfflineDocumentPhoto(
+        id=uuid.uuid4().hex,
+        document_id=document_id,
+        original_name=filename or None,
+        file_path=stored_path,
+        file_size=file_size,
+        mime_type=file.content_type,
+        uploaded_by=current_user.id,
+    )
+    db.add(photo)
+    db.commit()
+    db.refresh(photo)
+    return _serialize_offline_document_photo(photo)
+
+
+@router.delete("/offline-documents/{document_id}/photos/{photo_id}")
+async def delete_offline_document_photo(
+    document_id: str,
+    photo_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除线下票据照片。"""
+    _ensure_not_surveyor(current_user)
+
+    doc = db.query(OfflineDocument).filter(OfflineDocument.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="线下票据不存在")
+    _ensure_can_manage_offline_document(current_user, doc)
+
+    photo = (
+        db.query(OfflineDocumentPhoto)
+        .filter(OfflineDocumentPhoto.id == photo_id, OfflineDocumentPhoto.document_id == document_id)
+        .first()
+    )
+    if not photo:
+        raise HTTPException(status_code=404, detail="票据照片不存在")
+
+    file_path = photo.file_path
+    db.delete(photo)
+    db.commit()
+
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+    return {"success": True}
+
+# ===== 出入库单据照片（按单上传，历史兼容） =====
+
+MAX_STOCK_TRANSACTION_DOCUMENTS = 10
+ALLOWED_STOCK_DOCUMENT_EXTS = {".jpg", ".jpeg", ".png"}
+
+
+def _ensure_can_manage_transaction_docs(current_user: User, tx: StockTransaction) -> None:
+    """仅允许出入库操作人或仓库侧角色管理单据照片。"""
+    if current_user.role in ["admin", "warehouse_manager", "manager"]:
+        return
+    if tx.operator_id == current_user.id:
+        return
+    raise HTTPException(status_code=403, detail="无权限操作该出入库单据照片")
+
+
+def _serialize_stock_transaction_document(doc: StockTransactionDocument) -> dict:
+    return {
+        "id": doc.id,
+        "transaction_id": doc.transaction_id,
+        "original_name": doc.original_name,
+        "file_path": doc.file_path,
+        "file_size": doc.file_size,
+        "mime_type": doc.mime_type,
+        "uploaded_by": doc.uploaded_by,
+        "created_at": to_utc_iso(doc.created_at) if doc.created_at else None,
+    }
+
+
+@router.get("/transactions/{transaction_id}/documents")
+async def list_stock_transaction_documents(
+    transaction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取出入库单据照片列表（线下单据）。"""
+    _ensure_not_surveyor(current_user)
+
+    tx = db.query(StockTransaction).filter(StockTransaction.id == transaction_id).first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="出入库单不存在")
+    _ensure_can_manage_transaction_docs(current_user, tx)
+
+    docs = (
+        db.query(StockTransactionDocument)
+        .filter(StockTransactionDocument.transaction_id == transaction_id)
+        .order_by(desc(StockTransactionDocument.created_at))
+        .all()
+    )
+    return {"documents": [_serialize_stock_transaction_document(d) for d in docs], "total": len(docs)}
+
+
+@router.post("/transactions/{transaction_id}/documents")
+async def upload_stock_transaction_document(
+    transaction_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """上传出入库单据照片（线下单据拍照）。单张上传，最多 10 张。"""
+    _ensure_not_surveyor(current_user)
+
+    tx = db.query(StockTransaction).filter(StockTransaction.id == transaction_id).first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="出入库单不存在")
+    _ensure_can_manage_transaction_docs(current_user, tx)
+
+    existing_count = (
+        db.query(func.count(StockTransactionDocument.id))
+        .filter(StockTransactionDocument.transaction_id == transaction_id)
+        .scalar()
+        or 0
+    )
+    if int(existing_count) >= MAX_STOCK_TRANSACTION_DOCUMENTS:
+        raise HTTPException(status_code=400, detail=f"单据照片已达到上限（{MAX_STOCK_TRANSACTION_DOCUMENTS}张）")
+
+    filename = (file.filename or "").strip()
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_STOCK_DOCUMENT_EXTS:
+        raise HTTPException(status_code=400, detail="仅支持 jpg/jpeg/png 图片")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="仅支持图片文件")
+
+    stored_path = await save_uploaded_file(file, category="stock_documents", sub_folder=transaction_id)
+
+    # 校验图片可完整解码（线下单据照片允许留白，不做“底部空白”启发式拦截）
+    try:
+        validate_image_on_disk(stored_path, detect_blank_bottom=False)
+    except ImageValidationError as e:
+        try:
+            if stored_path and os.path.exists(stored_path):
+                os.remove(stored_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 尺寸限制：默认 10MB（沿用系统配置）
+    try:
+        max_bytes = int(getattr(settings, "MAX_FILE_SIZE", 10 * 1024 * 1024) or 10 * 1024 * 1024)
+    except Exception:
+        max_bytes = 10 * 1024 * 1024
+    file_size = None
+    try:
+        if stored_path and os.path.exists(stored_path):
+            file_size = int(os.path.getsize(stored_path))
+    except Exception:
+        file_size = None
+    if file_size is not None and file_size > max_bytes:
+        try:
+            if stored_path and os.path.exists(stored_path):
+                os.remove(stored_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=f"图片大小超过限制（{max_bytes // (1024 * 1024)}MB）")
+
+    doc = StockTransactionDocument(
+        id=uuid.uuid4().hex,
+        transaction_id=transaction_id,
+        original_name=filename or None,
+        file_path=stored_path,
+        file_size=file_size,
+        mime_type=file.content_type,
+        uploaded_by=current_user.id,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _serialize_stock_transaction_document(doc)
+
+
+@router.delete("/transactions/{transaction_id}/documents/{document_id}")
+async def delete_stock_transaction_document(
+    transaction_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除出入库单据照片。"""
+    _ensure_not_surveyor(current_user)
+
+    tx = db.query(StockTransaction).filter(StockTransaction.id == transaction_id).first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="出入库单不存在")
+    _ensure_can_manage_transaction_docs(current_user, tx)
+
+    doc = (
+        db.query(StockTransactionDocument)
+        .filter(
+            StockTransactionDocument.id == document_id,
+            StockTransactionDocument.transaction_id == transaction_id,
+        )
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="单据照片不存在")
+
+    file_path = doc.file_path
+    db.delete(doc)
+    db.commit()
+
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+    return {"success": True}
 
 # ===== 仓库管理 =====
 
@@ -2083,6 +2478,13 @@ async def import_sn_batch(
     from datetime import datetime
     
     _ensure_stock_operator(current_user)
+
+    offline_document_id = None
+    if isinstance(file_data, dict):
+        offline_document_id = file_data.get("offline_document_id")
+    offline_doc = _get_offline_document_for_use(
+        db, current_user=current_user, offline_document_id=offline_document_id
+    )
     
     try:
         # 解析上传的文件数据
@@ -2263,6 +2665,7 @@ async def import_sn_batch(
                 document_number=document_number,
                 total_quantity=total_import_quantity,
                 notes=f"SN批量导入 - {file_name}",
+                offline_document_id=offline_doc.id if offline_doc else None,
             )
             db.add(stock_in_trans)
 
@@ -4653,6 +5056,8 @@ async def manual_stock_out(
     aux_items = payload.get("aux_items") if isinstance(payload, dict) else []
     issued_to = payload.get("issued_to") if isinstance(payload, dict) else None
     notes = (payload.get("notes") or "").strip() if isinstance(payload, dict) else ""
+    offline_document_id = payload.get("offline_document_id") if isinstance(payload, dict) else None
+    offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
 
     try:
         warehouse_id = int(warehouse_id)
@@ -4745,6 +5150,7 @@ async def manual_stock_out(
         warehouse_id=warehouse_id,
         operator_id=current_user.id,
         issued_to=issued_to,
+        offline_document_id=offline_doc.id if offline_doc else None,
         scan_location=loc,
         document_number=doc_no,
         total_quantity=sum(int(v) for v in requirements.values()),
@@ -4925,6 +5331,8 @@ async def create_return_request(
     return_warehouse_id = payload.get("return_warehouse_id") if isinstance(payload, dict) else None
     main_sns = payload.get("main_sns") if isinstance(payload, dict) else []
     aux_items = payload.get("aux_items") if isinstance(payload, dict) else []
+    offline_document_id = payload.get("offline_document_id") if isinstance(payload, dict) else None
+    offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
 
     if not out_id:
         raise HTTPException(status_code=400, detail="缺少 out_transaction_id")
@@ -5012,6 +5420,7 @@ async def create_return_request(
         transaction_type=TransactionTypeEnum.RETURN,
         warehouse_id=return_wh.id,
         operator_id=current_user.id,
+        offline_document_id=offline_doc.id if offline_doc else None,
         related_transaction_id=out_trans.id,
         document_number=ret_doc,
         total_quantity=0,

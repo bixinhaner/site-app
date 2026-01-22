@@ -12,6 +12,24 @@ export const stockApi = {
   // 创建入库单
   createStockIn: (data) => 
     request.post('/api/stock/stock-in', data),
+
+  // ===== 线下单据（可复用）=====
+  createOfflineDocument: (data) =>
+    request.post('/api/stock/offline-documents', data),
+
+  getOfflineDocument: (documentId) =>
+    request.get(`/api/stock/offline-documents/${documentId}`),
+
+  uploadOfflineDocumentPhoto: (documentId, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return request.post(`/api/stock/offline-documents/${documentId}/photos`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  deleteOfflineDocumentPhoto: (documentId, photoId) =>
+    request.delete(`/api/stock/offline-documents/${documentId}/photos/${photoId}`),
   
   // 扫码出库
   scanCheckout: (data) => 

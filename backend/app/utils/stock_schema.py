@@ -81,6 +81,7 @@ def ensure_stock_schema(engine: Engine) -> None:
         "stock_transactions": {
             "related_transaction_id": "related_transaction_id VARCHAR(36)",
             "issued_to": "issued_to INTEGER",
+            "offline_document_id": "offline_document_id VARCHAR(32)",
         },
         "stock_transaction_items": {
             "vendor": "vendor VARCHAR(100)",

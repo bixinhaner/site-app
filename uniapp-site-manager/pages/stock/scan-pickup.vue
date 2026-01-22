@@ -128,6 +128,11 @@
               <text class="item-code">{{ $t('stock.codeLabel') }}: {{ item.equipment_code }}</text>
             </view>
           </view>
+
+          <!-- 线下单据（可选） -->
+          <view class="offline-documents">
+            <OfflineDocumentSection v-model="checkoutOfflineDocumentId" :disabled="confirming" />
+          </view>
           
           <!-- 确认按钮 -->
           <view class="action-buttons">
@@ -543,6 +548,10 @@
                   <text class="item-code">{{ $t('stock.codeLabel') }}: {{ item.equipment_code }}</text>
                 </view>
               </view>
+
+              <view class="return-documents">
+                <OfflineDocumentSection v-model="returnOfflineDocumentId" :disabled="returnActionLoading" />
+              </view>
             </view>
 
             <view v-else-if="returnPreviewAction === 'error'" class="return-hint-card">
@@ -627,6 +636,7 @@ export default {
       pickupHistory: [],
       loading: false,
       confirming: false,
+      checkoutOfflineDocumentId: null,
       userLocation: null,
       // My Pickups 分页/搜索/分组
       pickupTab: 'picked',
@@ -653,6 +663,7 @@ export default {
       returnActionLoading: false,
       returnSelectedWarehouseIndex: 0,
       cancelReason: '',
+      returnOfflineDocumentId: null,
 
       // 设备详情 Bottom Sheet
       deviceDetailVisible: false,
@@ -1174,7 +1185,8 @@ export default {
           parsed_barcode: this.parsedBarcode, // 传递解析后的数据
           package_id: this.selectedPackage.id,
           warehouse_id: warehouseId,
-          gps_location: this.userLocation
+          gps_location: this.userLocation,
+          offline_document_id: this.checkoutOfflineDocumentId || undefined,
         }
         
         console.log('🚀 [confirmPickup] 开始确认领料')
@@ -1297,6 +1309,7 @@ export default {
       this.scannedEquipmentInstance = null
       this.availablePackages = []
       this.selectedPackageIndex = 0
+      this.checkoutOfflineDocumentId = null
       if (collapse) this.scanSectionCollapsed = true
     },
     
@@ -1538,6 +1551,7 @@ export default {
       this.returnPreviewData = {}
       this.cancelReason = ''
       this.returnSelectedWarehouseIndex = 0
+      this.returnOfflineDocumentId = null
 
       if (!this.warehouses || this.warehouses.length === 0) {
         await this.loadWarehouses()
@@ -1552,6 +1566,7 @@ export default {
       this.returnPreviewData = {}
       this.cancelReason = ''
       this.returnSelectedWarehouseIndex = 0
+      this.returnOfflineDocumentId = null
       this.returnPreviewLoading = false
       this.returnActionLoading = false
     },
@@ -1681,7 +1696,8 @@ export default {
               barcode,
               parsed_barcode: parsed && parsed.success ? parsed : null,
               return_warehouse_id: this.selectedReturnWarehouse.id,
-              gps_location: this.userLocation
+              gps_location: this.userLocation,
+              offline_document_id: this.returnOfflineDocumentId || undefined,
             },
             success: resolve,
             fail: reject
@@ -1694,6 +1710,7 @@ export default {
         }
 
 	        const data = res.data || {}
+
 	        uni.showToast({ title: this.$t('stock.returnRequestSuccessTitle'), icon: 'success' })
 
 	        // 回显到弹窗摘要（避免分页/分组导致列表中找不到该条记录）
@@ -2173,6 +2190,10 @@ export default {
       }
     }
   }
+}
+
+.offline-documents {
+  margin-top: 24rpx;
 }
 
 .action-buttons {
@@ -2856,6 +2877,10 @@ export default {
   color: var(--text-secondary);
   font-size: 26rpx;
   margin-bottom: 8rpx;
+}
+
+.return-documents {
+  margin-top: 14rpx;
 }
 
 .bind-list { margin-top: 12rpx; }

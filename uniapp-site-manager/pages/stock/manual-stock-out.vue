@@ -148,6 +148,16 @@
 				</view>
 			</view>
 
+			<view class="section u-card">
+				<view class="u-card-header">
+					<text class="u-card-title">{{ $t('stock.offlineDocTitle') }}</text>
+					<text class="hint">{{ $t('common.optional') }}</text>
+				</view>
+				<view class="u-card-content">
+					<OfflineDocumentSection v-model="offlineDocumentId" :disabled="submitting" :showHeader="false" />
+				</view>
+			</view>
+
 			<view class="bottom-spacer" />
 		</scroll-view>
 
@@ -285,6 +295,7 @@
 
 	const issuedToUser = ref(null)
 	const notes = ref('')
+	const offlineDocumentId = ref(null)
 
 	const snInput = ref('')
 	const snList = ref([])
@@ -594,6 +605,7 @@
 							equipment_id: Number(a.equipment_id),
 							quantity: Number(a.quantity || 0),
 						})),
+						offline_document_id: offlineDocumentId.value || undefined,
 						notes: String(notes.value || '').trim(),
 					}
 

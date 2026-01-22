@@ -12,6 +12,71 @@
       </el-radio-group>
     </el-card>
 
+    <!-- 线下单据（可选） -->
+    <el-card class="offline-document-card">
+      <template #header>
+        <div class="upload-header">
+          <span>线下单据（可选）</span>
+          <el-button
+            size="small"
+            type="danger"
+            plain
+            :disabled="!hasOfflineDocAny || offlineDocBusy"
+            @click="onClearOfflineDoc"
+          >
+            清空并删除
+          </el-button>
+        </div>
+      </template>
+
+      <el-form label-width="120px">
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="票据备注">
+              <el-input
+                v-model="offlineDocRemark"
+                placeholder="可选（票据创建后不可修改，需清空重建）"
+                :disabled="Boolean(offlineDocId)"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="状态">
+              <div class="offline-doc-status">
+                <el-tag v-if="offlineDocFileList.length === 0" size="small" type="info">未选择图片</el-tag>
+                <template v-else>
+                  <el-tag v-if="offlineDocPendingCount > 0" size="small" type="warning">待上传 {{ offlineDocPendingCount }}</el-tag>
+                  <el-tag v-if="offlineDocUploadedCount > 0" size="small" type="success">已上传 {{ offlineDocUploadedCount }}</el-tag>
+                </template>
+                <el-tag v-if="offlineDocId" size="small" type="info" style="margin-left: 8px;">已创建票据</el-tag>
+              </div>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item label="票据照片">
+          <div class="offline-doc-uploader">
+            <el-upload
+              v-model:file-list="offlineDocFileList"
+              list-type="picture-card"
+              multiple
+              :limit="MAX_OFFLINE_DOC_PHOTOS"
+              accept="image/*"
+              :auto-upload="false"
+              :disabled="offlineDocBusy || submitting || importing"
+              :on-change="onOfflineDocFileChange"
+              :on-remove="onOfflineDocRemove"
+              :on-preview="onOfflineDocPreview"
+              :on-exceed="onOfflineDocExceed"
+            >
+              <el-icon><Plus /></el-icon>
+            </el-upload>
+            <div class="offline-doc-tip">最多10张，提交入库/导入时会自动上传并绑定到本次入库记录</div>
+          </div>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <!-- 手动入库表单 -->
     <div v-if="stockInMethod === 'manual'" class="manual-stock-in">
       <!-- 入库单据表单 -->
@@ -117,7 +182,7 @@
       </div>
       
       <div style="margin-top: 20px; text-align: center;">
-        <el-button @click="resetForm">重置</el-button>
+        <el-button @click="onResetManual">重置</el-button>
         <el-button type="primary" @click="submitStockIn" :loading="submitting" :disabled="stockInForm.items.length === 0">
           提交入库
         </el-button>
@@ -263,7 +328,7 @@
 
       <!-- 导入按钮 -->
       <div style="margin-top: 20px; text-align: center;">
-        <el-button @click="resetImport">重置</el-button>
+        <el-button @click="onResetImport">重置</el-button>
         <el-button type="primary" @click="submitImport" :loading="importing" :disabled="!canImport">
           开始导入
         </el-button>
@@ -326,6 +391,10 @@
       </el-card>
     </div>
   </div>
+
+  <el-dialog v-model="offlineDocPreviewVisible" title="预览" width="70%">
+    <img v-if="offlineDocPreviewUrl" :src="offlineDocPreviewUrl" style="width: 100%;" />
+  </el-dialog>
 </template>
 
 <script setup>
@@ -335,9 +404,13 @@ import { Plus, Refresh, Search, Warning, Download, UploadFilled } from '@element
 import { stockApi } from '../../api/stock'
 import { equipmentApi } from '../../api/equipment'
 import { useUserStore } from '../../stores/user'
+import { resolveImageUrl } from '@/utils/imageLoader'
 import * as XLSX from 'xlsx'
 
 const userStore = useUserStore()
+
+const MAX_OFFLINE_DOC_PHOTOS = 10
+const MAX_OFFLINE_DOC_MB = 10
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -384,6 +457,27 @@ const stockInForm = ref({
   notes: '',
   items: []
 })
+
+// ===== 线下单据（可选）=====
+const offlineDocRemark = ref('')
+const offlineDocId = ref(null)
+const offlineDocFileList = ref([])
+const offlineDocBusy = ref(false)
+const offlineDocPreviewVisible = ref(false)
+const offlineDocPreviewUrl = ref('')
+const previousStockInMethod = ref('manual')
+
+const hasOfflineDocAny = computed(() =>
+  offlineDocFileList.value.length > 0 || Boolean(offlineDocId.value)
+)
+
+const offlineDocUploadedCount = computed(() =>
+  offlineDocFileList.value.filter((f) => Boolean(f?.serverPhotoId)).length
+)
+
+const offlineDocPendingCount = computed(() =>
+  offlineDocFileList.value.filter((f) => !f?.serverPhotoId).length
+)
 
 const filteredInventoryList = computed(() => {
   let list = inventoryList.value
@@ -494,6 +588,197 @@ const calculateTotal = () => {
   // 触发计算，computed会自动更新
 }
 
+let creatingOfflineDocPromise = null
+
+const isBlobUrl = (url) => /^blob:/i.test(String(url || ''))
+
+const safeRevokeBlobUrl = (url) => {
+  if (!isBlobUrl(url)) return
+  try {
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    // ignore
+  }
+}
+
+const ensureOfflineDocId = async () => {
+  if (offlineDocId.value) return offlineDocId.value
+  if (creatingOfflineDocPromise) return creatingOfflineDocPromise
+  creatingOfflineDocPromise = (async () => {
+    const res = await stockApi.createOfflineDocument({ remark: offlineDocRemark.value || '' })
+    const id = res?.id
+    if (!id) throw new Error('create_offline_document_failed')
+    offlineDocId.value = id
+    return id
+  })()
+  try {
+    return await creatingOfflineDocPromise
+  } finally {
+    creatingOfflineDocPromise = null
+  }
+}
+
+const ensureOfflineDocUploaded = async () => {
+  if (offlineDocFileList.value.length === 0) return null
+
+  offlineDocBusy.value = true
+  try {
+    const docId = await ensureOfflineDocId()
+
+    for (const f of offlineDocFileList.value) {
+      if (f?.serverPhotoId) continue
+      const raw = f?.raw
+      if (!raw) continue
+
+      const res = await stockApi.uploadOfflineDocumentPhoto(docId, raw)
+      if (!res?.id) throw new Error('upload_offline_document_photo_failed')
+
+      f.serverPhotoId = res.id
+      f.serverFilePath = res.file_path
+
+      const nextUrl = resolveImageUrl(res.file_path || '')
+      if (nextUrl) {
+        safeRevokeBlobUrl(f.url)
+        f.url = nextUrl
+      }
+      f.status = 'success'
+    }
+
+    return docId
+  } catch (e) {
+    console.error(e)
+    const detail = e?.response?.data?.detail || e?.message || '网络错误'
+    ElMessage.error(`线下单据上传失败：${detail}`)
+    throw e
+  } finally {
+    offlineDocBusy.value = false
+  }
+}
+
+const clearOfflineDocState = ({ deleteRemote } = { deleteRemote: true }) => {
+  for (const f of offlineDocFileList.value) {
+    safeRevokeBlobUrl(f?.url)
+  }
+  offlineDocFileList.value = []
+  offlineDocId.value = null
+  offlineDocRemark.value = ''
+  if (deleteRemote) {
+    // 远端删除已在上层完成
+  }
+}
+
+const deleteAllOfflineDocPhotos = async (docId) => {
+  const res = await stockApi.getOfflineDocument(docId)
+  const photos = Array.isArray(res?.photos) ? res.photos : []
+  for (const p of photos) {
+    if (!p?.id) continue
+    await stockApi.deleteOfflineDocumentPhoto(docId, p.id)
+  }
+}
+
+const confirmClearOfflineDoc = async (message) => {
+  if (!hasOfflineDocAny.value) return true
+  try {
+    await ElMessageBox.confirm(message, '提示', { type: 'warning' })
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+const clearOfflineDoc = async ({ confirmMessage, needConfirm, deleteRemote, showMessage } = {}) => {
+  const mustConfirm = needConfirm !== false
+  const shouldDeleteRemote = deleteRemote !== false
+  const shouldShowMessage = showMessage !== false
+
+  if (mustConfirm) {
+    const ok = await confirmClearOfflineDoc(confirmMessage || '清空后将删除已上传的线下单据照片，是否继续？')
+    if (!ok) return false
+  }
+
+  if (shouldDeleteRemote && offlineDocId.value) {
+    offlineDocBusy.value = true
+    try {
+      await deleteAllOfflineDocPhotos(offlineDocId.value)
+    } catch (e) {
+      console.error(e)
+      const detail = e?.response?.data?.detail || e?.message || '网络错误'
+      ElMessage.error(`清空失败：${detail}`)
+      return false
+    } finally {
+      offlineDocBusy.value = false
+    }
+  }
+
+  clearOfflineDocState({ deleteRemote: shouldDeleteRemote })
+  if (shouldShowMessage) ElMessage.success('已清空线下单据')
+  return true
+}
+
+const onClearOfflineDoc = async () => {
+  await clearOfflineDoc()
+}
+
+const onOfflineDocExceed = () => {
+  ElMessage.warning(`最多只能选择 ${MAX_OFFLINE_DOC_PHOTOS} 张图片`)
+}
+
+const onOfflineDocFileChange = (uploadFile, uploadFiles) => {
+  const raw = uploadFile?.raw
+  if (raw) {
+    const isImage = String(raw.type || '').startsWith('image/')
+    if (!isImage) {
+      ElMessage.error('仅支持图片文件')
+      offlineDocFileList.value = (uploadFiles || []).filter((f) => f?.uid !== uploadFile.uid)
+      return
+    }
+    const tooBig = Number(raw.size || 0) > MAX_OFFLINE_DOC_MB * 1024 * 1024
+    if (tooBig) {
+      ElMessage.error(`图片大小不能超过 ${MAX_OFFLINE_DOC_MB}MB`)
+      offlineDocFileList.value = (uploadFiles || []).filter((f) => f?.uid !== uploadFile.uid)
+      return
+    }
+  }
+
+  for (const f of uploadFiles || []) {
+    if (f?.raw && !f.url) {
+      try {
+        f.url = URL.createObjectURL(f.raw)
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+}
+
+const onOfflineDocRemove = async (uploadFile, uploadFiles) => {
+  safeRevokeBlobUrl(uploadFile?.url)
+
+  const docId = offlineDocId.value
+  const photoId = uploadFile?.serverPhotoId
+  if (docId && photoId) {
+    offlineDocBusy.value = true
+    try {
+      await stockApi.deleteOfflineDocumentPhoto(docId, photoId)
+      ElMessage.success('已删除票据照片')
+    } catch (e) {
+      console.error(e)
+      ElMessage.error('删除票据照片失败')
+    } finally {
+      offlineDocBusy.value = false
+    }
+  }
+
+  if ((uploadFiles || []).length === 0) {
+    offlineDocId.value = null
+  }
+}
+
+const onOfflineDocPreview = (uploadFile) => {
+  offlineDocPreviewUrl.value = uploadFile?.url || ''
+  offlineDocPreviewVisible.value = Boolean(offlineDocPreviewUrl.value)
+}
+
 const submitStockIn = async () => {
   if (stockInForm.value.items.length === 0) {
     ElMessage.warning('请至少添加一个入库明细')
@@ -527,10 +812,16 @@ const submitStockIn = async () => {
     await ElMessageBox.confirm('确认提交入库单据？', '提交确认')
     
     submitting.value = true
-    const response = await stockApi.createStockIn(stockInForm.value)
+
+    const offline_document_id = await ensureOfflineDocUploaded()
+    const payload = { ...stockInForm.value }
+    if (offline_document_id) payload.offline_document_id = offline_document_id
+
+    const response = await stockApi.createStockIn(payload)
     ElMessage.success('入库单据创建成功')
     
     resetForm()
+    clearOfflineDocState({ deleteRemote: false })
     loadInventoryList()
   } catch (error) {
     if (error === 'cancel') return
@@ -551,6 +842,17 @@ const resetForm = () => {
   calculateTotal()
 }
 
+const onResetManual = async () => {
+  const cleared = await clearOfflineDoc({
+    confirmMessage: '重置将清空线下单据并删除已上传照片，是否继续？',
+    needConfirm: true,
+    deleteRemote: true,
+    showMessage: false,
+  })
+  if (!cleared) return
+  resetForm()
+}
+
 // 批量导入相关方法
 const canImport = computed(() => {
   if (!importForm.value.warehouse_id || previewData.value.length === 0) return false
@@ -560,8 +862,23 @@ const canImport = computed(() => {
   return Boolean(importForm.value.equipment_type_id)
 })
 
-const handleMethodChange = () => {
-  // 切换方式时重置状态
+const handleMethodChange = async (nextVal) => {
+  const next = String(nextVal || '')
+  if (next === previousStockInMethod.value) return
+  if (hasOfflineDocAny.value) {
+    const cleared = await clearOfflineDoc({
+      confirmMessage: '切换入库方式将清空线下单据并删除已上传照片，是否继续？',
+      needConfirm: true,
+      deleteRemote: true,
+      showMessage: false,
+    })
+    if (!cleared) {
+      stockInMethod.value = previousStockInMethod.value
+      return
+    }
+  }
+  previousStockInMethod.value = next
+  // 切换方式时重置批量导入状态
   resetImport()
 }
 
@@ -953,10 +1270,12 @@ const submitImport = async () => {
         return
       }
 
+      const offline_document_id = await ensureOfflineDocUploaded()
       const res = await stockApi.createStockIn({
         warehouse_id: importForm.value.warehouse_id,
         notes,
-        items
+        items,
+        ...(offline_document_id ? { offline_document_id } : {}),
       })
 
       importResult.value = {
@@ -968,6 +1287,7 @@ const submitImport = async () => {
       }
 
       ElMessage.success(`导入完成！入库单据号：${res.document_number}`)
+      clearOfflineDocState({ deleteRemote: false })
       await loadInventoryList()
       return
     }
@@ -1013,8 +1333,11 @@ const submitImport = async () => {
       file_content: fileContent,
       file_name: currentFile.value.name,
       equipment_type_id: importForm.value.equipment_type_id,
-      warehouse_id: importForm.value.warehouse_id
+      warehouse_id: importForm.value.warehouse_id,
     }
+
+    const offline_document_id = await ensureOfflineDocUploaded()
+    if (offline_document_id) importData.offline_document_id = offline_document_id
     
     const response = await stockApi.importSN(importData)
     importResult.value = { ...response, import_type: 'main_device' }
@@ -1023,6 +1346,7 @@ const submitImport = async () => {
     
     // 刷新库存列表
     if (response.success_count > 0) {
+      clearOfflineDocState({ deleteRemote: false })
       await loadInventoryList()
     }
     
@@ -1051,6 +1375,17 @@ const resetImport = (options = {}) => {
   if (uploadRef.value) {
     uploadRef.value.clearFiles()
   }
+}
+
+const onResetImport = async () => {
+  const cleared = await clearOfflineDoc({
+    confirmMessage: '重置将清空线下单据并删除已上传照片，是否继续？',
+    needConfirm: true,
+    deleteRemote: true,
+    showMessage: false,
+  })
+  if (!cleared) return
+  resetImport()
 }
 
 const viewImportDetails = () => {
@@ -1093,6 +1428,8 @@ onMounted(() => {
   loadInventoryList()
   loadOptions()
   loadBatchImportOptions()
+
+  previousStockInMethod.value = stockInMethod.value
 })
 </script>
 
@@ -1142,6 +1479,23 @@ h3 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.offline-doc-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.offline-doc-uploader {
+  width: 100%;
+}
+
+.offline-doc-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
 }
 
 .upload-demo {
