@@ -5530,6 +5530,1699 @@ async def get_my_stock_out_detail(
     return payload
 
 
+@router.get("/stock-outs/{out_transaction_id}")
+async def get_stock_out_detail(
+    out_transaction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取出库单详情（管理员/仓库侧）。"""
+    _ensure_stock_operator(current_user)
+
+    out_id = (out_transaction_id or "").strip()
+    if not out_id:
+        raise HTTPException(status_code=400, detail="缺少 out_transaction_id")
+
+    out_trans = (
+        db.query(StockTransaction)
+        .options(
+            joinedload(StockTransaction.warehouse),
+            joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment),
+            joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment_instance),
+        )
+        .filter(StockTransaction.id == out_id, StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT)
+        .first()
+    )
+    if not out_trans:
+        raise HTTPException(status_code=404, detail="出库单不存在")
+
+    has_main = False
+    has_aux = False
+    for it in out_trans.transaction_items or []:
+        eq = it.equipment
+        if not eq:
+            continue
+        cat = _enum_value(eq.category)
+        if cat == EquipmentCategoryEnum.MAIN_DEVICE.value:
+            has_main = True
+        elif cat == EquipmentCategoryEnum.AUXILIARY.value:
+            has_aux = True
+
+    payload = _serialize_stock_out_for_return(db, out_trans)
+    payload["source_tag"] = _stock_out_source_tag(out_trans)
+    payload["method_tag"] = _stock_out_method_tag(has_main=has_main, has_aux=has_aux)
+    payload["notes"] = out_trans.notes
+    payload["issued_to"] = out_trans.issued_to
+    payload["operator_id"] = out_trans.operator_id
+    return payload
+
+
+def _list_issued_items_for_user(
+    db: Session,
+    *,
+    receiver_user_id: int,
+    item_type: str = "main",
+    status_group: Optional[str] = None,
+    q: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    paginate: bool = True,
+) -> dict:
+    """按领取人/扫码领取人返回“主设备/辅料”扁平列表（管理员可查看指定人员）。"""
+    t = str(item_type or "main").strip().lower()
+    if t not in {"main", "aux"}:
+        raise HTTPException(status_code=400, detail="item_type 参数不合法")
+
+    allowed_groups = {"picked", "installed", "pending_receive", "returned"}
+    g = str(status_group or "").strip()
+    if g and g not in allowed_groups:
+        raise HTTPException(status_code=400, detail="status_group 参数不合法")
+
+    try:
+        page = int(page or 1)
+    except Exception:
+        page = 1
+    page = max(page, 1)
+
+    try:
+        page_size = int(page_size or 20)
+    except Exception:
+        page_size = 20
+    page_size = max(1, min(page_size, 100))
+
+    search = (q or "").strip()
+    like_contains = f"%{search}%"
+    like_prefix = f"{search}%"
+
+    group_counts = {"picked": 0, "installed": 0, "pending_receive": 0, "returned": 0}
+
+    # 归属规则：
+    # 1) issued_to 有值：归属到 issued_to；
+    # 2) issued_to 为空：归属到“该出库单最新一条 pickup_record”的 picker_id。
+    assigned_out_ids: set = set()
+
+    direct_out_rows = (
+        db.query(StockTransaction.id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransaction.issued_to == receiver_user_id,
+        )
+        .all()
+    )
+    for row in direct_out_rows:
+        if row and row[0]:
+            assigned_out_ids.add(str(row[0]))
+
+    pick_latest_subq = (
+        db.query(
+            PickupRecord.transaction_id.label("out_id"),
+            func.max(PickupRecord.pickup_time).label("max_time"),
+        )
+        .join(StockTransaction, StockTransaction.id == PickupRecord.transaction_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransaction.issued_to.is_(None),
+        )
+        .group_by(PickupRecord.transaction_id)
+        .subquery()
+    )
+    pick_out_rows = (
+        db.query(StockTransaction.id.label("out_id"))
+        .join(pick_latest_subq, pick_latest_subq.c.out_id == StockTransaction.id)
+        .join(
+            PickupRecord,
+            and_(
+                PickupRecord.transaction_id == pick_latest_subq.c.out_id,
+                PickupRecord.pickup_time == pick_latest_subq.c.max_time,
+            ),
+        )
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransaction.issued_to.is_(None),
+            PickupRecord.picker_id == receiver_user_id,
+        )
+        .all()
+    )
+    for r in pick_out_rows:
+        out_id = str(getattr(r, "out_id", "") or "").strip()
+        if out_id:
+            assigned_out_ids.add(out_id)
+
+    if not assigned_out_ids:
+        return {
+            "items": [],
+            "page": page,
+            "page_size": page_size,
+            "total": 0,
+            "has_more": False,
+            "group_counts": group_counts,
+        }
+
+    if t == "main":
+        query = (
+            db.query(
+                StockTransaction.id.label("out_id"),
+                StockTransaction.document_number.label("out_document_number"),
+                StockTransaction.operation_time.label("operation_time"),
+                Warehouse.id.label("warehouse_id"),
+                Warehouse.warehouse_name.label("warehouse_name"),
+                StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+                EquipmentInstance.serial_number.label("serial_number"),
+                Equipment.id.label("equipment_id"),
+                Equipment.equipment_name.label("equipment_name"),
+                Equipment.equipment_code.label("equipment_code"),
+            )
+            .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+            .join(Equipment, Equipment.id == StockTransactionItem.equipment_id)
+            .outerjoin(EquipmentInstance, EquipmentInstance.id == StockTransactionItem.equipment_instance_id)
+            .outerjoin(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+                StockTransaction.id.in_(list(assigned_out_ids)),
+                Equipment.category == EquipmentCategoryEnum.MAIN_DEVICE,
+            )
+        )
+
+        if search:
+            pickup_search_exists = db.query(PickupRecord.id).filter(
+                PickupRecord.transaction_id == StockTransaction.id,
+                or_(
+                    PickupRecord.serial_number == search,
+                    PickupRecord.serial_number.like(like_prefix),
+                    PickupRecord.main_device_barcode == search,
+                    PickupRecord.main_device_barcode.like(like_prefix),
+                ),
+            ).exists()
+            query = query.filter(
+                or_(
+                    StockTransaction.document_number.like(like_contains),
+                    EquipmentInstance.serial_number == search,
+                    EquipmentInstance.serial_number.like(like_prefix),
+                    Equipment.equipment_name.like(like_contains),
+                    Equipment.equipment_code.like(like_contains),
+                    pickup_search_exists,
+                )
+            )
+
+        rows = query.order_by(desc(StockTransaction.operation_time)).all()
+
+        out_ids = list({str(r.out_id) for r in rows if r and r.out_id})
+        pickup_map: Dict[str, dict] = {}
+        if out_ids:
+            pick_any_latest_subq = (
+                db.query(
+                    PickupRecord.transaction_id.label("out_id"),
+                    func.max(PickupRecord.pickup_time).label("max_time"),
+                )
+                .filter(PickupRecord.transaction_id.in_(out_ids))
+                .group_by(PickupRecord.transaction_id)
+                .subquery()
+            )
+            pick_rows = (
+                db.query(
+                    PickupRecord.transaction_id,
+                    PickupRecord.serial_number,
+                    PickupRecord.main_device_barcode,
+                )
+                .join(
+                    pick_any_latest_subq,
+                    and_(
+                        PickupRecord.transaction_id == pick_any_latest_subq.c.out_id,
+                        PickupRecord.pickup_time == pick_any_latest_subq.c.max_time,
+                    ),
+                )
+                .all()
+            )
+            for pr in pick_rows:
+                key = str(pr.transaction_id)
+                if key not in pickup_map:
+                    pickup_map[key] = {
+                        "serial_number": str(pr.serial_number).strip() if pr.serial_number else None,
+                        "main_device_barcode": str(pr.main_device_barcode).strip() if pr.main_device_barcode else None,
+                    }
+
+        sns = []
+        for r in rows:
+            sn_value = (r.serial_number or "").strip() if r.serial_number else ""
+            if not sn_value:
+                pick = pickup_map.get(str(r.out_id)) or {}
+                sn_value = str(pick.get("serial_number") or "").strip()
+                if not sn_value:
+                    sn_value = str(pick.get("main_device_barcode") or "").strip()
+            if sn_value:
+                sns.append(sn_value)
+        sns = list({s for s in sns if s})
+
+        lock_status = {
+            InspectionStatusEnum.SUBMITTED,
+            InspectionStatusEnum.UNDER_REVIEW,
+            InspectionStatusEnum.APPROVED,
+            InspectionStatusEnum.COMPLETED,
+        }
+        device_level_cond = and_(
+            InspectionCheckItem.sector_id.isnot(None),
+            InspectionCheckItem.band.isnot(None),
+            or_(
+                InspectionCheckItem.cell_id.is_(None),
+                InspectionCheckItem.cell_id
+                == (InspectionCheckItem.sector_id + "_" + InspectionCheckItem.band),
+            ),
+        )
+
+        installed_locked_sns: set = set()
+        if sns:
+            installed_locked_rows = (
+                db.query(InspectionCheckItem.equipment_sn)
+                .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+                .filter(
+                    InspectionCheckItem.equipment_sn.in_(sns),
+                    device_level_cond,
+                    SiteInspection.status.in_(list(lock_status)),
+                )
+                .distinct()
+                .all()
+            )
+            installed_locked_sns = {row[0] for row in installed_locked_rows if row and row[0]}
+
+        out_ids = list({str(r.out_id) for r in rows if r and r.out_id})
+        instance_ids = list({str(r.equipment_instance_id) for r in rows if r and r.equipment_instance_id})
+
+        return_map: Dict[tuple, dict] = {}
+        if out_ids and instance_ids:
+            ret_rows = (
+                db.query(
+                    StockTransaction.related_transaction_id.label("out_id"),
+                    StockTransaction.id.label("return_id"),
+                    StockTransaction.document_number.label("return_document_number"),
+                    StockTransaction.approval_status.label("return_status"),
+                    StockTransaction.created_at.label("created_at"),
+                    StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+                    StockTransactionItem.quantity.label("quantity"),
+                    StockTransactionItem.received_qty.label("received_qty"),
+                )
+                .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+                .filter(
+                    StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                    StockTransaction.related_transaction_id.in_(out_ids),
+                    StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received"]),
+                    StockTransactionItem.equipment_instance_id.in_(instance_ids),
+                )
+                .order_by(desc(StockTransaction.created_at))
+                .all()
+            )
+            for rr in ret_rows:
+                key = (str(rr.out_id), str(rr.equipment_instance_id))
+                if key in return_map:
+                    continue
+                qty = int(rr.quantity or 0)
+                received = int(rr.received_qty or 0)
+                status = str(rr.return_status or "")
+                eff_received = qty if status == "received" else received
+                return_map[key] = {
+                    "return_transaction_id": str(rr.return_id),
+                    "return_document_number": rr.return_document_number,
+                    "return_status": status,
+                    "quantity": qty,
+                    "received_qty": eff_received,
+                }
+
+        out_meta_map: Dict[str, dict] = {}
+        if out_ids:
+            has_map = _has_main_aux_map(db, out_ids)
+            out_rows = (
+                db.query(StockTransaction)
+                .options(joinedload(StockTransaction.operator))
+                .filter(StockTransaction.id.in_(out_ids))
+                .all()
+            )
+            for ot in out_rows:
+                key = str(ot.id)
+                flags = has_map.get(key, {"has_main": False, "has_aux": False})
+                operator_name = None
+                if ot.operator:
+                    operator_name = ot.operator.full_name or ot.operator.username
+                out_meta_map[key] = {
+                    "source_tag": _stock_out_source_tag(ot),
+                    "method_tag": _stock_out_method_tag(
+                        has_main=bool(flags["has_main"]), has_aux=bool(flags["has_aux"])
+                    ),
+                    "operator_id": ot.operator_id,
+                    "operator_name": operator_name,
+                }
+
+        items_all = []
+        for r in rows:
+            out_id = str(r.out_id)
+            sn = (r.serial_number or "").strip() if r.serial_number else ""
+            pick = pickup_map.get(out_id) or {}
+            pick_sn = str(pick.get("serial_number") or "").strip()
+            pick_barcode = str(pick.get("main_device_barcode") or "").strip()
+            main_device_barcode = pick_barcode or None
+            if not sn and pick_sn:
+                sn = pick_sn
+            if not sn and pick_barcode:
+                sn = pick_barcode
+            inst_id = str(r.equipment_instance_id or "")
+
+            ret = return_map.get((out_id, inst_id))
+            status_value = "picked"
+            return_status = None
+            return_tx_id = None
+            return_doc = None
+            is_returned = False
+            if ret:
+                return_status = ret.get("return_status")
+                return_tx_id = ret.get("return_transaction_id")
+                return_doc = ret.get("return_document_number")
+                qty = int(ret.get("quantity") or 0)
+                received_qty = int(ret.get("received_qty") or 0)
+                if return_status == "received" or (qty > 0 and received_qty >= qty):
+                    status_value = "returned"
+                    is_returned = True
+                else:
+                    status_value = "pending_receive"
+            else:
+                if sn and sn in installed_locked_sns:
+                    status_value = "installed"
+
+            group_counts[status_value] = int(group_counts.get(status_value, 0) or 0) + 1
+
+            meta = out_meta_map.get(out_id, {})
+            items_all.append(
+                {
+                    "item_type": "main",
+                    "status_group": status_value,
+                    "source_tag": meta.get("source_tag") or "其他",
+                    "method_tag": meta.get("method_tag") or "未知",
+                    "out_transaction_id": out_id,
+                    "out_document_number": r.out_document_number,
+                    "warehouse_id": r.warehouse_id,
+                    "warehouse_name": r.warehouse_name,
+                    "operation_time": to_utc_iso(r.operation_time) if r.operation_time else None,
+                    "operator_id": meta.get("operator_id"),
+                    "operator_name": meta.get("operator_name"),
+                    "equipment_instance_id": r.equipment_instance_id,
+                    "serial_number": sn,
+                    "main_device_barcode": main_device_barcode,
+                    "equipment_id": r.equipment_id,
+                    "equipment_name": r.equipment_name,
+                    "equipment_code": r.equipment_code,
+                    "return_status": return_status,
+                    "return_transaction_id": return_tx_id,
+                    "return_document_number": return_doc,
+                    "is_returned": is_returned,
+                }
+            )
+
+        if g:
+            items_all = [it for it in items_all if it.get("status_group") == g]
+
+        items_all.sort(key=lambda x: x.get("operation_time") or "", reverse=True)
+        total = len(items_all)
+
+        if not paginate:
+            return {
+                "items": items_all,
+                "page": 1,
+                "page_size": total,
+                "total": total,
+                "has_more": False,
+                "group_counts": group_counts,
+            }
+
+        offset = (page - 1) * page_size
+        items_page = items_all[offset : offset + page_size]
+        has_more = offset + len(items_page) < total
+
+        return {
+            "items": items_page,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "has_more": has_more,
+            "group_counts": group_counts,
+        }
+
+    # ===== aux =====
+    group_counts["installed"] = 0  # 辅料不展示“已安装”
+
+    query = (
+        db.query(
+            StockTransaction.id.label("out_id"),
+            StockTransaction.document_number.label("out_document_number"),
+            StockTransaction.operation_time.label("operation_time"),
+            Warehouse.id.label("warehouse_id"),
+            Warehouse.warehouse_name.label("warehouse_name"),
+            Equipment.id.label("equipment_id"),
+            Equipment.equipment_name.label("equipment_name"),
+            Equipment.equipment_code.label("equipment_code"),
+            Equipment.unit.label("unit"),
+            func.sum(StockTransactionItem.quantity).label("out_qty"),
+        )
+        .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+        .join(Equipment, Equipment.id == StockTransactionItem.equipment_id)
+        .outerjoin(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransaction.id.in_(list(assigned_out_ids)),
+            Equipment.category == EquipmentCategoryEnum.AUXILIARY,
+        )
+        .group_by(
+            StockTransaction.id,
+            StockTransaction.document_number,
+            StockTransaction.operation_time,
+            Warehouse.id,
+            Warehouse.warehouse_name,
+            Equipment.id,
+            Equipment.equipment_name,
+            Equipment.equipment_code,
+            Equipment.unit,
+        )
+    )
+
+    if search:
+        query = query.filter(
+            or_(
+                StockTransaction.document_number.like(like_contains),
+                Equipment.equipment_name.like(like_contains),
+                Equipment.equipment_code.like(like_contains),
+            )
+        )
+
+    rows = query.order_by(desc(StockTransaction.operation_time)).all()
+    out_ids = list({str(r.out_id) for r in rows if r and r.out_id})
+
+    out_meta_map: Dict[str, dict] = {}
+    if out_ids:
+        has_map = _has_main_aux_map(db, out_ids)
+        out_rows = (
+            db.query(StockTransaction)
+            .options(joinedload(StockTransaction.operator))
+            .filter(StockTransaction.id.in_(out_ids))
+            .all()
+        )
+        for ot in out_rows:
+            key = str(ot.id)
+            flags = has_map.get(key, {"has_main": False, "has_aux": False})
+            operator_name = None
+            if ot.operator:
+                operator_name = ot.operator.full_name or ot.operator.username
+            out_meta_map[key] = {
+                "source_tag": _stock_out_source_tag(ot),
+                "method_tag": _stock_out_method_tag(
+                    has_main=bool(flags["has_main"]), has_aux=bool(flags["has_aux"])
+                ),
+                "operator_id": ot.operator_id,
+                "operator_name": operator_name,
+            }
+
+    aux_return_map: Dict[tuple, dict] = {}
+    if out_ids:
+        ret_rows = (
+            db.query(
+                StockTransaction.related_transaction_id.label("out_id"),
+                StockTransaction.approval_status.label("return_status"),
+                StockTransactionItem.equipment_id.label("equipment_id"),
+                StockTransactionItem.quantity.label("quantity"),
+                StockTransactionItem.received_qty.label("received_qty"),
+            )
+            .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                StockTransaction.related_transaction_id.in_(out_ids),
+                StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received"]),
+                StockTransactionItem.equipment_instance_id.is_(None),
+            )
+            .all()
+        )
+        for rr in ret_rows:
+            key = (str(rr.out_id), int(rr.equipment_id))
+            if key not in aux_return_map:
+                aux_return_map[key] = {"requested_qty": 0, "received_qty": 0}
+            qty = int(rr.quantity or 0)
+            if qty <= 0:
+                continue
+            status = str(rr.return_status or "")
+            aux_return_map[key]["requested_qty"] += qty
+            if status == "received":
+                aux_return_map[key]["received_qty"] += qty
+            else:
+                aux_return_map[key]["received_qty"] += int(rr.received_qty or 0)
+
+    items_all = []
+    for r in rows:
+        out_id = str(r.out_id)
+        equipment_id = int(r.equipment_id)
+        out_qty = int(r.out_qty or 0)
+        ret = aux_return_map.get((out_id, equipment_id), {"requested_qty": 0, "received_qty": 0})
+
+        requested = min(int(ret.get("requested_qty") or 0), out_qty)
+        received = min(int(ret.get("received_qty") or 0), out_qty)
+        pending = max(requested - received, 0)
+
+        status_value = "picked"
+        is_returned = False
+        if out_qty > 0 and received >= out_qty:
+            status_value = "returned"
+            is_returned = True
+        elif pending > 0:
+            status_value = "pending_receive"
+
+        group_counts[status_value] = int(group_counts.get(status_value, 0) or 0) + 1
+
+        meta = out_meta_map.get(out_id, {})
+        items_all.append(
+            {
+                "item_type": "aux",
+                "status_group": status_value,
+                "source_tag": meta.get("source_tag") or "其他",
+                "method_tag": meta.get("method_tag") or "未知",
+                "out_transaction_id": out_id,
+                "out_document_number": r.out_document_number,
+                "warehouse_id": r.warehouse_id,
+                "warehouse_name": r.warehouse_name,
+                "operation_time": to_utc_iso(r.operation_time) if r.operation_time else None,
+                "operator_id": meta.get("operator_id"),
+                "operator_name": meta.get("operator_name"),
+                "equipment_id": equipment_id,
+                "equipment_name": r.equipment_name,
+                "equipment_code": r.equipment_code,
+                "unit": r.unit,
+                "quantity": out_qty,
+                "is_returned": is_returned,
+                "return_pending_qty": int(pending),
+                "return_received_qty": int(received),
+            }
+        )
+
+    if g:
+        if g == "installed":
+            items_all = []
+        else:
+            items_all = [it for it in items_all if it.get("status_group") == g]
+
+    items_all.sort(key=lambda x: x.get("operation_time") or "", reverse=True)
+    total = len(items_all)
+
+    if not paginate:
+        return {
+            "items": items_all,
+            "page": 1,
+            "page_size": total,
+            "total": total,
+            "has_more": False,
+            "group_counts": group_counts,
+        }
+
+    offset = (page - 1) * page_size
+    items_page = items_all[offset : offset + page_size]
+    has_more = offset + len(items_page) < total
+
+    return {
+        "items": items_page,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "has_more": has_more,
+        "group_counts": group_counts,
+    }
+
+
+@router.get("/users/{user_id}/issued-items")
+async def list_user_issued_items(
+    user_id: int,
+    item_type: str = "main",
+    status_group: Optional[str] = None,
+    q: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """web-admin：查看指定用户的“我的设备/辅料”扁平列表。"""
+    _ensure_stock_operator(current_user)
+
+    target = db.query(User).filter(User.id == int(user_id)).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    return _list_issued_items_for_user(
+        db,
+        receiver_user_id=int(user_id),
+        item_type=item_type,
+        status_group=status_group,
+        q=q,
+        page=page,
+        page_size=page_size,
+        paginate=True,
+    )
+
+
+@router.get("/users/{user_id}/issued-items/export")
+async def export_user_issued_items(
+    user_id: int,
+    item_type: str = "main",
+    status_group: Optional[str] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """web-admin：导出指定用户的“主设备/辅料”归属明细（按当前 Tab 单 Sheet）。"""
+    _ensure_stock_operator(current_user)
+
+    target = db.query(User).filter(User.id == int(user_id)).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    resp = _list_issued_items_for_user(
+        db,
+        receiver_user_id=int(user_id),
+        item_type=item_type,
+        status_group=status_group,
+        q=q,
+        page=1,
+        page_size=100,
+        paginate=False,
+    )
+    items = resp.get("items") or []
+
+    import pandas as pd
+    import io
+    from fastapi.responses import StreamingResponse
+    from urllib.parse import quote
+
+    t = str(item_type or "main").strip().lower()
+
+    status_map = {
+        "picked": "已领货",
+        "installed": "已安装",
+        "pending_receive": "退库待收货",
+        "returned": "已退库",
+    }
+    def status_text(v: Optional[str]) -> str:
+        key = str(v or "").strip()
+        return status_map.get(key, key or "-")
+
+    rows = []
+    if t == "main":
+        for it in items:
+            rows.append(
+                {
+                    "SN": it.get("serial_number") or "",
+                    "条码": it.get("main_device_barcode") or "",
+                    "设备名称": it.get("equipment_name") or "",
+                    "设备编码": it.get("equipment_code") or "",
+                    "状态": status_text(it.get("status_group")),
+                    "出库单号": it.get("out_document_number") or "",
+                    "出库单ID": it.get("out_transaction_id") or "",
+                    "设备实例ID": it.get("equipment_instance_id") or "",
+                    "仓库": it.get("warehouse_name") or "",
+                    "出库时间": it.get("operation_time") or "",
+                    "领料方式": it.get("method_tag") or "",
+                    "来源": it.get("source_tag") or "",
+                    "退库状态": it.get("return_status") or "",
+                    "退库单号": it.get("return_document_number") or "",
+                    "退库单ID": it.get("return_transaction_id") or "",
+                }
+            )
+        sheet_name = "主设备"
+    else:
+        for it in items:
+            rows.append(
+                {
+                    "物料名称": it.get("equipment_name") or "",
+                    "物料编码": it.get("equipment_code") or "",
+                    "数量": int(it.get("quantity") or 0),
+                    "单位": it.get("unit") or "",
+                    "状态": status_text(it.get("status_group")),
+                    "出库单号": it.get("out_document_number") or "",
+                    "出库单ID": it.get("out_transaction_id") or "",
+                    "仓库": it.get("warehouse_name") or "",
+                    "出库时间": it.get("operation_time") or "",
+                    "领料方式": it.get("method_tag") or "",
+                    "来源": it.get("source_tag") or "",
+                    "退库待收货数量": int(it.get("return_pending_qty") or 0),
+                    "退库已收货数量": int(it.get("return_received_qty") or 0),
+                }
+            )
+        sheet_name = "辅料"
+
+    df = pd.DataFrame(rows)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.sheets.get(sheet_name)
+        if ws:
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        max_length = max(max_length, len(str(cell.value or "")))
+                    except Exception:
+                        pass
+                ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 50)
+
+    output.seek(0)
+
+    base_name = target.full_name or target.username or f"user_{user_id}"
+    file_name = f"{base_name}_{sheet_name}_归属明细.xlsx"
+    quoted = quote(file_name)
+    return StreamingResponse(
+        io.BytesIO(output.read()),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quoted}"},
+    )
+
+
+@router.get("/user-ownership/export")
+async def export_user_ownership(
+    keyword: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """web-admin：导出全部人员物料归属（跟随页面用户关键字筛选，单 Sheet）。"""
+    _ensure_stock_operator(current_user)
+
+    kw = str(keyword or "").strip()
+
+    user_query = db.query(User)
+    if kw:
+        user_query = user_query.filter(
+            or_(
+                User.username.contains(kw),
+                User.full_name.contains(kw),
+                User.email.contains(kw),
+            )
+        )
+    user_rows = user_query.all()
+    user_ids = [int(u.id) for u in user_rows if u and getattr(u, "id", None) is not None]
+    user_meta = {
+        int(u.id): {
+            "user_id": int(u.id),
+            "username": u.username,
+            "full_name": u.full_name,
+            "role": u.role,
+            "is_active": bool(getattr(u, "is_active", True)),
+        }
+        for u in user_rows
+        if u and getattr(u, "id", None) is not None
+    }
+
+    # 归属：优先 issued_to；若 issued_to 为空，则归属到扫码领取人（pickup_record.picker_id）
+    assigned_out_map: Dict[str, int] = {}
+
+    if user_ids:
+        direct_out_rows = (
+            db.query(StockTransaction.id, StockTransaction.issued_to)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+                StockTransaction.issued_to.in_(user_ids),
+            )
+            .all()
+        )
+        for out_id, issued_to in direct_out_rows:
+            if not out_id or not issued_to:
+                continue
+            try:
+                assigned_out_map[str(out_id)] = int(issued_to)
+            except Exception:
+                continue
+
+        pick_latest_subq = (
+            db.query(
+                PickupRecord.transaction_id.label("out_id"),
+                func.max(PickupRecord.pickup_time).label("max_time"),
+            )
+            .join(StockTransaction, StockTransaction.id == PickupRecord.transaction_id)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+                StockTransaction.issued_to.is_(None),
+            )
+            .group_by(PickupRecord.transaction_id)
+            .subquery()
+        )
+
+        pick_assign_rows = (
+            db.query(
+                StockTransaction.id.label("out_id"),
+                PickupRecord.picker_id.label("picker_id"),
+            )
+            .join(pick_latest_subq, pick_latest_subq.c.out_id == StockTransaction.id)
+            .join(
+                PickupRecord,
+                and_(
+                    PickupRecord.transaction_id == pick_latest_subq.c.out_id,
+                    PickupRecord.pickup_time == pick_latest_subq.c.max_time,
+                ),
+            )
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+                StockTransaction.issued_to.is_(None),
+                PickupRecord.picker_id.in_(user_ids),
+            )
+            .all()
+        )
+        for r in pick_assign_rows:
+            out_id = str(getattr(r, "out_id", "") or "").strip()
+            if not out_id or out_id in assigned_out_map:
+                continue
+            try:
+                assigned_out_map[out_id] = int(getattr(r, "picker_id", 0) or 0)
+            except Exception:
+                continue
+
+    out_ids = [oid for oid in assigned_out_map.keys() if oid]
+
+    import pandas as pd
+    import io
+    from fastapi.responses import StreamingResponse
+    from urllib.parse import quote
+
+    if not out_ids:
+        df = pd.DataFrame(
+            columns=[
+                "用户ID",
+                "用户名",
+                "姓名",
+                "角色",
+                "是否启用",
+                "物料类型",
+                "SN",
+                "条码",
+                "物料名称",
+                "物料编码",
+                "数量",
+                "单位",
+                "状态",
+                "出库单号",
+                "出库单ID",
+                "设备实例ID",
+                "仓库",
+                "出库时间",
+                "领料方式",
+                "来源",
+                "退库状态",
+                "退库单号",
+                "退库单ID",
+                "退库待收货数量",
+                "退库已收货数量",
+            ]
+        )
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="归属明细")
+        output.seek(0)
+        file_name = "人员领用台账_全部物料.xlsx"
+        return StreamingResponse(
+            io.BytesIO(output.read()),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_name)}"},
+        )
+
+    # 出库单基础信息
+    out_rows = (
+        db.query(
+            StockTransaction.id.label("out_id"),
+            StockTransaction.document_number.label("out_document_number"),
+            StockTransaction.operation_time.label("operation_time"),
+            Warehouse.warehouse_name.label("warehouse_name"),
+        )
+        .outerjoin(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransaction.id.in_(out_ids),
+        )
+        .all()
+    )
+    out_meta = {
+        str(r.out_id): {
+            "out_document_number": r.out_document_number,
+            "operation_time": to_utc_iso(r.operation_time) if r.operation_time else None,
+            "warehouse_name": r.warehouse_name,
+        }
+        for r in out_rows
+        if r and r.out_id
+    }
+
+    # 领料方式/来源标签
+    has_map = _has_main_aux_map(db, out_ids)
+    out_obj_rows = db.query(StockTransaction).filter(StockTransaction.id.in_(out_ids)).all()
+    out_tags = {}
+    for ot in out_obj_rows:
+        key = str(ot.id)
+        flags = has_map.get(key, {"has_main": False, "has_aux": False})
+        out_tags[key] = {
+            "source_tag": _stock_out_source_tag(ot),
+            "method_tag": _stock_out_method_tag(has_main=bool(flags["has_main"]), has_aux=bool(flags["has_aux"])),
+        }
+
+    # 取每个出库单最近一条 pickup_record（用于 SN/条码回填）
+    pick_any_latest_subq = (
+        db.query(
+            PickupRecord.transaction_id.label("out_id"),
+            func.max(PickupRecord.pickup_time).label("max_time"),
+        )
+        .filter(PickupRecord.transaction_id.in_(out_ids))
+        .group_by(PickupRecord.transaction_id)
+        .subquery()
+    )
+    pick_any_rows = (
+        db.query(
+            PickupRecord.transaction_id.label("out_id"),
+            PickupRecord.serial_number.label("serial_number"),
+            PickupRecord.main_device_barcode.label("main_device_barcode"),
+        )
+        .join(
+            pick_any_latest_subq,
+            and_(
+                PickupRecord.transaction_id == pick_any_latest_subq.c.out_id,
+                PickupRecord.pickup_time == pick_any_latest_subq.c.max_time,
+            ),
+        )
+        .all()
+    )
+    pick_any_map: Dict[str, dict] = {}
+    for pr in pick_any_rows:
+        out_id = str(pr.out_id)
+        if not out_id:
+            continue
+        pick_any_map[out_id] = {
+            "serial_number": str(pr.serial_number).strip() if pr.serial_number else "",
+            "main_device_barcode": str(pr.main_device_barcode).strip() if pr.main_device_barcode else "",
+        }
+
+    # ===== 主设备明细：每台一行 =====
+    main_item_rows = (
+        db.query(
+            StockTransactionItem.transaction_id.label("out_id"),
+            StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+            EquipmentInstance.serial_number.label("serial_number"),
+            Equipment.id.label("equipment_id"),
+            Equipment.equipment_name.label("equipment_name"),
+            Equipment.equipment_code.label("equipment_code"),
+            Equipment.unit.label("unit"),
+        )
+        .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+        .join(Equipment, Equipment.id == StockTransactionItem.equipment_id)
+        .outerjoin(EquipmentInstance, EquipmentInstance.id == StockTransactionItem.equipment_instance_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransactionItem.transaction_id.in_(out_ids),
+            Equipment.category == EquipmentCategoryEnum.MAIN_DEVICE,
+        )
+        .all()
+    )
+
+    # 主设备退库映射（按 out_id + equipment_instance_id）
+    main_out_ids = list({str(r.out_id) for r in main_item_rows if r and r.out_id})
+    instance_ids = list({str(r.equipment_instance_id) for r in main_item_rows if r and r.equipment_instance_id})
+    return_map: Dict[tuple, dict] = {}
+    if main_out_ids and instance_ids:
+        ret_rows = (
+            db.query(
+                StockTransaction.related_transaction_id.label("out_id"),
+                StockTransaction.id.label("return_id"),
+                StockTransaction.document_number.label("return_document_number"),
+                StockTransaction.approval_status.label("return_status"),
+                StockTransaction.created_at.label("created_at"),
+                StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+                StockTransactionItem.quantity.label("quantity"),
+                StockTransactionItem.received_qty.label("received_qty"),
+            )
+            .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                StockTransaction.related_transaction_id.in_(main_out_ids),
+                StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received"]),
+                StockTransactionItem.equipment_instance_id.in_(instance_ids),
+            )
+            .order_by(desc(StockTransaction.created_at))
+            .all()
+        )
+        for rr in ret_rows:
+            key = (str(rr.out_id), str(rr.equipment_instance_id))
+            if key in return_map:
+                continue
+            qty = int(rr.quantity or 0)
+            received = int(rr.received_qty or 0)
+            status = str(rr.return_status or "")
+            eff_received = qty if status == "received" else received
+            return_map[key] = {
+                "return_transaction_id": str(rr.return_id),
+                "return_document_number": rr.return_document_number,
+                "return_status": status,
+                "quantity": qty,
+                "received_qty": eff_received,
+            }
+
+    # 已安装判定：锁定检查（设备级）
+    lock_status = {
+        InspectionStatusEnum.SUBMITTED,
+        InspectionStatusEnum.UNDER_REVIEW,
+        InspectionStatusEnum.APPROVED,
+        InspectionStatusEnum.COMPLETED,
+    }
+    device_level_cond = and_(
+        InspectionCheckItem.sector_id.isnot(None),
+        InspectionCheckItem.band.isnot(None),
+        or_(
+            InspectionCheckItem.cell_id.is_(None),
+            InspectionCheckItem.cell_id
+            == (InspectionCheckItem.sector_id + "_" + InspectionCheckItem.band),
+        ),
+    )
+
+    sns = []
+    for r in main_item_rows:
+        out_id = str(r.out_id)
+        sn_value = (r.serial_number or "").strip() if r.serial_number else ""
+        if not sn_value:
+            pick = pick_any_map.get(out_id) or {}
+            sn_value = str(pick.get("serial_number") or "").strip()
+            if not sn_value:
+                sn_value = str(pick.get("main_device_barcode") or "").strip()
+        if sn_value:
+            sns.append(sn_value)
+    sns = list({s for s in sns if s})
+
+    installed_locked_sns: set = set()
+    if sns:
+        installed_locked_rows = (
+            db.query(InspectionCheckItem.equipment_sn)
+            .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+            .filter(
+                InspectionCheckItem.equipment_sn.in_(sns),
+                device_level_cond,
+                SiteInspection.status.in_(list(lock_status)),
+            )
+            .distinct()
+            .all()
+        )
+        installed_locked_sns = {row[0] for row in installed_locked_rows if row and row[0]}
+
+    # ===== 辅料明细：按 out_id + equipment_id 聚合一行 =====
+    aux_rows = (
+        db.query(
+            StockTransactionItem.transaction_id.label("out_id"),
+            Equipment.id.label("equipment_id"),
+            Equipment.equipment_name.label("equipment_name"),
+            Equipment.equipment_code.label("equipment_code"),
+            Equipment.unit.label("unit"),
+            func.sum(StockTransactionItem.quantity).label("out_qty"),
+        )
+        .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+        .join(Equipment, Equipment.id == StockTransactionItem.equipment_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransactionItem.transaction_id.in_(out_ids),
+            Equipment.category == EquipmentCategoryEnum.AUXILIARY,
+        )
+        .group_by(
+            StockTransactionItem.transaction_id,
+            Equipment.id,
+            Equipment.equipment_name,
+            Equipment.equipment_code,
+            Equipment.unit,
+        )
+        .all()
+    )
+
+    aux_return_map: Dict[tuple, dict] = {}
+    if out_ids:
+        aux_ret_rows = (
+            db.query(
+                StockTransaction.related_transaction_id.label("out_id"),
+                StockTransaction.approval_status.label("return_status"),
+                StockTransactionItem.equipment_id.label("equipment_id"),
+                StockTransactionItem.quantity.label("quantity"),
+                StockTransactionItem.received_qty.label("received_qty"),
+            )
+            .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                StockTransaction.related_transaction_id.in_(out_ids),
+                StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received"]),
+                StockTransactionItem.equipment_instance_id.is_(None),
+            )
+            .all()
+        )
+        for rr in aux_ret_rows:
+            key = (str(rr.out_id), int(rr.equipment_id))
+            if key not in aux_return_map:
+                aux_return_map[key] = {"requested_qty": 0, "received_qty": 0}
+            qty = int(rr.quantity or 0)
+            if qty <= 0:
+                continue
+            status = str(rr.return_status or "")
+            aux_return_map[key]["requested_qty"] += qty
+            if status == "received":
+                aux_return_map[key]["received_qty"] += qty
+            else:
+                aux_return_map[key]["received_qty"] += int(rr.received_qty or 0)
+
+    status_map = {
+        "picked": "已领货",
+        "installed": "已安装",
+        "pending_receive": "退库待收货",
+        "returned": "已退库",
+    }
+    def status_text(v: Optional[str]) -> str:
+        key = str(v or "").strip()
+        return status_map.get(key, key or "-")
+
+    rows = []
+
+    for r in main_item_rows:
+        out_id = str(r.out_id)
+        assigned_user_id = int(assigned_out_map.get(out_id) or 0)
+        meta = user_meta.get(assigned_user_id) or {}
+        outm = out_meta.get(out_id) or {}
+        tags = out_tags.get(out_id) or {}
+        pick = pick_any_map.get(out_id) or {}
+
+        sn_value = (r.serial_number or "").strip() if r.serial_number else ""
+        main_device_barcode = str(pick.get("main_device_barcode") or "").strip()
+        if not sn_value:
+            sn_value = str(pick.get("serial_number") or "").strip()
+        if not sn_value and main_device_barcode:
+            sn_value = main_device_barcode
+
+        inst_id = str(r.equipment_instance_id or "")
+        ret = return_map.get((out_id, inst_id))
+        status_group = "picked"
+        return_status = ""
+        return_tx_id = ""
+        return_doc = ""
+        if ret:
+            return_status = str(ret.get("return_status") or "")
+            return_tx_id = str(ret.get("return_transaction_id") or "")
+            return_doc = str(ret.get("return_document_number") or "")
+            qty = int(ret.get("quantity") or 0)
+            received_qty = int(ret.get("received_qty") or 0)
+            if return_status == "received" or (qty > 0 and received_qty >= qty):
+                status_group = "returned"
+            else:
+                status_group = "pending_receive"
+        else:
+            if sn_value and sn_value in installed_locked_sns:
+                status_group = "installed"
+
+        rows.append(
+            {
+                "用户ID": meta.get("user_id") or assigned_user_id or "",
+                "用户名": meta.get("username") or "",
+                "姓名": meta.get("full_name") or "",
+                "角色": meta.get("role") or "",
+                "是否启用": "是" if meta.get("is_active") else "否",
+                "物料类型": "主设备",
+                "SN": sn_value or "",
+                "条码": main_device_barcode or "",
+                "物料名称": r.equipment_name or "",
+                "物料编码": r.equipment_code or "",
+                "数量": 1,
+                "单位": r.unit or "",
+                "状态": status_text(status_group),
+                "出库单号": outm.get("out_document_number") or "",
+                "出库单ID": out_id,
+                "设备实例ID": inst_id,
+                "仓库": outm.get("warehouse_name") or "",
+                "出库时间": outm.get("operation_time") or "",
+                "领料方式": tags.get("method_tag") or "",
+                "来源": tags.get("source_tag") or "",
+                "退库状态": return_status,
+                "退库单号": return_doc,
+                "退库单ID": return_tx_id,
+                "退库待收货数量": 0,
+                "退库已收货数量": 0,
+            }
+        )
+
+    for r in aux_rows:
+        out_id = str(r.out_id)
+        assigned_user_id = int(assigned_out_map.get(out_id) or 0)
+        meta = user_meta.get(assigned_user_id) or {}
+        outm = out_meta.get(out_id) or {}
+        tags = out_tags.get(out_id) or {}
+
+        equipment_id = int(r.equipment_id)
+        out_qty = int(r.out_qty or 0)
+
+        ret = aux_return_map.get((out_id, equipment_id), {"requested_qty": 0, "received_qty": 0})
+        requested = min(int(ret.get("requested_qty") or 0), out_qty)
+        received = min(int(ret.get("received_qty") or 0), out_qty)
+        pending = max(requested - received, 0)
+
+        status_group = "picked"
+        if out_qty > 0 and received >= out_qty:
+            status_group = "returned"
+        elif pending > 0:
+            status_group = "pending_receive"
+
+        rows.append(
+            {
+                "用户ID": meta.get("user_id") or assigned_user_id or "",
+                "用户名": meta.get("username") or "",
+                "姓名": meta.get("full_name") or "",
+                "角色": meta.get("role") or "",
+                "是否启用": "是" if meta.get("is_active") else "否",
+                "物料类型": "辅料",
+                "SN": "",
+                "条码": "",
+                "物料名称": r.equipment_name or "",
+                "物料编码": r.equipment_code or "",
+                "数量": out_qty,
+                "单位": r.unit or "",
+                "状态": status_text(status_group),
+                "出库单号": outm.get("out_document_number") or "",
+                "出库单ID": out_id,
+                "设备实例ID": "",
+                "仓库": outm.get("warehouse_name") or "",
+                "出库时间": outm.get("operation_time") or "",
+                "领料方式": tags.get("method_tag") or "",
+                "来源": tags.get("source_tag") or "",
+                "退库状态": "",
+                "退库单号": "",
+                "退库单ID": "",
+                "退库待收货数量": int(pending),
+                "退库已收货数量": int(received),
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="归属明细")
+        ws = writer.sheets.get("归属明细")
+        if ws:
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        max_length = max(max_length, len(str(cell.value or "")))
+                    except Exception:
+                        pass
+                ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 50)
+
+    output.seek(0)
+    file_name = "人员领用台账_全部物料.xlsx"
+    return StreamingResponse(
+        io.BytesIO(output.read()),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_name)}"},
+    )
+
+
+@router.get("/user-ownership/summary")
+async def get_user_ownership_summary(
+    keyword: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """web-admin：分页返回用户 + 主/辅料状态汇总 + 最近出库时间。"""
+    _ensure_stock_operator(current_user)
+
+    try:
+        skip = int(skip or 0)
+    except Exception:
+        skip = 0
+    skip = max(0, skip)
+
+    try:
+        limit = int(limit or 20)
+    except Exception:
+        limit = 20
+    limit = max(1, min(limit, 200))
+
+    kw = str(keyword or "").strip()
+
+    user_query = db.query(User)
+    if kw:
+        user_query = user_query.filter(
+            or_(
+                User.username.contains(kw),
+                User.full_name.contains(kw),
+                User.email.contains(kw),
+            )
+        )
+
+    total = user_query.count()
+    user_rows = user_query.order_by(User.id.asc()).offset(skip).limit(limit).all()
+    user_ids = [int(u.id) for u in user_rows if u and getattr(u, "id", None) is not None]
+
+    def _empty_counts(*, with_installed: bool) -> dict:
+        base = {"picked": 0, "pending_receive": 0, "returned": 0}
+        if with_installed:
+            base["installed"] = 0
+        return base
+
+    summary_map: Dict[int, dict] = {}
+    for u in user_rows:
+        if not u or getattr(u, "id", None) is None:
+            continue
+        uid = int(u.id)
+        summary_map[uid] = {
+            "id": uid,
+            "username": u.username,
+            "full_name": u.full_name,
+            "role": u.role,
+            "is_active": bool(getattr(u, "is_active", True)),
+            "main_counts": _empty_counts(with_installed=True),
+            "aux_counts": _empty_counts(with_installed=False),
+            "last_out_time": None,
+        }
+
+    # 归属：issued_to 优先；issued_to 为空时取最新 pickup_record.picker_id
+    out_user_map: Dict[str, int] = {}
+    out_time_map: Dict[str, datetime] = {}
+    latest_by_user: Dict[int, datetime] = {}
+
+    if user_ids:
+        direct_out_rows = (
+            db.query(StockTransaction.id, StockTransaction.issued_to, StockTransaction.operation_time)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+                StockTransaction.issued_to.in_(user_ids),
+            )
+            .all()
+        )
+        for out_id, issued_to, op_time in direct_out_rows:
+            if not out_id or not issued_to:
+                continue
+            uid = int(issued_to)
+            if uid not in summary_map:
+                continue
+            oid = str(out_id)
+            out_user_map[oid] = uid
+            if op_time:
+                out_time_map[oid] = op_time
+                prev = latest_by_user.get(uid)
+                if not prev or op_time > prev:
+                    latest_by_user[uid] = op_time
+
+        pick_latest_subq = (
+            db.query(
+                PickupRecord.transaction_id.label("out_id"),
+                func.max(PickupRecord.pickup_time).label("max_time"),
+            )
+            .join(StockTransaction, StockTransaction.id == PickupRecord.transaction_id)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+                StockTransaction.issued_to.is_(None),
+            )
+            .group_by(PickupRecord.transaction_id)
+            .subquery()
+        )
+        pick_assign_rows = (
+            db.query(
+                StockTransaction.id.label("out_id"),
+                PickupRecord.picker_id.label("picker_id"),
+                StockTransaction.operation_time.label("operation_time"),
+            )
+            .join(pick_latest_subq, pick_latest_subq.c.out_id == StockTransaction.id)
+            .join(
+                PickupRecord,
+                and_(
+                    PickupRecord.transaction_id == pick_latest_subq.c.out_id,
+                    PickupRecord.pickup_time == pick_latest_subq.c.max_time,
+                ),
+            )
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+                StockTransaction.issued_to.is_(None),
+                PickupRecord.picker_id.in_(user_ids),
+            )
+            .all()
+        )
+        for r in pick_assign_rows:
+            oid = str(getattr(r, "out_id", "") or "").strip()
+            if not oid:
+                continue
+            uid = int(getattr(r, "picker_id", 0) or 0)
+            if uid not in summary_map:
+                continue
+            if oid in out_user_map:
+                continue
+            out_user_map[oid] = uid
+
+            op_time = getattr(r, "operation_time", None)
+            if op_time:
+                out_time_map[oid] = op_time
+                prev = latest_by_user.get(uid)
+                if not prev or op_time > prev:
+                    latest_by_user[uid] = op_time
+
+    # 写回最近出库时间
+    for uid, dt in latest_by_user.items():
+        if uid in summary_map:
+            summary_map[uid]["last_out_time"] = to_utc_iso(dt) if dt else None
+
+    out_ids = list(out_user_map.keys())
+    if not out_ids:
+        return {"users": list(summary_map.values()), "total": total, "skip": skip, "limit": limit}
+
+    # 取每个出库单最近一条 pickup_record（用于 SN/条码回填）
+    pick_any_latest_subq = (
+        db.query(
+            PickupRecord.transaction_id.label("out_id"),
+            func.max(PickupRecord.pickup_time).label("max_time"),
+        )
+        .filter(PickupRecord.transaction_id.in_(out_ids))
+        .group_by(PickupRecord.transaction_id)
+        .subquery()
+    )
+    pick_any_rows = (
+        db.query(
+            PickupRecord.transaction_id.label("out_id"),
+            PickupRecord.serial_number.label("serial_number"),
+            PickupRecord.main_device_barcode.label("main_device_barcode"),
+        )
+        .join(
+            pick_any_latest_subq,
+            and_(
+                PickupRecord.transaction_id == pick_any_latest_subq.c.out_id,
+                PickupRecord.pickup_time == pick_any_latest_subq.c.max_time,
+            ),
+        )
+        .all()
+    )
+    pick_any_map: Dict[str, dict] = {}
+    for pr in pick_any_rows:
+        oid = str(pr.out_id)
+        if not oid:
+            continue
+        pick_any_map[oid] = {
+            "serial_number": str(pr.serial_number).strip() if pr.serial_number else "",
+            "main_device_barcode": str(pr.main_device_barcode).strip() if pr.main_device_barcode else "",
+        }
+
+    # ===== 主设备：每台一条 =====
+    main_rows = (
+        db.query(
+            StockTransactionItem.transaction_id.label("out_id"),
+            StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+            EquipmentInstance.serial_number.label("serial_number"),
+        )
+        .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+        .join(Equipment, Equipment.id == StockTransactionItem.equipment_id)
+        .outerjoin(EquipmentInstance, EquipmentInstance.id == StockTransactionItem.equipment_instance_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransactionItem.transaction_id.in_(out_ids),
+            Equipment.category == EquipmentCategoryEnum.MAIN_DEVICE,
+        )
+        .all()
+    )
+
+    # 主设备退库映射（按 out_id + equipment_instance_id）
+    main_out_ids = list({str(r.out_id) for r in main_rows if r and r.out_id})
+    instance_ids = list({str(r.equipment_instance_id) for r in main_rows if r and r.equipment_instance_id})
+    return_map: Dict[tuple, dict] = {}
+    if main_out_ids and instance_ids:
+        ret_rows = (
+            db.query(
+                StockTransaction.related_transaction_id.label("out_id"),
+                StockTransaction.approval_status.label("return_status"),
+                StockTransaction.created_at.label("created_at"),
+                StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+                StockTransactionItem.quantity.label("quantity"),
+                StockTransactionItem.received_qty.label("received_qty"),
+            )
+            .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                StockTransaction.related_transaction_id.in_(main_out_ids),
+                StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received"]),
+                StockTransactionItem.equipment_instance_id.in_(instance_ids),
+            )
+            .order_by(desc(StockTransaction.created_at))
+            .all()
+        )
+        for rr in ret_rows:
+            key = (str(rr.out_id), str(rr.equipment_instance_id))
+            if key in return_map:
+                continue
+            qty = int(rr.quantity or 0)
+            received = int(rr.received_qty or 0)
+            status = str(rr.return_status or "")
+            eff_received = qty if status == "received" else received
+            return_map[key] = {"return_status": status, "quantity": qty, "received_qty": eff_received}
+
+    # 已安装判定：锁定检查（设备级）
+    lock_status = {
+        InspectionStatusEnum.SUBMITTED,
+        InspectionStatusEnum.UNDER_REVIEW,
+        InspectionStatusEnum.APPROVED,
+        InspectionStatusEnum.COMPLETED,
+    }
+    device_level_cond = and_(
+        InspectionCheckItem.sector_id.isnot(None),
+        InspectionCheckItem.band.isnot(None),
+        or_(
+            InspectionCheckItem.cell_id.is_(None),
+            InspectionCheckItem.cell_id
+            == (InspectionCheckItem.sector_id + "_" + InspectionCheckItem.band),
+        ),
+    )
+
+    sns = []
+    for r in main_rows:
+        oid = str(r.out_id)
+        sn_value = (r.serial_number or "").strip() if r.serial_number else ""
+        if not sn_value:
+            pick = pick_any_map.get(oid) or {}
+            sn_value = str(pick.get("serial_number") or "").strip()
+            if not sn_value:
+                sn_value = str(pick.get("main_device_barcode") or "").strip()
+        if sn_value:
+            sns.append(sn_value)
+    sns = list({s for s in sns if s})
+
+    installed_locked_sns: set = set()
+    if sns:
+        installed_locked_rows = (
+            db.query(InspectionCheckItem.equipment_sn)
+            .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+            .filter(
+                InspectionCheckItem.equipment_sn.in_(sns),
+                device_level_cond,
+                SiteInspection.status.in_(list(lock_status)),
+            )
+            .distinct()
+            .all()
+        )
+        installed_locked_sns = {row[0] for row in installed_locked_rows if row and row[0]}
+
+    for r in main_rows:
+        oid = str(r.out_id)
+        uid = out_user_map.get(oid)
+        if not uid or uid not in summary_map:
+            continue
+
+        sn_value = (r.serial_number or "").strip() if r.serial_number else ""
+        if not sn_value:
+            pick = pick_any_map.get(oid) or {}
+            sn_value = str(pick.get("serial_number") or "").strip()
+            if not sn_value:
+                sn_value = str(pick.get("main_device_barcode") or "").strip()
+
+        inst_id = str(r.equipment_instance_id or "")
+        ret = return_map.get((oid, inst_id))
+        status_group = "picked"
+        if ret:
+            return_status = str(ret.get("return_status") or "")
+            qty = int(ret.get("quantity") or 0)
+            received_qty = int(ret.get("received_qty") or 0)
+            if return_status == "received" or (qty > 0 and received_qty >= qty):
+                status_group = "returned"
+            else:
+                status_group = "pending_receive"
+        else:
+            if sn_value and sn_value in installed_locked_sns:
+                status_group = "installed"
+
+        summary_map[uid]["main_counts"][status_group] = int(summary_map[uid]["main_counts"].get(status_group, 0) or 0) + 1
+
+    # ===== 辅料：按 out_id + equipment_id 聚合 =====
+    aux_rows = (
+        db.query(
+            StockTransactionItem.transaction_id.label("out_id"),
+            Equipment.id.label("equipment_id"),
+            func.sum(StockTransactionItem.quantity).label("out_qty"),
+        )
+        .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+        .join(Equipment, Equipment.id == StockTransactionItem.equipment_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransactionItem.transaction_id.in_(out_ids),
+            Equipment.category == EquipmentCategoryEnum.AUXILIARY,
+        )
+        .group_by(
+            StockTransactionItem.transaction_id,
+            Equipment.id,
+        )
+        .all()
+    )
+
+    aux_return_map: Dict[tuple, dict] = {}
+    if out_ids:
+        aux_ret_rows = (
+            db.query(
+                StockTransaction.related_transaction_id.label("out_id"),
+                StockTransaction.approval_status.label("return_status"),
+                StockTransactionItem.equipment_id.label("equipment_id"),
+                StockTransactionItem.quantity.label("quantity"),
+                StockTransactionItem.received_qty.label("received_qty"),
+            )
+            .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+            .filter(
+                StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                StockTransaction.related_transaction_id.in_(out_ids),
+                StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received"]),
+                StockTransactionItem.equipment_instance_id.is_(None),
+            )
+            .all()
+        )
+        for rr in aux_ret_rows:
+            key = (str(rr.out_id), int(rr.equipment_id))
+            if key not in aux_return_map:
+                aux_return_map[key] = {"requested_qty": 0, "received_qty": 0}
+            qty = int(rr.quantity or 0)
+            if qty <= 0:
+                continue
+            status = str(rr.return_status or "")
+            aux_return_map[key]["requested_qty"] += qty
+            if status == "received":
+                aux_return_map[key]["received_qty"] += qty
+            else:
+                aux_return_map[key]["received_qty"] += int(rr.received_qty or 0)
+
+    for r in aux_rows:
+        oid = str(r.out_id)
+        uid = out_user_map.get(oid)
+        if not uid or uid not in summary_map:
+            continue
+        out_qty = int(r.out_qty or 0)
+        equipment_id = int(r.equipment_id)
+        ret = aux_return_map.get((oid, equipment_id), {"requested_qty": 0, "received_qty": 0})
+        requested = min(int(ret.get("requested_qty") or 0), out_qty)
+        received = min(int(ret.get("received_qty") or 0), out_qty)
+        pending = max(requested - received, 0)
+
+        status_group = "picked"
+        if out_qty > 0 and received >= out_qty:
+            status_group = "returned"
+        elif pending > 0:
+            status_group = "pending_receive"
+
+        summary_map[uid]["aux_counts"][status_group] = int(summary_map[uid]["aux_counts"].get(status_group, 0) or 0) + 1
+
+    return {"users": list(summary_map.values()), "total": total, "skip": skip, "limit": limit}
+
+
 @router.get("/my-issued-items")
 async def list_my_issued_items(
     item_type: str = "main",

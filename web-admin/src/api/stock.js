@@ -170,4 +170,20 @@ export const stockApi = {
 
   rejectReturnV2: (id, data) =>
     request.post(`/api/stock/returns/${id}/reject`, data),
+
+  // ===== 人员归属（web-admin）=====
+  getUserIssuedItems: (userId, params = {}) =>
+    request.get(`/api/stock/users/${userId}/issued-items`, { params }),
+
+  exportUserIssuedItems: (userId, params = {}) =>
+    request.get(`/api/stock/users/${userId}/issued-items/export`, { params, responseType: 'blob' }),
+
+  getStockOutDetail: (outTransactionId) =>
+    request.get(`/api/stock/stock-outs/${outTransactionId}`),
+
+  getUserOwnershipSummary: (params = {}) =>
+    request.get('/api/stock/user-ownership/summary', { params }),
+
+  exportUserOwnershipAll: (params = {}) =>
+    request.get('/api/stock/user-ownership/export', { params, responseType: 'blob' }),
 }

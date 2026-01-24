@@ -108,6 +108,12 @@ const routes = [
             meta: { title: '领料记录', icon: 'Tickets', group: 'ledger', order: 2 }
           },
           {
+            path: 'user-ownership',
+            name: 'UserOwnership',
+            component: () => import('../views/stock/UserOwnership.vue'),
+            meta: { title: '人员领用台账', icon: 'UserFilled', roles: ['admin', 'warehouse_manager', 'manager'], group: 'ledger', order: 5 }
+          },
+          {
             path: 'warehouses',
             name: 'Warehouses',
             component: () => import('../views/stock/WarehouseList.vue'),
