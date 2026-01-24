@@ -5264,6 +5264,20 @@ def _serialize_stock_out_for_return(db: Session, out_trans: StockTransaction) ->
         cat = _enum_value(eq.category) if eq else None
         is_main = cat == EquipmentCategoryEnum.MAIN_DEVICE.value
         serial_number = it.equipment_instance.serial_number if it.equipment_instance else None
+        if is_main and not serial_number:
+            pick = (
+                db.query(PickupRecord)
+                .filter(PickupRecord.transaction_id == out_trans.id)
+                .order_by(desc(PickupRecord.pickup_time))
+                .first()
+            )
+            if pick:
+                if pick.serial_number:
+                    serial_number = pick.serial_number
+                elif pick.main_device_barcode:
+                    serial_number = pick.main_device_barcode
+            if not serial_number and getattr(out_trans, "scan_barcode", None):
+                serial_number = out_trans.scan_barcode
 
         if is_main:
             max_returnable = 0 if (it.equipment_instance_id and str(it.equipment_instance_id) in main_reserved) else 1
@@ -5587,6 +5601,16 @@ async def list_my_issued_items(
         )
 
         if search:
+            pickup_search_exists = db.query(PickupRecord.id).filter(
+                PickupRecord.transaction_id == StockTransaction.id,
+                PickupRecord.picker_id == current_user.id,
+                or_(
+                    PickupRecord.serial_number == search,
+                    PickupRecord.serial_number.like(like_prefix),
+                    PickupRecord.main_device_barcode == search,
+                    PickupRecord.main_device_barcode.like(like_prefix),
+                ),
+            ).exists()
             query = query.filter(
                 or_(
                     StockTransaction.document_number.like(like_contains),
@@ -5594,14 +5618,49 @@ async def list_my_issued_items(
                     EquipmentInstance.serial_number.like(like_prefix),
                     Equipment.equipment_name.like(like_contains),
                     Equipment.equipment_code.like(like_contains),
+                    pickup_search_exists,
                 )
             )
 
         rows = query.order_by(desc(StockTransaction.operation_time)).all()
 
-        sns = [str(r.serial_number or "").strip() for r in rows]
-        sns = [s for s in sns if s]
-        sns = list({s for s in sns})
+        out_ids = list({str(r.out_id) for r in rows if r and r.out_id})
+        pickup_map: Dict[str, dict] = {}
+        if out_ids:
+            pick_rows = (
+                db.query(
+                    PickupRecord.transaction_id,
+                    PickupRecord.serial_number,
+                    PickupRecord.main_device_barcode,
+                    PickupRecord.pickup_time,
+                )
+                .filter(
+                    PickupRecord.transaction_id.in_(out_ids),
+                    PickupRecord.picker_id == current_user.id,
+                )
+                .order_by(desc(PickupRecord.pickup_time))
+                .all()
+            )
+            for transaction_id, serial_number, main_device_barcode, _ in pick_rows:
+                key = str(transaction_id)
+                if key in pickup_map:
+                    continue
+                pickup_map[key] = {
+                    "serial_number": str(serial_number).strip() if serial_number else None,
+                    "main_device_barcode": str(main_device_barcode).strip() if main_device_barcode else None,
+                }
+
+        sns = []
+        for r in rows:
+            sn_value = (r.serial_number or "").strip() if r.serial_number else ""
+            if not sn_value:
+                pick = pickup_map.get(str(r.out_id)) or {}
+                sn_value = str(pick.get("serial_number") or "").strip()
+                if not sn_value:
+                    sn_value = str(pick.get("main_device_barcode") or "").strip()
+            if sn_value:
+                sns.append(sn_value)
+        sns = list({s for s in sns if s})
 
         lock_status = {
             InspectionStatusEnum.SUBMITTED,
@@ -5694,6 +5753,17 @@ async def list_my_issued_items(
         for r in rows:
             out_id = str(r.out_id)
             sn = (r.serial_number or "").strip() if r.serial_number else ""
+            main_device_barcode = None
+            if not sn:
+                pick = pickup_map.get(out_id) or {}
+                pick_sn = str(pick.get("serial_number") or "").strip()
+                pick_barcode = str(pick.get("main_device_barcode") or "").strip()
+                if pick_sn:
+                    sn = pick_sn
+                if pick_barcode:
+                    main_device_barcode = pick_barcode
+                if not sn and pick_barcode:
+                    sn = pick_barcode
             inst_id = str(r.equipment_instance_id or "")
 
             ret = return_map.get((out_id, inst_id))
@@ -5733,6 +5803,7 @@ async def list_my_issued_items(
                     "operation_time": to_utc_iso(r.operation_time) if r.operation_time else None,
                     "equipment_instance_id": r.equipment_instance_id,
                     "serial_number": sn,
+                    "main_device_barcode": main_device_barcode,
                     "equipment_id": r.equipment_id,
                     "equipment_name": r.equipment_name,
                     "equipment_code": r.equipment_code,

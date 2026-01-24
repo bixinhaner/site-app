@@ -967,13 +967,15 @@ export default {
       if (record.item_type === 'aux') {
         return `${outId}-${String(record.equipment_id || '')}`
       }
-      return `${outId}-${String(record.serial_number || record.equipment_instance_id || '')}`
+      return `${outId}-${String(record.serial_number || record.main_device_barcode || record.equipment_instance_id || '')}`
     },
 
     recordPrimaryText(record) {
       if (!record) return '-'
       if (record.item_type === 'aux') return record.equipment_name || record.equipment_code || '-'
-      return record.serial_number || '-'
+      const sn = String(record.serial_number || record.main_device_barcode || '').trim()
+      if (sn) return sn
+      return record.equipment_name || record.equipment_code || record.out_document_number || '-'
     },
 
     recordSecondaryText(record) {
