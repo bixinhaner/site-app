@@ -139,6 +139,7 @@ async def get_inventory_list(
     for inv in inventory_list:
         result.append({
             "id": inv.id,
+            "warehouse_id": inv.warehouse_id,
             "equipment_id": inv.equipment_id,
             "warehouse_name": inv.warehouse.warehouse_name,
             "warehouse_code": inv.warehouse.warehouse_code,
@@ -2914,6 +2915,8 @@ async def get_equipment_instances(
     equipment_id: int,
     status: Optional[str] = None,
     include_voided: bool = False,
+    warehouse_id: Optional[int] = None,
+    include_out: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -2929,6 +2932,61 @@ async def get_equipment_instances(
     
     if status:
         query = query.filter(EquipmentInstance.status == status)
+
+    # 仅查询指定仓库的实例（默认只看仓库内；可选包含“已出库但上次出库仓库=当前仓库”的实例）
+    if warehouse_id is not None:
+        out_instance_ids = []
+        if include_out:
+            out_instance_subq = (
+                db.query(EquipmentInstance.id.label("id"))
+                .filter(
+                    EquipmentInstance.equipment_id == equipment_id,
+                    EquipmentInstance.warehouse_id.is_(None),
+                )
+            )
+            if not include_voided:
+                out_instance_subq = out_instance_subq.filter(
+                    or_(EquipmentInstance.is_voided == False, EquipmentInstance.is_voided.is_(None))
+                )
+            if status:
+                out_instance_subq = out_instance_subq.filter(EquipmentInstance.status == status)
+            out_instance_subq = out_instance_subq.subquery()
+
+            latest_out_subq = (
+                db.query(
+                    StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+                    func.max(StockTransaction.operation_time).label("last_out_time"),
+                )
+                .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+                .join(out_instance_subq, StockTransactionItem.equipment_instance_id == out_instance_subq.c.id)
+                .filter(StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT)
+                .group_by(StockTransactionItem.equipment_instance_id)
+                .subquery()
+            )
+
+            out_rows = (
+                db.query(StockTransactionItem.equipment_instance_id)
+                .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+                .join(
+                    latest_out_subq,
+                    and_(
+                        StockTransactionItem.equipment_instance_id == latest_out_subq.c.equipment_instance_id,
+                        StockTransaction.operation_time == latest_out_subq.c.last_out_time,
+                    ),
+                )
+                .filter(
+                    StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+                    StockTransaction.warehouse_id == warehouse_id,
+                )
+                .distinct()
+                .all()
+            )
+            out_instance_ids = [r[0] for r in out_rows]
+
+        if out_instance_ids:
+            query = query.filter(or_(EquipmentInstance.warehouse_id == warehouse_id, EquipmentInstance.id.in_(out_instance_ids)))
+        else:
+            query = query.filter(EquipmentInstance.warehouse_id == warehouse_id)
     
     instances = query.order_by(desc(EquipmentInstance.created_at)).all()
 
@@ -2936,36 +2994,41 @@ async def get_equipment_instances(
     out_instance_ids = [inst.id for inst in instances if inst.warehouse_id is None]
     last_warehouse_map = {}
     if out_instance_ids:
-        latest_pickup_subq = (
+        latest_out_subq = (
             db.query(
-                PickupRecord.equipment_instance_id.label("equipment_instance_id"),
-                func.max(PickupRecord.pickup_time).label("last_pickup_time"),
+                StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+                func.max(StockTransaction.operation_time).label("last_out_time"),
             )
-            .filter(PickupRecord.equipment_instance_id.in_(out_instance_ids))
-            .group_by(PickupRecord.equipment_instance_id)
+            .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+            .filter(
+                StockTransactionItem.equipment_instance_id.in_(out_instance_ids),
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            )
+            .group_by(StockTransactionItem.equipment_instance_id)
             .subquery()
         )
 
-        pickup_rows = (
+        out_rows = (
             db.query(
-                PickupRecord.equipment_instance_id,
+                StockTransactionItem.equipment_instance_id,
                 StockTransaction.warehouse_id,
                 Warehouse.warehouse_name,
             )
+            .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+            .join(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
             .join(
-                latest_pickup_subq,
+                latest_out_subq,
                 and_(
-                    PickupRecord.equipment_instance_id == latest_pickup_subq.c.equipment_instance_id,
-                    PickupRecord.pickup_time == latest_pickup_subq.c.last_pickup_time,
+                    StockTransactionItem.equipment_instance_id == latest_out_subq.c.equipment_instance_id,
+                    StockTransaction.operation_time == latest_out_subq.c.last_out_time,
                 ),
             )
-            .join(StockTransaction, StockTransaction.id == PickupRecord.transaction_id)
-            .join(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+            .filter(StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT)
             .all()
         )
-        for equipment_instance_id, warehouse_id, warehouse_name in pickup_rows:
+        for equipment_instance_id, last_wh_id, warehouse_name in out_rows:
             last_warehouse_map[equipment_instance_id] = {
-                "warehouse_id": warehouse_id,
+                "warehouse_id": last_wh_id,
                 "warehouse_name": warehouse_name,
             }
     

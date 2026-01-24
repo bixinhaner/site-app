@@ -169,29 +169,42 @@
       </el-tabs>
     </el-card>
 
-    <!-- 设备实例详情弹窗 -->
-    <el-dialog
-      v-model="showInstanceDialog"
-      :title="`${selectedEquipment?.equipment_name} - 设备实例详情`"
-      width="80%"
-      top="5vh"
-    >
-        <div v-if="selectedEquipment">
-          <div class="instance-stats">
-            <el-tag type="info" size="small">总数量: {{ deviceInstances.length }}</el-tag>
-            <el-tag type="success" size="small">在库: {{ getInstancesByStatus('in_stock').length }}</el-tag>
-            <el-tag type="warning" size="small">待检查: {{ getInstancesByStatus('pending_inspection').length }}</el-tag>
-            <el-tag type="success" size="small">已检查: {{ getInstancesByStatus('inspected').length }}</el-tag>
-            <el-tag type="warning" size="small">退库待收货: {{ getInstancesByStatus('return_pending_receive').length }}</el-tag>
-            <el-tag type="info" size="small">已出库: {{ getInstancesByStatus('issued').length }}</el-tag>
-            <el-tag type="danger" size="small">损坏/报损: {{ getInstancesByStatus('damaged').length }}</el-tag>
-          </div>
+	    <!-- 设备实例详情弹窗 -->
+	    <el-dialog
+	      v-model="showInstanceDialog"
+	      :title="`${selectedEquipment?.equipment_name} - ${selectedEquipment?.warehouse_name || '-'} - 设备实例详情`"
+	      width="80%"
+	      top="5vh"
+	    >
+	        <div v-if="selectedEquipment">
+	          <div class="instance-stats">
+	            <el-checkbox
+	              v-model="includeOutInstances"
+	              :disabled="instanceLoading"
+	              @change="loadDeviceInstances"
+	            >
+	              包含已出库（按上个仓库）
+	            </el-checkbox>
+	            <el-tag type="info" size="small">总数量: {{ deviceInstances.length }}</el-tag>
+	            <el-tag type="success" size="small">在库: {{ getInstancesByStatus('in_stock').length }}</el-tag>
+	            <el-tag type="warning" size="small">待检查: {{ getInstancesByStatus('pending_inspection').length }}</el-tag>
+	            <el-tag type="success" size="small">已检查: {{ getInstancesByStatus('inspected').length }}</el-tag>
+	            <el-tag type="warning" size="small">退库待收货: {{ getInstancesByStatus('return_pending_receive').length }}</el-tag>
+	            <el-tag type="info" size="small">已出库: {{ getInstancesByStatus('issued').length }}</el-tag>
+	            <el-tag type="danger" size="small">损坏/报损: {{ getInstancesByStatus('damaged').length }}</el-tag>
+	          </div>
 
-        <el-table :data="deviceInstances" stripe style="width: 100%; margin-top: 16px;" max-height="400">
-          <el-table-column prop="serial_number" label="SN序列号" width="150" />
-          <el-table-column prop="mac_address" label="MAC地址" width="150" />
-          <el-table-column prop="imei" label="IMEI" width="150" />
-          <el-table-column prop="firmware_version" label="固件版本" width="100" />
+	        <el-table
+	          :data="deviceInstances"
+	          v-loading="instanceLoading"
+	          stripe
+	          style="width: 100%; margin-top: 16px;"
+	          max-height="400"
+	        >
+	          <el-table-column prop="serial_number" label="SN序列号" width="150" />
+	          <el-table-column prop="mac_address" label="MAC地址" width="150" />
+	          <el-table-column prop="imei" label="IMEI" width="150" />
+	          <el-table-column prop="firmware_version" label="固件版本" width="100" />
           <el-table-column prop="hardware_version" label="硬件版本" width="100" />
           <el-table-column prop="vendor" label="供应商" width="100" />
           <el-table-column prop="batch_number" label="批次号" width="100" />
@@ -380,6 +393,8 @@ const activeTab = ref('main_device')
 const showInstanceDialog = ref(false)
 const selectedEquipment = ref(null)
 const deviceInstances = ref([])
+const includeOutInstances = ref(false)
+const instanceLoading = ref(false)
 
 // 计算属性 - 设备分类列表
 const mainDeviceList = computed(() => 
@@ -583,26 +598,47 @@ const handleTabChange = (tabName) => {
   activeTab.value = tabName
 }
 
-// 查看设备实例
-const viewDeviceInstances = async (equipment) => {
-  try {
-    selectedEquipment.value = equipment
-    
-    // 调用API获取设备实例数据
-    const response = await stockApi.getEquipmentInstances(equipment.equipment_id)
-    deviceInstances.value = response.instances || []
-    
-    if (deviceInstances.value.length === 0) {
-      ElMessage.info(`${equipment.equipment_name} 暂无设备实例，请先导入SN数据`)
-      return
-    }
-    
-    showInstanceDialog.value = true
-  } catch (error) {
-    console.error('获取设备实例失败:', error)
-    ElMessage.error('获取设备实例失败: ' + (error.response?.data?.detail || error.message))
-  }
-}
+	// 查看设备实例
+	const loadDeviceInstances = async () => {
+	  if (!selectedEquipment.value) {
+	    deviceInstances.value = []
+	    return
+	  }
+	  try {
+	    instanceLoading.value = true
+	    const params = {}
+	    if (selectedEquipment.value.warehouse_id !== undefined && selectedEquipment.value.warehouse_id !== null) {
+	      params.warehouse_id = selectedEquipment.value.warehouse_id
+	    }
+	    if (includeOutInstances.value) {
+	      params.include_out = true
+	    }
+	    const response = await stockApi.getEquipmentInstances(selectedEquipment.value.equipment_id, params)
+	    deviceInstances.value = response.instances || []
+	  } catch (error) {
+	    console.error('获取设备实例失败:', error)
+	    ElMessage.error('获取设备实例失败: ' + (error.response?.data?.detail || error.message))
+	    deviceInstances.value = []
+	  } finally {
+	    instanceLoading.value = false
+	  }
+	}
+
+	const viewDeviceInstances = async (equipment) => {
+	  try {
+	    selectedEquipment.value = equipment
+	    includeOutInstances.value = false
+	    showInstanceDialog.value = true
+	    await loadDeviceInstances()
+
+	    if (deviceInstances.value.length === 0) {
+	      ElMessage.info(`${equipment.equipment_name} 在当前仓库暂无实例`)
+	    }
+	  } catch (error) {
+	    console.error('获取设备实例失败:', error)
+	    ElMessage.error('获取设备实例失败: ' + (error.response?.data?.detail || error.message))
+	  }
+	}
 
 // 设备追踪：跳转到设备生命周期追踪页面，并自动带入 SN
 const trackDevice = (serialNumber) => {
