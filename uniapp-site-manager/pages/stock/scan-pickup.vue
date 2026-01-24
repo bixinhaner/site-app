@@ -952,6 +952,15 @@ export default {
   },
   
   methods: {
+    buildParsedBarcodeForBackend(barcode) {
+      const raw = String(barcode || '').trim()
+      if (!raw) return null
+      // 仅在复合格式（包含逗号/冒号）时解析，以减少不必要解析与日志输出
+      if (!raw.includes(',') && !raw.includes(':')) return null
+      const parsed = parseBarcode(raw)
+      return parsed && parsed.success ? parsed : null
+    },
+
     toggleScanSection() {
       this.scanSectionCollapsed = !this.scanSectionCollapsed
     },
@@ -1112,7 +1121,7 @@ export default {
       this.deviceDetailPreviewReqId = reqId
       this.deviceDetailPreviewLoading = true
       try {
-        const parsed = parseBarcode(barcode)
+        const parsed = this.buildParsedBarcodeForBackend(barcode)
         const res = await new Promise((resolve, reject) => {
           uni.request({
             url: buildApiUrl('/api/stock/scan-return/preview'),
@@ -1120,7 +1129,7 @@ export default {
             header: getAuthHeaders(this.userStore.token),
             data: {
               barcode,
-              parsed_barcode: parsed && parsed.success ? parsed : null,
+              parsed_barcode: parsed,
               gps_location: this.userLocation
             },
             success: resolve,
@@ -1969,7 +1978,7 @@ export default {
 
       this.returnPreviewLoading = true
       try {
-        const parsed = parseBarcode(barcode)
+        const parsed = this.buildParsedBarcodeForBackend(barcode)
         const res = await new Promise((resolve, reject) => {
           uni.request({
             url: buildApiUrl('/api/stock/scan-return/preview'),
@@ -1977,7 +1986,7 @@ export default {
             header: getAuthHeaders(this.userStore.token),
             data: {
               barcode,
-              parsed_barcode: parsed && parsed.success ? parsed : null,
+              parsed_barcode: parsed,
               gps_location: this.userLocation
             },
             success: resolve,
@@ -2069,7 +2078,7 @@ export default {
 
       this.returnActionLoading = true
       try {
-        const parsed = parseBarcode(barcode)
+        const parsed = this.buildParsedBarcodeForBackend(barcode)
         const res = await new Promise((resolve, reject) => {
           uni.request({
             url: buildApiUrl('/api/stock/scan-return/request'),
@@ -2077,7 +2086,7 @@ export default {
             header: getAuthHeaders(this.userStore.token),
             data: {
               barcode,
-              parsed_barcode: parsed && parsed.success ? parsed : null,
+              parsed_barcode: parsed,
               return_warehouse_id: this.selectedReturnWarehouse.id,
               gps_location: this.userLocation,
               offline_document_id: this.returnOfflineDocumentId || undefined,

@@ -367,7 +367,6 @@ export const createRequestConfig = (options = {}) => {
     ...options
   }
 
-  log('Request config:', config)
   return config
 }
 

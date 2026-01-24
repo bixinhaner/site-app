@@ -13,18 +13,69 @@ const t = (key, params = {}) => {
   }
 }
 
+const BARCODE_PARSER_DEBUG_STORAGE_KEY = 'debug_barcode_parser'
+let barcodeParserDebugEnabledCache = null
+
+const normalizeBoolean = (value) => {
+  if (value === true) return true
+  if (value === false) return false
+  if (value === 1) return true
+  if (value === 0) return false
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return true
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false
+  }
+  return false
+}
+
+export function isBarcodeParserDebugEnabled() {
+  if (barcodeParserDebugEnabledCache !== null) return barcodeParserDebugEnabledCache
+  try {
+    if (typeof uni === 'undefined' || !uni.getStorageSync) {
+      barcodeParserDebugEnabledCache = false
+      return barcodeParserDebugEnabledCache
+    }
+    const raw = uni.getStorageSync(BARCODE_PARSER_DEBUG_STORAGE_KEY)
+    barcodeParserDebugEnabledCache = normalizeBoolean(raw)
+    return barcodeParserDebugEnabledCache
+  } catch (e) {
+    barcodeParserDebugEnabledCache = false
+    return barcodeParserDebugEnabledCache
+  }
+}
+
+export function setBarcodeParserDebugEnabled(enabled) {
+  const next = Boolean(enabled)
+  barcodeParserDebugEnabledCache = next
+  try {
+    if (typeof uni !== 'undefined' && uni.setStorageSync) {
+      uni.setStorageSync(BARCODE_PARSER_DEBUG_STORAGE_KEY, next)
+    }
+  } catch (e) {
+    // ignore
+  }
+  return next
+}
+
+const debugLog = (...args) => {
+  if (!isBarcodeParserDebugEnabled()) return
+  // eslint-disable-next-line no-console
+  console.log(...args)
+}
+
 /**
  * 解析扫码结果
  * @param {string} scanResult 扫码原始结果
  * @returns {object} 解析后的结果
  */
 export function parseBarcode(scanResult) {
-  console.log('🔍 [parseBarcode] 开始解析条码')
-  console.log('🔍 [parseBarcode] 输入scanResult:', scanResult)
-  console.log('🔍 [parseBarcode] scanResult类型:', typeof scanResult)
+  debugLog('🔍 [parseBarcode] 开始解析条码')
+  debugLog('🔍 [parseBarcode] 输入scanResult:', scanResult)
+  debugLog('🔍 [parseBarcode] scanResult类型:', typeof scanResult)
   
   if (!scanResult || typeof scanResult !== 'string') {
-    console.log('❌ [parseBarcode] 输入无效')
+    debugLog('❌ [parseBarcode] 输入无效')
     return {
       success: false,
       error: t('stock.scanResultEmpty'),
@@ -44,28 +95,28 @@ export function parseBarcode(scanResult) {
   }
 
   const trimmed = scanResult.trim()
-  console.log('🔍 [parseBarcode] 处理后的字符串:', trimmed)
-  console.log('🔍 [parseBarcode] 字符串长度:', trimmed.length)
+  debugLog('🔍 [parseBarcode] 处理后的字符串:', trimmed)
+  debugLog('🔍 [parseBarcode] 字符串长度:', trimmed.length)
 
   try {
     // 格式1: SN,MAC 或 SN,MAC1,MAC2,MAC3,MAC4 (逗号分隔)
     // 例如: 1211000124233API0001,48BF742DDF43
     // 例如: 120200089725BKB0030,48BF743904E0,48BF743904FE,48BF7439051C,48BF7439053A
-    console.log('🔍 [parseBarcode] 检查格式1: SN,MAC(1-4) (逗号分隔)')
-    console.log('🔍 [parseBarcode] 包含逗号?:', trimmed.includes(','))
-    console.log('🔍 [parseBarcode] 包含冒号?:', trimmed.includes(':'))
+    debugLog('🔍 [parseBarcode] 检查格式1: SN,MAC(1-4) (逗号分隔)')
+    debugLog('🔍 [parseBarcode] 包含逗号?:', trimmed.includes(','))
+    debugLog('🔍 [parseBarcode] 包含冒号?:', trimmed.includes(':'))
     
     if (trimmed.includes(',') && !trimmed.includes(':')) {
-      console.log('✅ [parseBarcode] 匹配格式1')
+      debugLog('✅ [parseBarcode] 匹配格式1')
       const parts = trimmed.split(',').map(part => part.trim())
-      console.log('🔍 [parseBarcode] 分割结果:', parts)
-      console.log('🔍 [parseBarcode] 分割数量:', parts.length)
+      debugLog('🔍 [parseBarcode] 分割结果:', parts)
+      debugLog('🔍 [parseBarcode] 分割数量:', parts.length)
       
       if (parts.length === 2) {
         result.sn = parts[0]
         result.mac1 = parts[1]
         result.format = 'sn_mac_comma'
-        console.log('✅ [parseBarcode] 格式1解析成功:', result)
+        debugLog('✅ [parseBarcode] 格式1解析成功:', result)
         return result
       } else if (parts.length === 5) {
         result.sn = parts[0]
@@ -74,98 +125,98 @@ export function parseBarcode(scanResult) {
         result.mac3 = parts[3]
         result.mac4 = parts[4]
         result.format = 'sn_mac4_comma'
-        console.log('✅ [parseBarcode] 格式1(5段)解析成功:', result)
+        debugLog('✅ [parseBarcode] 格式1(5段)解析成功:', result)
         return result
       } else {
-        console.log('❌ [parseBarcode] 格式1分割数量不正确（期望2或5）')
+        debugLog('❌ [parseBarcode] 格式1分割数量不正确（期望2或5）')
       }
     }
 
     // 格式2: MAC1:xxx, MAC2:xxx, SN:xxx (键值对格式)
     // 例如: MAC1:48BF743244E69, MAC2:48BF74324E6B, SN:12020008532555DB0002
-    console.log('🔍 [parseBarcode] 检查格式2: 键值对格式')
+    debugLog('🔍 [parseBarcode] 检查格式2: 键值对格式')
     if (trimmed.includes(':')) {
-      console.log('✅ [parseBarcode] 匹配格式2')
+      debugLog('✅ [parseBarcode] 匹配格式2')
       const pairs = trimmed.split(',').map(pair => pair.trim())
-      console.log('🔍 [parseBarcode] 键值对列表:', pairs)
+      debugLog('🔍 [parseBarcode] 键值对列表:', pairs)
       
       for (const pair of pairs) {
-        console.log('🔍 [parseBarcode] 处理键值对:', pair)
+        debugLog('🔍 [parseBarcode] 处理键值对:', pair)
         const [key, value] = pair.split(':').map(part => part.trim())
-        console.log('🔍 [parseBarcode] 键:', key, '值:', value)
+        debugLog('🔍 [parseBarcode] 键:', key, '值:', value)
         
         if (key && value) {
           switch (key.toUpperCase()) {
             case 'SN':
               result.sn = value
-              console.log('🔍 [parseBarcode] 设置SN:', value)
+              debugLog('🔍 [parseBarcode] 设置SN:', value)
               break
             case 'MAC':
             case 'MAC1':
               result.mac1 = value
-              console.log('🔍 [parseBarcode] 设置MAC1:', value)
+              debugLog('🔍 [parseBarcode] 设置MAC1:', value)
               break
             case 'MAC2':
               result.mac2 = value
-              console.log('🔍 [parseBarcode] 设置MAC2:', value)
+              debugLog('🔍 [parseBarcode] 设置MAC2:', value)
               break
             case 'MAC3':
               result.mac3 = value
-              console.log('🔍 [parseBarcode] 设置MAC3:', value)
+              debugLog('🔍 [parseBarcode] 设置MAC3:', value)
               break
             case 'MAC4':
               result.mac4 = value
-              console.log('🔍 [parseBarcode] 设置MAC4:', value)
+              debugLog('🔍 [parseBarcode] 设置MAC4:', value)
               break
           }
         }
       }
       
-      console.log('🔍 [parseBarcode] 格式2解析后:', result)
+      debugLog('🔍 [parseBarcode] 格式2解析后:', result)
       if (result.sn) {
         result.format = 'key_value_pairs'
-        console.log('✅ [parseBarcode] 格式2解析成功')
+        debugLog('✅ [parseBarcode] 格式2解析成功')
         return result
       } else {
-        console.log('❌ [parseBarcode] 格式2未找到SN')
+        debugLog('❌ [parseBarcode] 格式2未找到SN')
       }
     }
 
     // 格式3: 纯SN (条形码Code128)
     // 例如: 12020008532555DB0002
-    console.log('🔍 [parseBarcode] 检查格式3: 纯SN')
+    debugLog('🔍 [parseBarcode] 检查格式3: 纯SN')
     if (!trimmed.includes(',') && !trimmed.includes(':')) {
-      console.log('✅ [parseBarcode] 匹配格式3')
-      console.log('🔍 [parseBarcode] 长度检查:', trimmed.length, '>=8?:', trimmed.length >= 8)
-      console.log('🔍 [parseBarcode] 字符检查:', /^[A-Za-z0-9]+$/.test(trimmed))
-      console.log('🔍 [parseBarcode] 全数字?:', /^\d+$/.test(trimmed))
+      debugLog('✅ [parseBarcode] 匹配格式3')
+      debugLog('🔍 [parseBarcode] 长度检查:', trimmed.length, '>=8?:', trimmed.length >= 8)
+      debugLog('🔍 [parseBarcode] 字符检查:', /^[A-Za-z0-9]+$/.test(trimmed))
+      debugLog('🔍 [parseBarcode] 全数字?:', /^\d+$/.test(trimmed))
       
       // 简单验证SN格式（可根据实际业务规则调整）
       if (validateSerialNumber(trimmed)) {
         result.sn = trimmed
         result.format = 'pure_sn'
-        console.log('✅ [parseBarcode] 格式3解析成功:', result)
+        debugLog('✅ [parseBarcode] 格式3解析成功:', result)
         return result
       } else if (/^\d+$/.test(trimmed) && trimmed.length >= 8) {
         // 纯数字结果直接判为无效（避免误扫）
         result.success = false
         result.error = t('stock.invalidBarcode')
-        console.log('❌ [parseBarcode] 格式3为纯数字，判为无效:', result)
+        debugLog('❌ [parseBarcode] 格式3为纯数字，判为无效:', result)
         return result
       } else {
-        console.log('❌ [parseBarcode] 格式3验证失败')
+        debugLog('❌ [parseBarcode] 格式3验证失败')
       }
     }
 
     // 如果都不匹配，返回错误
-    console.log('❌ [parseBarcode] 所有格式都不匹配')
+    debugLog('❌ [parseBarcode] 所有格式都不匹配')
     result.success = false
     result.error = t('stock.barcodeFormatUnsupported')
-    console.log('❌ [parseBarcode] 返回错误结果:', result)
+    debugLog('❌ [parseBarcode] 返回错误结果:', result)
     return result
 
   } catch (error) {
-    console.log('❌ [parseBarcode] 异常:', error)
+    debugLog('❌ [parseBarcode] 异常:', error)
     return {
       success: false,
       error: t('stock.barcodeParseFailed', { error: error.message }),
