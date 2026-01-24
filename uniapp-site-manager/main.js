@@ -3,6 +3,8 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import CustomNavbar from './components/CustomNavbar.vue'
 import CustomTabbar from './components/custom-tabbar/custom-tabbar.vue'
+import OfflineDocumentSection from './components/OfflineDocumentSection.vue'
+import DocumentPhotoPicker from './components/DocumentPhotoPicker.vue'
 import UniIcons from './uni_modules/uni-icons/components/uni-icons/uni-icons.vue'
 import UniLoadMore from './uni_modules/uni-load-more/components/uni-load-more/uni-load-more.vue'
 import i18n from './utils/i18n.js'
@@ -86,6 +88,8 @@ export function createApp() {
 	app.component('custom-tabbar', CustomTabbar)
 	app.component('uni-icons', UniIcons)
 	app.component('uni-load-more', UniLoadMore)
+	app.component('OfflineDocumentSection', OfflineDocumentSection)
+	app.component('DocumentPhotoPicker', DocumentPhotoPicker)
 	app.config.globalProperties.$formatPercentInt = formatPercentInt
 	app.config.globalProperties.$toPercentInt = toPercentInt
 
