@@ -123,11 +123,11 @@
 							<view class="aux-nums">
 								<view class="n">
 									<text class="k">{{ $t('stock.qtyRemaining') }}</text>
-									<text class="v">{{ auxRemainingCap(row) }}</text>
+									<text class="v">{{ auxRemainingQty(row) }}</text>
 								</view>
 								<view class="n">
 									<text class="k">{{ $t('stock.qtyPending') }}</text>
-									<text class="v">{{ Math.max(0, Number(row.planned_qty || 0) - Number(row.confirmed_qty || 0)) }}</text>
+									<text class="v">{{ auxPendingQty(row) }}</text>
 								</view>
 								<view class="n accent">
 									<text class="k">{{ $t('stock.issueDraftPlannedThisTime') }}</text>
@@ -193,6 +193,34 @@
 	const snInput = ref('')
 
 	const canEdit = computed(() => String(draft.value?.status || '') === 'draft')
+
+	const normalizeDraftPayload = (rawDraft, { preserveAuxEdits = false } = {}) => {
+		if (!rawDraft) return null
+		const prevAuxMap = new Map((draft.value?.aux_items || []).map(r => [Number(r.equipment_id), r]))
+		const next = {
+			...rawDraft,
+		}
+		next.aux_items = (next.aux_items || []).map(r => {
+			const equipmentId = Number(r.equipment_id)
+			const prev = prevAuxMap.get(equipmentId)
+			const plannedQty = preserveAuxEdits
+				? Number(prev?.planned_qty ?? r.planned_qty ?? 0)
+				: Number(r.planned_qty || 0)
+			const basePlanned = preserveAuxEdits
+				? Number(prev?._base_planned_qty ?? r.planned_qty ?? 0)
+				: Number(r.planned_qty || 0)
+			const baseConfirmed = preserveAuxEdits
+				? Number(prev?._base_confirmed_qty ?? r.confirmed_qty ?? 0)
+				: Number(r.confirmed_qty || 0)
+			return {
+				...r,
+				planned_qty: plannedQty,
+				_base_planned_qty: basePlanned,
+				_base_confirmed_qty: baseConfirmed,
+			}
+		})
+		return next
+	}
 
 	const pendingSerials = computed(() => {
 		return (draft.value?.serials || []).filter(s => String(s.status) === 'pending')
@@ -260,11 +288,7 @@
 				header: getAuthHeaders(userStore.token),
 			})
 			if (res.statusCode === 200 && res.data?.draft) {
-				draft.value = res.data.draft
-				draft.value.aux_items = (draft.value.aux_items || []).map(r => ({
-					...r,
-					planned_qty: Number(r.planned_qty || 0),
-				}))
+				draft.value = normalizeDraftPayload(res.data.draft, { preserveAuxEdits: false })
 				if (String(draft.value?.status || '') !== 'draft') {
 					setTimeout(() => {
 						uni.redirectTo({ url: `/pages/stock/issue-drafts/detail?draft_id=${draftId.value}` })
@@ -335,7 +359,7 @@
 				},
 			})
 			if (res.statusCode === 200 && res.data?.draft) {
-				draft.value = res.data.draft
+				draft.value = normalizeDraftPayload(res.data.draft, { preserveAuxEdits: canEdit.value })
 				uni.showToast({ title: $t('stock.issueDraftScanSuccess'), icon: 'success' })
 				return
 			}
@@ -392,11 +416,25 @@
 		return items.find(it => Number(it.equipment_id) === Number(equipmentId)) || null
 	}
 
-	const auxRemainingCap = (row) => {
+	const auxBasePendingQty = (row) => {
+		const basePlanned = Number(row?._base_planned_qty ?? row?.planned_qty ?? 0)
+		const baseConfirmed = Number(row?._base_confirmed_qty ?? row?.confirmed_qty ?? 0)
+		return Math.max(0, basePlanned - baseConfirmed)
+	}
+
+	const auxPendingQty = (row) => {
+		return Math.max(0, Number(row?.planned_qty || 0) - Number(row?.confirmed_qty || 0))
+	}
+
+	const auxPlannedCap = (row) => {
 		const reqIt = requestItemByEquipId(row.equipment_id)
 		const remaining = Number(reqIt?.remaining_qty || 0)
-		const pendingThisDraft = Math.max(0, Number(row.planned_qty || 0) - Number(row.confirmed_qty || 0))
-		return Math.max(0, remaining + pendingThisDraft)
+		return Math.max(0, remaining + auxBasePendingQty(row))
+	}
+
+	const auxRemainingQty = (row) => {
+		const cap = auxPlannedCap(row)
+		return Math.max(0, cap - auxPendingQty(row))
 	}
 
 	const normalizeAux = (idx) => {
@@ -406,7 +444,7 @@
 		if (!row) return
 		let n = Number(String(row.planned_qty || '').trim())
 		if (!Number.isFinite(n) || n < 0) n = 0
-		const max = auxRemainingCap(row)
+		const max = auxPlannedCap(row)
 		if (n > max) n = max
 		row.planned_qty = Math.floor(n)
 	}
@@ -415,7 +453,7 @@
 		if (!canEdit.value) return
 		const row = (draft.value?.aux_items || [])[idx]
 		if (!row) return
-		const max = auxRemainingCap(row)
+		const max = auxPlannedCap(row)
 		row.planned_qty = Math.min(max, Number(row.planned_qty || 0) + 1)
 	}
 
@@ -430,7 +468,7 @@
 		if (!canEdit.value) return
 		const rows = draft.value?.aux_items || []
 		rows.forEach((r) => {
-			r.planned_qty = auxRemainingCap(r)
+			r.planned_qty = auxPlannedCap(r)
 		})
 		uni.showToast({ title: $t('stock.issueDraftAuxFilled'), icon: 'success' })
 	}
@@ -448,7 +486,7 @@
 			data: { items: payload },
 		})
 		if (res.statusCode === 200 && res.data?.draft) {
-			draft.value = res.data.draft
+			draft.value = normalizeDraftPayload(res.data.draft, { preserveAuxEdits: false })
 			return true
 		}
 		if (res.statusCode === 401) {
