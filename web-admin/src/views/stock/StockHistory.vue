@@ -49,10 +49,10 @@
                 <el-button type="primary" @click="loadAll">查询</el-button>
               </template>
             </el-input>
-            <el-tooltip
-              content="支持：单据号、文件名、仓库、操作人、设备编码、设备名称、SN"
-              placement="top"
-            >
+	            <el-tooltip
+	              content="支持：单据号、文件名、仓库、操作人、领取人、设备编码、设备名称、SN"
+	              placement="top"
+	            >
               <span class="keyword-help" aria-label="搜索提示">?</span>
             </el-tooltip>
           </div>
@@ -97,14 +97,22 @@
             </div>
             <span v-else>{{ row.totalQuantity }}</span>
           </template>
-        </el-table-column>
+	        </el-table-column>
 
-        <el-table-column prop="operatorName" label="操作人" width="120" />
+	        <el-table-column prop="operatorName" label="操作人" width="120" />
+	        <el-table-column prop="receiverName" label="领取人" width="140">
+	          <template #default="{ row }">
+	            <span v-if="row.recordType === 'transaction' && row.transactionType === 'stock_out'">
+	              {{ row.receiverName || '-' }}
+	            </span>
+	            <span v-else>-</span>
+	          </template>
+	        </el-table-column>
 
-        <el-table-column prop="operationTime" label="操作时间" width="180">
-          <template #default="{ row }">
-            {{ formatDateTime(row.operationTime) }}
-          </template>
+	        <el-table-column prop="operationTime" label="操作时间" width="180">
+	          <template #default="{ row }">
+	            {{ formatDateTime(row.operationTime) }}
+	          </template>
         </el-table-column>
 
         <el-table-column prop="notes" label="备注" min-width="160" v-if="showNotesColumn">
@@ -679,15 +687,16 @@ const buildRecords = computed(() => {
       transactionType: t.transaction_type,
       documentLabel: t.document_number || '-',
       direction: t.transaction_type === 'stock_out' ? 'out' : 'in',
-      warehouseName: wname,
-      totalQuantity: t.total_quantity || 0,
-      importCounts: null,
-      operatorName: t.operator_name || '',
-      operationTime: t.operation_time,
-      status: t.approval_status,
-      notes: t.notes || '',
-      raw: t
-    })
+	      warehouseName: wname,
+	      totalQuantity: t.total_quantity || 0,
+	      importCounts: null,
+	      operatorName: t.operator_name || '',
+	      receiverName: t.receiver_name || '',
+	      operationTime: t.operation_time,
+	      status: t.approval_status,
+	      notes: t.notes || '',
+	      raw: t
+	    })
   })
 
   rawImports.value.forEach((r) => {
@@ -699,17 +708,18 @@ const buildRecords = computed(() => {
       direction: 'in',
       warehouseName: r.warehouse_name || '',
       totalQuantity: r.total_count || 0,
-      importCounts: {
-        success: r.success_count || 0,
-        duplicate: r.duplicate_count || 0,
-        failed: r.failed_count || 0
-      },
-      operatorName: r.importer_name || '',
-      operationTime: r.import_date,
-      status: r.status,
-      notes: '',
-      importId: r.id,
-      file_name: r.file_name,
+	      importCounts: {
+	        success: r.success_count || 0,
+	        duplicate: r.duplicate_count || 0,
+	        failed: r.failed_count || 0
+	      },
+	      operatorName: r.importer_name || '',
+	      receiverName: '',
+	      operationTime: r.import_date,
+	      status: r.status,
+	      notes: '',
+	      importId: r.id,
+	      file_name: r.file_name,
       equipment_type_name: r.equipment_type_name,
       warehouse_name: r.warehouse_name,
       importer_name: r.importer_name,
@@ -748,15 +758,16 @@ const filteredRecords = computed(() => {
           (it.serial_number || '').toLowerCase().includes(kw)
         )
       })
-      return (
-        (r.documentLabel || '').toLowerCase().includes(kw) ||
-        (r.warehouseName || '').toLowerCase().includes(kw) ||
-        (r.operatorName || '').toLowerCase().includes(kw) ||
-        (r.notes || '').toLowerCase().includes(kw) ||
-        hitTxItem
-      )
-    })
-  }
+	      return (
+	        (r.documentLabel || '').toLowerCase().includes(kw) ||
+	        (r.warehouseName || '').toLowerCase().includes(kw) ||
+	        (r.operatorName || '').toLowerCase().includes(kw) ||
+	        (r.receiverName || '').toLowerCase().includes(kw) ||
+	        (r.notes || '').toLowerCase().includes(kw) ||
+	        hitTxItem
+	      )
+	    })
+	  }
 
   // 日期范围过滤：针对 operationTime
   if (filters.value.start_date && filters.value.end_date) {

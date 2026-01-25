@@ -156,11 +156,53 @@
 
 			<view class="spacer" />
 		</scroll-view>
+
+		<!-- 检查绑定提示（复用旧退库的规则） -->
+		<view v-if="bindModalVisible" class="bind-modal-mask" @click="closeBindModal">
+			<view class="bind-modal" @click.stop>
+				<view class="bind-modal-header">
+					<text class="bind-modal-title">
+						{{ bindModalAction === 'need_unbind' ? $t('stock.oneClickUnbind') : $t('common.hint') }}
+					</text>
+					<text class="bind-modal-close u-pressable" @click="closeBindModal">×</text>
+				</view>
+
+				<view class="bind-modal-body">
+					<text class="bind-modal-desc">{{ bindModalMessage }}</text>
+
+					<scroll-view v-if="bindModalBindings.length" class="bind-list" scroll-y>
+						<view v-for="(b, idx) in bindModalBindings" :key="idx" class="bind-item">
+							<view class="bind-item-row">
+								<text class="bind-sn mono">{{ b.sn || '-' }}</text>
+								<text class="bind-title">{{ bindingTitle(b) }}</text>
+							</view>
+							<text v-if="bindingSiteName(b)" class="bind-sub">{{ bindingSiteName(b) }}</text>
+							<text v-if="bindingReasonText(b)" class="bind-reason">{{ bindingReasonText(b) }}</text>
+						</view>
+					</scroll-view>
+				</view>
+
+				<view class="bind-modal-footer">
+					<button class="u-btn u-btn-secondary u-pressable" :disabled="unbindSubmitting" @click="closeBindModal">
+						{{ $t('common.close') }}
+					</button>
+					<button
+						v-if="bindModalAction === 'need_unbind'"
+						class="u-btn u-btn-primary u-pressable"
+						:disabled="unbindSubmitting"
+						@click="confirmUnbindAndRetry"
+					>
+						{{ unbindSubmitting ? $t('stock.processing') : $t('stock.oneClickUnbind') }}
+					</button>
+				</view>
+			</view>
+		</view>
 	</view>
 </template>
 
 <script setup>
-	import { computed, getCurrentInstance, onMounted, ref, watch } from 'vue'
+	import { computed, getCurrentInstance, onMounted, ref } from 'vue'
+	import { onLoad } from '@dcloudio/uni-app'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { parseBarcode } from '@/utils/barcode-parser.js'
 	import { useUserStore } from '@/stores/user'
@@ -185,6 +227,18 @@
 	const selectedMainSns = ref([])
 	const auxQtyMap = ref({})
 	const offlineDocumentId = ref(null)
+
+	// 从“我的设备→设备详情→退库”带入
+	const preselectOutId = ref('')
+	const preselectSn = ref('')
+	const preselectApplied = ref(false)
+
+	// 检查绑定弹窗（后端 400 detail.action）
+	const bindModalVisible = ref(false)
+	const bindModalAction = ref('')
+	const bindModalMessage = ref('')
+	const bindModalBindings = ref([])
+	const unbindSubmitting = ref(false)
 
 	const submitting = ref(false)
 
@@ -304,6 +358,51 @@
 		warehouseIndex.value = Number(e.detail.value || 0)
 	}
 
+	const bindingTitle = (binding) => {
+		const fallback = $t('stock.unknownWorkOrderOrSite')
+		if (!binding) return fallback
+		return binding.work_order_title || binding.site_name || fallback
+	}
+
+	const bindingSiteName = (binding) => {
+		if (!binding) return ''
+		if (binding.work_order_title && binding.site_name) return binding.site_name
+		return ''
+	}
+
+	const bindingReasonText = (binding) => {
+		if (!binding) return ''
+		const code = String(binding.reason_code || '').trim()
+		const map = {
+			other_inspector: $t('stock.unbindReasonOtherInspector'),
+			inspection_locked: $t('stock.unbindReasonInspectionLocked'),
+			status_not_supported: $t('stock.unbindReasonStatusNotSupported'),
+		}
+		return map[code] || binding.reason || ''
+	}
+
+	const openBindModalFromDetail = (detail) => {
+		const action = String(detail?.action || '').trim()
+		if (action !== 'need_unbind' && action !== 'unbind_blocked') return false
+		bindModalAction.value = action
+		bindModalMessage.value = String(detail?.message || detail?.detail || $t('messages.operationFailed') || '').trim()
+		bindModalBindings.value = Array.isArray(detail?.need_unbind)
+			? detail.need_unbind
+			: Array.isArray(detail?.blocked_bindings)
+				? detail.blocked_bindings
+				: []
+		bindModalVisible.value = true
+		return true
+	}
+
+	const closeBindModal = (force = false) => {
+		if (unbindSubmitting.value && !force) return
+		bindModalVisible.value = false
+		bindModalAction.value = ''
+		bindModalMessage.value = ''
+		bindModalBindings.value = []
+	}
+
 	const scanAddMain = async () => {
 		if (!selectedOut.value) {
 			uni.showToast({ title: $t('stock.selectStockOut'), icon: 'none' })
@@ -364,14 +463,14 @@
 		auxQtyMap.value = map
 	}
 
-	const submit = async () => {
+	const buildSubmitPayload = () => {
 		if (!selectedOut.value?.id) {
 			uni.showToast({ title: $t('stock.selectStockOut'), icon: 'none' })
-			return
+			return null
 		}
 		if (!selectedWarehouse.value) {
 			uni.showToast({ title: $t('stock.selectReturnWarehouse'), icon: 'none' })
-			return
+			return null
 		}
 
 		const auxItemsPayload = []
@@ -384,8 +483,21 @@
 
 		if (selectedMainSns.value.length === 0 && auxItemsPayload.length === 0) {
 			uni.showToast({ title: $t('stock.returnSelectAtLeastOne'), icon: 'none' })
-			return
+			return null
 		}
+
+		return {
+			out_transaction_id: selectedOut.value.id,
+			return_warehouse_id: selectedWarehouse.value.id,
+			main_sns: selectedMainSns.value,
+			aux_items: auxItemsPayload,
+			offline_document_id: offlineDocumentId.value || undefined,
+		}
+	}
+
+	const doSubmit = async () => {
+		const payload = buildSubmitPayload()
+		if (!payload) return
 
 		try {
 			submitting.value = true
@@ -394,13 +506,7 @@
 				...createRequestConfig({
 					method: 'POST',
 					headers: getAuthHeaders(userStore.token),
-					data: {
-						out_transaction_id: selectedOut.value.id,
-						return_warehouse_id: selectedWarehouse.value.id,
-						main_sns: selectedMainSns.value,
-						aux_items: auxItemsPayload,
-						offline_document_id: offlineDocumentId.value || undefined,
-					}
+					data: payload,
 				})
 			})
 
@@ -414,6 +520,13 @@
 				userStore.logout()
 				return
 			}
+
+			// 后端返回检查绑定阻断/需解绑：展示弹窗并支持一键解绑重试
+			if (res.statusCode === 400 && res.data?.detail && typeof res.data.detail === 'object') {
+				const handled = openBindModalFromDetail(res.data.detail)
+				if (handled) return
+			}
+
 			uni.showToast({ title: String(res.data?.detail || res.data?.message || $t('messages.operationFailed')), icon: 'none' })
 		} catch (e) {
 			console.error('提交退库失败:', e)
@@ -423,13 +536,136 @@
 		}
 	}
 
-	watch(() => selectedOut.value?.id, () => {
-		selectedMainSns.value = []
-	})
+	const submit = async () => {
+		await doSubmit()
+	}
+
+	const fetchOutDetail = async (outId) => {
+		const id = String(outId || '').trim()
+		if (!id || !userStore.token) return null
+		try {
+			const res = await uni.request({
+				url: buildApiUrl(`/api/stock/my-stock-outs/${id}`),
+				...createRequestConfig({
+					method: 'GET',
+					headers: getAuthHeaders(userStore.token),
+				})
+			})
+			if (res.statusCode === 200) return res.data || null
+			if (res.statusCode === 401) userStore.logout()
+			return null
+		} catch (e) {
+			console.error('加载出库单详情失败:', e)
+			return null
+		}
+	}
+
+	const ensureSelectedOutById = async (outId) => {
+		const id = String(outId || '').trim()
+		if (!id) return false
+		if (String(selectedOut.value?.id || '') === id) return true
+		const found = (outs.value || []).find(o => String(o?.id || '') === id)
+		if (found) {
+			selectOut(found)
+			return true
+		}
+		const detail = await fetchOutDetail(id)
+		if (!detail?.id) {
+			uni.showToast({ title: $t('stock.stockOutNotFoundOrNoPermission') || '出库单不存在或无权限', icon: 'none' })
+			return false
+		}
+		outs.value = [detail].concat((outs.value || []).filter(o => String(o?.id || '') !== String(detail.id)))
+		selectOut(detail)
+		return true
+	}
+
+	const tryPreselectSn = (sn) => {
+		const value = String(sn || '').trim()
+		if (!value || !selectedOut.value) return false
+		const exist = selectedMainSns.value.includes(value)
+		if (exist) return true
+		const inOut = (selectedOut.value.items || []).some(it => it?.is_main_device && it?.serial_number === value && Number(it?.max_returnable || 0) > 0)
+		if (!inOut) return false
+		selectedMainSns.value = selectedMainSns.value.concat([value])
+		return true
+	}
+
+	const applyPreselectFromQuery = async () => {
+		if (preselectApplied.value) return
+		const outId = String(preselectOutId.value || '').trim()
+		const sn = String(preselectSn.value || '').trim()
+		if (!outId) return
+
+		preselectApplied.value = true
+		const ok = await ensureSelectedOutById(outId)
+		if (!ok) return
+		if (!sn) return
+
+		const picked = tryPreselectSn(sn)
+		if (!picked) {
+			uni.showToast({ title: $t('stock.deviceNotInInventoryTitle'), icon: 'none' })
+		}
+	}
+
+	const confirmUnbindAndRetry = async () => {
+		if (unbindSubmitting.value) return
+		const sns = Array.from(new Set((bindModalBindings.value || []).map(b => String(b?.sn || '').trim()).filter(Boolean)))
+		if (sns.length === 0) {
+			closeBindModal()
+			return
+		}
+
+		uni.showModal({
+			title: $t('stock.oneClickUnbind'),
+			content: $t('stock.unbindWillClearAndDelete'),
+			confirmText: $t('common.confirm'),
+			cancelText: $t('common.cancel'),
+			success: async (r) => {
+				if (!r.confirm) return
+				unbindSubmitting.value = true
+				try {
+					for (const sn of sns) {
+						const ret = await uni.request({
+							url: buildApiUrl(API_ENDPOINTS.STOCK.SCAN_RETURN_UNBIND),
+							...createRequestConfig({
+								method: 'POST',
+								headers: getAuthHeaders(userStore.token),
+								data: { sn },
+							})
+						})
+						if (ret.statusCode === 401) {
+							userStore.logout()
+							return
+						}
+						if (ret.statusCode !== 200) {
+							const msg = ret.data?.detail || ret.data?.message || $t('messages.operationFailed')
+							uni.showToast({ title: String(msg), icon: 'none' })
+							return
+						}
+					}
+
+					uni.showToast({ title: $t('messages.operationSuccess'), icon: 'success' })
+					closeBindModal(true)
+					await doSubmit()
+				} catch (e) {
+					console.error('解绑失败:', e)
+					uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
+				} finally {
+					unbindSubmitting.value = false
+				}
+			}
+		})
+	}
 
 	onMounted(async () => {
 		await loadWarehouses()
 		await loadOuts(true)
+		await applyPreselectFromQuery()
+	})
+
+	onLoad((query) => {
+		preselectOutId.value = String(query?.out_transaction_id || '').trim()
+		preselectSn.value = String(query?.sn || '').trim()
 	})
 </script>
 
@@ -512,4 +748,48 @@
 	.footer { margin: 16px; }
 	.spacer { height: 24px; }
 	.mono { font-family: monospace; }
+
+	.bind-modal-mask {
+		position: fixed;
+		left: 0;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.45);
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+		z-index: 999;
+	}
+	.bind-modal {
+		width: 100%;
+		max-height: 78vh;
+		background: #fff;
+		border-top-left-radius: 18px;
+		border-top-right-radius: 18px;
+		overflow: hidden;
+		box-shadow: 0 -12px 30px rgba(17, 24, 39, 0.16);
+	}
+	.bind-modal-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 14px 16px;
+		border-bottom: 1px solid rgba(229, 231, 235, 0.9);
+	}
+	.bind-modal-title { font-size: 14px; font-weight: 900; color: var(--text-primary); }
+	.bind-modal-close { font-size: 22px; color: #6b7280; padding: 2px 6px; }
+	.bind-modal-body { padding: 12px 16px 6px; }
+	.bind-modal-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+
+	.bind-list { margin-top: 12px; max-height: 40vh; }
+	.bind-item { padding: 10px 12px; border-radius: 14px; background: rgba(243, 244, 246, 0.7); border: 1px solid rgba(229, 231, 235, 0.95); margin-bottom: 10px; }
+	.bind-item-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+	.bind-sn { font-size: 12px; font-weight: 900; color: var(--text-primary); }
+	.bind-title { flex: 1; min-width: 0; text-align: right; font-size: 12px; color: var(--text-primary); }
+	.bind-sub { margin-top: 6px; font-size: 11px; color: var(--text-secondary); }
+	.bind-reason { margin-top: 6px; font-size: 11px; color: #ef4444; }
+
+	.bind-modal-footer { padding: 12px 16px 16px; display: flex; gap: 10px; }
+	.bind-modal-footer .u-btn { flex: 1; }
 </style>

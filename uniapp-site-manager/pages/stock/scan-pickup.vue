@@ -523,198 +523,6 @@
       </view>
     </view>
 
-	    <!-- 退库弹窗（流程收敛在扫码领料页） -->
-	    <view class="return-modal-mask" v-if="returnModalVisible" @click="closeReturnModal">
-	      <view class="return-modal" @click.stop>
-	        <view class="return-modal-header">
-	          <text class="return-modal-title">{{ $t('stock.returnModalTitle') }}</text>
-	          <view class="return-modal-close" @click="closeReturnModal">
-	            <text class="close-text">×</text>
-	          </view>
-	        </view>
-
-	        <view class="return-modal-body" v-if="returnRecord">
-	          <view class="return-summary">
-	            <view class="summary-row">
-	              <text class="summary-label">{{ $t('stock.serialNumber') }}</text>
-	              <view class="summary-value-wrap">
-	                <text class="summary-value mono">{{ returnSummarySn }}</text>
-	                <text class="summary-action" @click="copyReturnSn">{{ $t('stock.copySn') }}</text>
-	              </view>
-	            </view>
-	            <view v-if="returnRecord.package_name" class="summary-row">
-	              <text class="summary-label">{{ $t('stock.packageLabel') }}</text>
-	              <text class="summary-value">{{ returnRecord.package_name }}</text>
-	            </view>
-	            <view class="summary-row">
-	              <text class="summary-label">{{ $t('common.status') }}</text>
-	              <text class="status-badge" :class="returnStatusBadgeClass">{{ returnStatusBadgeText }}</text>
-	            </view>
-	            <view v-if="returnRecord.return_document_number" class="summary-row">
-	              <text class="summary-label">{{ $t('stock.returnDocumentNumber') }}</text>
-	              <text class="summary-value mono">{{ returnRecord.return_document_number }}</text>
-	            </view>
-	            <view v-if="returnRecord.return_warehouse_name" class="summary-row">
-	              <text class="summary-label">{{ $t('stock.returnWarehouseLabel') }}</text>
-	              <text class="summary-value">{{ returnRecord.return_warehouse_name }}</text>
-	            </view>
-	            <view v-if="returnRecord.return_reject_reason" class="summary-reject-box">
-	              <text class="reject-icon">⚠️</text>
-	              <text class="reject-text">{{ $t('stock.rejectReason') }}: {{ returnRecord.return_reject_reason }}</text>
-	            </view>
-	          </view>
-
-	          <view v-if="returnPreviewLoading" class="return-loading">
-	            <text>{{ $t('stock.processing') }}</text>
-	          </view>
-
-	          <view v-else>
-	            <view v-if="returnPreviewAction === 'no_active_pickup'" class="return-hint-card">
-	              <text>{{ $t('stock.noReturnablePickup') }}</text>
-	            </view>
-
-	            <view v-else-if="returnPreviewAction === 'already_requested'" class="return-hint-card">
-	              <view class="hint-header info">
-	                <text class="hint-title">{{ $t('stock.alreadyReturnRequested') }}</text>
-	                <text class="hint-desc">{{ $t('stock.returnNeedWarehouseConfirmTip') }}</text>
-	              </view>
-	              <view class="kv-list">
-	                <view class="kv-row" v-if="returnPreviewData.return_document_number">
-	                  <text class="kv-label">{{ $t('stock.returnDocumentNumber') }}</text>
-	                  <text class="kv-value mono">{{ returnPreviewData.return_document_number }}</text>
-	                </view>
-	                <view class="kv-row" v-if="returnPreviewData.return_status">
-	                  <text class="kv-label">{{ $t('common.status') }}</text>
-	                  <text class="kv-value">{{ statusTextForReturn(returnPreviewData.return_status) }}</text>
-	                </view>
-	              </view>
-	              <view v-if="canCancelReturn" class="cancel-section">
-	                <text class="cancel-label">{{ $t('stock.cancelReasonOptional') }}</text>
-	                <input class="cancel-input" v-model="cancelReason" :placeholder="$t('stock.cancelReasonOptional')" />
-	              </view>
-	            </view>
-
-            <view v-else-if="returnPreviewAction === 'unbind_blocked'" class="return-hint-card">
-              <view class="hint-header warning">
-                <text class="hint-title">{{ $t('stock.unbindBlockedTitle') }}</text>
-                <text class="hint-desc">{{ $t('stock.unbindBlockedTip') }}</text>
-              </view>
-              <view
-	                v-if="returnPreviewData.blocked_bindings && returnPreviewData.blocked_bindings.length > 0"
-	                class="bind-list"
-	              >
-	                <view v-for="(b, idx) in returnPreviewData.blocked_bindings" :key="idx" class="bind-item">
-	                  <view class="bind-head">
-	                    <text class="bind-title">{{ bindingTitle(b) }}</text>
-	                    <text class="status-tag" :class="inspectionStatusTagClass(b.inspection_status)">{{ inspectionStatusText(b.inspection_status) }}</text>
-	                  </view>
-	                  <view class="bind-meta">
-	                    <text class="meta-item">{{ $t('stock.sectorBandLabel') }}: {{ sectorBandText(b) }}</text>
-	                    <text v-if="bindingSiteName(b)" class="meta-item">{{ $t('stock.siteLabel') }}: {{ bindingSiteName(b) }}</text>
-	                  </view>
-	                  <text class="bind-reason">{{ bindingReasonText(b) }}</text>
-	                </view>
-	              </view>
-	            </view>
-
-            <view v-else-if="returnPreviewAction === 'need_unbind'" class="return-hint-card">
-              <view class="hint-header info">
-                <text class="hint-title">{{ $t('stock.needUnbindTitle') }}</text>
-                <text class="hint-desc">{{ $t('stock.needUnbindTip') }}</text>
-              </view>
-	              <view v-if="returnPreviewData.need_unbind && returnPreviewData.need_unbind.length > 0" class="bind-list">
-	                <view v-for="(b, idx) in returnPreviewData.need_unbind" :key="idx" class="bind-item">
-	                  <view class="bind-head">
-	                    <text class="bind-title">{{ bindingTitle(b) }}</text>
-	                    <text class="status-tag" :class="inspectionStatusTagClass(b.inspection_status)">{{ inspectionStatusText(b.inspection_status) }}</text>
-	                  </view>
-	                  <view class="bind-meta">
-	                    <text class="meta-item">{{ $t('stock.sectorBandLabel') }}: {{ sectorBandText(b) }}</text>
-	                    <text v-if="bindingSiteName(b)" class="meta-item">{{ $t('stock.siteLabel') }}: {{ bindingSiteName(b) }}</text>
-	                  </view>
-	                </view>
-	              </view>
-              <view class="hint-actions">
-                <button class="modal-btn btn-outline" :disabled="returnActionLoading" @click="doReturnUnbind">
-                  {{ $t('stock.oneClickUnbind') }}
-                </button>
-                <button class="modal-btn btn-secondary" :disabled="returnActionLoading" @click="refreshReturnPreview">
-                  {{ $t('common.refresh') }}
-                </button>
-              </view>
-            </view>
-
-	            <view v-else-if="returnPreviewAction === 'preview_ok'" class="return-preview-ok">
-	              <view class="hint-header info">
-	                <text class="hint-title">{{ $t('stock.returnRequestReadyTitle') }}</text>
-	                <text class="hint-desc">{{ $t('stock.returnNeedWarehouseConfirmTip') }}</text>
-	              </view>
-	              <view class="return-doc">
-	                <text>{{ $t('stock.documentNumber') }}: {{ returnPreviewData.out_document_number }}</text>
-	              </view>
-
-              <view class="return-warehouse-section">
-                <text class="section-title-sm">{{ $t('stock.selectReturnWarehouse') }}</text>
-                <picker
-                  @change="onReturnWarehouseChange"
-                  :value="returnSelectedWarehouseIndex"
-                  :range="returnWarehouseOptions"
-                >
-                  <view class="picker-input">
-                    <text>{{ selectedReturnWarehouse ? selectedReturnWarehouse.warehouse_name : $t('common.pleaseSelect') }}</text>
-                    <text class="picker-arrow">▼</text>
-                  </view>
-                </picker>
-              </view>
-
-              <view class="items-list">
-                <view v-for="item in (returnPreviewData.items || [])" :key="item.item_id" class="item-card">
-                  <view class="item-header">
-                    <text class="item-name">{{ item.equipment_name }}</text>
-                    <text class="item-quantity">{{ item.quantity }} {{ item.unit }}</text>
-                  </view>
-                  <text class="item-code">{{ $t('stock.codeLabel') }}: {{ item.equipment_code }}</text>
-                </view>
-              </view>
-
-              <view class="return-documents">
-                <OfflineDocumentSection v-model="returnOfflineDocumentId" :disabled="returnActionLoading" />
-              </view>
-            </view>
-
-            <view v-else-if="returnPreviewAction === 'error'" class="return-hint-card">
-              <text>{{ returnPreviewData.detail || returnPreviewData.message || $t('messages.operationFailed') }}</text>
-            </view>
-
-            <view v-else class="return-hint-card">
-              <text>{{ $t('stock.responseUnknown') }}</text>
-            </view>
-          </view>
-        </view>
-
-        <view class="return-modal-footer">
-          <button class="modal-btn btn-secondary" :disabled="returnActionLoading" @click="closeReturnModal">
-            {{ $t('common.cancel') }}
-          </button>
-          <button
-            v-if="returnPreviewAction === 'preview_ok'"
-            class="modal-btn btn-primary"
-            :disabled="returnActionLoading"
-            @click="submitReturnRequest"
-          >
-            {{ $t('stock.submitReturnRequest') }}
-          </button>
-          <button
-            v-if="canCancelReturn"
-            class="modal-btn btn-danger"
-            :disabled="returnActionLoading"
-            @click="cancelReturnRequest"
-          >
-            {{ $t('stock.cancelReturnRequest') }}
-          </button>
-        </view>
-      </view>
-    </view>
   </view>
 </template>
 
@@ -784,17 +592,6 @@ export default {
         returned: 0,
       },
 
-      // 退库弹窗状态
-      returnModalVisible: false,
-      returnRecord: null,
-      returnPreviewAction: '',
-      returnPreviewData: {},
-      returnPreviewLoading: false,
-      returnActionLoading: false,
-      returnSelectedWarehouseIndex: 0,
-      cancelReason: '',
-      returnOfflineDocumentId: null,
-
       // 设备详情 Bottom Sheet
       deviceDetailVisible: false,
       deviceDetailRecord: null,
@@ -821,14 +618,6 @@ export default {
 	    selectedPackage() {
 	      return this.availablePackages[this.selectedPackageIndex]
 	    },
-    
-    returnWarehouseOptions() {
-      return this.warehouses.map(w => w.warehouse_name)
-    },
-
-    selectedReturnWarehouse() {
-      return this.warehouses[this.returnSelectedWarehouseIndex] || null
-    },
 
     pickupTabOptions() {
       const c = this.issuedTabCounts || {}
@@ -850,35 +639,6 @@ export default {
     issuedSearchPlaceholder() {
       return this.$t('stock.pickupSearchPlaceholder')
     },
-
-    canCancelReturn() {
-      return (
-        this.returnPreviewAction === 'already_requested' &&
-        this.returnPreviewData?.return_status === 'pending_receive' &&
-        !!this.returnPreviewData?.return_transaction_id
-      )
-    },
-
-	    returnSummarySn() {
-	      return (this.returnRecord?.serial_number || this.returnRecord?.main_device_barcode || '').trim()
-	    },
-
-	    returnStatusBadgeText() {
-	      if (!this.returnRecord) return '-'
-	      if (this.returnRecord.is_returned) return this.$t('stock.statusReturned')
-	      if (this.returnRecord.return_status) return this.statusTextForReturn(this.returnRecord.return_status)
-	      return this.$t('stock.returnNotRequested')
-	    },
-
-	    returnStatusBadgeClass() {
-	      if (!this.returnRecord) return 'none'
-	      if (this.returnRecord.is_returned) return 'done'
-	      const s = (this.returnRecord.return_status || '').toString()
-	      if (s === 'pending_receive') return 'pending'
-	      if (s === 'rejected') return 'rejected'
-	      if (s === 'canceled') return 'canceled'
-	      return 'none'
-	    },
 
     deviceDetailSn() {
       return (this.deviceDetailRecord?.serial_number || this.deviceDetailRecord?.main_device_barcode || '').trim()
@@ -1166,9 +926,17 @@ export default {
     openReturnFromDetail() {
       const record = this.deviceDetailRecord
       if (!record) return
+      const outId = String(record.out_transaction_id || '').trim()
+      const sn = String(record.serial_number || record.main_device_barcode || '').trim()
+      if (!outId || !sn) {
+        uni.showToast({ title: this.$t('messages.operationFailed'), icon: 'none' })
+        return
+      }
       this.closeDeviceDetail()
       setTimeout(() => {
-        this.openReturnModal(record)
+        uni.navigateTo({
+          url: `/pages/stock/returns/create?out_transaction_id=${encodeURIComponent(outId)}&sn=${encodeURIComponent(sn)}`
+        })
       }, 100)
     },
 
@@ -1828,13 +1596,6 @@ export default {
 	      this.loadMoreIssuedItems()
 	    },
 
-	    syncReturnRecordFromHistory() {
-	      if (!this.returnRecord) return
-	      const key = this.recordKey(this.returnRecord)
-	      const latest = (this.issuedItems || []).find(r => this.recordKey(r) === key)
-	      if (latest) this.returnRecord = { ...(this.returnRecord || {}), ...(latest || {}) }
-	    },
-
 	    syncDeviceDetailRecordFromHistory() {
 	      if (!this.deviceDetailRecord) return
 	      const key = this.recordKey(this.deviceDetailRecord)
@@ -1927,269 +1688,6 @@ export default {
 	      return map[status] || status
 	    },
 
-	    copyReturnSn() {
-	      const sn = (this.returnSummarySn || '').trim()
-	      if (!sn) return
-	      uni.setClipboardData({
-	        data: sn,
-	        success: () => {
-	          uni.showToast({ title: this.$t('stock.copySn'), icon: 'success' })
-	        }
-	      })
-	    },
-
-	    async openReturnModal(record) {
-	      if (!record) return
-	      this.returnRecord = record
-	      this.returnModalVisible = true
-      this.returnPreviewAction = ''
-      this.returnPreviewData = {}
-      this.cancelReason = ''
-      this.returnSelectedWarehouseIndex = 0
-      this.returnOfflineDocumentId = null
-
-      if (!this.warehouses || this.warehouses.length === 0) {
-        await this.loadWarehouses()
-      }
-      await this.refreshReturnPreview()
-    },
-
-    closeReturnModal() {
-      this.returnModalVisible = false
-      this.returnRecord = null
-      this.returnPreviewAction = ''
-      this.returnPreviewData = {}
-      this.cancelReason = ''
-      this.returnSelectedWarehouseIndex = 0
-      this.returnOfflineDocumentId = null
-      this.returnPreviewLoading = false
-      this.returnActionLoading = false
-    },
-
-    onReturnWarehouseChange(e) {
-      this.returnSelectedWarehouseIndex = Number(e.detail.value || 0)
-    },
-
-    async refreshReturnPreview() {
-      if (!this.returnRecord) return
-      const barcode = (this.returnRecord.serial_number || this.returnRecord.main_device_barcode || '').trim()
-      if (!barcode) {
-        this.returnPreviewAction = 'no_active_pickup'
-        this.returnPreviewData = {}
-        return
-      }
-
-      this.returnPreviewLoading = true
-      try {
-        const parsed = this.buildParsedBarcodeForBackend(barcode)
-        const res = await new Promise((resolve, reject) => {
-          uni.request({
-            url: buildApiUrl('/api/stock/scan-return/preview'),
-            method: 'POST',
-            header: getAuthHeaders(this.userStore.token),
-            data: {
-              barcode,
-              parsed_barcode: parsed,
-              gps_location: this.userLocation
-            },
-            success: resolve,
-            fail: reject
-          })
-        })
-	        if (res.statusCode !== 200) {
-	          const detail = res.data?.detail || res.data?.message || this.$t('messages.requestFailedWithCode', { code: res.statusCode })
-	          uni.showToast({ title: detail, icon: 'none' })
-	          this.returnPreviewAction = 'error'
-	          this.returnPreviewData = { detail }
-	          return
-	        }
-
-        this.returnPreviewAction = res.data?.action || ''
-        this.returnPreviewData = res.data || {}
-
-        // 默认退入原出库仓库
-        if (this.returnPreviewAction === 'preview_ok' && this.returnPreviewData.out_warehouse_id && this.warehouses?.length) {
-          const idx = this.warehouses.findIndex(w => w.id === this.returnPreviewData.out_warehouse_id)
-          if (idx >= 0) this.returnSelectedWarehouseIndex = idx
-        }
-        // 已提交退库：回显退入仓库（来自 My Pickups）
-        if (this.returnPreviewAction === 'already_requested' && this.returnRecord?.return_warehouse_id && this.warehouses?.length) {
-          const idx = this.warehouses.findIndex(w => w.id === this.returnRecord.return_warehouse_id)
-          if (idx >= 0) this.returnSelectedWarehouseIndex = idx
-        }
-      } catch (error) {
-        const msg = error?.data?.detail || this.$t('messages.networkError')
-        this.returnPreviewAction = 'error'
-        this.returnPreviewData = { detail: msg }
-        uni.showToast({ title: msg, icon: 'none' })
-      } finally {
-        this.returnPreviewLoading = false
-      }
-    },
-
-    async doReturnUnbind() {
-      const sn = (this.returnPreviewData?.sn || this.returnRecord?.serial_number || this.returnRecord?.main_device_barcode || '').trim()
-      if (!sn) return
-
-      uni.showModal({
-        title: this.$t('stock.oneClickUnbind'),
-        content: this.$t('stock.unbindWillClearAndDelete'),
-        confirmText: this.$t('common.confirm'),
-        cancelText: this.$t('common.cancel'),
-        success: async (r) => {
-          if (!r.confirm) return
-          this.returnActionLoading = true
-          try {
-            const ret = await new Promise((resolve, reject) => {
-              uni.request({
-                url: buildApiUrl('/api/stock/scan-return/unbind'),
-                method: 'POST',
-                header: getAuthHeaders(this.userStore.token),
-                data: { sn },
-                success: resolve,
-                fail: reject
-              })
-            })
-            if (ret.statusCode === 200) {
-              uni.showToast({ title: this.$t('messages.operationSuccess'), icon: 'success' })
-              await this.refreshReturnPreview()
-              await this.loadPickupHistory()
-              this.syncReturnRecordFromHistory()
-            } else {
-              uni.showToast({ title: this.$t('messages.operationFailed'), icon: 'none' })
-            }
-          } catch (error) {
-            const msg = error?.data?.detail || this.$t('messages.operationFailed')
-            uni.showToast({ title: msg, icon: 'none' })
-          } finally {
-            this.returnActionLoading = false
-          }
-        }
-      })
-    },
-
-    async submitReturnRequest() {
-      if (this.returnPreviewAction !== 'preview_ok') return
-
-      const barcode = (this.returnRecord?.serial_number || this.returnRecord?.main_device_barcode || '').trim()
-      if (!barcode) return
-
-      if (!this.selectedReturnWarehouse) {
-        uni.showToast({ title: this.$t('stock.selectReturnWarehouse'), icon: 'none' })
-        return
-      }
-
-      this.returnActionLoading = true
-      try {
-        const parsed = this.buildParsedBarcodeForBackend(barcode)
-        const res = await new Promise((resolve, reject) => {
-          uni.request({
-            url: buildApiUrl('/api/stock/scan-return/request'),
-            method: 'POST',
-            header: getAuthHeaders(this.userStore.token),
-            data: {
-              barcode,
-              parsed_barcode: parsed,
-              return_warehouse_id: this.selectedReturnWarehouse.id,
-              gps_location: this.userLocation,
-              offline_document_id: this.returnOfflineDocumentId || undefined,
-            },
-            success: resolve,
-            fail: reject
-          })
-        })
-        if (res.statusCode !== 200) {
-          const detail = res.data?.detail || res.data?.message || this.$t('messages.operationFailed')
-          uni.showToast({ title: detail, icon: 'none' })
-          return
-        }
-
-	        const data = res.data || {}
-
-	        uni.showToast({ title: this.$t('stock.returnRequestSuccessTitle'), icon: 'success' })
-
-	        // 回显到弹窗摘要（避免分页/分组导致列表中找不到该条记录）
-	        if (this.returnRecord) {
-	          this.returnRecord.return_status = data.return_status || 'pending_receive'
-	          this.returnRecord.return_document_number = data.return_document_number || this.returnRecord.return_document_number
-	          this.returnRecord.return_warehouse_id = data.return_warehouse_id || this.returnRecord.return_warehouse_id
-	          this.returnRecord.return_warehouse_name =
-	            data.return_warehouse_name ||
-	            this.selectedReturnWarehouse?.warehouse_name ||
-	            this.returnRecord.return_warehouse_name
-	          this.returnRecord.return_reject_reason = null
-	        }
-
-	        // 申请后刷新列表与预览（变为 already_requested）
-	        await this.loadPickupHistory()
-	        this.syncReturnRecordFromHistory()
-	        await this.refreshReturnPreview()
-
-        // 提示单号
-        if (data.return_document_number) {
-          uni.showModal({
-            title: this.$t('stock.returnRequestSuccessTitle'),
-            content: `${this.$t('stock.returnDocumentNumber')}: ${data.return_document_number}\n${this.$t('stock.returnStatusPendingReceive')}`,
-            showCancel: false
-          })
-        }
-      } catch (error) {
-        const msg = error?.data?.detail || this.$t('messages.operationFailed')
-        uni.showToast({ title: msg, icon: 'none' })
-      } finally {
-        this.returnActionLoading = false
-      }
-    },
-
-    async cancelReturnRequest() {
-      if (!this.canCancelReturn) return
-      const returnTransactionId = this.returnPreviewData?.return_transaction_id
-      if (!returnTransactionId) return
-      uni.showModal({
-        title: this.$t('common.hint'),
-        content: this.$t('stock.cancelReturnConfirm'),
-        confirmText: this.$t('common.confirm'),
-        cancelText: this.$t('common.cancel'),
-        success: async (r) => {
-          if (!r.confirm) return
-          this.returnActionLoading = true
-          try {
-            const res = await new Promise((resolve, reject) => {
-              uni.request({
-                url: buildApiUrl('/api/stock/scan-return/cancel'),
-                method: 'POST',
-                header: getAuthHeaders(this.userStore.token),
-                data: {
-                  return_transaction_id: returnTransactionId,
-                  reason: (this.cancelReason || '').trim()
-                },
-                success: resolve,
-                fail: reject
-              })
-            })
-	            if (res.statusCode === 200) {
-	              uni.showToast({ title: this.$t('messages.operationSuccess'), icon: 'success' })
-	              this.cancelReason = ''
-	              if (this.returnRecord) {
-	                this.returnRecord.return_status = 'canceled'
-	                this.returnRecord.return_reject_reason = null
-	              }
-	              await this.loadPickupHistory()
-	              this.syncReturnRecordFromHistory()
-	              await this.refreshReturnPreview()
-	            } else {
-	              uni.showToast({ title: this.$t('messages.operationFailed'), icon: 'none' })
-	            }
-          } catch (error) {
-            const msg = error?.data?.detail || this.$t('messages.operationFailed')
-            uni.showToast({ title: msg, icon: 'none' })
-          } finally {
-            this.returnActionLoading = false
-          }
-        }
-      })
-    },
-    
     async getCurrentLocation() {
       try {
         console.log('使用原生插件获取当前位置...')
@@ -3111,68 +2609,6 @@ export default {
   color: #ffffff;
 }
 
-/* 退库弹窗 */
-.return-modal-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10001;
-}
-
-.return-modal {
-  width: 88%;
-  max-height: 84vh;
-  background: var(--bg-elevated);
-  border-radius: 16rpx;
-  overflow: hidden;
-  box-shadow: var(--shadow-card);
-  display: flex;
-  flex-direction: column;
-}
-
-.return-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 24rpx 24rpx;
-  border-bottom: 1rpx solid #e5e7eb;
-}
-
-.return-modal-title {
-  font-size: 32rpx;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.return-modal-close {
-  padding: 8rpx;
-}
-
-.close-text {
-  font-size: 38rpx;
-  line-height: 38rpx;
-  color: #9ca3af;
-}
-
-.return-modal-body {
-  padding: 20rpx 24rpx;
-  overflow: auto;
-  flex: 1;
-}
-
-.return-summary {
-  background: var(--bg-page);
-  border-radius: 12rpx;
-  padding: 16rpx 18rpx;
-  margin-bottom: 16rpx;
-}
-
 .summary-row {
   display: flex;
   justify-content: space-between;
@@ -3361,52 +2797,11 @@ export default {
 .reject-icon { font-size: 28rpx; line-height: 28rpx; }
 .reject-text { flex: 1; font-size: 24rpx; color: #b91c1c; line-height: 1.4; }
 
-.return-loading {
-  padding: 20rpx 0;
-  text-align: center;
-  color: var(--text-secondary);
-}
-
 .return-hint-card {
   padding: 18rpx;
   background: var(--bg-page);
   border-radius: 12rpx;
   color: var(--text-primary);
-}
-
-.return-hint-sub {
-  margin-top: 10rpx;
-  color: var(--text-secondary);
-  font-size: 26rpx;
-}
-
-.kv-list {
-  margin-top: 10rpx;
-  padding-top: 10rpx;
-  border-top: 1rpx solid #e5e7eb;
-}
-
-.kv-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12rpx;
-  padding: 10rpx 0;
-}
-
-.kv-label {
-  font-size: 24rpx;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.kv-value {
-  font-size: 26rpx;
-  color: var(--text-primary);
-  font-weight: 600;
-  text-align: right;
-  word-break: break-all;
-  max-width: 72%;
 }
 
 .hint-header {
@@ -3430,50 +2825,6 @@ export default {
 
 .hint-header.warning .hint-title { color: #b45309; }
 .hint-header.info .hint-title { color: #2563eb; }
-
-.hint-actions {
-  display: flex;
-  gap: 16rpx;
-  margin-top: 16rpx;
-}
-
-.cancel-section {
-  margin-top: 16rpx;
-}
-
-.cancel-label {
-  display: block;
-  font-size: 26rpx;
-  color: var(--text-secondary);
-  margin-bottom: 8rpx;
-}
-
-.cancel-input {
-  background: #ffffff;
-  border: 1rpx solid #e5e7eb;
-  border-radius: 10rpx;
-  padding: 18rpx 16rpx;
-  font-size: 26rpx;
-  color: var(--text-primary);
-}
-
-.section-title-sm {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 14rpx 0 12rpx;
-  display: block;
-}
-
-.return-doc {
-  color: var(--text-secondary);
-  font-size: 26rpx;
-  margin-bottom: 8rpx;
-}
-
-.return-documents {
-  margin-top: 14rpx;
-}
 
 .bind-list { margin-top: 12rpx; }
 .bind-item {
@@ -3540,13 +2891,6 @@ export default {
   font-size: 24rpx;
   line-height: 1.4;
   display: block;
-}
-
-.return-modal-footer {
-  padding: 18rpx 24rpx;
-  border-top: 1rpx solid #e5e7eb;
-  display: flex;
-  gap: 16rpx;
 }
 
 .modal-btn {

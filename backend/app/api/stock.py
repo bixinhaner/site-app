@@ -7988,6 +7988,49 @@ async def create_return_request(
     if not picked_main_sns and not aux_req_map:
         raise HTTPException(status_code=400, detail="请至少选择1个主设备SN或辅料数量")
 
+    # 复用旧退库逻辑的“检查绑定”规则：若存在设备级检查绑定，需先解绑（或阻断）
+    if picked_main_sns:
+        blocked_bindings: List[dict] = []
+        need_unbind_bindings: List[dict] = []
+        for sn in picked_main_sns:
+            try:
+                bindings = _get_blocking_bindings(db, sn=sn, current_user=current_user)
+            except Exception:
+                bindings = {"need_unbind": [], "blocked": []}
+            for b in (bindings.get("blocked") or []):
+                try:
+                    row = dict(b) if isinstance(b, dict) else {"detail": str(b)}
+                except Exception:
+                    row = {"detail": str(b)}
+                row["sn"] = sn
+                blocked_bindings.append(row)
+            for b in (bindings.get("need_unbind") or []):
+                try:
+                    row = dict(b) if isinstance(b, dict) else {"detail": str(b)}
+                except Exception:
+                    row = {"detail": str(b)}
+                row["sn"] = sn
+                need_unbind_bindings.append(row)
+
+        if blocked_bindings:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "action": "unbind_blocked",
+                    "message": "存在不可解绑的检查绑定，无法发起退库",
+                    "blocked_bindings": blocked_bindings,
+                },
+            )
+        if need_unbind_bindings:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "action": "need_unbind",
+                    "message": "存在设备级检查绑定，需先解绑并清理检查内容",
+                    "need_unbind": need_unbind_bindings,
+                },
+            )
+
     ret_id = uuid.uuid4().hex
     ret_doc = _build_request_no("RET", current_user.id)
     ret_trans = StockTransaction(
