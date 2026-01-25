@@ -67,7 +67,7 @@
         style="width: 100%"
         v-loading="loading"
       >
-        <el-table-column prop="recordType" label="类型" width="110">
+        <el-table-column prop="recordType" label="类型" width="90">
           <template #default="{ row }">
             <el-tag :type="row.recordType === 'import' ? 'info' : 'primary'">
               {{ row.recordType === 'import' ? 'SN导入' : '出入库' }}
@@ -75,9 +75,9 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="documentLabel" label="单据/文件" min-width="200" />
+        <el-table-column prop="documentLabel" label="单据/文件" min-width="260" show-overflow-tooltip />
 
-        <el-table-column prop="direction" label="方向" width="80">
+        <el-table-column prop="direction" label="方向" width="70">
           <template #default="{ row }">
             <el-tag :type="row.direction === 'in' ? 'success' : (row.direction === 'out' ? 'warning' : 'info')" size="small">
               {{ directionText(row) }}
@@ -85,9 +85,9 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="warehouseName" label="仓库" width="140" />
+        <el-table-column prop="warehouseName" label="仓库" min-width="200" show-overflow-tooltip />
 
-        <el-table-column label="数量" min-width="160">
+        <el-table-column label="数量" width="120">
           <template #default="{ row }">
             <div v-if="row.recordType === 'import'" class="counts">
               <el-tag size="small">总 {{ row.totalQuantity }}</el-tag>
@@ -99,29 +99,29 @@
           </template>
 	        </el-table-column>
 
-	        <el-table-column prop="operatorName" label="操作人" width="120" />
-	        <el-table-column prop="receiverName" label="领取人" width="140">
+	        <el-table-column prop="operatorName" label="操作人" width="110" show-overflow-tooltip />
+	        <el-table-column prop="receiverName" label="领取人" width="150" show-overflow-tooltip>
 	          <template #default="{ row }">
 	            <span v-if="row.recordType === 'transaction' && row.transactionType === 'stock_out'">
-	              {{ row.receiverName || '-' }}
+	              <span class="cell-ellipsis">{{ row.receiverName || '-' }}</span>
 	            </span>
 	            <span v-else>-</span>
 	          </template>
 	        </el-table-column>
 
-	        <el-table-column prop="operationTime" label="操作时间" width="180">
+	        <el-table-column prop="operationTime" label="操作时间" width="160">
 	          <template #default="{ row }">
 	            {{ formatDateTime(row.operationTime) }}
 	          </template>
         </el-table-column>
 
-        <el-table-column prop="notes" label="备注" min-width="160" v-if="showNotesColumn">
+        <el-table-column prop="notes" label="备注" min-width="200" v-if="showNotesColumn" show-overflow-tooltip>
           <template #default="{ row }">
             <span>{{ row.notes || '-' }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="90" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.recordType === 'import'"
@@ -1156,6 +1156,17 @@ onMounted(async () => {
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.cell-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .keyword-search {
