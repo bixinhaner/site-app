@@ -1987,6 +1987,15 @@ async def get_stock_transactions(
     
     result = []
     for trans in transactions:
+        operator_id = getattr(trans, "operator_id", None)
+        operator_name = None
+        if operator_id is not None and str(operator_id).strip() != "":
+            operator = getattr(trans, "operator", None)
+            if operator:
+                operator_name = operator.full_name or operator.username or str(operator_id)
+            else:
+                operator_name = f"已删除用户(原ID:{operator_id})"
+
         issued_to = getattr(trans, "issued_to", None)
         receiver_name = None
         if issued_to is not None and str(issued_to).strip() != "":
@@ -2029,7 +2038,7 @@ async def get_stock_transactions(
             "transaction_type": trans.transaction_type,
             "warehouse_id": trans.warehouse_id,
             "warehouse_name": trans.warehouse.warehouse_name if trans.warehouse else None,
-            "operator_name": trans.operator.full_name if trans.operator else None,
+            "operator_name": operator_name,
             "issued_to": issued_to,
             "receiver_name": receiver_name,
             "operation_time": to_utc_iso(trans.operation_time) if trans.operation_time else None,
