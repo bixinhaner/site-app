@@ -1987,6 +1987,15 @@ async def get_stock_transactions(
     
     result = []
     for trans in transactions:
+        issued_to = getattr(trans, "issued_to", None)
+        receiver_name = None
+        if issued_to is not None and str(issued_to).strip() != "":
+            receiver = getattr(trans, "receiver", None)
+            if receiver:
+                receiver_name = receiver.full_name or receiver.username or str(issued_to)
+            else:
+                receiver_name = f"已删除用户(原ID:{issued_to})"
+
         # 获取明细
         items = []
         for item in trans.transaction_items:
@@ -2021,6 +2030,8 @@ async def get_stock_transactions(
             "warehouse_id": trans.warehouse_id,
             "warehouse_name": trans.warehouse.warehouse_name if trans.warehouse else None,
             "operator_name": trans.operator.full_name if trans.operator else None,
+            "issued_to": issued_to,
+            "receiver_name": receiver_name,
             "operation_time": to_utc_iso(trans.operation_time) if trans.operation_time else None,
             "total_quantity": trans.total_quantity,
             "approval_status": trans.approval_status,

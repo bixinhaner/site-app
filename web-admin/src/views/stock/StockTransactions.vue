@@ -96,6 +96,12 @@
           </template>
         </el-table-column>
         <el-table-column prop="operator_name" label="操作人" width="120" />
+        <el-table-column prop="receiver_name" label="领取人" width="160">
+          <template #default="{ row }">
+            <span v-if="row.transaction_type === 'stock_out'">{{ row.receiver_name || '-' }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="total_quantity" label="总数量" width="100" />
         <el-table-column prop="approval_status" label="审批状态" width="100">
           <template #default="{ row }">
