@@ -460,6 +460,146 @@
       </el-collapse>
     </el-card>
 
+    <!-- 卡片 4：旧流程扫码领货（我的设备） -->
+    <el-card class="mb16" v-loading="loading">
+      <template #header>
+        <div class="card-header">
+          <span>旧流程扫码领货（我的设备）</span>
+        </div>
+      </template>
+
+      <el-form :model="form" label-width="200px" :disabled="!canEdit">
+        <el-form-item label="全局默认开关">
+          <el-switch
+            v-model="form.enable_legacy_scan_pickup.default"
+            active-text="开启旧流程扫码"
+            inactive-text="关闭旧流程扫码"
+          />
+        </el-form-item>
+
+        <el-form-item label="说明">
+          <ul class="hint-list">
+            <li>该开关仅影响移动端“我的设备”页面内的“扫码领货/扫码出库”（旧流程）。</li>
+            <li>关闭后：移动端仍可查看领用台账、退库、解绑，但不可扫码出库；后端会拒绝 /api/stock/scan-checkout。</li>
+            <li>建议：为避免流程混淆，生产环境默认关闭，统一走“物料申请→领料单→仓库确认出库”。</li>
+          </ul>
+        </el-form-item>
+      </el-form>
+
+      <el-collapse v-model="activeAdvancedLegacyScanPickup" class="mt8">
+        <el-collapse-item name="role-legacy-scan">
+          <template #title>
+            <span>按角色覆盖（旧流程扫码领货）</span>
+          </template>
+          <el-table
+            :data="roleRows"
+            size="small"
+            border
+            style="width: 100%"
+          >
+            <el-table-column prop="label" label="角色" width="140" />
+            <el-table-column label="旧流程扫码领货">
+              <template #default="{ row }">
+                <el-select
+                  v-model="form.enable_legacy_scan_pickup.per_role[row.key]"
+                  placeholder="跟随全局"
+                  style="width: 220px"
+                  :disabled="!canEdit"
+                  clearable
+                >
+                  <el-option label="跟随全局" :value="''" />
+                  <el-option label="允许旧流程扫码" value="allow" />
+                  <el-option label="禁止旧流程扫码" value="deny" />
+                </el-select>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p class="hint mt8">
+            留空表示该角色使用“全局默认开关”。当同一用户同时满足多个角色时，APP 端会按后端解析的优先级使用配置。
+          </p>
+        </el-collapse-item>
+
+        <el-collapse-item name="user-legacy-scan">
+          <template #title>
+            <span>按用户覆盖（旧流程扫码领货）</span>
+          </template>
+          <div class="user-rules">
+            <div class="user-rule-form">
+              <el-select
+                v-model="newLegacyScanPickupUserRule.user_id"
+                filterable
+                remote
+                reserve-keyword
+                placeholder="搜索用户名/姓名/邮箱"
+                :remote-method="searchUsers"
+                :loading="userSelectLoading"
+                style="width: 260px"
+                :disabled="!canEdit"
+              >
+                <el-option
+                  v-for="opt in userOptions"
+                  :key="opt.id"
+                  :label="opt.label"
+                  :value="String(opt.id)"
+                />
+              </el-select>
+              <el-select
+                v-model="newLegacyScanPickupUserRule.flag"
+                placeholder="旧流程扫码策略"
+                style="width: 220px; margin-left: 8px"
+                :disabled="!canEdit"
+              >
+                <el-option label="允许旧流程扫码" value="allow" />
+                <el-option label="禁止旧流程扫码" value="deny" />
+              </el-select>
+              <el-button
+                type="primary"
+                size="small"
+                style="margin-left: 8px"
+                :disabled="!canEdit"
+                @click="addLegacyScanPickupUserRule"
+              >
+                添加
+              </el-button>
+            </div>
+
+            <el-table
+              v-if="form.enable_legacy_scan_pickup.per_user.length"
+              :data="form.enable_legacy_scan_pickup.per_user"
+              size="small"
+              border
+              style="width: 100%; margin-top: 8px"
+            >
+              <el-table-column prop="user_id" label="用户ID" width="120" />
+              <el-table-column prop="flag" label="旧流程扫码策略" width="200">
+                <template #default="{ row }">
+                  <span v-if="row.flag === 'allow'">允许旧流程扫码</span>
+                  <span v-else-if="row.flag === 'deny'">禁止旧流程扫码</span>
+                  <span v-else>（未知）</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="80">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    text
+                    size="small"
+                    :disabled="!canEdit"
+                    @click="removeLegacyScanPickupUserRule($index)"
+                  >
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <p class="hint mt8">
+              按用户配置的优先级最高，会覆盖全局与角色配置。
+            </p>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
     <el-card>
       <template #header>
         <div class="card-header">
@@ -520,6 +660,17 @@ const form = ref({
     },
     per_user: [],
   },
+  enable_legacy_scan_pickup: {
+    default: false,
+    per_role: {
+      admin: '',
+      manager: '',
+      inspector: '',
+      surveyor: '',
+      user: '',
+    },
+    per_user: [],
+  },
 })
 
 const newLocationUserRule = ref({
@@ -537,10 +688,16 @@ const newLocalUploadWatermarkUserRule = ref({
   flag: 'allow',
 })
 
+const newLegacyScanPickupUserRule = ref({
+  user_id: '',
+  flag: 'deny',
+})
+
 // 高级配置折叠面板（默认全部收起，减少页面占用）
 const activeAdvancedLocation = ref([])
 const activeAdvancedUpload = ref([])
 const activeAdvancedLocalUploadWatermark = ref([])
+const activeAdvancedLegacyScanPickup = ref([])
 
 // 用户搜索下拉选项
 const userOptions = ref([])
@@ -628,6 +785,7 @@ const loadConfig = async () => {
     const perUser = lm.per_user || {}
     const uploadRule = raw.allow_local_photo_upload || {}
     const localUploadWatermarkRule = raw.local_upload_watermark_with_geo || {}
+    const legacyScanPickupRule = raw.enable_legacy_scan_pickup || {}
 
     form.value.location_mode.default =
       (lm.default && lm.default.toLowerCase()) === 'native' ? 'native' : 'baidu'
@@ -659,6 +817,14 @@ const loadConfig = async () => {
       true,
     )
 
+    // enable_legacy_scan_pickup：默认关闭（false）
+    fillBoolRuleToForm(
+      form.value.enable_legacy_scan_pickup,
+      legacyScanPickupRule,
+      roleKeys,
+      false,
+    )
+
   } catch (e) {
     console.error(e)
     const detail = e?.response?.data?.detail
@@ -683,6 +849,7 @@ const save = async () => {
       },
       allow_local_photo_upload: {},
       local_upload_watermark_with_geo: {},
+      enable_legacy_scan_pickup: {},
     }
 
     // 构建 per_role：仅提交明确选择的模式
@@ -709,6 +876,10 @@ const save = async () => {
 
     payload.local_upload_watermark_with_geo = buildBoolRulePayload(
       form.value.local_upload_watermark_with_geo,
+    )
+
+    payload.enable_legacy_scan_pickup = buildBoolRulePayload(
+      form.value.enable_legacy_scan_pickup,
     )
 
     await mobileSettingsApi.updateMobileSettings(payload)
@@ -822,6 +993,36 @@ const addLocalUploadWatermarkUserRule = () => {
 
 const removeLocalUploadWatermarkUserRule = (index) => {
   form.value.local_upload_watermark_with_geo.per_user.splice(index, 1)
+}
+
+const addLegacyScanPickupUserRule = () => {
+  const id = String(newLegacyScanPickupUserRule.value.user_id || '').trim()
+  const flag = newLegacyScanPickupUserRule.value.flag
+  if (!id) {
+    ElMessage.warning('请选择用户')
+    return
+  }
+  if (flag !== 'allow' && flag !== 'deny') {
+    ElMessage.warning('请选择旧流程扫码策略')
+    return
+  }
+  const exists = form.value.enable_legacy_scan_pickup.per_user.some(
+    (r) => String(r.user_id) === id,
+  )
+  if (exists) {
+    ElMessage.warning('该用户已存在旧流程扫码策略')
+    return
+  }
+  form.value.enable_legacy_scan_pickup.per_user.push({
+    user_id: id,
+    flag,
+  })
+  newLegacyScanPickupUserRule.value.user_id = ''
+  newLegacyScanPickupUserRule.value.flag = 'deny'
+}
+
+const removeLegacyScanPickupUserRule = (index) => {
+  form.value.enable_legacy_scan_pickup.per_user.splice(index, 1)
 }
 
 // 远程搜索用户（用于按用户覆盖的选择器）

@@ -2,20 +2,22 @@
   <view class="container">
     <CustomNavbar :title="$t('stock.scanPickup')" :showBack="true" variant="brand" />
 
-    <scroll-view class="page-content" scroll-y>
-      <view class="header">
-        <view class="scan-info">
-          <text class="info-text">{{ $t('stock.myDevicesInfo') }}</text>
-        </view>
-      </view>
+	    <scroll-view class="page-content" scroll-y>
+	      <view class="header">
+	        <view class="scan-info">
+	          <text class="info-text">
+	            {{ legacyScanPickupEnabled ? $t('stock.myDevicesInfo') : $t('stock.myDevicesInfoLedger') }}
+	          </text>
+	        </view>
+	      </view>
 
-    <!-- 扫码领货（默认折叠） -->
-    <view class="scan-fold">
-      <view class="scan-fold-header" :class="{ expanded: !scanSectionCollapsed }" @click="toggleScanSection">
-        <view class="scan-fold-left">
-          <uni-icons type="scan" size="18" color="var(--color-primary)" />
-          <text class="scan-fold-title">{{ $t('stock.scanPickupAction') }}</text>
-        </view>
+	    <!-- 扫码领货（默认折叠） -->
+	    <view class="scan-fold" v-if="legacyScanPickupEnabled">
+	      <view class="scan-fold-header" :class="{ expanded: !scanSectionCollapsed }" @click="toggleScanSection">
+	        <view class="scan-fold-left">
+	          <uni-icons type="scan" size="18" color="var(--color-primary)" />
+	          <text class="scan-fold-title">{{ $t('stock.scanPickupAction') }}</text>
+	        </view>
         <view class="scan-fold-right">
           <view class="scan-fold-scan-btn" @click.stop="startScanFromCollapsed">
             <uni-icons type="scan" size="16" color="#ffffff" />
@@ -716,12 +718,13 @@
   </view>
 </template>
 
-<script>
-import { parseBarcode, formatMacAddress, getParseResultSummary, isValidParseResult } from '@/utils/barcode-parser.js'
-import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
-import { useUserStore } from '@/stores/user'
-import { useLanguageStore } from '@/stores/language'
-import { getCurrentInstance, watch, onMounted } from 'vue'
+	<script>
+	import { parseBarcode, formatMacAddress, getParseResultSummary, isValidParseResult } from '@/utils/barcode-parser.js'
+	import { scanDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
+	import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+	import { useUserStore } from '@/stores/user'
+	import { useLanguageStore } from '@/stores/language'
+	import { getCurrentInstance, watch, onMounted } from 'vue'
 
 export default {
   setup() {
@@ -811,10 +814,13 @@ export default {
     }
   },
   
-  computed: {
-    selectedPackage() {
-      return this.availablePackages[this.selectedPackageIndex]
-    },
+	  computed: {
+	    legacyScanPickupEnabled() {
+	      return this.userStore?.legacyScanPickupEnabled === true
+	    },
+	    selectedPackage() {
+	      return this.availablePackages[this.selectedPackageIndex]
+	    },
     
     returnWarehouseOptions() {
       return this.warehouses.map(w => w.warehouse_name)
@@ -1208,41 +1214,38 @@ export default {
       })
     },
 
-    async startScan() {
-      try {
-        this.scanSectionCollapsed = false
-        console.log('开始扫码...')
-        const result = await new Promise((resolve, reject) => {
-          uni.scanCode({
-            scanType: ['barCode', 'qrCode'],
-            success: resolve,
-            fail: reject
-          })
-        })
-
-        // 仅允许二维码 / Code128（避免误扫 EAN8/EAN13 等导致随机数字）
-        const normalizeScanType = (value) => String(value || '').trim().toUpperCase().replace(/[-\s]/g, '_')
-        const scanType = normalizeScanType(result?.scanType)
-        const allowedScanTypes = new Set(['QR_CODE', 'QRCODE', 'QR', 'CODE_128', 'CODE128'])
-        if (!scanType || !allowedScanTypes.has(scanType)) {
-          uni.showToast({
-            title: this.$t('stock.unsupportedScanType', { type: scanType || 'UNKNOWN' }),
-            icon: 'none'
-          })
-          return
-        }
-        
-        console.log('=== 扫码原始结果 ===')
-        console.log('result:', result)
-        console.log('result.result:', result.result)
-        console.log('result类型:', typeof result.result)
-        console.log('result长度:', result.result ? result.result.length : 0)
-        
-        this.scanResult = result.result
-        
-        console.log('=== 开始解析条码 ===')
-        console.log('调用parseBarcode，输入:', result.result)
-        this.parsedBarcode = parseBarcode(result.result)
+	    async startScan() {
+	      try {
+	        this.scanSectionCollapsed = false
+	        console.log('开始扫码...')
+	        const scanned = await scanDeviceCode()
+	        if (!scanned.ok) {
+	          if (scanned.error === ScanDeviceCodeError.UNSUPPORTED_SCAN_TYPE) {
+	            uni.showToast({
+	              title: this.$t('stock.unsupportedScanType', { type: scanned.scanType || 'UNKNOWN' }),
+	              icon: 'none'
+	            })
+	            return
+	          }
+	          if (scanned.error === ScanDeviceCodeError.EMPTY_RESULT) {
+	            uni.showToast({ title: this.$t('stock.scanResultEmpty'), icon: 'none' })
+	            return
+	          }
+	          uni.showToast({ title: this.$t('stock.scanFailed'), icon: 'none' })
+	          return
+	        }
+	        
+	        console.log('=== 扫码原始结果 ===')
+	        console.log('scanType:', scanned.scanType)
+	        console.log('raw:', scanned.raw)
+	        console.log('raw类型:', typeof scanned.raw)
+	        console.log('raw长度:', scanned.raw ? scanned.raw.length : 0)
+	        
+	        this.scanResult = scanned.raw
+	        
+	        console.log('=== 开始解析条码 ===')
+	        console.log('调用parseBarcode，输入:', scanned.raw)
+	        this.parsedBarcode = parseBarcode(scanned.raw)
         
         console.log('=== 解析结果 ===')
         console.log('parsedBarcode:', JSON.stringify(this.parsedBarcode, null, 2))

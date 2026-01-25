@@ -120,6 +120,9 @@ export const stockApi = {
     request.put('/api/stock/flow-settings', data),
 
   // ===== 物料申请（新流程）=====
+  createMaterialRequest: (data) =>
+    request.post('/api/stock/material-requests', data),
+
   listMaterialRequests: (params = {}) =>
     request.get('/api/stock/material-requests', { params }),
 

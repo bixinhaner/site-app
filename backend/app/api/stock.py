@@ -224,6 +224,17 @@ async def scan_equipment_checkout(
     current_user: User = Depends(get_current_user)
 ):
     """扫码出库 - 核心功能"""
+    # 旧流程扫码领货：默认关闭（避免与新“物料申请→领料单→确认出库”并行导致使用混淆）
+    # 该开关由 /api/system/mobile-settings 控制，并对所有客户端强制生效。
+    try:
+        from app.api.mobile_settings import _load_mobile_settings, _resolve_bool_for_user
+        ms = _load_mobile_settings(db)
+        enabled = _resolve_bool_for_user(ms, "enable_legacy_scan_pickup", current_user, default=False)
+    except Exception:
+        enabled = False
+    if not enabled:
+        raise HTTPException(status_code=400, detail="旧流程扫码领货已关闭，请使用“物料申请”流程领料")
+
     barcode = scan_data.get("barcode")
     parsed_barcode = scan_data.get("parsed_barcode")  # 解析后的条码数据
     package_id = scan_data.get("package_id")
@@ -293,6 +304,24 @@ async def scan_equipment_checkout(
                 "serial_number": serial_number,
                 "picked_at": to_utc_iso(existing_pickup.pickup_time, assume_local=True) if existing_pickup.pickup_time else None
             }
+        conflict = (
+            db.query(IssueDraftSerial.id)
+            .join(IssueDraft, IssueDraftSerial.draft_id == IssueDraft.id)
+            .filter(
+                IssueDraftSerial.serial_number == serial_number,
+                IssueDraftSerial.status == IssueDraftSerialStatusEnum.PENDING,
+                IssueDraft.status.in_(
+                    [
+                        IssueDraftStatusEnum.DRAFT,
+                        IssueDraftStatusEnum.PENDING_CONFIRM,
+                        IssueDraftStatusEnum.PARTIALLY_CONFIRMED,
+                    ]
+                ),
+            )
+            .first()
+        )
+        if conflict:
+            raise HTTPException(status_code=400, detail=f"SN已在领料单待确认，无法扫码出库：{serial_number}")
 
     # 若设备实例已被他人领料，则禁止重复领料
     if equipment_instance and equipment_instance.issued_to and equipment_instance.issued_to != current_user.id:
@@ -465,8 +494,8 @@ async def scan_equipment_checkout(
         }
     
     # 5. 执行出库操作
-    transaction_id = str(uuid.uuid4())
-    document_number = f"OUT-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}"
+    transaction_id = uuid.uuid4().hex
+    document_number = _build_request_no("OUT", current_user.id)
 
     transaction_scan_location = {}
     if isinstance(gps_location, dict):
@@ -480,6 +509,7 @@ async def scan_equipment_checkout(
         warehouse_id=warehouse_id,
         package_id=package.id,
         operator_id=current_user.id,
+        issued_to=current_user.id,
         offline_document_id=offline_doc.id if offline_doc else None,
         scan_barcode=barcode,
         # 扫描时间使用服务器本地时间记录
@@ -3611,7 +3641,10 @@ def _ensure_active_warehouse(db: Session, warehouse_id: int) -> Warehouse:
 
 
 def _build_request_no(prefix: str, user_id: int) -> str:
-    return f"{prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{user_id}"
+    # 避免秒级并发导致单号冲突：使用毫秒 + 随机后缀
+    ts_ms = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
+    suffix = uuid.uuid4().hex[:6]
+    return f"{prefix}-{ts_ms}-{user_id}-{suffix}"
 
 
 def _merge_request_items(items: list) -> list:
@@ -3821,6 +3854,7 @@ async def create_material_request(
     _ensure_not_surveyor(current_user)
 
     warehouse_id = payload.get("warehouse_id")
+    requester_id = payload.get("requester_id") if isinstance(payload, dict) else None
     items = payload.get("items") if isinstance(payload, dict) else []
     notes = (payload.get("notes") or "").strip() if isinstance(payload, dict) else ""
 
@@ -3829,6 +3863,26 @@ async def create_material_request(
     except Exception:
         raise HTTPException(status_code=400, detail="请选择仓库")
     _ensure_active_warehouse(db, warehouse_id)
+
+    # 支持仓库侧“代他人创建申请单”
+    if requester_id is None or str(requester_id).strip() == "":
+        requester_id = current_user.id
+    try:
+        requester_id = int(requester_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="请选择申请人")
+    if requester_id <= 0:
+        raise HTTPException(status_code=400, detail="请选择申请人")
+
+    if requester_id != current_user.id:
+        _ensure_stock_operator(current_user)
+        managed_ids = _get_managed_warehouse_ids(db, current_user)
+        if managed_ids is not None and warehouse_id not in managed_ids:
+            raise HTTPException(status_code=403, detail="无权限为该仓库代创建申请单")
+
+        requester_user = db.query(User).filter(User.id == requester_id).first()
+        if not requester_user or not bool(getattr(requester_user, "is_active", True)):
+            raise HTTPException(status_code=400, detail="申请人不存在或已禁用")
 
     merged_items = _merge_request_items(items)
     if not merged_items:
@@ -3849,7 +3903,7 @@ async def create_material_request(
         id=uuid.uuid4().hex,
         request_no=_build_request_no("REQ", current_user.id),
         warehouse_id=warehouse_id,
-        requester_id=current_user.id,
+        requester_id=requester_id,
         status=MaterialRequestStatusEnum.DRAFT,
         notes=notes or None,
     )
@@ -3945,6 +3999,10 @@ async def update_material_request(
     except Exception:
         raise HTTPException(status_code=400, detail="请选择仓库")
     _ensure_active_warehouse(db, warehouse_id)
+    if is_warehouse_side and req.requester_id != current_user.id:
+        managed_ids = _get_managed_warehouse_ids(db, current_user)
+        if managed_ids is not None and warehouse_id not in managed_ids:
+            raise HTTPException(status_code=403, detail="无权限编辑该仓库的申请单")
 
     merged_items = _merge_request_items(items)
     if not merged_items:
@@ -4010,6 +4068,9 @@ async def submit_material_request(
         is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
         if not is_warehouse_side:
             raise HTTPException(status_code=403, detail="无权限提交该申请单")
+        managed_ids = _get_managed_warehouse_ids(db, current_user)
+        if managed_ids is not None and req.warehouse_id not in managed_ids:
+            raise HTTPException(status_code=403, detail="无权限提交该仓库的申请单")
 
     req.submitted_at = datetime.now()
     req.status = MaterialRequestStatusEnum.SUBMITTED
@@ -4060,6 +4121,10 @@ async def cancel_material_request(
     is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
     if not is_warehouse_side and req.requester_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限取消该申请单")
+    if is_warehouse_side and req.requester_id != current_user.id:
+        managed_ids = _get_managed_warehouse_ids(db, current_user)
+        if managed_ids is not None and req.warehouse_id not in managed_ids:
+            raise HTTPException(status_code=403, detail="无权限取消该仓库的申请单")
 
     req.status = MaterialRequestStatusEnum.CANCELED
     if reason:
@@ -4083,6 +4148,9 @@ async def approve_material_request(
         raise HTTPException(status_code=404, detail="申请单不存在")
     if _enum_value(req.status) != MaterialRequestStatusEnum.SUBMITTED.value:
         raise HTTPException(status_code=400, detail="当前状态不可审批")
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids is not None and req.warehouse_id not in managed_ids:
+        raise HTTPException(status_code=403, detail="无权限审批该仓库的申请单")
 
     items_payload = payload.get("items") if isinstance(payload, dict) else []
     comments = (payload.get("comments") or "").strip() if isinstance(payload, dict) else ""
@@ -4157,6 +4225,9 @@ async def reject_material_request(
         raise HTTPException(status_code=404, detail="申请单不存在")
     if _enum_value(req.status) != MaterialRequestStatusEnum.SUBMITTED.value:
         raise HTTPException(status_code=400, detail="当前状态不可驳回")
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids is not None and req.warehouse_id not in managed_ids:
+        raise HTTPException(status_code=403, detail="无权限驳回该仓库的申请单")
 
     req.status = MaterialRequestStatusEnum.REJECTED
     req.approved_by = current_user.id
@@ -4941,6 +5012,8 @@ async def _confirm_issue_draft_impl(
             continue
         serials_to_confirm.append(s)
         requirements[int(s.equipment_id)] = requirements.get(int(s.equipment_id), 0) + 1
+    if not serials_to_confirm and not aux_confirm_map:
+        raise HTTPException(status_code=400, detail="没有可确认的SN或辅料，请刷新后重试")
 
     draft_item_by_eid = {int(it.equipment_id): it for it in (draft.items or [])}
     for eid, qty in aux_confirm_map.items():
@@ -4978,15 +5051,33 @@ async def _confirm_issue_draft_impl(
 
     # 逐行扣库存 + 写明细
     for equipment_id, qty in requirements.items():
-        inv = db.query(Inventory).filter(
-            and_(Inventory.warehouse_id == draft.warehouse_id, Inventory.equipment_id == equipment_id)
-        ).first()
-        if not inv:
-            raise HTTPException(status_code=400, detail="库存更新失败：未找到库存记录")
-        inv.current_stock -= int(qty)
-        inv.available_stock -= int(qty)
-        inv.allocated_stock += int(qty)
-        inv.last_updated_by = current_user.id
+        updated = (
+            db.query(Inventory)
+            .filter(
+                Inventory.warehouse_id == draft.warehouse_id,
+                Inventory.equipment_id == equipment_id,
+                Inventory.current_stock >= int(qty),
+                Inventory.available_stock >= int(qty),
+            )
+            .update(
+                {
+                    Inventory.current_stock: Inventory.current_stock - int(qty),
+                    Inventory.available_stock: Inventory.available_stock - int(qty),
+                    Inventory.allocated_stock: Inventory.allocated_stock + int(qty),
+                    Inventory.last_updated_by: current_user.id,
+                },
+                synchronize_session=False,
+            )
+        )
+        if updated != 1:
+            db.expire_all()
+            latest_shortages = _collect_stock_shortage(db, draft.warehouse_id, requirements)
+            if latest_shortages:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"message": "库存不足，无法确认出库", "shortages": latest_shortages},
+                )
+            raise HTTPException(status_code=400, detail="库存更新失败")
 
     # 主设备明细：每SN一条
     for s in serials_to_confirm:
@@ -5004,13 +5095,28 @@ async def _confirm_issue_draft_impl(
         s.confirmed_transaction_id = tx_id
         s.confirmed_at = now
 
-        inst = db.query(EquipmentInstance).filter(EquipmentInstance.id == s.equipment_instance_id).first()
-        if inst:
-            inst.status = InventoryStatusEnum.ISSUED
-            inst.issued_to = draft.requester_id
-            inst.issued_date = now
-            inst.warehouse_id = None
-            inst.updated_at = now
+        updated_inst = (
+            db.query(EquipmentInstance)
+            .filter(
+                EquipmentInstance.id == s.equipment_instance_id,
+                EquipmentInstance.equipment_id == s.equipment_id,
+                or_(EquipmentInstance.is_voided.is_(False), EquipmentInstance.is_voided.is_(None)),
+                EquipmentInstance.status == InventoryStatusEnum.IN_STOCK,
+                EquipmentInstance.warehouse_id == draft.warehouse_id,
+            )
+            .update(
+                {
+                    EquipmentInstance.status: InventoryStatusEnum.ISSUED,
+                    EquipmentInstance.issued_to: draft.requester_id,
+                    EquipmentInstance.issued_date: now,
+                    EquipmentInstance.warehouse_id: None,
+                    EquipmentInstance.updated_at: now,
+                },
+                synchronize_session=False,
+            )
+        )
+        if updated_inst != 1:
+            raise HTTPException(status_code=400, detail=f"SN当前状态不可出库：{s.serial_number}")
 
         # 申请单已发放+1
         req_item = db.query(MaterialRequestItem).filter(
@@ -5043,11 +5149,8 @@ async def _confirm_issue_draft_impl(
             req_item.issued_qty = int(getattr(req_item, "issued_qty", 0) or 0) + int(qty)
 
     # 更新领料单状态
-    any_pending_serial = (
-        db.query(IssueDraftSerial.id)
-        .filter(IssueDraftSerial.draft_id == draft.id, IssueDraftSerial.status == IssueDraftSerialStatusEnum.PENDING)
-        .first()
-        is not None
+    any_pending_serial = any(
+        _enum_value(x.status) == IssueDraftSerialStatusEnum.PENDING.value for x in (draft.serials or [])
     )
     any_pending_aux = any(
         int(getattr(it, "planned_qty", 0) or 0) > int(getattr(it, "confirmed_qty", 0) or 0)
@@ -5062,6 +5165,7 @@ async def _confirm_issue_draft_impl(
         draft.status = IssueDraftStatusEnum.PARTIALLY_CONFIRMED
 
     # 若申请单已全部发放则关闭
+    db.flush()
     _maybe_close_material_request(db, req)
 
     db.commit()
@@ -5199,6 +5303,25 @@ async def manual_stock_out(
     requirements: Dict[int, int] = {}
     instance_rows: List[EquipmentInstance] = []
     for sn in sn_set:
+        conflict = (
+            db.query(IssueDraftSerial.id)
+            .join(IssueDraft, IssueDraftSerial.draft_id == IssueDraft.id)
+            .filter(
+                IssueDraftSerial.serial_number == sn,
+                IssueDraftSerial.status == IssueDraftSerialStatusEnum.PENDING,
+                IssueDraft.status.in_(
+                    [
+                        IssueDraftStatusEnum.DRAFT,
+                        IssueDraftStatusEnum.PENDING_CONFIRM,
+                        IssueDraftStatusEnum.PARTIALLY_CONFIRMED,
+                    ]
+                ),
+            )
+            .first()
+        )
+        if conflict:
+            raise HTTPException(status_code=400, detail=f"SN已在领料单待确认，无法快速出库：{sn}")
+
         inst = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn).first()
         if not inst:
             raise HTTPException(status_code=404, detail=f"未找到SN：{sn}")

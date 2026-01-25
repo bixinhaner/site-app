@@ -8,6 +8,8 @@ export const useUserStore = defineStore('user', () => {
 	const token = ref(uni.getStorageSync('token') || '')
 	const refreshToken = ref(uni.getStorageSync('refreshToken') || '')
 	const userInfo = ref(uni.getStorageSync('userInfo') || null)
+	// 旧流程：我的设备-扫码领货开关（默认关闭；登录后从 /api/system/mobile-settings/effective 刷新）
+	const legacyScanPickupEnabled = ref(false)
 	const isLoggedIn = computed(() => !!token.value)
 
 	// 权限相关的计算属性
@@ -95,16 +97,21 @@ export const useUserStore = defineStore('user', () => {
 							// 未返回时默认允许
 							setAllowLocalPhotoUpload(true)
 						}
-						if (typeof settingsRes.data.local_upload_watermark_with_geo === 'boolean') {
-							setLocalUploadWatermarkWithGeo(settingsRes.data.local_upload_watermark_with_geo)
-						} else {
-							// 未返回时默认携带（沿用现状）
-							setLocalUploadWatermarkWithGeo(true)
+							if (typeof settingsRes.data.local_upload_watermark_with_geo === 'boolean') {
+								setLocalUploadWatermarkWithGeo(settingsRes.data.local_upload_watermark_with_geo)
+							} else {
+								// 未返回时默认携带（沿用现状）
+								setLocalUploadWatermarkWithGeo(true)
+							}
+							if (typeof settingsRes.data.enable_legacy_scan_pickup === 'boolean') {
+								legacyScanPickupEnabled.value = settingsRes.data.enable_legacy_scan_pickup === true
+							} else {
+								legacyScanPickupEnabled.value = false
+							}
 						}
+					} catch (e) {
+						console.warn('刷新移动端配置失败（登录后）:', e)
 					}
-				} catch (e) {
-					console.warn('刷新移动端配置失败（登录后）:', e)
-				}
 
 				console.log('登录成功:', user)
 				return { success: true }
@@ -271,15 +278,20 @@ export const useUserStore = defineStore('user', () => {
 						} else {
 							setAllowLocalPhotoUpload(true)
 						}
-						if (typeof settingsRes.data.local_upload_watermark_with_geo === 'boolean') {
-							setLocalUploadWatermarkWithGeo(settingsRes.data.local_upload_watermark_with_geo)
-						} else {
-							setLocalUploadWatermarkWithGeo(true)
+							if (typeof settingsRes.data.local_upload_watermark_with_geo === 'boolean') {
+								setLocalUploadWatermarkWithGeo(settingsRes.data.local_upload_watermark_with_geo)
+							} else {
+								setLocalUploadWatermarkWithGeo(true)
+							}
+							if (typeof settingsRes.data.enable_legacy_scan_pickup === 'boolean') {
+								legacyScanPickupEnabled.value = settingsRes.data.enable_legacy_scan_pickup === true
+							} else {
+								legacyScanPickupEnabled.value = false
+							}
 						}
+					} catch (e) {
+						console.warn('刷新移动端配置失败（validateToken）:', e)
 					}
-				} catch (e) {
-					console.warn('刷新移动端配置失败（validateToken）:', e)
-				}
 
 				return true
 			} else if (response.statusCode === 401) {
@@ -298,6 +310,7 @@ export const useUserStore = defineStore('user', () => {
 			token.value = ''
 			refreshToken.value = ''
 			userInfo.value = null
+			legacyScanPickupEnabled.value = false
 			uni.removeStorageSync('token')
 			uni.removeStorageSync('refreshToken')
 			uni.removeStorageSync('userInfo')
@@ -307,10 +320,11 @@ export const useUserStore = defineStore('user', () => {
 		return false
 	}
 
-	return {
-		token,
-		userInfo,
-		isLoggedIn,
+		return {
+			token,
+			userInfo,
+			legacyScanPickupEnabled,
+			isLoggedIn,
 		// 权限属性
 		isAdmin,
 		isInspector,

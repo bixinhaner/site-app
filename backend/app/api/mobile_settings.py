@@ -69,6 +69,7 @@ class MobileSettingsPayload(BaseModel):
   location_mode: Optional[LocationModeRule] = None
   allow_local_photo_upload: Optional[BoolRule] = None
   local_upload_watermark_with_geo: Optional[BoolRule] = None
+  enable_legacy_scan_pickup: Optional[BoolRule] = None
 
 
 class EffectiveMobileSettingsResponse(BaseModel):
@@ -77,6 +78,7 @@ class EffectiveMobileSettingsResponse(BaseModel):
   location_mode: str
   allow_local_photo_upload: bool = True
   local_upload_watermark_with_geo: bool = True
+  enable_legacy_scan_pickup: bool = False
 
 
 def _normalize_mode(mode: str) -> str:
@@ -300,7 +302,7 @@ async def get_mobile_settings(
   """
   获取完整的移动端配置（仅管理员/项目经理可见）。
 
-  - 目前仅包含 location_mode
+  - 目前包含 location_mode / 本地上传 / 水印定位信息 / 旧流程扫码领货等配置项
   - 返回原始配置结构（包含 default/per_role/per_user）
   """
   _require_admin_or_manager(current_user)
@@ -310,6 +312,7 @@ async def get_mobile_settings(
   # allow_local_photo_upload 若不存在，则使用默认结构
   allow_upload_rule = raw.get("allow_local_photo_upload") or {}
   local_upload_watermark_rule = raw.get("local_upload_watermark_with_geo") or {}
+  legacy_scan_pickup_rule = raw.get("enable_legacy_scan_pickup") or {}
 
   # 构造 LocationModeRule，保证字段存在
   lm = LocationModeRule(
@@ -334,6 +337,11 @@ async def get_mobile_settings(
     location_mode=lm,
     allow_local_photo_upload=allow_upload,
     local_upload_watermark_with_geo=local_upload_watermark,
+    enable_legacy_scan_pickup=BoolRule(
+      default=legacy_scan_pickup_rule.get("default") if isinstance(legacy_scan_pickup_rule.get("default"), bool) else False,
+      per_role=legacy_scan_pickup_rule.get("per_role") or {},
+      per_user=legacy_scan_pickup_rule.get("per_user") or {},
+    ),
   )
 
 
@@ -346,7 +354,7 @@ async def update_mobile_settings(
   """
   更新移动端配置（仅管理员/项目经理）。
 
-  - 目前仅支持 location_mode
+  - 支持多项移动端配置项（见 MobileSettingsPayload）
   - 每个配置项都采用 default/per_role/per_user 结构
   """
   _require_admin_or_manager(current_user)
@@ -374,6 +382,9 @@ async def update_mobile_settings(
   if payload.local_upload_watermark_with_geo is not None:
     settings["local_upload_watermark_with_geo"] = _normalize_bool_rule(payload.local_upload_watermark_with_geo)
 
+  if payload.enable_legacy_scan_pickup is not None:
+    settings["enable_legacy_scan_pickup"] = _normalize_bool_rule(payload.enable_legacy_scan_pickup)
+
   _save_mobile_settings(db, settings)
 
   # 返回最新配置
@@ -398,10 +409,18 @@ async def update_mobile_settings(
     per_user=local_upload_watermark_rule.get("per_user") or {},
   )
 
+  legacy_scan_pickup_rule = settings.get("enable_legacy_scan_pickup") or {}
+  legacy_scan_pickup = BoolRule(
+    default=legacy_scan_pickup_rule.get("default") if isinstance(legacy_scan_pickup_rule.get("default"), bool) else False,
+    per_role=legacy_scan_pickup_rule.get("per_role") or {},
+    per_user=legacy_scan_pickup_rule.get("per_user") or {},
+  )
+
   return MobileSettingsPayload(
     location_mode=lm,
     allow_local_photo_upload=allow_upload,
     local_upload_watermark_with_geo=local_upload_watermark,
+    enable_legacy_scan_pickup=legacy_scan_pickup,
   )
 
 
@@ -430,10 +449,17 @@ async def get_effective_mobile_settings(
     user=current_user,
     default=True,
   )
+  enable_legacy_scan_pickup = _resolve_bool_for_user(
+    settings,
+    key="enable_legacy_scan_pickup",
+    user=current_user,
+    default=False,
+  )
   return EffectiveMobileSettingsResponse(
     location_mode=location_mode,
     allow_local_photo_upload=allow_local_photo_upload,
     local_upload_watermark_with_geo=local_upload_watermark_with_geo,
+    enable_legacy_scan_pickup=enable_legacy_scan_pickup,
   )
 
 

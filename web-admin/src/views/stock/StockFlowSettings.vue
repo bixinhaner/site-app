@@ -50,7 +50,7 @@
 
         <el-form-item label="允许快速出库（无申请）">
           <el-switch v-model="settings.allow_quick_stock_out" />
-          <div class="help">关闭后：扫码出库/快速出库接口将返回“快捷出库已关闭”</div>
+          <div class="help">关闭后：快速出库（无申请）接口将返回“快捷出库已关闭”（旧流程扫码领货请到“系统配置 → 移动端配置”单独控制）</div>
         </el-form-item>
       </el-form>
     </el-card>
@@ -199,4 +199,3 @@ onMounted(async () => {
   }
 }
 </style>
-

@@ -171,13 +171,14 @@
 <script setup>
 	import { computed, getCurrentInstance, onMounted, ref } from 'vue'
 	import { onLoad, onShow } from '@dcloudio/uni-app'
-	import { useUserStore } from '@/stores/user'
-	import { useLanguageStore } from '@/stores/language'
-	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
-	import { parseBarcode } from '@/utils/barcode-parser.js'
-	import { formatDateTime } from '@/utils/time.js'
-	import CustomNavbar from '@/components/CustomNavbar.vue'
-	import SkeletonCard from '@/components/SkeletonCard.vue'
+		import { useUserStore } from '@/stores/user'
+		import { useLanguageStore } from '@/stores/language'
+		import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
+		import { parseBarcode } from '@/utils/barcode-parser.js'
+		import { scanDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
+		import { formatDateTime } from '@/utils/time.js'
+		import CustomNavbar from '@/components/CustomNavbar.vue'
+		import SkeletonCard from '@/components/SkeletonCard.vue'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
@@ -290,20 +291,26 @@
 		await load()
 	}
 
-	const scanByCamera = async () => {
-		if (!canEdit.value) return
-		try {
-			const res = await uni.scanCode({ scanType: ['qrCode', 'barCode'] })
-			const raw = String(res?.result || '').trim()
-			if (!raw) {
-				uni.showToast({ title: $t('stock.scanResultEmpty'), icon: 'none' })
+		const scanByCamera = async () => {
+			if (!canEdit.value) return
+			const scanned = await scanDeviceCode()
+			if (!scanned.ok) {
+				if (scanned.error === ScanDeviceCodeError.UNSUPPORTED_SCAN_TYPE) {
+					uni.showToast({
+						title: $t('stock.unsupportedScanType', { type: scanned.scanType || 'UNKNOWN' }),
+						icon: 'none',
+					})
+					return
+				}
+				if (scanned.error === ScanDeviceCodeError.EMPTY_RESULT) {
+					uni.showToast({ title: $t('stock.scanResultEmpty'), icon: 'none' })
+					return
+				}
+				uni.showToast({ title: $t('stock.scanFailed'), icon: 'none' })
 				return
 			}
-			await submitScan(raw)
-		} catch (e) {
-			uni.showToast({ title: $t('stock.scanFailed'), icon: 'none' })
+			await submitScan(scanned.raw)
 		}
-	}
 
 	const addSnFromInput = async () => {
 		if (!canEdit.value) return
