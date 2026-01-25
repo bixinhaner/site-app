@@ -709,20 +709,41 @@ async def get_my_pickup_records(
     }
 
     # ===== 相关状态（用于分组/排序）=====
-    return_pending_exists = db.query(StockTransaction.id).filter(
+    # 仅将“包含主设备明细”的退库单视为影响该主设备的退库状态，避免“仅退辅料”把主设备误判为已退库
+    # - 若 PickupRecord.equipment_instance_id 有值：按出库单 + equipment_instance_id 精确匹配
+    # - 若为空：退化为“只要该退库单含任意主设备明细”即可（兼容极少数历史数据）
+    return_item_match_cond = and_(
+        StockTransactionItem.transaction_id == StockTransaction.id,
+        StockTransactionItem.equipment_instance_id.isnot(None),
+        or_(
+            PickupRecord.equipment_instance_id.is_(None),
+            StockTransactionItem.equipment_instance_id == PickupRecord.equipment_instance_id,
+        ),
+    )
+
+    return_pending_exists = db.query(StockTransaction.id).join(
+        StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id
+    ).filter(
         StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
         StockTransaction.related_transaction_id == PickupRecord.transaction_id,
         StockTransaction.approval_status.in_(["pending_receive", "partially_received"]),
+        return_item_match_cond,
     ).exists()
-    return_received_exists = db.query(StockTransaction.id).filter(
+    return_received_exists = db.query(StockTransaction.id).join(
+        StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id
+    ).filter(
         StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
         StockTransaction.related_transaction_id == PickupRecord.transaction_id,
         StockTransaction.approval_status == "received",
+        return_item_match_cond,
     ).exists()
-    return_reject_or_cancel_exists = db.query(StockTransaction.id).filter(
+    return_reject_or_cancel_exists = db.query(StockTransaction.id).join(
+        StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id
+    ).filter(
         StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
         StockTransaction.related_transaction_id == PickupRecord.transaction_id,
         StockTransaction.approval_status.in_(["rejected", "canceled"]),
+        return_item_match_cond,
     ).exists()
 
     device_level_cond = and_(
@@ -816,19 +837,50 @@ async def get_my_pickup_records(
     records = query.offset(offset).limit(page_size).all()
     has_more = offset + len(records) < total
 
-    # 退库单（方案A）信息：按出库 transaction_id 聚合取最新一条，用于展示“待收货/已收货/拒收/取消”等状态
+    # 退库单（方案A）信息：按（出库 transaction_id + equipment_instance_id）聚合取最新一条
+    # 仅关注包含主设备明细的退库单，避免“仅退辅料”误影响主设备状态展示
     related_ids = [r.transaction_id for r in records if r.transaction_id]
-    return_trans_map: Dict[str, StockTransaction] = {}
+    return_trans_map: Dict[tuple, dict] = {}
     if related_ids:
         try:
-            return_trans = db.query(StockTransaction).filter(
+            ret_rows = db.query(
+                StockTransaction.related_transaction_id.label("out_id"),
+                StockTransaction.document_number.label("return_document_number"),
+                StockTransaction.approval_status.label("return_status"),
+                StockTransaction.warehouse_id.label("return_warehouse_id"),
+                Warehouse.warehouse_name.label("return_warehouse_name"),
+                StockTransaction.approval_comments.label("approval_comments"),
+                StockTransaction.created_at.label("created_at"),
+                StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+            ).join(
+                StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id
+            ).outerjoin(
+                Warehouse, Warehouse.id == StockTransaction.warehouse_id
+            ).filter(
                 StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
                 StockTransaction.related_transaction_id.in_(related_ids),
+                StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received", "rejected", "canceled"]),
+                StockTransactionItem.equipment_instance_id.isnot(None),
             ).order_by(desc(StockTransaction.created_at)).all()
-            for rt in return_trans:
-                key = getattr(rt, "related_transaction_id", None)
-                if key and key not in return_trans_map:
-                    return_trans_map[key] = rt
+
+            for rr in ret_rows:
+                out_id = str(getattr(rr, "out_id", "") or "").strip()
+                inst_id = str(getattr(rr, "equipment_instance_id", "") or "").strip()
+                if not out_id or not inst_id:
+                    continue
+                payload = {
+                    "return_document_number": getattr(rr, "return_document_number", None),
+                    "return_status": getattr(rr, "return_status", None),
+                    "return_warehouse_id": getattr(rr, "return_warehouse_id", None),
+                    "return_warehouse_name": getattr(rr, "return_warehouse_name", None),
+                    "approval_comments": getattr(rr, "approval_comments", None),
+                }
+                key_exact = (out_id, inst_id)
+                if key_exact not in return_trans_map:
+                    return_trans_map[key_exact] = payload
+                key_fallback = (out_id, None)
+                if key_fallback not in return_trans_map:
+                    return_trans_map[key_fallback] = payload
         except Exception:
             # 兼容老库/字段缺失等场景：忽略退库信息
             return_trans_map = {}
@@ -884,8 +936,15 @@ async def get_my_pickup_records(
         elif sn_for_state and sn_for_state in need_unbind_sns:
             binding_state = "need_unbind"
 
-        latest_return = return_trans_map.get(record.transaction_id) if record.transaction_id else None
-        latest_return_status = latest_return.approval_status if latest_return else None
+        out_id = record.transaction_id
+        inst_id = record.equipment_instance_id
+        latest_return = None
+        if out_id:
+            if inst_id:
+                latest_return = return_trans_map.get((out_id, str(inst_id))) or return_trans_map.get((out_id, None))
+            else:
+                latest_return = return_trans_map.get((out_id, None))
+        latest_return_status = latest_return.get("return_status") if latest_return else None
         pickup_group_value = "picked"
         if record.is_returned or latest_return_status == "received":
             pickup_group_value = "returned"
@@ -914,16 +973,12 @@ async def get_my_pickup_records(
             "is_confirmed": record.is_confirmed,
             "is_returned": record.is_returned,
             "return_status": latest_return_status,
-            "return_document_number": latest_return.document_number if latest_return else None,
-            "return_warehouse_id": latest_return.warehouse_id if latest_return else None,
-            "return_warehouse_name": (
-                latest_return.warehouse.warehouse_name
-                if latest_return and latest_return.warehouse
-                else None
-            ),
+            "return_document_number": latest_return.get("return_document_number") if latest_return else None,
+            "return_warehouse_id": latest_return.get("return_warehouse_id") if latest_return else None,
+            "return_warehouse_name": latest_return.get("return_warehouse_name") if latest_return else None,
             "return_reject_reason": (
-                latest_return.approval_comments
-                if latest_return and latest_return.approval_status == "rejected"
+                latest_return.get("approval_comments")
+                if latest_return_status == "rejected" and latest_return
                 else None
             ),
             # returned_at / confirmed_at 使用 datetime.now() 写入，按本地->UTC 输出
@@ -1519,11 +1574,14 @@ async def scan_return_receive(
         equipment_instance.updated_at = now
 
     # 标记领料记录已归还（仅收货确认后）
-    pickup_record = db.query(PickupRecord).filter(
+    pickup_query = db.query(PickupRecord).filter(
         PickupRecord.transaction_id == out_trans.id,
         PickupRecord.picker_id == return_trans.operator_id,
         PickupRecord.is_returned == False,
-    ).order_by(desc(PickupRecord.pickup_time)).first()
+    )
+    if equipment_instance:
+        pickup_query = pickup_query.filter(PickupRecord.equipment_instance_id == equipment_instance.id)
+    pickup_record = pickup_query.order_by(desc(PickupRecord.pickup_time)).first()
     if pickup_record:
         pickup_record.is_returned = True
         pickup_record.returned_at = now
@@ -8526,16 +8584,38 @@ async def receive_return_items(
         t.approval_comments = receive_notes
 
     # 若已全部收货，标记老的 PickupRecord 已归还（兼容旧“我的设备”列表）
+    # 仅当退库单包含主设备明细时才更新，避免“仅退辅料”把主设备误标为已退库
     if t.approval_status == "received" and out_trans.id and t.operator_id:
-        pickup_record = db.query(PickupRecord).filter(
-            PickupRecord.transaction_id == out_trans.id,
-            PickupRecord.picker_id == t.operator_id,
-            PickupRecord.is_returned == False,
-        ).order_by(desc(PickupRecord.pickup_time)).first()
-        if pickup_record:
-            pickup_record.is_returned = True
-            pickup_record.returned_at = now
-            pickup_record.return_notes = receive_notes or "仓库已收货确认"
+        returned_instance_ids = list(
+            {
+                str(getattr(it, "equipment_instance_id"))
+                for it in (t.transaction_items or [])
+                if getattr(it, "equipment_instance_id", None)
+            }
+        )
+        if returned_instance_ids:
+            pickup_rows = db.query(PickupRecord).filter(
+                PickupRecord.transaction_id == out_trans.id,
+                PickupRecord.picker_id == t.operator_id,
+                PickupRecord.is_returned == False,
+                PickupRecord.equipment_instance_id.in_(returned_instance_ids),
+            ).all()
+            for pr in pickup_rows:
+                pr.is_returned = True
+                pr.returned_at = now
+                pr.return_notes = receive_notes or "仓库已收货确认"
+
+            # 兼容：极少数历史数据 pickup_record 未关联 equipment_instance_id
+            if not pickup_rows:
+                pickup_record = db.query(PickupRecord).filter(
+                    PickupRecord.transaction_id == out_trans.id,
+                    PickupRecord.picker_id == t.operator_id,
+                    PickupRecord.is_returned == False,
+                ).order_by(desc(PickupRecord.pickup_time)).first()
+                if pickup_record and not getattr(pickup_record, "equipment_instance_id", None):
+                    pickup_record.is_returned = True
+                    pickup_record.returned_at = now
+                    pickup_record.return_notes = receive_notes or "仓库已收货确认"
 
     db.commit()
     return {"message": "收货确认成功", "return_status": t.approval_status}
