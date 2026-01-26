@@ -40,7 +40,10 @@ from app.services.omc_client import (
 )
 from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_state
 from app.utils.timezone import to_utc_iso
-from app.services.omc_monitor import advance_opening_work_orders_by_ever
+from app.services.omc_monitor import (
+    advance_opening_work_orders_by_ever,
+    advance_replacement_work_orders_by_ever,
+)
 
 router = APIRouter()
 
@@ -1405,6 +1408,7 @@ async def get_site_omc_devices(
         # 刷新完成后，基于最新聚合表尝试推进工单/站点状态（只升不降，不再二次查询 OMC）
         try:
             advance_opening_work_orders_by_ever(db, site_id)
+            advance_replacement_work_orders_by_ever(db, site_id)
             db.commit()
         except Exception as exc:  # pragma: no cover
             db.rollback()

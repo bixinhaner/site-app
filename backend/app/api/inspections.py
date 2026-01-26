@@ -2783,6 +2783,14 @@ async def bind_equipment_to_sector(
             status_code=404,
             detail="检查记录不存在或无权限操作"
         )
+
+    # 识别工单类型（设备更换工单允许“直接换绑”）
+    wo: Optional[WorkOrder] = None
+    is_replacement_wo = False
+    if getattr(inspection, "work_order_id", None):
+        wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
+        if wo and wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+            is_replacement_wo = True
     
     # 验证设备状态（仅在绑定操作时验证）
     equipment_instance = None
@@ -2841,112 +2849,284 @@ async def bind_equipment_to_sector(
             status_code=404,
             detail=f"未找到扇区 {sector_id} 的检查项"
         )
-    
+
     # 仅在绑定操作时检查是否已有其他设备绑定到该小区
     if not is_unbind:
-        existing_binding = db.query(InspectionCheckItem).filter(
-            InspectionCheckItem.inspection_id == inspection_id,
-            InspectionCheckItem.sector_id == sector_id,
-            func.coalesce(InspectionCheckItem.band, "") == func.coalesce(band, ""),
-            InspectionCheckItem.equipment_sn.isnot(None),
-            InspectionCheckItem.equipment_sn != equipment_sn
-        ).first()
-        
-        if existing_binding:
+        slot_sns = []
+        for it in check_items:
+            sn0 = (getattr(it, "equipment_sn", None) or "").strip()
+            if sn0:
+                slot_sns.append(sn0)
+        slot_unique = [s for s in dict.fromkeys(slot_sns) if s]
+
+        if len(slot_unique) > 1:
+            raise HTTPException(status_code=409, detail="该设备位存在多个已绑定SN，无法绑定/更换，请联系管理员处理")
+
+        slot_current_sn = slot_unique[0] if slot_unique else None
+
+        # 非设备更换工单：仍要求先解绑再绑定，避免误操作覆盖
+        if slot_current_sn and slot_current_sn != str(equipment_sn).strip() and not is_replacement_wo:
             raise HTTPException(
                 status_code=409,
                 detail=(
                     f"设备（扇区 {sector_id}"
-                    f"{'，频段 ' + str(band) if band else ''}）已绑定其他设备: {existing_binding.equipment_sn}"
+                    f"{'，频段 ' + str(band) if band else ''}）已绑定其他设备: {slot_current_sn}"
+                ),
+            )
+
+        # 阻止同一设备SN被绑定到其他设备位：以绑定历史“最新动作”判定当前是否仍绑定
+        try:
+            from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+            from sqlalchemy.orm import joinedload
+
+            eq_sn = (equipment_sn or "").strip()
+            if eq_sn:
+                latest = (
+                    db.query(EquipmentBindingHistory)
+                    .options(
+                        joinedload(EquipmentBindingHistory.site),
+                        joinedload(EquipmentBindingHistory.operator),
+                    )
+                    .filter(EquipmentBindingHistory.equipment_sn == eq_sn)
+                    .order_by(EquipmentBindingHistory.operated_at.desc(), EquipmentBindingHistory.id.desc())
+                    .first()
                 )
-            )
 
-        # 新增：阻止同一设备SN绑定到其他小区（跨检查记录全局唯一小区）
-        from sqlalchemy.orm import joinedload
-        conflict = db.query(InspectionCheckItem).options(
-            joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.site),
-            joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.inspector)
-        ).filter(
-            InspectionCheckItem.equipment_sn == equipment_sn,
-            or_(
-                InspectionCheckItem.sector_id != sector_id,
-                func.coalesce(InspectionCheckItem.band, "") != func.coalesce(band, "")
-            )
-        ).first()
+                if latest and latest.action != BindingActionEnum.UNBIND:
+                    same_slot = (
+                        int(getattr(latest, "site_id", 0) or 0) == int(getattr(inspection, "site_id", 0) or 0)
+                        and str(getattr(latest, "sector_id", "") or "") == str(sector_id or "")
+                        and str(getattr(latest, "band", "") or "") == str(band or "")
+                        and str(getattr(latest, "cell_id", "") or "") == str(cell_id or "")
+                    )
+                    if not same_slot:
+                        site_name = getattr(getattr(latest, "site", None), "site_name", None) or "未知站点"
+                        site_id = getattr(latest, "site_id", None) or "N/A"
+                        conflict_cell = getattr(latest, "sector_id", None) or "-"
+                        conflict_band = getattr(latest, "band", None) or "-"
+                        conflict_cell_str = getattr(latest, "cell_id", None) or f"{conflict_cell}_{conflict_band}"
+                        binder = getattr(latest, "operator", None)
+                        binder_name = (
+                            (binder.full_name or binder.username) if binder else "未知用户"
+                        )
 
-        if conflict:
-            conflict_cell = conflict.sector_id
-            conflict_band = getattr(conflict, 'band', None)
-            conflict_cell_str = f"{conflict_cell}_{conflict_band}" if conflict_band else f"{conflict_cell}"
-            
-            # 获取站点信息
-            conflict_inspection = conflict.inspection
-            site_name = conflict_inspection.site.site_name if conflict_inspection and conflict_inspection.site else "未知站点"
-            site_id = conflict_inspection.site_id if conflict_inspection else "N/A"
-            
-            # 获取绑定人信息（优先使用检查项的checked_by，否则使用检查记录的inspector）
-            binder_id = conflict.checked_by if conflict.checked_by else (conflict_inspection.inspector_id if conflict_inspection else None)
-            binder_name = "未知用户"
-            if binder_id:
-                binder = db.query(User).filter(User.id == binder_id).first()
-                if binder:
-                    binder_name = binder.full_name or binder.username
-            
-            # 构造丰富的错误提示
-            detail_msg = (
-                f"设备 {equipment_sn} 已被使用，无法绑定！\n"
-                f"已绑定站点：{site_name} (ID: {site_id})\n"
-                f"已绑定小区：扇区{conflict_cell}{'的' + conflict_band + '频段' if conflict_band else ''} (小区ID: {conflict_cell_str})\n"
-                f"绑定操作人：{binder_name}\n"
-                f"请先解绑该设备后再进行绑定操作"
-            )
-            
-            raise HTTPException(
-                status_code=409,
-                detail=detail_msg
-            )
+                        detail_msg = (
+                            f"设备 {eq_sn} 已被使用，无法绑定！\n"
+                            f"已绑定站点：{site_name} (ID: {site_id})\n"
+                            f"已绑定设备位：{conflict_cell_str}\n"
+                            f"绑定操作人：{binder_name}\n"
+                            f"请先解绑该设备后再进行绑定操作"
+                        )
+                        raise HTTPException(status_code=409, detail=detail_msg)
+        except HTTPException:
+            raise
+        except Exception:
+            # 兼容：历史表缺失/异常时回退为原逻辑（保守阻断）
+            from sqlalchemy.orm import joinedload
+
+            conflict = db.query(InspectionCheckItem).options(
+                joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.site),
+                joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.inspector)
+            ).filter(
+                InspectionCheckItem.equipment_sn == equipment_sn,
+                or_(
+                    InspectionCheckItem.sector_id != sector_id,
+                    func.coalesce(InspectionCheckItem.band, "") != func.coalesce(band, "")
+                )
+            ).first()
+
+            if conflict:
+                conflict_cell = conflict.sector_id
+                conflict_band = getattr(conflict, 'band', None)
+                conflict_cell_str = f"{conflict_cell}_{conflict_band}" if conflict_band else f"{conflict_cell}"
+
+                conflict_inspection = conflict.inspection
+                site_name = conflict_inspection.site.site_name if conflict_inspection and conflict_inspection.site else "未知站点"
+                site_id = conflict_inspection.site_id if conflict_inspection else "N/A"
+
+                binder_id = conflict.checked_by if conflict.checked_by else (conflict_inspection.inspector_id if conflict_inspection else None)
+                binder_name = "未知用户"
+                if binder_id:
+                    binder = db.query(User).filter(User.id == binder_id).first()
+                    if binder:
+                        binder_name = binder.full_name or binder.username
+
+                detail_msg = (
+                    f"设备 {equipment_sn} 已被使用，无法绑定！\n"
+                    f"已绑定站点：{site_name} (ID: {site_id})\n"
+                    f"已绑定小区：{conflict_cell_str}\n"
+                    f"绑定操作人：{binder_name}\n"
+                    f"请先解绑该设备后再进行绑定操作"
+                )
+                raise HTTPException(status_code=409, detail=detail_msg)
     
     # 绑定或解绑设备到所有相关检查项
     try:
         # 导入历史记录模型
         from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
-        
+
+        now = datetime.utcnow()
+
+        # 设备更换：写入旧设备 UNBIND 记录（一次即可），确保“当前绑定推导/退库判定”不被历史 SN 卡死
+        old_slot_sn = None
+        if is_replacement_wo and not is_unbind:
+            sns = []
+            for it in check_items:
+                sn0 = (getattr(it, "equipment_sn", None) or "").strip()
+                if sn0:
+                    sns.append(sn0)
+            unique = [s for s in dict.fromkeys(sns) if s]
+            if len(unique) == 1:
+                old_slot_sn = unique[0]
+            elif len(unique) > 1:
+                raise HTTPException(status_code=409, detail="该设备位存在多个已绑定SN，无法更换，请联系管理员处理")
+
+            new_sn_norm = (equipment_sn or "").strip()
+            if old_slot_sn and new_sn_norm and old_slot_sn != new_sn_norm:
+                # 绑定历史记录：旧 SN -> UNBIND
+                first_item = check_items[0]
+                db.add(
+                    EquipmentBindingHistory(
+                        inspection_id=inspection_id,
+                        check_item_id=first_item.id,
+                        site_id=inspection.site_id,
+                        sector_id=sector_id,
+                        band=band or "",
+                        cell_id=first_item.cell_id or cell_id,
+                        equipment_sn=old_slot_sn,
+                        action=BindingActionEnum.UNBIND,
+                        operator_id=current_user.id,
+                        previous_equipment_sn=None,
+                        latitude=request_data.get("latitude"),
+                        longitude=request_data.get("longitude"),
+                        gps_accuracy=request_data.get("gps_accuracy"),
+                        notes="设备更换：解绑旧设备",
+                    )
+                )
+
+                # 旧设备归属交接：issued_to -> 执行人（不自动退库）
+                try:
+                    from app.models.equipment import EquipmentInstance, InventoryStatusEnum
+                    from app.models.work_order import AuditEvent
+
+                    old_inst = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == old_slot_sn).first()
+                    if old_inst:
+                        old_issued_to = getattr(old_inst, "issued_to", None)
+                        old_status = getattr(old_inst, "status", None)
+                        old_inst.issued_to = current_user.id
+                        old_inst.status = InventoryStatusEnum.ISSUED
+                        old_inst.updated_at = now
+
+                        # 设备审计：归属交接
+                        db.add(
+                            AuditEvent(
+                                id=str(uuid.uuid4()),
+                                resource_type="equipment_instance",
+                                resource_id=str(old_inst.id),
+                                action="handover_issued_to",
+                                operator_id=current_user.id,
+                                from_status=str(getattr(old_status, "value", old_status)),
+                                to_status=str(InventoryStatusEnum.ISSUED.value),
+                                comments="设备更换工单自动交接（仅变更领料人归属，不自动退库）",
+                                details={
+                                    "reason": "equipment_replacement",
+                                    "work_order_id": getattr(wo, "id", None),
+                                    "site_id": getattr(inspection, "site_id", None),
+                                    "sector_id": sector_id,
+                                    "band": band or "",
+                                    "old_sn": old_slot_sn,
+                                    "new_sn": new_sn_norm,
+                                    "from_issued_to": old_issued_to,
+                                    "to_issued_to": current_user.id,
+                                },
+                            )
+                        )
+                except Exception:
+                    # 审计/交接失败不阻断主流程
+                    pass
+
+                # 写入工单 replacement_history（用于前端追溯）
+                try:
+                    if wo:
+                        extra = wo.extra_data or {}
+                        hist = extra.get("replacement_history") or []
+                        if not isinstance(hist, list):
+                            hist = []
+                        hist.append(
+                            {
+                                "sector_id": str(sector_id),
+                                "band": str(band or ""),
+                                "old_sn": old_slot_sn,
+                                "new_sn": new_sn_norm,
+                                "operator_id": current_user.id,
+                                "replaced_at": now.isoformat() + "Z",
+                            }
+                        )
+                        extra["replacement_history"] = hist
+                        wo.extra_data = extra
+                        wo.updated_at = now
+                except Exception:
+                    pass
+
         for item in check_items:
             # 记录之前的设备SN（用于历史记录）
             previous_sn = item.equipment_sn
-            
+
             # 更新设备绑定
             item.equipment_sn = equipment_sn if not is_unbind else None
-            _touch_check_item_and_clear_review(item, datetime.utcnow())
-            
+            _touch_check_item_and_clear_review(item, now)
+
             # 创建历史记录
-            if not is_unbind or previous_sn:  # 绑定操作或有之前设备的解绑操作才记录
-                history = EquipmentBindingHistory(
-                    inspection_id=inspection_id,
-                    check_item_id=item.id,
-                    site_id=inspection.site_id,
-                    sector_id=sector_id,
-                    band=band or "",
-                    cell_id=item.cell_id or cell_id,
-                    equipment_sn=equipment_sn if not is_unbind else previous_sn,
-                    action=BindingActionEnum.UNBIND if is_unbind else (
-                        BindingActionEnum.REBIND if previous_sn else BindingActionEnum.BIND
-                    ),
-                    operator_id=current_user.id,
-                    previous_equipment_sn=previous_sn if not is_unbind and previous_sn else None,
-                    latitude=request_data.get("latitude"),
-                    longitude=request_data.get("longitude"),
-                    gps_accuracy=request_data.get("gps_accuracy"),
-                    notes=request_data.get("notes")
+            if is_unbind:
+                if previous_sn:
+                    db.add(
+                        EquipmentBindingHistory(
+                            inspection_id=inspection_id,
+                            check_item_id=item.id,
+                            site_id=inspection.site_id,
+                            sector_id=sector_id,
+                            band=band or "",
+                            cell_id=item.cell_id or cell_id,
+                            equipment_sn=previous_sn,
+                            action=BindingActionEnum.UNBIND,
+                            operator_id=current_user.id,
+                            previous_equipment_sn=None,
+                            latitude=request_data.get("latitude"),
+                            longitude=request_data.get("longitude"),
+                            gps_accuracy=request_data.get("gps_accuracy"),
+                            notes=request_data.get("notes"),
+                        )
+                    )
+            else:
+                prev_norm = (previous_sn or "").strip()
+                new_norm = (equipment_sn or "").strip()
+                if prev_norm == new_norm:
+                    continue
+                db.add(
+                    EquipmentBindingHistory(
+                        inspection_id=inspection_id,
+                        check_item_id=item.id,
+                        site_id=inspection.site_id,
+                        sector_id=sector_id,
+                        band=band or "",
+                        cell_id=item.cell_id or cell_id,
+                        equipment_sn=new_norm,
+                        action=BindingActionEnum.REBIND if prev_norm else BindingActionEnum.BIND,
+                        operator_id=current_user.id,
+                        previous_equipment_sn=prev_norm if prev_norm else None,
+                        latitude=request_data.get("latitude"),
+                        longitude=request_data.get("longitude"),
+                        gps_accuracy=request_data.get("gps_accuracy"),
+                        notes=request_data.get("notes"),
+                    )
                 )
-                db.add(history)
         
         # 更新设备状态
         if not is_unbind and equipment_instance:
             # 绑定时，设备状态更新为"待检查"
             from app.models.equipment import InventoryStatusEnum
             equipment_instance.status = InventoryStatusEnum.PENDING_INSPECTION
-            equipment_instance.updated_at = datetime.utcnow()
+            equipment_instance.updated_at = now
         
         db.commit()
         

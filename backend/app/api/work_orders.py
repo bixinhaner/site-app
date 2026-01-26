@@ -44,7 +44,11 @@ from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.work_order_sync import get_work_order_sync_service
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
-from app.services.omc_monitor import run_omc_check_for_work_order, advance_opening_work_orders_by_ever
+from app.services.omc_monitor import (
+    run_omc_check_for_work_order,
+    advance_opening_work_orders_by_ever,
+    advance_replacement_work_orders_by_ever,
+)
 from app.services.omc_client import get_omc_manual_confirm_enabled
 from app.services.omc_state import get_bound_sns_for_site, upsert_omc_device_state
 from app.utils.timezone import to_utc_iso
@@ -460,6 +464,68 @@ async def create_work_order(
     if not site:
         raise HTTPException(status_code=404, detail="站点不存在")
 
+    normalized_replacement_targets = None
+
+    # 设备更换工单创建规则校验
+    if data.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        allowed_site_statuses = {
+            "construction",
+            "pending_online",
+            "online_pending_activation",
+            "operational",
+            "maintenance",
+        }
+        if site.status not in allowed_site_statuses:
+            raise HTTPException(
+                status_code=409,
+                detail=f"站点当前状态为 {site.status}，不允许创建设备更换工单",
+            )
+
+        # 必须选择要更换的设备位（支持多选）
+        raw_targets = getattr(data, "replacement_targets", None) or []
+        if not raw_targets:
+            raise HTTPException(status_code=400, detail="设备更换工单必须选择要更换的设备位")
+
+        # 归一化/去重
+        normalized_targets = []
+        seen_keys = set()
+        for t in raw_targets:
+            sector_id = str(getattr(t, "sector_id", None) or "").strip()
+            band = str(getattr(t, "band", None) or "").strip()
+            if not sector_id or not band:
+                raise HTTPException(status_code=400, detail="设备更换工单设备位参数不完整（sector_id/band）")
+            key = f"{sector_id}__{band}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            normalized_targets.append({"sector_id": sector_id, "band": band})
+
+        if not normalized_targets:
+            raise HTTPException(status_code=400, detail="设备更换工单必须选择要更换的设备位")
+
+        normalized_replacement_targets = normalized_targets
+
+        # 执行人自发起：仅允许指派给自己（避免越权派单）
+        if getattr(current_user, "role", None) == "inspector" and data.assigned_to != current_user.id:
+            raise HTTPException(status_code=400, detail="执行人自发起设备更换工单时只能指派给自己")
+
+        # 同一站点仅允许存在一条“进行中的”设备更换工单
+        in_progress_statuses = [
+            WorkOrderStatusEnum.PENDING,
+            WorkOrderStatusEnum.ACTIVE,
+            WorkOrderStatusEnum.SUBMITTED,
+            WorkOrderStatusEnum.UNDER_REVIEW,
+            WorkOrderStatusEnum.APPROVED,
+            WorkOrderStatusEnum.ACTIVATED,
+        ]
+        existing_replacement = db.query(WorkOrder).filter(
+            WorkOrder.site_id == data.site_id,
+            WorkOrder.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
+            WorkOrder.status.in_(in_progress_statuses),
+        ).order_by(WorkOrder.assigned_at.desc()).first()
+        if existing_replacement:
+            raise HTTPException(status_code=409, detail="该站点已有进行中的设备更换工单")
+
     # 勘察工单创建规则校验
     if data.type == WorkOrderTypeEnum.SITE_SURVEY:
         # 0) 站点无需勘察：禁止创建勘察工单
@@ -642,6 +708,22 @@ async def create_work_order(
         if existing_ssv:
             raise HTTPException(status_code=409, detail="该站点已有进行中的 SSV 工单")
 
+    # 分配/审核人：设备更换工单允许执行人自发起，但派单人/审核人应尽量沿用站点负责人（site.assigned_to）
+    assigned_by_id = current_user.id
+    initiator_id = None
+    if data.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT and getattr(current_user, "role", None) == "inspector":
+        initiator_id = current_user.id
+        assigned_by_id = getattr(site, "assigned_to", None) or None
+        if not assigned_by_id:
+            admin_user = db.query(User).filter(User.username == "admin").first()
+            assigned_by_id = admin_user.id if admin_user else current_user.id
+
+    extra_data = {"template_id": data.template_id} if data.template_id else {}
+    if data.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        extra_data["replacement_targets"] = normalized_replacement_targets or []
+        if initiator_id:
+            extra_data["initiator_id"] = initiator_id
+
     wo = WorkOrder(
         id=str(uuid.uuid4()),
         site_id=data.site_id,
@@ -649,12 +731,12 @@ async def create_work_order(
         type=data.type,
         description=data.description,
         priority=data.priority,
-        assigned_by=current_user.id,
+        assigned_by=assigned_by_id,
         assigned_to=data.assigned_to,
         assigned_at=datetime.utcnow(),  # 显式设置分配时间
         due_date=data.due_date,
         status=WorkOrderStatusEnum.PENDING,
-        extra_data={"template_id": data.template_id} if data.template_id else {}
+        extra_data=extra_data,
     )
     db.add(wo)
     db.flush()
@@ -832,6 +914,15 @@ async def delete_work_order(
             WorkOrder.id != wo.id,
         ).count()
 
+    # 设备更换工单：删除时需要回滚站点状态（仅在已接受/站点处于 maintenance 时生效）
+    site_status_before = None
+    if old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        try:
+            extra = wo.extra_data or {}
+            site_status_before = extra.get("site_status_before")
+        except Exception:
+            site_status_before = None
+
     try:
         # 若历史库存记录绑定了工单，先解除绑定（保留库存数据）
         _detach_stock_records_from_work_order(db, wo)
@@ -887,6 +978,21 @@ async def delete_work_order(
                     old_site_status,
                     site.status,
                     "删除安装工单，站点状态回滚至 planned",
+                )
+
+        # 设备更换工单：删除时回滚站点状态到 site_status_before
+        if old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+            site = db.query(Site).filter(Site.id == old_site_id).first()
+            before = str(site_status_before or "").strip()
+            if site and before and site.status == "maintenance" and site.status != before:
+                old_site_status = site.status
+                site.status = before
+                _audit_site_status_change(
+                    db,
+                    old_site_id,
+                    old_site_status,
+                    site.status,
+                    "删除设备更换工单，站点状态回滚",
                 )
 
         db.commit()
@@ -950,6 +1056,25 @@ async def accept_work_order(
                 detail="该检查模板包含“小区级（按EARFCN）”检查项，请先在站点规划（LLD）中导入规划数据",
             )
 
+    # 设备更换工单：接受时将站点切到 maintenance，并记录原状态用于后续回滚
+    if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        site = db.query(Site).filter(Site.id == wo.site_id).first()
+        if site:
+            extra = wo.extra_data or {}
+            if not extra.get("site_status_before"):
+                extra["site_status_before"] = site.status
+            if site.status != "maintenance":
+                old_site_status = site.status
+                site.status = "maintenance"
+                _audit_site_status_change(
+                    db,
+                    site.id,
+                    old_site_status,
+                    site.status,
+                    "接受设备更换工单，站点进入维护阶段",
+                )
+            wo.extra_data = extra
+
     # 更新工单状态
     old_status = wo.status
     wo.status = WorkOrderStatusEnum.ACTIVE
@@ -974,6 +1099,59 @@ async def accept_work_order(
 
         total_items = 0
         devices = CellGenerator.generate_devices_from_planning(db, wo.site_id)
+
+        # 设备更换工单：仅生成选中的设备位相关检查项
+        target_slots = None
+        old_sn_map = {}
+        if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+            raw_targets = (wo.extra_data or {}).get("replacement_targets") or []
+            slots = set()
+            for t in raw_targets:
+                if not isinstance(t, dict):
+                    continue
+                sector_id = str(t.get("sector_id") or "").strip()
+                band = str(t.get("band") or "").strip()
+                if not sector_id or not band:
+                    continue
+                slots.add((sector_id, band))
+            if not slots:
+                raise HTTPException(status_code=400, detail="设备更换工单缺少 replacement_targets，无法生成检查项")
+            target_slots = slots
+            devices = [d for d in devices if (str(d.sector_id), str(d.band)) in target_slots]
+            if carrier_cells is not None:
+                carrier_cells = [
+                    c for c in (carrier_cells or []) if (str(c.sector_id), str(c.band)) in target_slots
+                ]
+
+            # 预填旧设备 SN（用于展示与追溯）
+            try:
+                from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+
+                for sector_id, band in sorted(target_slots):
+                    cell_id = f"{sector_id}_{band}"
+                    row = (
+                        db.query(EquipmentBindingHistory)
+                        .filter(
+                            EquipmentBindingHistory.site_id == wo.site_id,
+                            EquipmentBindingHistory.sector_id == sector_id,
+                            EquipmentBindingHistory.band == band,
+                            EquipmentBindingHistory.cell_id == cell_id,
+                        )
+                        .order_by(EquipmentBindingHistory.operated_at.desc(), EquipmentBindingHistory.id.desc())
+                        .first()
+                    )
+                    if row and row.action != BindingActionEnum.UNBIND and row.equipment_sn:
+                        old_sn_map[(sector_id, band)] = str(row.equipment_sn).strip()
+            except Exception:
+                old_sn_map = {}
+
+            extra = wo.extra_data or {}
+            extra["replacement_old_devices"] = [
+                {"sector_id": s, "band": b, "old_sn": old_sn_map.get((s, b))}
+                for (s, b) in sorted(target_slots)
+            ]
+            wo.extra_data = extra
+
         sectors = sorted({d.sector_id for d in devices})
 
         print(
@@ -1036,6 +1214,11 @@ async def accept_work_order(
                             sector_id=dev.sector_id,
                             band=dev.band,
                             cell_id=dev.cell_id,
+                            equipment_sn=(
+                                old_sn_map.get((str(dev.sector_id), str(dev.band)))
+                                if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT
+                                else None
+                            ),
                             required_type=required_type,
                             fields=item_fields,
                             status=CheckItemStatusEnum.PENDING,
@@ -1235,7 +1418,25 @@ async def complete_work_order(
     wo.completed_at = datetime.utcnow()
     
     # 自动更新站点状态
-    _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
+    if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        try:
+            site = db.query(Site).filter(Site.id == wo.site_id).first()
+            extra = wo.extra_data or {}
+            before = (extra.get("site_status_before") or "").strip()
+            if site and before and site.status != before:
+                old_site_status = site.status
+                site.status = before
+                _audit_site_status_change(
+                    db,
+                    site.id,
+                    old_site_status,
+                    site.status,
+                    "手工标记设备更换工单完成，站点状态回滚",
+                )
+        except Exception as exc:  # pragma: no cover
+            print(f"[WARN] 标记完成时回滚站点状态失败: {exc}")
+    else:
+        _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
     
     db.commit()
     _audit(db, "work_order", wo.id, "complete", current_user.id,
@@ -1675,6 +1876,9 @@ async def final_review(
                     f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
                     f"状态从 {old_site_status} 更新为 {site.status} (开站工单审核通过，待上线)"
                 )
+        elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+            # 设备更换：审核通过后进入待上线/待激活推进（复用 OMC ever 推进，不走开站的站点状态分支）
+            wo.status = WorkOrderStatusEnum.APPROVED
         elif wo.type == WorkOrderTypeEnum.SSV:
             wo.status = WorkOrderStatusEnum.COMPLETED
             wo.completed_at = datetime.utcnow()
@@ -1700,8 +1904,8 @@ async def final_review(
         if wo.status == WorkOrderStatusEnum.COMPLETED:
             _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
 
-        # 开站工单审核通过后立即触发一次 OMC 检查（单工单）
-        if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION and wo.status == WorkOrderStatusEnum.APPROVED:
+        # 开站/设备更换工单审核通过后立即触发一次 OMC 检查（单工单）
+        if wo.type in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT) and wo.status == WorkOrderStatusEnum.APPROVED:
             try:
                 from app.services.omc_monitor import run_omc_check_for_work_order
                 run_omc_check_for_work_order(wo.id)
@@ -1710,7 +1914,10 @@ async def final_review(
             # 若已存在“ever”达标（例如提前手工确认），尝试直接推进（不依赖 OMC 实时查询）
             try:
                 db.flush()
-                advance_opening_work_orders_by_ever(db, wo.site_id)
+                if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+                    advance_opening_work_orders_by_ever(db, wo.site_id)
+                else:
+                    advance_replacement_work_orders_by_ever(db, wo.site_id)
             except Exception as exc:  # pragma: no cover
                 print(f"[OMC] 基于 ever 推进失败 site_id={wo.site_id}: {exc}")
         # 审核通过时建立/追加档案快照
@@ -1753,6 +1960,25 @@ async def final_review(
                 inspection.review_comments = req.comments
                 inspection.review_comments_i18n = req.comments_i18n
 
+        # 设备更换工单：驳回时回滚站点状态
+        if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+            try:
+                site = db.query(Site).filter(Site.id == wo.site_id).first()
+                extra = wo.extra_data or {}
+                before = (extra.get("site_status_before") or "").strip()
+                if site and before and site.status != before:
+                    old_site_status = site.status
+                    site.status = before
+                    _audit_site_status_change(
+                        db,
+                        site.id,
+                        old_site_status,
+                        site.status,
+                        "设备更换工单驳回，站点状态回滚",
+                    )
+            except Exception as exc:  # pragma: no cover
+                print(f"[WARN] 设备更换工单驳回回滚站点状态失败: {exc}")
+
     wo.reviewed_by = current_user.id
     wo.reviewed_at = datetime.utcnow()
     wo.review_comments = req.comments
@@ -1771,7 +1997,7 @@ async def manual_confirm_opening_omc_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """开站设备在线/激活状态：手工确认。
+    """开站/设备更换：设备在线/激活状态手工确认。
 
     仅在 OMC API 配置开启手工确认开关后可用。
 
@@ -1787,8 +2013,8 @@ async def manual_confirm_opening_omc_status(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if wo.type != WorkOrderTypeEnum.OPENING_INSPECTION:
-        raise HTTPException(status_code=400, detail="仅开站工单支持手工确认设备状态")
+    if wo.type not in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT):
+        raise HTTPException(status_code=400, detail="仅开站/设备更换工单支持手工确认设备状态")
     if wo.status in (WorkOrderStatusEnum.REJECTED, WorkOrderStatusEnum.COMPLETED):
         raise HTTPException(status_code=409, detail=f"当前工单状态不允许手工确认：{wo.status}")
 
@@ -1832,7 +2058,10 @@ async def manual_confirm_opening_omc_status(
 
     advance_result = {}
     try:
-        advance_result = advance_opening_work_orders_by_ever(db, wo.site_id)
+        if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+            advance_result = advance_opening_work_orders_by_ever(db, wo.site_id)
+        else:
+            advance_result = advance_replacement_work_orders_by_ever(db, wo.site_id)
     except Exception as exc:  # pragma: no cover
         print(f"[OMC] 手工确认后推进工单/站点失败 site_id={wo.site_id}: {exc}")
 
@@ -2163,6 +2392,8 @@ async def review_work_order(
                     f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
                     f"状态从 {old_site_status} 更新为 {site.status} (开站工单审核通过，待上线)"
                 )
+        elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+            wo.status = WorkOrderStatusEnum.APPROVED  # 80%：待上线
         else:
             wo.status = WorkOrderStatusEnum.COMPLETED
             wo.completed_at = datetime.utcnow()
@@ -2196,6 +2427,25 @@ async def review_work_order(
                 inspection.review_comments = review_data.comments
                 inspection.review_comments_i18n = review_data.comments_i18n
                 inspection.result = "fail"
+
+        # 设备更换工单：驳回时回滚站点状态
+        if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+            try:
+                site = db.query(Site).filter(Site.id == wo.site_id).first()
+                extra = wo.extra_data or {}
+                before = (extra.get("site_status_before") or "").strip()
+                if site and before and site.status != before:
+                    old_site_status = site.status
+                    site.status = before
+                    _audit_site_status_change(
+                        db,
+                        site.id,
+                        old_site_status,
+                        site.status,
+                        "设备更换工单驳回，站点状态回滚",
+                    )
+            except Exception as exc:  # pragma: no cover
+                print(f"[WARN] 设备更换工单驳回回滚站点状态失败: {exc}")
     
     # 更新审核信息
     wo.reviewed_at = datetime.utcnow()
@@ -2264,8 +2514,8 @@ async def review_work_order(
         comments=review_data.comments,
     )
     
-    # 对于开站工单：审核通过后触发一次后台 OMC 状态检查
-    if review_data.action == "approve" and wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+    # 对于开站/设备更换工单：审核通过后触发一次后台 OMC 状态检查
+    if review_data.action == "approve" and wo.type in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT):
         try:
             run_omc_check_for_work_order(wo.id)
         except Exception as exc:  # pragma: no cover - OMC 故障不影响审核主流程
@@ -2310,6 +2560,7 @@ async def batch_work_order_operation(
     error_count = 0
     errors = []
     rolled_back_site_ids = set()
+    rolled_back_replacement_site_ids = set()
     
     for wo in work_orders:
         try:
@@ -2344,6 +2595,13 @@ async def batch_work_order_operation(
                 old_status = wo.status
                 old_wo_type = wo.type
                 old_site_id = wo.site_id
+                site_status_before = None
+                if old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+                    try:
+                        extra = wo.extra_data or {}
+                        site_status_before = extra.get("site_status_before")
+                    except Exception:
+                        site_status_before = None
 
                 # 删除安装工单时：若该站点删除后无安装工单，则回滚站点状态到 planned（批量删除：按“删除集合后”计算）
                 remaining_opening_orders = None
@@ -2413,6 +2671,25 @@ async def batch_work_order_operation(
                             "批量删除安装工单，站点状态回滚至 planned",
                         )
                     rolled_back_site_ids.add(old_site_id)
+
+                # 设备更换工单：批量删除时回滚站点状态到 site_status_before
+                if (
+                    old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT
+                    and old_site_id not in rolled_back_replacement_site_ids
+                ):
+                    site = db.query(Site).filter(Site.id == old_site_id).first()
+                    before = str(site_status_before or "").strip()
+                    if site and before and site.status == "maintenance" and site.status != before:
+                        old_site_status = site.status
+                        site.status = before
+                        _audit_site_status_change(
+                            db,
+                            old_site_id,
+                            old_site_status,
+                            site.status,
+                            "批量删除设备更换工单，站点状态回滚",
+                        )
+                    rolled_back_replacement_site_ids.add(old_site_id)
 
                 _audit(db, "work_order", wo.id, "batch_delete", current_user.id,
                        from_status=old_status.value, to_status="deleted")

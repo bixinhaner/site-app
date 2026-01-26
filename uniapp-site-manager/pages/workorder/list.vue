@@ -256,7 +256,7 @@ const handleRefresh = async () => {
   await reload()
 }
 
-const isOpeningWorkOrder = (wo) => String(wo?.type || '') === 'opening_inspection'
+const needsOmcEverWorkOrder = (wo) => ['opening_inspection', 'equipment_replacement'].includes(String(wo?.type || ''))
 
 const getOmcEverKey = (siteId) => {
   const s = String(siteId ?? '').trim()
@@ -306,7 +306,7 @@ const loadOmcEverForSite = async (siteId) => {
 const preloadOmcEverForWorkOrders = async (list) => {
   const siteIds = Array.from(new Set(
     (list || [])
-      .filter((wo) => isOpeningWorkOrder(wo) && wo?.site_id)
+      .filter((wo) => needsOmcEverWorkOrder(wo) && wo?.site_id)
       .map((wo) => getOmcEverKey(wo.site_id))
       .filter(Boolean)
   ))
@@ -320,7 +320,7 @@ const getOmcEverSummary = (wo) => {
 }
 
 const shouldShowOmcTags = (wo) => {
-  if (!isOpeningWorkOrder(wo)) return false
+  if (!needsOmcEverWorkOrder(wo)) return false
   const s = getOmcEverSummary(wo)
   return !!(s && s.hasDevices)
 }
@@ -467,6 +467,7 @@ const statusText = (s) => {
     SUBMITTED: $t('workorder.submitted'),
     UNDER_REVIEW: $t('workorder.underReview'),
     APPROVED: $t('workorder.approved'),
+    ACTIVATED: $t('workorder.activated'),
     REJECTED: $t('workorder.rejected'),
     COMPLETED: $t('workorder.completed')
   })[s] || s

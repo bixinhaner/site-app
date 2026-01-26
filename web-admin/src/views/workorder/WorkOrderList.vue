@@ -159,6 +159,22 @@
           <el-option v-for="tpl in templateOptions" :key="tpl.id" :label="tpl.template_name" :value="tpl.id" />
         </el-select>
       </el-form-item>
+      <el-form-item v-if="createForm.type === 'equipment_replacement'" label="更换设备位" prop="replacement_targets">
+        <el-select
+          v-model="createForm.replacement_targets"
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          placeholder="请选择要更换的设备位（可多选）"
+          style="width: 100%"
+          :loading="replacementTargetsLoading"
+          @visible-change="v => v && loadReplacementTargets()"
+        >
+          <el-option v-for="opt in replacementTargetOptions" :key="opt.key" :label="opt.label" :value="opt.key" />
+        </el-select>
+        <div class="form-hint">按站点规划生成的设备位（sector_id + band），支持多选。</div>
+      </el-form-item>
       <el-form-item label="优先级">
         <el-select v-model="createForm.priority" placeholder="选择优先级" style="width: 100%">
           <el-option label="低" value="low" />
@@ -387,22 +403,24 @@ const statuses = [
   { label: '已驳回', value: 'REJECTED' },
   { label: '已完成', value: 'COMPLETED' }
 ]
-	// 类型显示映射（用于表格/详情友好显示历史类型）
-		const typeLabelMap = {
-		  'opening_inspection': '新站安装',
-	  'maintenance': '维护检查',
-	  'power_issue': '断电问题',
-	  'transmission_issue': '传输问题',
-		  'gps_issue': 'GPS问题',
-		  'signal_issue': '信号问题',
-		  'site_survey': '站点勘查',
-		  'ssv': 'SSV 验收'
-		}
+// 类型显示映射（用于表格/详情友好显示历史类型）
+const typeLabelMap = {
+  opening_inspection: '新站安装',
+  equipment_replacement: '设备更换',
+  maintenance: '维护检查',
+  power_issue: '断电问题',
+  transmission_issue: '传输问题',
+  gps_issue: 'GPS问题',
+  signal_issue: '信号问题',
+  site_survey: '站点勘查',
+  ssv: 'SSV 验收',
+}
 	
 // 创建工单可选类型
 const createTypes = [
   { label: '站点勘查', value: 'site_survey' },
   { label: '新站安装', value: 'opening_inspection' },
+  { label: '设备更换', value: 'equipment_replacement' },
   { label: 'SSV 验收', value: 'ssv' },
 ]
 
@@ -410,6 +428,7 @@ const createTypes = [
 const filterTypes = [
   { label: '站点勘查', value: 'site_survey' },
   { label: '新站安装', value: 'opening_inspection' },
+  { label: '设备更换', value: 'equipment_replacement' },
   { label: 'SSV 验收', value: 'ssv' },
 ]
 
@@ -450,11 +469,27 @@ const openReview = (row) => {
 // Create dialog state
 const createVisible = ref(false)
 const creating = ref(false)
-const createForm = ref({ site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '' })
+const createForm = ref({
+  site_id: null,
+  type: '',
+  assigned_to: null,
+  title: '',
+  priority: 'normal',
+  due_date: null,
+  description: '',
+  template_id: null,
+  // 设备更换工单：多选设备位（用 key 数组承载，提交时转换为 [{sector_id, band}]）
+  replacement_targets: [],
+})
 const siteOptions = ref([])
 const userOptions = ref([])
 const templateOptions = ref([])
 const formRef = ref()
+
+// 设备更换：设备位候选项（来自站点规划）
+const replacementTargetOptions = ref([])
+const replacementTargetsLoading = ref(false)
+const lastReplacementTargetsSiteId = ref(null)
 
 // 重复安装工单对话框
 const dupVisible = ref(false)
@@ -472,18 +507,43 @@ const editVisible = ref(false)
 const updating = ref(false)
 const editForm = ref({ id: '', site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '' })
 const editFormRef = ref()
-	// 编辑对话框类型选项：在仅两项基础上，额外包含当前工单类型以避免值缺失
-	const rules = {
-	  site_id: [{ required: true, message: '请选择站点', trigger: 'change' }],
-	  type: [{ required: true, message: '请选择类型', trigger: 'change' }],
-	  assigned_to: [{ required: true, message: '请选择分配对象', trigger: 'change' }],
-	  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
-	}
+
+const validateReplacementTargets = (rule, value, callback) => {
+  if (createForm.value.type !== 'equipment_replacement') {
+    callback()
+    return
+  }
+  if (Array.isArray(value) && value.length > 0) {
+    callback()
+    return
+  }
+  callback(new Error('请选择要更换的设备位'))
+}
+
+const rules = {
+  site_id: [{ required: true, message: '请选择站点', trigger: 'change' }],
+  type: [{ required: true, message: '请选择类型', trigger: 'change' }],
+  assigned_to: [{ required: true, message: '请选择分配对象', trigger: 'change' }],
+  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
+  replacement_targets: [{ validator: validateReplacementTargets, trigger: 'change' }],
+}
 
 const openCreate = () => {
   // reset form
-  createForm.value = { site_id: null, type: '', assigned_to: null, title: '', priority: 'normal', due_date: null, description: '', template_id: null }
+  createForm.value = {
+    site_id: null,
+    type: '',
+    assigned_to: null,
+    title: '',
+    priority: 'normal',
+    due_date: null,
+    description: '',
+    template_id: null,
+    replacement_targets: [],
+  }
   templateOptions.value = []
+  replacementTargetOptions.value = []
+  lastReplacementTargetsSiteId.value = null
   createVisible.value = true
 }
 
@@ -584,11 +644,75 @@ const loadTemplates = async () => {
   }
 }
 
+const _parseReplacementTargetKey = (key) => {
+  const raw = String(key || '').trim()
+  const parts = raw.split('__')
+  if (parts.length !== 2) return null
+  const sectorId = String(parts[0] || '').trim()
+  const band = String(parts[1] || '').trim()
+  if (!sectorId || !band) return null
+  return { sector_id: sectorId, band }
+}
+
+const loadReplacementTargets = async () => {
+  const siteId = createForm.value.site_id
+  if (!siteId) {
+    replacementTargetOptions.value = []
+    createForm.value.replacement_targets = []
+    lastReplacementTargetsSiteId.value = null
+    return
+  }
+  if (lastReplacementTargetsSiteId.value === siteId && replacementTargetOptions.value.length > 0) return
+  replacementTargetsLoading.value = true
+  try {
+    const planning = await request.get(`/api/sites/${siteId}/planning`)
+    const sectors = Array.isArray(planning?.sectors) ? planning.sectors : []
+    const globalBands = Array.isArray(planning?.bands) ? planning.bands : []
+    const opts = []
+
+    for (const s of sectors) {
+      const sectorId = String(s?.sector_index ?? '').trim()
+      if (!sectorId) continue
+      const bands = Array.isArray(s?.bands) && s.bands.length ? s.bands : globalBands
+      for (const b of bands || []) {
+        const band = String(b ?? '').trim()
+        if (!band) continue
+        const key = `${sectorId}__${band}`
+        opts.push({ key, label: `扇区 ${sectorId} / Band ${band}` })
+      }
+    }
+
+    replacementTargetOptions.value = opts
+    lastReplacementTargetsSiteId.value = siteId
+
+    // 清理不再存在的已选项
+    const valid = new Set(opts.map(o => o.key))
+    const picked = Array.isArray(createForm.value.replacement_targets) ? createForm.value.replacement_targets : []
+    createForm.value.replacement_targets = picked.filter(k => valid.has(k))
+  } catch (e) {
+    console.error(e)
+    replacementTargetOptions.value = []
+    lastReplacementTargetsSiteId.value = null
+    ElMessage.warning('站点规划未找到或无权限，无法加载设备位')
+  } finally {
+    replacementTargetsLoading.value = false
+  }
+}
+
 const onTypeOrSiteChange = async () => {
   // load candidate templates
   await loadTemplates()
   // try resolve default
   if (!createForm.value.site_id || !createForm.value.type) return
+
+  if (createForm.value.type === 'equipment_replacement') {
+    await loadReplacementTargets()
+  } else {
+    replacementTargetOptions.value = []
+    createForm.value.replacement_targets = []
+    lastReplacementTargetsSiteId.value = null
+  }
+
   try {
     const body = { site_id: createForm.value.site_id, task_type: createForm.value.type }
     const res = await request.post('/api/inspections/templates/resolve', body)
@@ -626,6 +750,19 @@ const submitCreate = () => {
         }
       }
       const payload = { ...createForm.value }
+      if (payload.type === 'equipment_replacement') {
+        const keys = Array.isArray(payload.replacement_targets) ? payload.replacement_targets : []
+        payload.replacement_targets = keys
+          .map(_parseReplacementTargetKey)
+          .filter(Boolean)
+        if (!payload.replacement_targets.length) {
+          ElMessage.error('设备更换工单必须选择要更换的设备位')
+          creating.value = false
+          return
+        }
+      } else {
+        delete payload.replacement_targets
+      }
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
       await request.post('/api/work-orders', payload)
       ElMessage.success('创建成功')
@@ -805,7 +942,7 @@ const deleteWorkOrder = async (id) => {
 }
 
 const statusText = (status, type) => {
-  if (type === 'opening_inspection') {
+  if (type === 'opening_inspection' || type === 'equipment_replacement') {
     if (status === 'APPROVED') return '待上线 (80%)'
     if (status === 'ACTIVATED') return '已上线待激活 (90%)'
     if (status === 'COMPLETED') return '已激活 (100%)'
@@ -1033,5 +1170,12 @@ watch([sortBy, sortOrder], () => {
 .batch-actions {
   display: flex;
   gap: 8px;
+}
+
+.form-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #909399;
 }
 </style>

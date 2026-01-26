@@ -23,15 +23,101 @@
 
         <el-divider />
 
-        <!-- 开站工单设备状态，仅对 opening_inspection 展示 -->
+        <!-- 设备更换工单信息 -->
+        <el-card v-if="order.type === 'equipment_replacement'" style="margin-bottom: 16px;">
+          <template #header>
+            <div class="card-header">
+              <span>设备更换信息</span>
+            </div>
+          </template>
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="更换设备位">
+              <el-space wrap>
+                <el-tag
+                  v-for="t in replacementTargets"
+                  :key="`${t.sector_id}__${t.band}`"
+                  size="small"
+                >
+                  S{{ t.sector_id }}/{{ t.band }}
+                </el-tag>
+                <span v-if="!replacementTargets.length" class="muted">-</span>
+              </el-space>
+            </el-descriptions-item>
+            <el-descriptions-item label="发起人ID">
+              <span>{{ replacementInitiatorId || '-' }}</span>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-divider />
+
+          <div class="replacement-block">
+            <div class="replacement-title">旧设备（预填）</div>
+            <el-empty v-if="!replacementOldDevices.length" description="暂无预填旧设备" />
+            <el-table v-else :data="replacementOldDevices" size="small" stripe>
+              <el-table-column label="设备位" width="160">
+                <template #default="{ row }">S{{ row.sector_id }}/{{ row.band }}</template>
+              </el-table-column>
+              <el-table-column prop="old_sn" label="旧设备SN" min-width="180">
+                <template #default="{ row }">
+                  <span>{{ row.old_sn || '-' }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <el-divider />
+
+          <div class="replacement-block">
+            <div class="replacement-title">更换记录</div>
+            <el-empty v-if="!replacementHistory.length" description="暂无更换记录" />
+            <el-table v-else :data="replacementHistory" size="small" stripe>
+              <el-table-column label="时间" width="180">
+                <template #default="{ row }">{{ formatDateTime(row.replaced_at) }}</template>
+              </el-table-column>
+              <el-table-column label="设备位" width="160">
+                <template #default="{ row }">S{{ row.sector_id }}/{{ row.band }}</template>
+              </el-table-column>
+              <el-table-column prop="old_sn" label="旧SN" min-width="160" />
+              <el-table-column prop="new_sn" label="新SN" min-width="160" />
+              <el-table-column prop="operator_id" label="操作人" width="120" />
+            </el-table>
+          </div>
+
+          <el-divider />
+
+          <div class="replacement-block">
+            <div class="replacement-title">旧设备退库（可选）</div>
+            <el-empty v-if="!replacementReturnCandidates.length" description="暂无可退库的旧设备" />
+            <template v-else>
+              <el-checkbox-group v-model="selectedReturnSns">
+                <el-checkbox v-for="sn in replacementReturnCandidates" :key="sn" :label="sn">
+                  {{ sn }}
+                </el-checkbox>
+              </el-checkbox-group>
+              <div style="margin-top: 12px;">
+                <el-button
+                  type="primary"
+                  size="small"
+                  :disabled="selectedReturnSns.length === 0 || returnSubmitting"
+                  :loading="returnSubmitting"
+                  @click="createReturnBySns"
+                >
+                  发起退库申请
+                </el-button>
+              </div>
+            </template>
+          </div>
+        </el-card>
+
+        <!-- 开站/设备更换工单：设备在线/激活状态 -->
         <el-card
-          v-if="order.type === 'opening_inspection'"
+          v-if="order.type === 'opening_inspection' || order.type === 'equipment_replacement'"
           class="mb16"
           v-loading="deviceStatusLoading"
         >
           <template #header>
             <div class="card-header">
-              <span>开站设备在线 / 激活状态</span>
+              <span>{{ order.type === 'opening_inspection' ? '开站设备在线 / 激活状态' : '换机设备在线 / 激活状态' }}</span>
               <div>
 	                <span v-if="deviceStatusCheckedAt" style="margin-right: 12px; color: #909399;">
 	                  最近检查时间：{{ formatDateTime(deviceStatusCheckedAt) }}
@@ -979,6 +1065,76 @@ const deviceStatusCheckedAt = ref(null)
 const manualConfirmEnabled = ref(false)
 const manualConfirmSubmitting = ref(false)
 
+// 设备更换工单信息（从 work_order.extra_data 中读取）
+const replacementTargets = computed(() => {
+  const list = order.value?.extra_data?.replacement_targets
+  return Array.isArray(list) ? list : []
+})
+
+const replacementOldDevices = computed(() => {
+  const list = order.value?.extra_data?.replacement_old_devices
+  return Array.isArray(list) ? list : []
+})
+
+const replacementHistory = computed(() => {
+  const list = order.value?.extra_data?.replacement_history
+  return Array.isArray(list) ? list : []
+})
+
+const replacementInitiatorId = computed(() => {
+  const v = order.value?.extra_data?.initiator_id
+  return v != null ? String(v) : ''
+})
+
+const replacementReturnCandidates = computed(() => {
+  const sns = []
+  for (const row of replacementHistory.value || []) {
+    const sn = String(row?.old_sn || '').trim()
+    if (sn) sns.push(sn)
+  }
+  for (const row of replacementOldDevices.value || []) {
+    const sn = String(row?.old_sn || '').trim()
+    if (sn) sns.push(sn)
+  }
+  return Array.from(new Set(sns))
+})
+
+const selectedReturnSns = ref([])
+const returnSubmitting = ref(false)
+
+watch(
+  () => order.value?.id,
+  () => {
+    selectedReturnSns.value = []
+  }
+)
+
+const createReturnBySns = async () => {
+  const id = order.value?.id
+  const sns = Array.isArray(selectedReturnSns.value) ? selectedReturnSns.value : []
+  const picked = Array.from(new Set(sns.map(s => String(s || '').trim()).filter(Boolean)))
+  if (!picked.length) return
+  if (!id) return
+
+  try {
+    returnSubmitting.value = true
+    const res = await request.post('/api/stock/returns/by-sns', {
+      sns: picked,
+      work_order_id: id,
+      notes: '设备更换退库申请',
+    })
+    const cnt = res?.created_count
+    ElMessage.success(`已发起退库申请（共 ${typeof cnt === 'number' ? cnt : picked.length} 台）`)
+    selectedReturnSns.value = []
+  } catch (e) {
+    console.error(e)
+    const detail = e?.response?.data?.detail
+    ElMessage.error((typeof detail === 'string' && detail) || detail?.message || '发起退库失败')
+  } finally {
+    returnSubmitting.value = false
+  }
+}
+
 // 检查项逐条审核（自定义弹窗）
 const itemReviewVisible = ref(false)
 const itemReviewRow = ref(null)
@@ -1128,12 +1284,14 @@ const statuses = [
 ]
 const types = [
   { label: '新站点设备安装', value: 'opening_inspection' },
+  { label: '设备更换', value: 'equipment_replacement' },
   { label: '维护检查', value: 'maintenance' },
   { label: '断电问题', value: 'power_issue' },
   { label: '传输问题', value: 'transmission_issue' },
   { label: 'GPS问题', value: 'gps_issue' },
   { label: '信号问题', value: 'signal_issue' },
-  { label: '站点勘察', value: 'site_survey' }
+  { label: '站点勘察', value: 'site_survey' },
+  { label: 'SSV 验收', value: 'ssv' },
 ]
 
 const canStartReview = computed(() => order.value && order.value.status === 'SUBMITTED')
@@ -2107,7 +2265,7 @@ const formatFileSize = (size) => {
 }
 
 const statusText = (status, type) => {
-  if (type === 'opening_inspection') {
+  if (type === 'opening_inspection' || type === 'equipment_replacement') {
     if (status === 'APPROVED') return '待上线 (80%)'
     if (status === 'ACTIVATED') return '已上线待激活 (90%)'
     if (status === 'COMPLETED') return '已激活 (100%)'
@@ -2200,8 +2358,8 @@ const loadDeviceStatus = async (refresh = false) => {
     ElMessage.warning(`请等待 ${deviceRefreshCooldown.value}s 后再刷新设备状态`)
     return
   }
-  // 仅开站工单需要设备状态
-  if (!order.value || order.value.type !== 'opening_inspection') {
+  // 仅开站/设备更换工单需要设备状态
+  if (!order.value || !['opening_inspection', 'equipment_replacement'].includes(order.value.type)) {
     devices.value = []
     deviceStatusCheckedAt.value = null
     manualConfirmEnabled.value = false
@@ -2585,6 +2743,17 @@ onMounted(refresh)
 .muted {
   color: #909399;
   font-weight: normal;
+}
+
+.replacement-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.replacement-title {
+  font-weight: 600;
+  color: #303133;
 }
 
 .field-photo-strip {

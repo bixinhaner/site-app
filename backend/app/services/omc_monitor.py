@@ -2,16 +2,19 @@ import threading
 import time
 from datetime import datetime
 from typing import Dict, List, Tuple
+import uuid
 
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.utils.timezone import to_utc_iso
 from app.models.site import Site
+from app.models.user import User
 from app.models.work_order import (
   WorkOrder,
   WorkOrderStatusEnum,
   WorkOrderTypeEnum,
+  AuditEvent,
 )
 from app.services.omc_client import (
   OmcClient,
@@ -27,6 +30,29 @@ from app.services.omc_state import (
 )
 
 _monitor_thread: threading.Thread | None = None
+
+
+def _audit_site_status_change(db: Session, site_id: int, old_status: str, new_status: str, reason: str) -> None:
+  """记录站点状态变更审计日志（供 OMC 推进/回滚使用）。"""
+  try:
+    admin_user = db.query(User).filter(User.username == "admin").first()
+    operator_id = admin_user.id if admin_user else 1
+
+    db.add(
+      AuditEvent(
+        id=str(uuid.uuid4()),
+        resource_type="site",
+        resource_id=str(site_id),
+        action="status_change",
+        operator_id=operator_id,
+        from_status=old_status,
+        to_status=new_status,
+        comments=f"系统自动更新: {reason}",
+        details={"reason": reason, "old_status": old_status, "new_status": new_status},
+      )
+    )
+  except Exception as exc:  # pragma: no cover
+    print(f"[WARN] 记录站点状态变更审计日志失败: {exc}")
 
 
 def _check_site_devices_status(
@@ -185,6 +211,79 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
   return summary
 
 
+def refresh_replacement_work_order_omc_status(db: Session, client: OmcClient, wo: WorkOrder) -> Dict:
+  """
+  针对“设备更换工单”(equipment_replacement)：
+  - 读取站点当前绑定设备 SN
+  - 调用 OMC 查询在线 & 激活状态
+  - 当全部在线 / 全部激活时，自动推进工单状态
+  - 当工单完成时，将站点状态回滚到 site_status_before（接受工单时记录）
+  - 将结果写入工单 extra_data.omc_status 方便前端展示
+  """
+  if wo.type != WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+    return {}
+
+  sns = get_bound_sns_for_site(db, wo.site_id)
+  if not sns:
+    summary = {
+      "sns": [],
+      "online": {},
+      "activated": {},
+      "all_online": False,
+      "all_activated": False,
+      "checked_at": to_utc_iso(datetime.utcnow()),
+    }
+  else:
+    online_map, activated_map = _check_site_devices_status(db, client, sns)
+    all_online = all(online_map.values()) if sns else False
+    all_activated = sns and activated_map and all(activated_map.values())
+
+    summary = {
+      "sns": sns,
+      "online": online_map,
+      "activated": activated_map,
+      "all_online": bool(all_online),
+      "all_activated": bool(all_activated),
+      "checked_at": to_utc_iso(datetime.utcnow()),
+    }
+
+  ever_summary = summarize_site_omc_state(db, wo.site_id)
+  ever_all_online = bool(ever_summary.get("all_ever_online"))
+  ever_all_activated = bool(ever_summary.get("all_ever_activated"))
+  summary["all_ever_online"] = ever_all_online
+  summary["all_ever_activated"] = ever_all_activated
+
+  # 状态推进：仅向前推进，不回退
+  if ever_all_online and wo.status == WorkOrderStatusEnum.APPROVED:
+    wo.status = WorkOrderStatusEnum.ACTIVATED
+    wo.activated_at = datetime.utcnow()
+
+  if ever_all_activated and wo.status in (
+    WorkOrderStatusEnum.APPROVED,
+    WorkOrderStatusEnum.ACTIVATED,
+  ):
+    wo.status = WorkOrderStatusEnum.COMPLETED
+    wo.completed_at = datetime.utcnow()
+
+    # 工单完成：站点状态回滚到 site_status_before
+    try:
+      site = db.query(Site).filter(Site.id == wo.site_id).first()
+      extra = wo.extra_data or {}
+      before = (extra.get("site_status_before") or "").strip()
+      if site and before and site.status != before:
+        old_site_status = site.status
+        site.status = before
+        _audit_site_status_change(db, site.id, old_site_status, site.status, "设备更换工单完成，站点状态回滚")
+    except Exception as exc:  # pragma: no cover
+      print(f"[WARN] 设备更换工单完成回滚站点状态失败: {exc}")
+
+  extra = wo.extra_data or {}
+  extra["omc_status"] = summary
+  wo.extra_data = extra
+  wo.updated_at = datetime.utcnow()
+  return summary
+
+
 def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
   """根据聚合表的 ever 状态推进开站工单/站点状态，不再调用 OMC 实时接口。
 
@@ -238,6 +337,56 @@ def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
   return result
 
 
+def advance_replacement_work_orders_by_ever(db: Session, site_id: int) -> Dict:
+  """根据聚合表的 ever 状态推进设备更换工单状态，不再调用 OMC 实时接口。"""
+  summary = summarize_site_omc_state(db, site_id)
+  ever_all_online = bool(summary.get("all_ever_online"))
+  ever_all_activated = bool(summary.get("all_ever_activated"))
+
+  result = {
+    "site_id": site_id,
+    "ever_all_online": ever_all_online,
+    "ever_all_activated": ever_all_activated,
+    "work_orders": [],
+  }
+
+  wos = db.query(WorkOrder).filter(
+    WorkOrder.site_id == site_id,
+    WorkOrder.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
+    WorkOrder.status.in_([WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED]),
+  ).all()
+
+  site = db.query(Site).filter(Site.id == site_id).first()
+
+  for wo in wos:
+    changed = False
+    if ever_all_online and wo.status == WorkOrderStatusEnum.APPROVED:
+      wo.status = WorkOrderStatusEnum.ACTIVATED
+      wo.activated_at = datetime.utcnow()
+      changed = True
+
+    if ever_all_activated and wo.status in (WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED):
+      wo.status = WorkOrderStatusEnum.COMPLETED
+      wo.completed_at = datetime.utcnow()
+      changed = True
+
+      # 完成时回滚站点状态
+      try:
+        extra = wo.extra_data or {}
+        before = (extra.get("site_status_before") or "").strip()
+        if site and before and site.status != before:
+          old_site_status = site.status
+          site.status = before
+          _audit_site_status_change(db, site.id, old_site_status, site.status, "设备更换工单完成，站点状态回滚")
+      except Exception as exc:  # pragma: no cover
+        print(f"[WARN] 回滚站点状态失败: {exc}")
+
+    if changed:
+      result["work_orders"].append({"id": wo.id, "status": wo.status.value})
+
+  return result
+
+
 def run_omc_check_for_work_order(work_order_id: str) -> None:
   """
   针对单个工单执行一次 OMC 状态检查（供 API / 审核后触发调用）。
@@ -245,7 +394,7 @@ def run_omc_check_for_work_order(work_order_id: str) -> None:
   db = SessionLocal()
   try:
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
-    if not wo or wo.type != WorkOrderTypeEnum.OPENING_INSPECTION:
+    if not wo or wo.type not in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT):
       return
 
     client = get_omc_client(db)
@@ -253,7 +402,10 @@ def run_omc_check_for_work_order(work_order_id: str) -> None:
       print("[OMC] 未配置 OMC API 信息，跳过检查")
       return
 
-    refresh_opening_work_order_omc_status(db, client, wo)
+    if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+      refresh_opening_work_order_omc_status(db, client, wo)
+    elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+      refresh_replacement_work_order_omc_status(db, client, wo)
     db.commit()
   except Exception as exc:  # pragma: no cover
     db.rollback()
@@ -279,17 +431,20 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
         work_orders = (
           db.query(WorkOrder)
           .filter(
-            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-            WorkOrder.status.in_(
-              [WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED]
+            WorkOrder.type.in_(
+              [WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT]
             ),
+            WorkOrder.status.in_([WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED]),
           )
           .all()
         )
 
         for wo in work_orders:
           try:
-            refresh_opening_work_order_omc_status(db, client, wo)
+            if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+              refresh_opening_work_order_omc_status(db, client, wo)
+            elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+              refresh_replacement_work_order_omc_status(db, client, wo)
           except Exception as exc:
             print(f"[OMC] 定时检查工单 {wo.id} 失败: {exc}")
 

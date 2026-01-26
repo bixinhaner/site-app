@@ -34,6 +34,24 @@
 				</view>
 			</view>
 		</view>
+
+		<!-- 设备更换：旧设备退库（可选，支持多选） -->
+		<view v-if="isEquipmentReplacement && replacementReturnCandidates.length" class="replacement-return">
+			<view class="return-header">
+				<text class="return-title">{{ $t('inspection.replacementReturnTitle') }}</text>
+				<text class="return-sub">{{ $t('inspection.replacementReturnDesc') }}</text>
+			</view>
+			<checkbox-group class="return-list" @change="onReturnSelectionChange">
+				<label v-for="sn in replacementReturnCandidates" :key="sn" class="return-item">
+					<checkbox :value="sn" :checked="selectedReturnSns.includes(sn)" />
+					<text class="return-sn">{{ sn }}</text>
+				</label>
+			</checkbox-group>
+			<button class="return-btn" :disabled="returnSubmitting || selectedReturnSns.length === 0" @click="submitReturnBySns">
+				<text class="btn-icon">📦</text>
+				<text>{{ returnSubmitting ? $t('inspection.replacementReturnSubmitting') : $t('inspection.replacementReturnAction') }}</text>
+			</button>
+		</view>
 		
 		<!-- 分类标签 -->
 		<view class="category-tabs">
@@ -198,9 +216,15 @@
 									<text class="bound-text">{{ $t('inspection.boundEquipment') }}</text>
 									<text class="bound-sn">{{ currentItem.equipment_sn }}</text>
 								</view>
-								<button class="unbind-btn" @click="unbindEquipment">
-									<text>{{ $t('inspection.unbind') }}</text>
-								</button>
+								<view class="bind-actions">
+									<button v-if="isEquipmentReplacement" class="replace-btn" @click="scanEquipmentForBinding">
+										<text class="btn-icon">📷</text>
+										<text>{{ $t('inspection.scanReplace') }}</text>
+									</button>
+									<button class="unbind-btn" @click="unbindEquipment">
+										<text>{{ $t('inspection.unbind') }}</text>
+									</button>
+								</view>
 							</view>
 							<view v-else class="unbind-equipment">
 								<text class="unbind-icon">⚠️</text>
@@ -886,10 +910,86 @@
 		})
 
 		const isOpeningInspection = computed(() => String(workOrderData.value?.type || '') === 'opening_inspection')
+		const isEquipmentReplacement = computed(() => String(workOrderData.value?.type || '') === 'equipment_replacement')
 		const hasBoundDevicesHint = computed(() => (checkItems.value || []).some((it) => !!it?.equipment_sn))
 
+		// 设备更换：从工单 extra_data.replacement_history 提取可退库的旧设备 SN（去重）
+		const replacementReturnCandidates = computed(() => {
+			const hist = workOrderData.value?.extra_data?.replacement_history
+			const list = Array.isArray(hist) ? hist : []
+			const sns = list
+				.map((r) => String(r?.old_sn || '').trim())
+				.filter(Boolean)
+			return Array.from(new Set(sns))
+		})
+
+		const selectedReturnSns = ref([])
+		const returnSubmitting = ref(false)
+
+		const onReturnSelectionChange = (e) => {
+			const vals = e?.detail?.value
+			selectedReturnSns.value = Array.isArray(vals) ? vals : []
+		}
+
+		const submitReturnBySns = async () => {
+			if (!userStore.token) return
+			const workOrderId = String(workOrderData.value?.id || '').trim()
+			const picked = Array.from(
+				new Set((selectedReturnSns.value || []).map((s) => String(s || '').trim()).filter(Boolean))
+			)
+			if (!picked.length) return
+
+			const confirmed = await new Promise((resolve) => {
+				uni.showModal({
+					title: $t('inspection.replacementReturnConfirmTitle'),
+					content: $t('inspection.replacementReturnConfirmContent', { count: picked.length }),
+					confirmText: $t('common.confirm'),
+					cancelText: $t('common.cancel'),
+					success: (r) => resolve(!!r.confirm),
+					fail: () => resolve(false)
+				})
+			})
+			if (!confirmed) return
+
+			try {
+				returnSubmitting.value = true
+				uni.showLoading({ title: $t('messages.submitting'), mask: true })
+				const response = await uni.request({
+					url: buildApiUrl('/api/stock/returns/by-sns'),
+					...createRequestConfig({
+						method: 'POST',
+						headers: getAuthHeaders(userStore.token),
+						data: {
+							sns: picked,
+							work_order_id: workOrderId || undefined,
+							notes: '设备更换退库申请'
+						}
+					})
+				})
+
+				if (response.statusCode === 200) {
+					selectedReturnSns.value = []
+					uni.showToast({ title: $t('inspection.replacementReturnSuccess'), icon: 'success' })
+					return
+				}
+				if (response.statusCode === 401) {
+					userStore.logout()
+					return
+				}
+				const detail = response.data?.detail
+				const msg = typeof detail === 'string' ? detail : (detail?.message || response.data?.message)
+				uni.showToast({ title: String(msg || $t('inspection.replacementReturnFailed')), icon: 'none', duration: 3000 })
+			} catch (err) {
+				console.error('发起退库失败:', err)
+				uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
+			} finally {
+				uni.hideLoading()
+				returnSubmitting.value = false
+			}
+		}
+
 		const shouldShowOmcTags = computed(() => {
-			if (!isOpeningInspection.value) return false
+			if (!isOpeningInspection.value && !isEquipmentReplacement.value) return false
 			const s = omcEverSummary.value
 			return !!(s && s.hasDevices)
 		})
@@ -924,7 +1024,7 @@
 
 		const loadOmcEverSummary = async () => {
 			const siteId = workOrderData.value?.site_id || inspectionData.value?.site_id
-			if (!isOpeningInspection.value || !siteId || !userStore.token) {
+			if ((!isOpeningInspection.value && !isEquipmentReplacement.value) || !siteId || !userStore.token) {
 				omcEverSummary.value = null
 				return
 			}
@@ -3302,6 +3402,24 @@
 				})
 				return
 			}
+
+			// 设备更换工单：允许已绑定情况下直接换绑（先确认再提交）
+			const oldSn = String(targetItem?.equipment_sn || '').trim()
+			const newSn = String(parsedBarcode.sn || '').trim()
+			if (oldSn && newSn && oldSn !== newSn && isEquipmentReplacement.value) {
+				const bindTarget = targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id
+				const confirmed = await new Promise((resolve) => {
+					uni.showModal({
+						title: $t('inspection.replaceConfirmTitle'),
+						content: $t('inspection.replaceConfirmContent', { target: bindTarget, old: oldSn, sn: newSn }),
+						confirmText: $t('common.confirm'),
+						cancelText: $t('common.cancel'),
+						success: (r) => resolve(!!r.confirm),
+						fail: () => resolve(false)
+					})
+				})
+				if (!confirmed) return
+			}
 			
 			uni.showLoading({
 				title: $t('inspection.validatingEquipment'),
@@ -3387,9 +3505,12 @@
 					
 					uni.hideLoading()
 					const bindTarget = targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id
+					const isReplace = !!(oldSn && String(parsedBarcode.sn || '').trim() && oldSn !== String(parsedBarcode.sn || '').trim() && isEquipmentReplacement.value)
 					uni.showModal({
-						title: $t('inspection.bindSuccessTitle'),
-						content: $t('inspection.bindSuccessDetail', { sn: parsedBarcode.sn, target: bindTarget }),
+						title: isReplace ? $t('inspection.replaceSuccessTitle') : $t('inspection.bindSuccessTitle'),
+						content: isReplace
+							? $t('inspection.replaceSuccessDetail', { old: oldSn, sn: parsedBarcode.sn, target: bindTarget })
+							: $t('inspection.bindSuccessDetail', { sn: parsedBarcode.sn, target: bindTarget }),
 						showCancel: false,
 						confirmText: $t('common.confirm'),
 						success: () => {
@@ -3593,6 +3714,77 @@
 		background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
 		border-radius: 6rpx;
 		transition: width 0.3s ease;
+	}
+
+	/* 设备更换：旧设备退库 */
+	.replacement-return {
+		margin: 0 20rpx 20rpx;
+		padding: 24rpx;
+		border-radius: 20rpx;
+		background: rgba(255, 255, 255, 0.96);
+		border: 1rpx solid rgba(229, 231, 235, 0.9);
+		box-shadow: var(--shadow-card);
+		display: flex;
+		flex-direction: column;
+		gap: 16rpx;
+	}
+
+	.return-header {
+		display: flex;
+		flex-direction: column;
+		gap: 6rpx;
+	}
+
+	.return-title {
+		font-size: 28rpx;
+		font-weight: 700;
+		color: #0f172a;
+	}
+
+	.return-sub {
+		font-size: 22rpx;
+		color: #64748b;
+		line-height: 1.4;
+	}
+
+	.return-list {
+		display: flex;
+		flex-direction: column;
+		gap: 12rpx;
+	}
+
+	.return-item {
+		display: flex;
+		align-items: center;
+		gap: 12rpx;
+		padding: 14rpx 12rpx;
+		border-radius: 16rpx;
+		background: #f8fafc;
+		border: 1rpx solid #e2e8f0;
+	}
+
+	.return-sn {
+		font-size: 26rpx;
+		color: #0f172a;
+		font-family: 'Courier New', monospace;
+	}
+
+	.return-btn {
+		background: linear-gradient(135deg, #0ea5e9, #0284c7);
+		color: #fff;
+		border: none;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10rpx;
+		min-height: 88rpx;
+		padding: 0 24rpx;
+		border-radius: 16rpx;
+		font-size: 28rpx;
+	}
+
+	.return-btn[disabled] {
+		opacity: 0.6;
 	}
 	
 	/* 分类标签 */
@@ -4784,6 +4976,26 @@
 		font-family: monospace;
 		margin-top: 4rpx;
 		display: block;
+	}
+
+	.bind-actions {
+		display: flex;
+		align-items: center;
+		gap: 12rpx;
+	}
+
+	.replace-btn {
+		background: rgba(34, 197, 94, 0.12);
+		color: #16a34a;
+		border: 1rpx solid rgba(34, 197, 94, 0.35);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10rpx;
+		min-height: 88rpx;
+		padding: 0 24rpx;
+		border-radius: 16rpx;
+		font-size: 26rpx;
 	}
 	
 	.unbind-btn { background: #fee2e2; color: #dc2626; border: 1rpx solid #fca5a5; display: inline-flex; align-items: center; justify-content: center; min-height: 88rpx; padding: 0 24rpx; border-radius: 16rpx; font-size: 26rpx; }

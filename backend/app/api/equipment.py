@@ -885,7 +885,7 @@ async def get_equipment_instance_lifecycle_events(
                 .filter(
                     AuditEvent.resource_type == "equipment_instance",
                     AuditEvent.resource_id == str(instance_id),
-                    AuditEvent.action.in_(["void_stock_in", "edit_instance_info"]),
+                    AuditEvent.action.in_(["void_stock_in", "edit_instance_info", "handover_issued_to"]),
                 )
                 .order_by(AuditEvent.created_at.desc())
                 .all()
@@ -916,6 +916,32 @@ async def get_equipment_instance_lifecycle_events(
                             operator_name=op_name,
                             notes="编辑设备实例信息",
                             details=getattr(ev, "details", None) or {},
+                        )
+                    )
+                elif ev.action == "handover_issued_to":
+                    details = getattr(ev, "details", None) or {}
+                    to_user_name = None
+                    try:
+                        to_user_id = details.get("to_issued_to")
+                        if to_user_id:
+                            u = db.query(User).filter(User.id == int(to_user_id)).first()
+                            if u:
+                                to_user_name = u.full_name or u.username
+                    except Exception:
+                        to_user_name = None
+
+                    note = "设备归属交接"
+                    if to_user_name:
+                        note = f"设备归属交接给 {to_user_name}"
+
+                    events.append(
+                        _mk_event(
+                            action="handover_issued_to",
+                            operated_at=operated_at,
+                            operator_id=getattr(op_user, "id", None),
+                            operator_name=op_name,
+                            notes=note,
+                            details=details,
                         )
                     )
     except Exception as exc:  # pragma: no cover

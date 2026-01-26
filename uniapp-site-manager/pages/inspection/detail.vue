@@ -854,10 +854,11 @@
 	})
 
 	const isOpeningInspection = computed(() => String(workOrderData.value?.type || '') === 'opening_inspection')
+	const isEquipmentReplacement = computed(() => String(workOrderData.value?.type || '') === 'equipment_replacement')
 	const hasBoundDevicesHint = computed(() => (checkItems.value || []).some((it) => !!it?.equipment_sn))
 
 	const shouldShowOmcTags = computed(() => {
-		if (!isOpeningInspection.value) return false
+		if (!isOpeningInspection.value && !isEquipmentReplacement.value) return false
 		const s = omcEverSummary.value
 		return !!(s && s.hasDevices)
 	})
@@ -892,7 +893,7 @@
 
 	const loadOmcEverSummary = async () => {
 		const siteId = workOrderData.value?.site_id || inspectionData.value?.site_id
-		if (!isOpeningInspection.value || !siteId || !userStore.token) {
+		if ((!isOpeningInspection.value && !isEquipmentReplacement.value) || !siteId || !userStore.token) {
 			omcEverSummary.value = null
 			return
 		}
@@ -1118,7 +1119,7 @@
 				const status = response.data.status
 				let progressPercentage = 0
 				
-				const isOpening = response.data.type === 'opening_inspection'
+				const isOmcGated = ['opening_inspection', 'equipment_replacement'].includes(String(response.data.type || ''))
 				
 				switch (status) {
 					case 'PENDING':
@@ -1137,10 +1138,10 @@
 						progressPercentage = 75
 						break
 					case 'APPROVED':
-						progressPercentage = isOpening ? 80 : 85
+						progressPercentage = isOmcGated ? 80 : 85
 						break
 					case 'ACTIVATED':
-						progressPercentage = isOpening ? 90 : 95
+						progressPercentage = isOmcGated ? 90 : 95
 						break
 					case 'COMPLETED':
 						progressPercentage = 100

@@ -1041,17 +1041,52 @@ def _get_blocking_bindings(
     """返回两类绑定：
     - need_unbind: 当前用户且检查状态允许解绑（draft/in_progress/rejected）的设备级绑定
     - blocked: 不能解绑或不属于当前用户的绑定
+
+    注意：判定“是否仍绑定/是否需要解绑”以 equipment_binding_history 的最新动作(action)为准，
+    避免历史检查项残留 SN 导致退库被永久阻断。
     """
-    q = (
-        db.query(InspectionCheckItem)
-        .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+
+    sn = (sn or "").strip()
+    if not sn:
+        return {"need_unbind": [], "blocked": []}
+
+    # 仅关心“当前仍绑定”的 SN：取该 SN 最新一条绑定历史记录
+    try:
+        from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+    except Exception:
+        EquipmentBindingHistory = None  # type: ignore
+        BindingActionEnum = None  # type: ignore
+
+    if not EquipmentBindingHistory:
+        return {"need_unbind": [], "blocked": []}
+
+    latest = (
+        db.query(EquipmentBindingHistory)
         .options(
-            joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.work_order),
-            joinedload(InspectionCheckItem.inspection).joinedload(SiteInspection.site),
+            joinedload(EquipmentBindingHistory.inspection).joinedload(SiteInspection.work_order),
+            joinedload(EquipmentBindingHistory.inspection).joinedload(SiteInspection.site),
         )
-        .filter(InspectionCheckItem.equipment_sn == sn)
+        .filter(EquipmentBindingHistory.equipment_sn == sn)
+        .order_by(EquipmentBindingHistory.operated_at.desc(), EquipmentBindingHistory.id.desc())
+        .first()
     )
-    items: List[InspectionCheckItem] = q.all()
+
+    if not latest or getattr(latest, "action", None) == BindingActionEnum.UNBIND:
+        return {"need_unbind": [], "blocked": []}
+
+    # 仅设备级绑定需要解绑：sector_id + band 且 cell_id == f"{sector_id}_{band}"（cell_id 缺失视为设备级）
+    sector_id = getattr(latest, "sector_id", None)
+    band = getattr(latest, "band", None)
+    cell_id = getattr(latest, "cell_id", None)
+    if not sector_id or not band:
+        return {"need_unbind": [], "blocked": []}
+    key = f"{sector_id}_{band}"
+    if cell_id and str(cell_id) != key:
+        return {"need_unbind": [], "blocked": []}
+
+    insp: Optional[SiteInspection] = getattr(latest, "inspection", None)
+    work_order = getattr(insp, "work_order", None) if insp else None
+    site = getattr(insp, "site", None) if insp else None
 
     allow_unbind_status = {
         InspectionStatusEnum.DRAFT,
@@ -1068,47 +1103,39 @@ def _get_blocking_bindings(
     need_unbind = []
     blocked = []
 
-    for it in items:
-        if not _is_device_level_check_item(it):
-            continue
+    insp_status = insp.status if insp and hasattr(insp, "status") else None
+    info = {
+        "inspection_id": getattr(insp, "id", None) if insp else None,
+        "inspection_status": getattr(insp_status, "value", insp_status),
+        "sector_id": sector_id,
+        "band": band,
+        "work_order_id": getattr(insp, "work_order_id", None) if insp else None,
+        "work_order_title": getattr(work_order, "title", None) if work_order else None,
+        "site_id": getattr(insp, "site_id", None) if insp else None,
+        "site_name": getattr(site, "site_name", None) if site else None,
+    }
 
-        insp: SiteInspection = it.inspection
-        insp_status = insp.status if hasattr(insp, "status") else None
-        work_order = getattr(insp, "work_order", None) if insp else None
-        site = getattr(insp, "site", None) if insp else None
-
-        info = {
-            "inspection_id": insp.id if insp else None,
-            "inspection_status": getattr(insp_status, "value", insp_status),
-            "sector_id": it.sector_id,
-            "band": it.band,
-            "work_order_id": getattr(insp, "work_order_id", None) if insp else None,
-            "work_order_title": getattr(work_order, "title", None) if work_order else None,
-            "site_id": getattr(insp, "site_id", None) if insp else None,
-            "site_name": getattr(site, "site_name", None) if site else None,
-        }
-
-        # 不属于当前用户的检查记录：一律阻断（需人工处理）
-        if insp and insp.inspector_id != current_user.id:
-            info["reason_code"] = "other_inspector"
-            info["reason"] = "设备已绑定到其他检查记录，无法自动解绑"
-            blocked.append(info)
-            continue
-
-        if insp_status in allow_unbind_status:
-            need_unbind.append(info)
-            continue
-
-        if insp_status in block_status:
-            info["reason_code"] = "inspection_locked"
-            info["reason"] = "检查已提交/审核中/已完成，禁止解绑"
-            blocked.append(info)
-            continue
-
-        # 未知状态：保守阻断
-        info["reason_code"] = "status_not_supported"
-        info["reason"] = "检查状态不支持解绑"
+    # 不属于当前用户的检查记录：一律阻断（需人工处理）
+    if insp and insp.inspector_id != current_user.id:
+        info["reason_code"] = "other_inspector"
+        info["reason"] = "设备已绑定到其他检查记录，无法自动解绑"
         blocked.append(info)
+        return {"need_unbind": need_unbind, "blocked": blocked}
+
+    if insp_status in allow_unbind_status:
+        need_unbind.append(info)
+        return {"need_unbind": need_unbind, "blocked": blocked}
+
+    if insp_status in block_status:
+        info["reason_code"] = "inspection_locked"
+        info["reason"] = "检查已提交/审核中/已完成，禁止解绑"
+        blocked.append(info)
+        return {"need_unbind": need_unbind, "blocked": blocked}
+
+    # 未知状态：保守阻断
+    info["reason_code"] = "status_not_supported"
+    info["reason"] = "检查状态不支持解绑"
+    blocked.append(info)
 
     return {"need_unbind": need_unbind, "blocked": blocked}
 
@@ -1193,6 +1220,37 @@ async def scan_return_unbind(
         return {"message": "无可解绑的设备级检查项", "unbind_count": 0}
 
     now = datetime.utcnow()
+
+    # 写入绑定历史：UNBIND（用于“当前绑定推导/退库判定”）
+    try:
+        from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+
+        for it in device_items:
+            prev_sn = (getattr(it, "equipment_sn", None) or "").strip()
+            if not prev_sn:
+                continue
+            insp = getattr(it, "inspection", None)
+            site_id = getattr(insp, "site_id", None) if insp else None
+            if not site_id:
+                continue
+            db.add(
+                EquipmentBindingHistory(
+                    inspection_id=getattr(it, "inspection_id", None) or "",
+                    check_item_id=it.id,
+                    site_id=int(site_id),
+                    sector_id=str(getattr(it, "sector_id", "") or ""),
+                    band=str(getattr(it, "band", "") or ""),
+                    cell_id=str(getattr(it, "cell_id", "") or f"{it.sector_id}_{it.band}"),
+                    equipment_sn=prev_sn,
+                    action=BindingActionEnum.UNBIND,
+                    operator_id=current_user.id,
+                    previous_equipment_sn=None,
+                    notes="扫码退库：一键解绑",
+                )
+            )
+    except Exception:
+        # 历史表异常不阻断解绑（保持旧行为）
+        pass
 
     # 删除照片（先删文件再删DB记录）
     check_item_ids = [it.id for it in device_items]
@@ -8159,6 +8217,227 @@ async def create_return_request(
     ret_trans.total_quantity = total_qty
     db.commit()
     return {"return_transaction_id": ret_id, "document_number": ret_doc, "status": ret_trans.approval_status}
+
+
+@router.post("/returns/by-sns")
+async def create_return_request_by_sns(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按主设备 SN 批量发起退库申请（待仓库收货）。
+
+    - 支持一次勾选多个 SN
+    - 自动按“原出库单”分组生成一条或多条退库单
+    - 权限以“当前设备归属(EquipmentInstance.issued_to)”为准，支持设备更换后的归属交接场景
+    """
+    _ensure_not_surveyor(current_user)
+
+    sns = payload.get("sns") if isinstance(payload, dict) else []
+    return_warehouse_id = payload.get("return_warehouse_id") if isinstance(payload, dict) else None
+    offline_document_id = payload.get("offline_document_id") if isinstance(payload, dict) else None
+    notes = (payload.get("notes") or "").strip() if isinstance(payload, dict) else ""
+    work_order_id = (payload.get("work_order_id") or "").strip() if isinstance(payload, dict) else ""
+    offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
+
+    if not isinstance(sns, list) or not sns:
+        raise HTTPException(status_code=400, detail="请至少选择1个主设备SN")
+
+    # SN 去重
+    picked = []
+    seen = set()
+    for s in sns:
+        sn = str(s or "").strip()
+        if not sn or sn in seen:
+            continue
+        seen.add(sn)
+        picked.append(sn)
+    if not picked:
+        raise HTTPException(status_code=400, detail="请至少选择1个主设备SN")
+
+    # 可选：统一退入仓库；不传则按原出库单 warehouse_id 回库
+    default_return_wh = None
+    if return_warehouse_id is not None and return_warehouse_id != "":
+        try:
+            default_return_wh = _ensure_active_warehouse(db, int(return_warehouse_id))
+        except Exception:
+            raise HTTPException(status_code=400, detail="请选择有效的退入仓库")
+
+    # 预加载设备实例并校验“当前归属”
+    inst_rows = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number.in_(picked)).all()
+    inst_by_sn = {str(i.serial_number).strip(): i for i in inst_rows if i and i.serial_number}
+
+    missing = [sn for sn in picked if sn not in inst_by_sn]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"设备SN不存在：{', '.join(missing[:10])}")
+
+    forbidden = [sn for sn, inst in inst_by_sn.items() if getattr(inst, "issued_to", None) != current_user.id]
+    if forbidden:
+        raise HTTPException(status_code=403, detail=f"无权限退库（设备不在当前用户名下）：{', '.join(forbidden[:10])}")
+
+    # 退库阻断：仍存在“当前绑定”的设备级检查项需要先解绑
+    blocked_bindings: List[dict] = []
+    need_unbind_bindings: List[dict] = []
+    for sn in picked:
+        try:
+            bindings = _get_blocking_bindings(db, sn=sn, current_user=current_user)
+        except Exception:
+            bindings = {"need_unbind": [], "blocked": []}
+        for b in (bindings.get("blocked") or []):
+            try:
+                row = dict(b) if isinstance(b, dict) else {"detail": str(b)}
+            except Exception:
+                row = {"detail": str(b)}
+            row["sn"] = sn
+            blocked_bindings.append(row)
+        for b in (bindings.get("need_unbind") or []):
+            try:
+                row = dict(b) if isinstance(b, dict) else {"detail": str(b)}
+            except Exception:
+                row = {"detail": str(b)}
+            row["sn"] = sn
+            need_unbind_bindings.append(row)
+
+    if blocked_bindings:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "action": "unbind_blocked",
+                "message": "存在不可解绑的检查绑定，无法发起退库",
+                "blocked_bindings": blocked_bindings,
+            },
+        )
+    if need_unbind_bindings:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "action": "need_unbind",
+                "message": "存在设备级检查绑定，需先解绑并清理检查内容",
+                "need_unbind": need_unbind_bindings,
+            },
+        )
+
+    # 解析每个 SN 对应的“最近一笔出库单”（允许历史多次出库/退库/再出库）
+    inst_ids = [i.id for i in inst_rows]
+    out_rows = (
+        db.query(StockTransactionItem.equipment_instance_id, StockTransaction.id, StockTransaction.operation_time)
+        .join(StockTransaction, StockTransaction.id == StockTransactionItem.transaction_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransactionItem.equipment_instance_id.in_(inst_ids),
+        )
+        .order_by(desc(StockTransaction.operation_time))
+        .all()
+    )
+    out_by_inst = {}
+    for inst_id, out_id, _ in out_rows:
+        if not inst_id or not out_id:
+            continue
+        if str(inst_id) in out_by_inst:
+            continue
+        out_by_inst[str(inst_id)] = str(out_id)
+
+    missing_out = [sn for sn, inst in inst_by_sn.items() if str(inst.id) not in out_by_inst]
+    if missing_out:
+        raise HTTPException(status_code=400, detail=f"未找到可追溯的出库单：{', '.join(missing_out[:10])}")
+
+    # 按出库单分组
+    group: Dict[str, List[str]] = {}
+    for sn in picked:
+        inst = inst_by_sn.get(sn)
+        if not inst:
+            continue
+        out_id = out_by_inst.get(str(inst.id))
+        if not out_id:
+            continue
+        group.setdefault(out_id, []).append(sn)
+
+    created = []
+    now = datetime.now()
+
+    # 逐出库单创建退库单
+    for out_id, sns_group in group.items():
+        out_trans = (
+            db.query(StockTransaction)
+            .options(
+                joinedload(StockTransaction.warehouse),
+                joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment_instance),
+                joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment),
+            )
+            .filter(StockTransaction.id == out_id, StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT)
+            .first()
+        )
+        if not out_trans:
+            raise HTTPException(status_code=404, detail=f"出库单不存在：{out_id}")
+
+        return_wh = default_return_wh or _ensure_active_warehouse(db, int(out_trans.warehouse_id))
+
+        # 去重
+        sns_group = [s for s in dict.fromkeys(sns_group) if s]
+
+        # 已存在退库申请：阻断
+        _, main_reserved = _return_reserved_maps(db, out_trans.id)
+        for sn in sns_group:
+            inst = inst_by_sn.get(sn)
+            if inst and str(inst.id) in main_reserved:
+                raise HTTPException(status_code=400, detail=f"该主设备已存在退库申请：{sn}")
+            if inst and _enum_value(inst.status) == InventoryStatusEnum.RETURN_PENDING_RECEIVE.value:
+                raise HTTPException(status_code=400, detail=f"设备已处于退库待收货：{sn}")
+
+        ret_id = uuid.uuid4().hex
+        ret_doc = _build_request_no("RET", current_user.id)
+
+        loc = {"_source": "batch_return_by_sns"}
+        if work_order_id:
+            loc["work_order_id"] = work_order_id
+
+        ret_trans = StockTransaction(
+            id=ret_id,
+            transaction_type=TransactionTypeEnum.RETURN,
+            warehouse_id=return_wh.id,
+            operator_id=current_user.id,
+            offline_document_id=offline_doc.id if offline_doc else None,
+            related_transaction_id=out_trans.id,
+            document_number=ret_doc,
+            total_quantity=len(sns_group),
+            notes=notes or ("设备更换退库申请" if work_order_id else "批量退库申请"),
+            approval_status="pending_receive",
+            scan_location=loc,
+        )
+        db.add(ret_trans)
+        db.flush()
+
+        for sn in sns_group:
+            inst = inst_by_sn.get(sn)
+            if not inst:
+                continue
+            db.add(
+                StockTransactionItem(
+                    transaction_id=ret_id,
+                    equipment_instance_id=inst.id,
+                    equipment_id=inst.equipment_id,
+                    quantity=1,
+                    received_qty=0,
+                )
+            )
+            inst.status = InventoryStatusEnum.RETURN_PENDING_RECEIVE
+            inst.updated_at = now
+
+        created.append(
+            {
+                "out_transaction_id": out_trans.id,
+                "out_document_number": out_trans.document_number,
+                "return_transaction_id": ret_id,
+                "return_document_number": ret_doc,
+                "return_warehouse_id": return_wh.id,
+                "return_warehouse_name": return_wh.warehouse_name if return_wh else None,
+                "sns": sns_group,
+                "status": ret_trans.approval_status,
+            }
+        )
+
+    db.commit()
+    return {"created_count": len(created), "created": created}
 
 
 def _serialize_return_transaction(db: Session, t: StockTransaction) -> dict:

@@ -43,8 +43,8 @@ class WorkOrderProgressCalculator:
         """
         base_progress = cls.STATUS_PROGRESS_MAP.get(work_order.status, 0)
         
-        # 针对开站工单，使用自定义阶段进度：APPROVED=80, ACTIVATED=90, COMPLETED=100
-        if work_order.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        # 针对开站/设备更换工单，使用自定义阶段进度：APPROVED=80, ACTIVATED=90, COMPLETED=100
+        if work_order.type in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT):
             if work_order.status == WorkOrderStatusEnum.APPROVED:
                 base_progress = 80
             elif work_order.status == WorkOrderStatusEnum.ACTIVATED:
