@@ -7,6 +7,8 @@ from pydantic import BaseModel
 import uuid
 import os
 from datetime import datetime
+import logging
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -50,6 +52,7 @@ from app.utils.file_handler import save_uploaded_file, validate_image_on_disk, I
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _ensure_stock_operator(current_user: User) -> None:
@@ -4684,120 +4687,179 @@ async def issue_draft_scan_main_device(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_material_request_enabled(db)
-    _ensure_not_surveyor(current_user)
+    barcode = ""
+    sn = ""
+    try:
+        _ensure_material_request_enabled(db)
+        _ensure_not_surveyor(current_user)
 
-    draft = (
-        db.query(IssueDraft)
-        .options(
-            joinedload(IssueDraft.request).joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
-            joinedload(IssueDraft.request).joinedload(MaterialRequest.warehouse),
-            joinedload(IssueDraft.request).joinedload(MaterialRequest.requester),
-            joinedload(IssueDraft.warehouse),
-            joinedload(IssueDraft.items).joinedload(IssueDraftItem.equipment),
-            joinedload(IssueDraft.serials),
+        draft = (
+            db.query(IssueDraft)
+            .options(
+                joinedload(IssueDraft.request).joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
+                joinedload(IssueDraft.request).joinedload(MaterialRequest.warehouse),
+                joinedload(IssueDraft.request).joinedload(MaterialRequest.requester),
+                joinedload(IssueDraft.warehouse),
+                joinedload(IssueDraft.items).joinedload(IssueDraftItem.equipment),
+                joinedload(IssueDraft.serials),
+            )
+            .filter(IssueDraft.id == draft_id)
+            .first()
         )
-        .filter(IssueDraft.id == draft_id)
-        .first()
-    )
-    if not draft:
-        raise HTTPException(status_code=404, detail="领料单不存在")
-    _ensure_issue_draft_access(db, draft, current_user)
+        if not draft:
+            raise HTTPException(status_code=404, detail="领料单不存在")
+        _ensure_issue_draft_access(db, draft, current_user)
 
-    if _enum_value(draft.status) != IssueDraftStatusEnum.DRAFT.value:
-        raise HTTPException(status_code=400, detail="当前状态不可扫码")
+        if _enum_value(draft.status) != IssueDraftStatusEnum.DRAFT.value:
+            raise HTTPException(status_code=400, detail="当前状态不可扫码")
 
-    barcode = (payload.get("barcode") or "").strip() if isinstance(payload, dict) else ""
-    parsed_barcode = payload.get("parsed_barcode") if isinstance(payload, dict) else None
-    sn = _extract_sn_from_scan(barcode, parsed_barcode)
-    if not sn:
-        raise HTTPException(status_code=400, detail="条码不能为空")
+        barcode = (payload.get("barcode") or "").strip() if isinstance(payload, dict) else ""
+        parsed_barcode = payload.get("parsed_barcode") if isinstance(payload, dict) else None
+        sn = _extract_sn_from_scan(barcode, parsed_barcode)
+        if not sn:
+            raise HTTPException(status_code=400, detail="条码不能为空")
 
-    instance = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn).first()
-    if not instance:
-        raise HTTPException(status_code=404, detail="未找到该SN对应的设备实例")
-    if bool(getattr(instance, "is_voided", False)):
-        raise HTTPException(status_code=400, detail="该SN实例已撤销")
-    if _enum_value(instance.status) != InventoryStatusEnum.IN_STOCK.value:
-        raise HTTPException(status_code=400, detail="设备不在库中，无法领料")
-    if instance.warehouse_id != draft.warehouse_id:
-        raise HTTPException(status_code=400, detail="设备不在申请仓库，无法领料")
+        instance = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn).first()
+        if not instance:
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到该SN对应的设备实例：{sn}。请确认扫描的是设备SN，或联系管理员导入库存。",
+            )
+        if bool(getattr(instance, "is_voided", False)):
+            raise HTTPException(status_code=400, detail="该SN实例已撤销")
+        if _enum_value(instance.status) != InventoryStatusEnum.IN_STOCK.value:
+            raise HTTPException(
+                status_code=400,
+                detail=f"设备当前状态为 {_enum_value(instance.status)}，不在库中，无法领料",
+            )
+        if instance.warehouse_id != draft.warehouse_id:
+            device_wh = (
+                instance.warehouse.warehouse_name
+                if getattr(instance, "warehouse", None) and getattr(instance.warehouse, "warehouse_name", None)
+                else str(instance.warehouse_id or "-")
+            )
+            draft_wh = (
+                draft.warehouse.warehouse_name
+                if getattr(draft, "warehouse", None) and getattr(draft.warehouse, "warehouse_name", None)
+                else str(draft.warehouse_id or "-")
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"设备不在申请仓库，无法领料（设备仓库：{device_wh}，申请仓库：{draft_wh}）",
+            )
 
-    eq = instance.equipment
-    if not eq or _enum_value(eq.category) != EquipmentCategoryEnum.MAIN_DEVICE.value:
-        raise HTTPException(status_code=400, detail="该SN不是主设备")
+        eq = instance.equipment
+        if not eq or _enum_value(eq.category) != EquipmentCategoryEnum.MAIN_DEVICE.value:
+            raise HTTPException(status_code=400, detail="该SN不是主设备，无法加入领料单")
 
-    req = draft.request
-    req_item_map = _get_request_item_map(req)
-    req_item = req_item_map.get(int(eq.id))
-    if not req_item:
-        raise HTTPException(status_code=400, detail="该SN型号不在申请单内")
+        req = draft.request
+        req_item_map = _get_request_item_map(req)
+        req_item = req_item_map.get(int(eq.id))
+        if not req_item:
+            eq_name = getattr(eq, "equipment_name", None) or getattr(eq, "equipment_code", None) or "未知型号"
+            raise HTTPException(status_code=400, detail=f"该SN对应型号【{eq_name}】不在申请单内，无法领料")
 
-    # 是否超出可领上限
-    pending_map = _calc_request_pending_map(db, req.id)
-    approved_qty = int(getattr(req_item, "approved_qty", 0) or 0)
-    issued_qty = int(getattr(req_item, "issued_qty", 0) or 0)
-    pending_qty = int(pending_map.get(int(eq.id), 0))
-    remaining = max(approved_qty - issued_qty - pending_qty, 0)
-    if remaining <= 0:
-        raise HTTPException(status_code=400, detail="该物料已无剩余可领数量")
+        # 是否超出可领上限
+        pending_map = _calc_request_pending_map(db, req.id)
+        approved_qty = int(getattr(req_item, "approved_qty", 0) or 0)
+        issued_qty = int(getattr(req_item, "issued_qty", 0) or 0)
+        pending_qty = int(pending_map.get(int(eq.id), 0))
+        remaining = max(approved_qty - issued_qty - pending_qty, 0)
+        if remaining <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"该物料已无剩余可领数量（已审批{approved_qty}，已出库{issued_qty}，其他领料单占用{pending_qty}）",
+            )
 
-    # 防重复：同草稿内 unique constraint
-    dup = db.query(IssueDraftSerial).filter(
-        IssueDraftSerial.draft_id == draft.id,
-        IssueDraftSerial.serial_number == sn,
-    ).first()
-    if dup:
-        return {"draft": _serialize_issue_draft(db, draft)}
-
-    # 防冲突：同SN不允许同时出现在多个未完成的领料单
-    conflict = (
-        db.query(IssueDraftSerial)
-        .join(IssueDraft, IssueDraftSerial.draft_id == IssueDraft.id)
-        .filter(
+        # 防重复：同草稿内 unique constraint
+        dup = db.query(IssueDraftSerial).filter(
+            IssueDraftSerial.draft_id == draft.id,
             IssueDraftSerial.serial_number == sn,
-            IssueDraftSerial.status == IssueDraftSerialStatusEnum.PENDING,
-            IssueDraft.status.in_(
-                [
-                    IssueDraftStatusEnum.DRAFT,
-                    IssueDraftStatusEnum.PENDING_CONFIRM,
-                    IssueDraftStatusEnum.PARTIALLY_CONFIRMED,
-                ]
-            ),
-            IssueDraft.id != draft.id,
-        )
-        .first()
-    )
-    if conflict:
-        raise HTTPException(status_code=400, detail="该SN已在其他领料单中待确认，无法重复添加")
+        ).first()
+        if dup:
+            return {"draft": _serialize_issue_draft(db, draft)}
 
-    db.add(
-        IssueDraftSerial(
-            draft_id=draft.id,
-            equipment_instance_id=instance.id,
-            equipment_id=instance.equipment_id,
-            serial_number=sn,
-            status=IssueDraftSerialStatusEnum.PENDING,
-            scanned_by=current_user.id,
-            scanned_at=datetime.now(),
+        # 防冲突：同SN不允许同时出现在多个未完成的领料单
+        conflict = (
+            db.query(IssueDraftSerial)
+            .join(IssueDraft, IssueDraftSerial.draft_id == IssueDraft.id)
+            .filter(
+                IssueDraftSerial.serial_number == sn,
+                IssueDraftSerial.status == IssueDraftSerialStatusEnum.PENDING,
+                IssueDraft.status.in_(
+                    [
+                        IssueDraftStatusEnum.DRAFT,
+                        IssueDraftStatusEnum.PENDING_CONFIRM,
+                        IssueDraftStatusEnum.PARTIALLY_CONFIRMED,
+                    ]
+                ),
+                IssueDraft.id != draft.id,
+            )
+            .first()
         )
-    )
-    db.commit()
+        if conflict:
+            other = db.query(IssueDraft).filter(IssueDraft.id == conflict.draft_id).first()
+            other_no = other.draft_no if other else conflict.draft_id
+            raise HTTPException(status_code=400, detail=f"该SN已在其他领料单【{other_no}】中待确认，无法重复添加")
 
-    fresh = (
-        db.query(IssueDraft)
-        .options(
-            joinedload(IssueDraft.request).joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
-            joinedload(IssueDraft.request).joinedload(MaterialRequest.warehouse),
-            joinedload(IssueDraft.request).joinedload(MaterialRequest.requester),
-            joinedload(IssueDraft.warehouse),
-            joinedload(IssueDraft.items).joinedload(IssueDraftItem.equipment),
-            joinedload(IssueDraft.serials),
+        db.add(
+            IssueDraftSerial(
+                draft_id=draft.id,
+                equipment_instance_id=instance.id,
+                equipment_id=instance.equipment_id,
+                serial_number=sn,
+                status=IssueDraftSerialStatusEnum.PENDING,
+                scanned_by=current_user.id,
+                scanned_at=datetime.now(),
+            )
         )
-        .filter(IssueDraft.id == draft.id)
-        .first()
-    )
-    return {"draft": _serialize_issue_draft(db, fresh)}
+        db.commit()
+
+        fresh = (
+            db.query(IssueDraft)
+            .options(
+                joinedload(IssueDraft.request).joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
+                joinedload(IssueDraft.request).joinedload(MaterialRequest.warehouse),
+                joinedload(IssueDraft.request).joinedload(MaterialRequest.requester),
+                joinedload(IssueDraft.warehouse),
+                joinedload(IssueDraft.items).joinedload(IssueDraftItem.equipment),
+                joinedload(IssueDraft.serials),
+            )
+            .filter(IssueDraft.id == draft.id)
+            .first()
+        )
+        return {"draft": _serialize_issue_draft(db, fresh)}
+    except HTTPException:
+        raise
+    except IntegrityError:
+        db.rollback()
+        error_id = uuid.uuid4().hex[:8]
+        logger.exception(
+            "issue_draft_scan_main_device integrity_error error_id=%s draft_id=%s sn=%s user_id=%s",
+            error_id,
+            draft_id,
+            sn,
+            getattr(current_user, "id", None),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"扫码添加SN发生冲突（可能是重复提交或并发操作），请刷新后重试（错误编号：{error_id}）",
+        )
+    except Exception:
+        db.rollback()
+        error_id = uuid.uuid4().hex[:8]
+        logger.exception(
+            "issue_draft_scan_main_device failed error_id=%s draft_id=%s barcode=%s sn=%s user_id=%s",
+            error_id,
+            draft_id,
+            barcode,
+            sn,
+            getattr(current_user, "id", None),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"系统异常，扫码添加SN失败，请稍后重试或联系管理员（错误编号：{error_id}）",
+        )
 
 
 @router.delete("/issue-drafts/{draft_id}/serials/{serial_id}")

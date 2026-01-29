@@ -3352,196 +3352,248 @@
 			})
 		}
 	
-	// 扫码绑定设备功能
-	const scanEquipmentForBinding = async (item = null) => {
-		const targetItem = item || currentItem.value
-		// 只有设备级检查项才需要绑定设备
-		if (!targetItem || !isDeviceLevelItem(targetItem)) {
-			uni.showToast({
-				title: $t('inspection.invalidCheckItem'),
-				icon: 'none',
-				duration: 3000
-			})
-			return
-		}
-		
-		try {
-			console.log('开始扫码绑定设备...')
-			
-			// 执行扫码
-			const result = await new Promise((resolve, reject) => {
-				uni.scanCode({
-					scanType: ['barCode', 'qrCode'],
-					success: resolve,
-					fail: reject
-				})
-			})
-
-			// 仅允许二维码 / Code128（避免误扫 EAN8/EAN13 等导致随机数字）
-			const normalizeScanType = (value) => String(value || '').trim().toUpperCase().replace(/[-\s]/g, '_')
-			const scanType = normalizeScanType(result?.scanType)
-			const allowedScanTypes = new Set(['QR_CODE', 'QRCODE', 'QR', 'CODE_128', 'CODE128'])
-			if (!scanType || !allowedScanTypes.has(scanType)) {
+		// 扫码绑定设备功能
+		const scanEquipmentForBinding = async (item = null) => {
+			const targetItem = item || currentItem.value
+			// 只有设备级检查项才需要绑定设备
+			if (!targetItem || !isDeviceLevelItem(targetItem)) {
 				uni.showToast({
-					title: $t('stock.unsupportedScanType', { type: scanType || 'UNKNOWN' }),
-					icon: 'none'
-				})
-				return
-			}
-			
-			console.log('扫码结果:', result.result)
-			
-			// 解析条码
-			const parsedBarcode = parseBarcode(result.result)
-			console.log('解析结果:', parsedBarcode)
-			
-			if (!parsedBarcode.success || !isValidParseResult(parsedBarcode)) {
-				uni.showToast({
-					title: parsedBarcode.error || $t('stock.invalidBarcode'),
-					icon: 'none'
-				})
-				return
-			}
-
-			// 设备更换工单：允许已绑定情况下直接换绑（先确认再提交）
-			const oldSn = String(targetItem?.equipment_sn || '').trim()
-			const newSn = String(parsedBarcode.sn || '').trim()
-			if (oldSn && newSn && oldSn !== newSn && isEquipmentReplacement.value) {
-				const bindTarget = targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id
-				const confirmed = await new Promise((resolve) => {
-					uni.showModal({
-						title: $t('inspection.replaceConfirmTitle'),
-						content: $t('inspection.replaceConfirmContent', { target: bindTarget, old: oldSn, sn: newSn }),
-						confirmText: $t('common.confirm'),
-						cancelText: $t('common.cancel'),
-						success: (r) => resolve(!!r.confirm),
-						fail: () => resolve(false)
-					})
-				})
-				if (!confirmed) return
-			}
-			
-			uni.showLoading({
-				title: $t('inspection.validatingEquipment'),
-				mask: true
-			})
-			
-			try {
-				// 验证设备是否已被当前用户领料
-				const checkResponse = await new Promise((resolve, reject) => {
-					uni.request({
-						url: buildApiUrl(`/api/inspections/equipment/check-pickup/${parsedBarcode.sn}`),
-						method: 'GET',
-						header: getAuthHeaders(userStore.token),
-						success: resolve,
-						fail: reject
-					})
-				})
-				
-				console.log('设备验证结果:', checkResponse.data)
-				
-				if (checkResponse.statusCode !== 200) {
-					throw new Error(checkResponse.data?.detail || $t('inspection.equipmentValidateFailed'))
-				}
-				
-				// 绑定设备到小区
-				const bindResponse = await new Promise((resolve, reject) => {
-					uni.request({
-						url: buildApiUrl(`/api/inspections/detail/${inspectionData.value.id}/bind-equipment`),
-						method: 'POST',
-						header: getAuthHeaders(userStore.token),
-						data: {
-							equipment_sn: parsedBarcode.sn,
-							sector_id: targetItem.sector_id,
-							band: targetItem.band
-						},
-						success: resolve,
-						fail: reject
-					})
-				})
-				
-				console.log('设备绑定结果:', bindResponse.data)
-				
-				// 冲突与权限等错误的前置友好提示
-				if (bindResponse.statusCode === 409) {
-					uni.hideLoading()
-					return uni.showModal({
-						title: $t('inspection.bindConflictTitle'),
-						content: bindResponse.data?.detail || $t('inspection.bindConflictContent', { sn: parsedBarcode.sn }),
-						showCancel: false
-					})
-				}
-				if (bindResponse.statusCode === 403) {
-					uni.hideLoading()
-					return uni.showToast({ title: bindResponse.data?.detail || $t('inspection.equipmentNotPickedUp'), icon: 'none', duration: 3000 })
-				}
-				if (bindResponse.statusCode === 400) {
-					uni.hideLoading()
-					return uni.showToast({ title: bindResponse.data?.detail || $t('inspection.bindFailed'), icon: 'none', duration: 3000 })
-				}
-				
-				if (bindResponse.statusCode === 200 && bindResponse.data.success) {
-					// 更新本地检查项数据
-					const updatedItems = checkItems.value.map(checkItem => {
-						if (checkItem.sector_id === targetItem.sector_id && 
-							(!targetItem.band || checkItem.band === targetItem.band)) {
-							return {
-								...checkItem,
-								equipment_sn: parsedBarcode.sn
-							}
-						}
-						return checkItem
-					})
-					
-					checkItems.value = updatedItems
-					
-					// 如果当前正在查看该检查项，也更新当前项
-					if (currentItem.value && currentItem.value.id === targetItem.id) {
-						currentItem.value = {
-							...currentItem.value,
-							equipment_sn: parsedBarcode.sn
-						}
-					}
-					
-					uni.hideLoading()
-					const bindTarget = targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id
-					const isReplace = !!(oldSn && String(parsedBarcode.sn || '').trim() && oldSn !== String(parsedBarcode.sn || '').trim() && isEquipmentReplacement.value)
-					uni.showModal({
-						title: isReplace ? $t('inspection.replaceSuccessTitle') : $t('inspection.bindSuccessTitle'),
-						content: isReplace
-							? $t('inspection.replaceSuccessDetail', { old: oldSn, sn: parsedBarcode.sn, target: bindTarget })
-							: $t('inspection.bindSuccessDetail', { sn: parsedBarcode.sn, target: bindTarget }),
-						showCancel: false,
-						confirmText: $t('common.confirm'),
-						success: () => {
-							// 如果是从外部调用，打开检查项详情
-							if (item && !currentItem.value) {
-								currentItem.value = { ...targetItem, equipment_sn: parsedBarcode.sn }
-							}
-						}
-					})
-				} else {
-					throw new Error(bindResponse.data?.detail || $t('inspection.bindFailed'))
-				}
-				
-			} catch (error) {
-				uni.hideLoading()
-				console.error('设备绑定失败:', error)
-				uni.showToast({
-					title: error.message || $t('inspection.bindFailed'),
+					title: $t('inspection.invalidCheckItem'),
 					icon: 'none',
 					duration: 3000
 				})
+				return
 			}
 			
-		} catch (error) {
-			console.error('扫码失败:', error)
-			uni.showToast({
-				title: $t('stock.scanFailed'),
-				icon: 'none'
-			})
+			try {
+				console.log('开始扫码绑定设备...')
+				
+				// 执行扫码
+				const result = await new Promise((resolve, reject) => {
+					uni.scanCode({
+						scanType: ['barCode', 'qrCode'],
+						success: resolve,
+						fail: reject
+					})
+				})
+	
+				// 仅允许二维码 / Code128（避免误扫 EAN8/EAN13 等导致随机数字）
+				const normalizeScanType = (value) => String(value || '').trim().toUpperCase().replace(/[-\s]/g, '_')
+				const scanType = normalizeScanType(result?.scanType)
+				const allowedScanTypes = new Set(['QR_CODE', 'QRCODE', 'QR', 'CODE_128', 'CODE128'])
+				if (!scanType || !allowedScanTypes.has(scanType)) {
+					uni.showToast({
+						title: $t('stock.unsupportedScanType', { type: scanType || 'UNKNOWN' }),
+						icon: 'none'
+					})
+					return
+				}
+				
+				const raw = String(result?.result || '').trim()
+				if (!raw) {
+					uni.showToast({
+						title: $t('stock.scanResultEmpty'),
+						icon: 'none'
+					})
+					return
+				}
+				console.log('扫码结果:', raw)
+	
+				// 纯数字码：此入口默认拦截（避免误扫 EAN8/EAN13 或非SN二维码导致随机数字通过）
+				// 若业务确认纯数字为有效SN，可在条码解析规则中放行
+				if (/^\d{8,}$/.test(raw)) {
+					uni.showModal({
+						title: $t('stock.invalidBarcode'),
+						content: `识别到纯数字码：${raw}\n\n工单检查绑定设备只支持设备SN二维码/Code128条形码。\n如确认该码就是设备SN，请联系管理员调整识别规则。`,
+						showCancel: false,
+						confirmText: $t('common.ok')
+					})
+					return
+				}
+				
+				// 解析条码
+				const parsedBarcode = parseBarcode(raw)
+				console.log('解析结果:', parsedBarcode)
+				
+				if (!parsedBarcode.success) {
+					uni.showToast({
+						title: parsedBarcode.error || $t('stock.invalidBarcode'),
+						icon: 'none'
+					})
+					return
+				}
+	
+				// 解析成功但SN不满足校验规则（长度/字符集等）
+				if (!isValidParseResult(parsedBarcode)) {
+					const snText = String(parsedBarcode?.sn || '').trim()
+					if (snText && /^\d{8,}$/.test(snText)) {
+						uni.showModal({
+							title: $t('stock.invalidBarcode'),
+							content: `识别到SN为纯数字：${snText}\n\n为避免误扫，此入口默认不接受纯数字SN。\n如确认该SN合法，请联系管理员调整识别规则。`,
+							showCancel: false,
+							confirmText: $t('common.ok')
+						})
+						return
+					}
+					uni.showToast({
+						title: $t('stock.invalidBarcode'),
+						icon: 'none'
+					})
+					return
+				}
+	
+				// 设备更换工单：允许已绑定情况下直接换绑（先确认再提交）
+				const oldSn = String(targetItem?.equipment_sn || '').trim()
+				const newSn = String(parsedBarcode.sn || '').trim()
+				if (oldSn && newSn && oldSn !== newSn && isEquipmentReplacement.value) {
+					const bindTarget = targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id
+					const confirmed = await new Promise((resolve) => {
+						uni.showModal({
+							title: $t('inspection.replaceConfirmTitle'),
+							content: $t('inspection.replaceConfirmContent', { target: bindTarget, old: oldSn, sn: newSn }),
+							confirmText: $t('common.confirm'),
+							cancelText: $t('common.cancel'),
+							success: (r) => resolve(!!r.confirm),
+							fail: () => resolve(false)
+						})
+					})
+					if (!confirmed) return
+				}
+				
+				uni.showLoading({
+					title: $t('inspection.validatingEquipment'),
+					mask: true
+				})
+				
+				try {
+					// 验证设备是否已被当前用户领料
+					const checkResponse = await new Promise((resolve, reject) => {
+						uni.request({
+							url: buildApiUrl(`/api/inspections/equipment/check-pickup/${parsedBarcode.sn}`),
+							method: 'GET',
+							header: getAuthHeaders(userStore.token),
+							success: resolve,
+							fail: reject
+						})
+					})
+					
+					console.log('设备验证结果:', checkResponse.data)
+					if (checkResponse.statusCode === 401) {
+						uni.hideLoading()
+						userStore.logout()
+						return
+					}
+					
+					if (checkResponse.statusCode !== 200) {
+						throw new Error(checkResponse.data?.detail || $t('inspection.equipmentValidateFailed'))
+					}
+					
+					// 绑定设备到小区
+					const bindResponse = await new Promise((resolve, reject) => {
+						uni.request({
+							url: buildApiUrl(`/api/inspections/detail/${inspectionData.value.id}/bind-equipment`),
+							method: 'POST',
+							header: getAuthHeaders(userStore.token),
+							data: {
+								equipment_sn: parsedBarcode.sn,
+								sector_id: targetItem.sector_id,
+								band: targetItem.band
+							},
+							success: resolve,
+							fail: reject
+						})
+					})
+					
+					console.log('设备绑定结果:', bindResponse.data)
+					
+					if (bindResponse.statusCode === 401) {
+						uni.hideLoading()
+						userStore.logout()
+						return
+					}
+					
+					// 冲突与权限等错误的前置友好提示
+					if (bindResponse.statusCode === 409) {
+						uni.hideLoading()
+						return uni.showModal({
+							title: $t('inspection.bindConflictTitle'),
+							content: bindResponse.data?.detail || $t('inspection.bindConflictContent', { sn: parsedBarcode.sn }),
+							showCancel: false
+						})
+					}
+					if (bindResponse.statusCode === 403) {
+						uni.hideLoading()
+						return uni.showToast({ title: bindResponse.data?.detail || $t('inspection.equipmentNotPickedUp'), icon: 'none', duration: 3000 })
+					}
+					if (bindResponse.statusCode === 400) {
+						uni.hideLoading()
+						return uni.showToast({ title: bindResponse.data?.detail || $t('inspection.bindFailed'), icon: 'none', duration: 3000 })
+					}
+					
+					if (bindResponse.statusCode === 200 && bindResponse.data.success) {
+						// 更新本地检查项数据
+						const updatedItems = checkItems.value.map(checkItem => {
+							if (checkItem.sector_id === targetItem.sector_id && 
+								(!targetItem.band || checkItem.band === targetItem.band)) {
+								return {
+									...checkItem,
+									equipment_sn: parsedBarcode.sn
+								}
+							}
+							return checkItem
+						})
+						
+						checkItems.value = updatedItems
+						
+						// 如果当前正在查看该检查项，也更新当前项
+						if (currentItem.value && currentItem.value.id === targetItem.id) {
+							currentItem.value = {
+								...currentItem.value,
+								equipment_sn: parsedBarcode.sn
+							}
+						}
+						
+						uni.hideLoading()
+						const bindTarget = targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id
+						const isReplace = !!(oldSn && String(parsedBarcode.sn || '').trim() && oldSn !== String(parsedBarcode.sn || '').trim() && isEquipmentReplacement.value)
+						uni.showModal({
+							title: isReplace ? $t('inspection.replaceSuccessTitle') : $t('inspection.bindSuccessTitle'),
+							content: isReplace
+								? $t('inspection.replaceSuccessDetail', { old: oldSn, sn: parsedBarcode.sn, target: bindTarget })
+								: $t('inspection.bindSuccessDetail', { sn: parsedBarcode.sn, target: bindTarget }),
+							showCancel: false,
+							confirmText: $t('common.confirm'),
+							success: () => {
+								// 如果是从外部调用，打开检查项详情
+								if (item && !currentItem.value) {
+									currentItem.value = { ...targetItem, equipment_sn: parsedBarcode.sn }
+								}
+							}
+						})
+					} else {
+						throw new Error(bindResponse.data?.detail || $t('inspection.bindFailed'))
+					}
+					
+				} catch (error) {
+					uni.hideLoading()
+					console.error('设备绑定失败:', error)
+					uni.showToast({
+						title: error.message || $t('inspection.bindFailed'),
+						icon: 'none',
+						duration: 3000
+					})
+				}
+				
+			} catch (error) {
+				console.error('扫码失败:', error)
+				const msg = String(error?.errMsg || error?.message || error || '').toLowerCase()
+				if (msg.includes('cancel')) return
+				uni.showToast({
+					title: $t('stock.scanFailed'),
+					icon: 'none'
+				})
+			}
 		}
-	}
 	
 	// 解绑设备
 	const unbindEquipment = async () => {

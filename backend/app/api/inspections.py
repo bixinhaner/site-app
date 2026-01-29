@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime
 import os
@@ -8,6 +9,7 @@ import uuid
 import hashlib
 import json
 import copy
+import logging
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -45,6 +47,7 @@ from app.schemas.inspection_enhanced import FieldDefinition
 from app.models.work_order import WorkOrder, WorkOrderTypeEnum
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 def _is_field_worker(u) -> bool:
     r = getattr(u, 'role', None)
@@ -2721,34 +2724,50 @@ async def check_equipment_pickup_status(
     放宽校验：支持已出库(ISSUED)与待检查(PENDING_INSPECTION)两种状态，
     以兼容已完成首次绑定但再次扫描校验的场景。
     """
-    from app.models.equipment import EquipmentInstance, InventoryStatusEnum
+    sn_norm = (sn or "").strip()
+    try:
+        from app.models.equipment import EquipmentInstance, InventoryStatusEnum
 
-    equipment_instance = db.query(EquipmentInstance).filter(
-        EquipmentInstance.serial_number == sn
-    ).first()
+        equipment_instance = db.query(EquipmentInstance).filter(
+            EquipmentInstance.serial_number == sn_norm
+        ).first()
 
-    if not equipment_instance:
-        raise HTTPException(status_code=404, detail=f"设备序列号 {sn} 不存在")
+        if not equipment_instance:
+            raise HTTPException(status_code=404, detail=f"设备序列号 {sn_norm} 不存在")
 
-    # 允许以下状态进入检查流程：已出库、待检查、已检查（便于复核/返检）
-    allowed_status = {
-        InventoryStatusEnum.ISSUED,
-        InventoryStatusEnum.PENDING_INSPECTION,
-        InventoryStatusEnum.INSPECTED,
-    }
-    if equipment_instance.status not in allowed_status:
-        raise HTTPException(status_code=400, detail="设备未出库，无法进行检查")
+        # 允许以下状态进入检查流程：已出库、待检查、已检查（便于复核/返检）
+        allowed_status = {
+            InventoryStatusEnum.ISSUED,
+            InventoryStatusEnum.PENDING_INSPECTION,
+            InventoryStatusEnum.INSPECTED,
+        }
+        if equipment_instance.status not in allowed_status:
+            raise HTTPException(status_code=400, detail="设备未出库，无法进行检查")
 
-    if equipment_instance.issued_to != current_user.id:
-        raise HTTPException(status_code=403, detail="设备未被当前用户领料，无法进行检查")
+        if equipment_instance.issued_to != current_user.id:
+            raise HTTPException(status_code=403, detail="设备未被当前用户领料，无法进行检查")
 
-    return {
-        "success": True,
-        "equipment_sn": sn,
-        "equipment_name": equipment_instance.equipment.equipment_name if equipment_instance.equipment else "未知设备",
-        "issued_date": equipment_instance.issued_date,
-        "message": "设备验证通过，可以进行检查"
-    }
+        return {
+            "success": True,
+            "equipment_sn": sn_norm,
+            "equipment_name": equipment_instance.equipment.equipment_name if equipment_instance.equipment else "未知设备",
+            "issued_date": equipment_instance.issued_date,
+            "message": "设备验证通过，可以进行检查"
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        error_id = uuid.uuid4().hex[:8]
+        logger.exception(
+            "check_equipment_pickup_status failed error_id=%s sn=%s user_id=%s",
+            error_id,
+            sn_norm,
+            getattr(current_user, "id", None),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"系统异常，设备校验失败，请稍后重试或联系管理员（错误编号：{error_id}）",
+        )
 
 
 @router.post("/detail/{inspection_id}/bind-equipment")
@@ -2760,6 +2779,8 @@ async def bind_equipment_to_sector(
 ):
     """绑定设备到小区检查项"""
     equipment_sn = request_data.get("equipment_sn")
+    if isinstance(equipment_sn, str):
+        equipment_sn = equipment_sn.strip()
     sector_id = request_data.get("sector_id")
     band = request_data.get("band")
     
@@ -2770,7 +2791,7 @@ async def bind_equipment_to_sector(
         )
     
     # 如果设备SN为空或空字符串，表示解绑操作
-    is_unbind = not equipment_sn or equipment_sn.strip() == ""
+    is_unbind = not equipment_sn
     
     # 验证检查记录存在且属于当前用户
     inspection = db.query(SiteInspection).filter(
@@ -2805,7 +2826,10 @@ async def bind_equipment_to_sector(
                 StockTransaction.scan_barcode == equipment_sn,
             ).first()
             if pending_return:
-                raise HTTPException(status_code=400, detail="设备已发起退库申请（待仓库收货），无法继续绑定检查项")
+                raise HTTPException(
+                    status_code=400,
+                    detail="设备已发起退库申请（待仓库收货），无法继续绑定检查项；请等待仓库收货完成或取消退库申请后再绑定",
+                )
         except HTTPException:
             raise
         except Exception:
@@ -2813,22 +2837,22 @@ async def bind_equipment_to_sector(
             pass
 
         from app.models.equipment import EquipmentInstance, InventoryStatusEnum
-        # 允许以下状态进行绑定（同一领料人）：已出库、待检查、已检查
         equipment_instance = db.query(EquipmentInstance).filter(
-            EquipmentInstance.serial_number == equipment_sn,
-            EquipmentInstance.status.in_([
-                InventoryStatusEnum.ISSUED,
-                InventoryStatusEnum.PENDING_INSPECTION,
-                InventoryStatusEnum.INSPECTED,
-            ]),
-            EquipmentInstance.issued_to == current_user.id
+            EquipmentInstance.serial_number == equipment_sn
         ).first()
-        
         if not equipment_instance:
-            raise HTTPException(
-                status_code=400,
-                detail="设备序列号无效或未被当前用户领料"
-            )
+            raise HTTPException(status_code=404, detail=f"设备序列号 {equipment_sn} 不存在")
+
+        allowed_status = {
+            InventoryStatusEnum.ISSUED,
+            InventoryStatusEnum.PENDING_INSPECTION,
+            InventoryStatusEnum.INSPECTED,
+        }
+        if equipment_instance.status not in allowed_status:
+            raise HTTPException(status_code=400, detail="设备未出库，无法进行检查")
+
+        if equipment_instance.issued_to != current_user.id:
+            raise HTTPException(status_code=403, detail="设备未被当前用户领料，无法绑定")
     
     # 构造cell_id
     cell_id = f"{sector_id}_{band}" if band else sector_id
@@ -2871,6 +2895,7 @@ async def bind_equipment_to_sector(
                 detail=(
                     f"设备（扇区 {sector_id}"
                     f"{'，频段 ' + str(band) if band else ''}）已绑定其他设备: {slot_current_sn}"
+                    "；如需更换，请先解绑该设备位后再绑定"
                 ),
             )
 
@@ -3154,11 +3179,40 @@ async def bind_equipment_to_sector(
                 "equipment_status": "pending_inspection"
             }
         
-    except Exception as e:
+    except HTTPException:
         db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        error_id = uuid.uuid4().hex[:8]
+        logger.exception(
+            "bind_equipment_to_sector integrity_error error_id=%s inspection_id=%s sn=%s sector_id=%s band=%s user_id=%s",
+            error_id,
+            inspection_id,
+            equipment_sn,
+            sector_id,
+            band,
+            getattr(current_user, "id", None),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"绑定发生冲突（可能是重复提交或并发操作），请刷新后重试（错误编号：{error_id}）",
+        )
+    except Exception:
+        db.rollback()
+        error_id = uuid.uuid4().hex[:8]
+        logger.exception(
+            "bind_equipment_to_sector failed error_id=%s inspection_id=%s sn=%s sector_id=%s band=%s user_id=%s",
+            error_id,
+            inspection_id,
+            equipment_sn,
+            sector_id,
+            band,
+            getattr(current_user, "id", None),
+        )
         raise HTTPException(
             status_code=500,
-            detail=f"绑定设备失败: {str(e)}"
+            detail=f"系统异常，绑定失败，请稍后重试或联系管理员（错误编号：{error_id}）",
         )
 
 
