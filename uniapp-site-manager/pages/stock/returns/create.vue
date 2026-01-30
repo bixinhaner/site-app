@@ -403,6 +403,30 @@
 		bindModalBindings.value = []
 	}
 
+	const validateMainSnInSelectedOut = (sn) => {
+		const value = String(sn || '').trim()
+		if (!value || !selectedOut.value) return { ok: false, reason: 'not_in_out' }
+
+		const mainItem = (selectedOut.value.items || []).find(it => it?.is_main_device && String(it?.serial_number || '').trim() === value)
+		if (!mainItem) return { ok: false, reason: 'not_in_out' }
+
+		const maxReturnable = Number(mainItem?.max_returnable || 0)
+		if (maxReturnable <= 0) return { ok: false, reason: 'already_return_requested' }
+
+		return { ok: true, value }
+	}
+
+	const showMainSnPickErrorToast = (sn, reason) => {
+		const value = String(sn || '').trim()
+		if (!value) return
+
+		if (reason === 'already_return_requested') {
+			uni.showToast({ title: $t('stock.returnSnAlreadyReturnRequested', { sn: value }), icon: 'none' })
+			return
+		}
+		uni.showToast({ title: $t('stock.returnSnNotInStockOut', { sn: value }), icon: 'none' })
+	}
+
 	const scanAddMain = async () => {
 		if (!selectedOut.value) {
 			uni.showToast({ title: $t('stock.selectStockOut'), icon: 'none' })
@@ -421,9 +445,9 @@
 			const exist = selectedMainSns.value.includes(value)
 			if (exist) return
 
-			const inOut = (selectedOut.value.items || []).some(it => it?.is_main_device && it?.serial_number === value && Number(it?.max_returnable || 0) > 0)
-			if (!inOut) {
-				uni.showToast({ title: $t('stock.deviceNotInInventoryTitle'), icon: 'none' })
+			const check = validateMainSnInSelectedOut(value)
+			if (!check.ok) {
+				showMainSnPickErrorToast(value, check.reason)
 				return
 			}
 			selectedMainSns.value = selectedMainSns.value.concat([value])
@@ -581,13 +605,14 @@
 
 	const tryPreselectSn = (sn) => {
 		const value = String(sn || '').trim()
-		if (!value || !selectedOut.value) return false
+		if (!value || !selectedOut.value) return { ok: false, reason: 'not_in_out' }
 		const exist = selectedMainSns.value.includes(value)
-		if (exist) return true
-		const inOut = (selectedOut.value.items || []).some(it => it?.is_main_device && it?.serial_number === value && Number(it?.max_returnable || 0) > 0)
-		if (!inOut) return false
+		if (exist) return { ok: true }
+
+		const check = validateMainSnInSelectedOut(value)
+		if (!check.ok) return check
 		selectedMainSns.value = selectedMainSns.value.concat([value])
-		return true
+		return { ok: true }
 	}
 
 	const applyPreselectFromQuery = async () => {
@@ -602,9 +627,7 @@
 		if (!sn) return
 
 		const picked = tryPreselectSn(sn)
-		if (!picked) {
-			uni.showToast({ title: $t('stock.deviceNotInInventoryTitle'), icon: 'none' })
-		}
+		if (!picked.ok) showMainSnPickErrorToast(sn, picked.reason)
 	}
 
 	const confirmUnbindAndRetry = async () => {
