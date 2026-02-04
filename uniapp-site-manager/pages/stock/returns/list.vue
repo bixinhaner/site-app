@@ -107,7 +107,8 @@
 </template>
 
 <script setup>
-	import { computed, getCurrentInstance, onMounted, ref } from 'vue'
+	import { computed, getCurrentInstance, ref } from 'vue'
+	import { onShow } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
@@ -263,7 +264,7 @@
 		uni.navigateTo({ url: '/pages/stock/returns/create' })
 	}
 
-	onMounted(async () => {
+	onShow(async () => {
 		await load(true)
 	})
 </script>

@@ -519,6 +519,23 @@
 		}
 	}
 
+	const goAfterCreateSuccess = () => {
+		// 避免 create -> redirectTo(list) 造成 list 页面被重复压栈（返回按钮需点多次）
+		try {
+			const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+			const prev = pages?.[pages.length - 2]
+			const rawRoute = String(prev?.route || prev?.__route__ || prev?.$page?.route || prev?.$page?.fullPath || '').trim()
+			const route = rawRoute.replace(/^\//, '').split('?')[0]
+			if (route === 'pages/stock/returns/list') {
+				uni.navigateBack({ delta: 1 })
+				return
+			}
+		} catch (e) {
+			// 忽略：兜底跳转到列表页
+		}
+		uni.redirectTo({ url: '/pages/stock/returns/list' })
+	}
+
 	const doSubmit = async () => {
 		const payload = buildSubmitPayload()
 		if (!payload) return
@@ -536,7 +553,7 @@
 
 			if (res.statusCode === 200) {
 				uni.showToast({ title: $t('stock.createReturnSuccess'), icon: 'success' })
-				setTimeout(() => uni.redirectTo({ url: '/pages/stock/returns/list' }), 500)
+				setTimeout(goAfterCreateSuccess, 500)
 				return
 			}
 
