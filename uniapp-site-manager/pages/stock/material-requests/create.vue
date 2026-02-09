@@ -75,7 +75,7 @@
 
 					<view class="preview" v-if="selectedPackage">
 						<view class="u-chip">{{ $t('stock.materialRequestPackagePreviewMain') }} × {{ packageCount }}</view>
-						<view class="u-chip">{{ $t('stock.materialRequestPackagePreviewAuxLines') }} {{ (selectedPackage.items || []).length }}</view>
+						<view class="u-chip">{{ $t('stock.materialRequestPackagePreviewAuxLines') }} {{ selectedPackageAuxLines }}</view>
 					</view>
 
 					<button class="u-btn u-btn-secondary u-btn-sm u-pressable" :disabled="!selectedPackage" @click="applyPackage">
@@ -233,6 +233,18 @@
 	const packageIndex = ref(0)
 	const packageOptions = computed(() => (packages.value || []).map(p => p.package_name))
 	const selectedPackage = computed(() => packages.value?.[packageIndex.value] || null)
+	const selectedPackageAuxLines = computed(() => {
+		const pkg = selectedPackage.value
+		const items = Array.isArray(pkg?.items) ? pkg.items : []
+		const mainEquipmentId = Number(pkg?.main_equipment_id || 0)
+		return items.filter((item) => {
+			const equipmentId = Number(item?.equipment_id || 0)
+			if (mainEquipmentId > 0 && equipmentId > 0 && equipmentId === mainEquipmentId) return false
+			const category = String(item?.category || '').trim()
+			if (category) return category !== 'main_device'
+			return true
+		}).length
+	})
 	const packageCount = ref(1)
 
 	const equipments = ref([])
@@ -742,8 +754,20 @@
 	}
 	.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 	.info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-	.name-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
-	.name { font-size: 14px; font-weight: 700; color: #111827; max-width: 320rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.name-line { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+	.name {
+		flex: 1;
+		min-width: 0;
+		font-size: 14px;
+		font-weight: 700;
+		color: #111827;
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		overflow: hidden;
+		line-height: 1.35;
+		word-break: break-all;
+	}
 	.code { font-size: 12px; color: #9ca3af; }
 
 	.actions { display: flex; align-items: center; gap: 10px; }
