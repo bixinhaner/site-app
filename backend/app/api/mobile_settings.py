@@ -54,6 +54,20 @@ class BoolRule(BaseModel):
   per_user: Dict[str, bool] = {}
 
 
+class IntRule(BaseModel):
+  """
+  通用整型配置项规则（用于距离阈值等）：
+
+  - default: 全局默认值
+  - per_role: 按角色覆盖
+  - per_user: 按用户覆盖（key 为用户ID字符串）
+  """
+
+  default: int = 100
+  per_role: Dict[str, int] = {}
+  per_user: Dict[str, int] = {}
+
+
 class MobileSettingsPayload(BaseModel):
   """
   移动端配置载荷。
@@ -61,6 +75,9 @@ class MobileSettingsPayload(BaseModel):
   - location_mode: 定位模式配置
   - allow_local_photo_upload: 是否允许检查详情本地上传图片
   - local_upload_watermark_with_geo: 检查详情本地上传水印是否携带经纬度和地址
+  - enable_photo_location_distance_check: 拍照时是否启用“实拍坐标 vs 规划坐标”距离比对
+  - photo_location_distance_threshold_m: 超距阈值（米）
+  - distance_exceed_block_upload: 超距是否阻断上传
 
   未来可在此处继续新增更多配置项，
   每个配置项都采用类似 *Rule 的结构。
@@ -70,6 +87,9 @@ class MobileSettingsPayload(BaseModel):
   allow_local_photo_upload: Optional[BoolRule] = None
   local_upload_watermark_with_geo: Optional[BoolRule] = None
   enable_legacy_scan_pickup: Optional[BoolRule] = None
+  enable_photo_location_distance_check: Optional[BoolRule] = None
+  distance_exceed_block_upload: Optional[BoolRule] = None
+  photo_location_distance_threshold_m: Optional[IntRule] = None
 
 
 class EffectiveMobileSettingsResponse(BaseModel):
@@ -79,6 +99,9 @@ class EffectiveMobileSettingsResponse(BaseModel):
   allow_local_photo_upload: bool = True
   local_upload_watermark_with_geo: bool = True
   enable_legacy_scan_pickup: bool = False
+  enable_photo_location_distance_check: bool = True
+  distance_exceed_block_upload: bool = False
+  photo_location_distance_threshold_m: int = 100
 
 
 def _normalize_mode(mode: str) -> str:
@@ -141,6 +164,52 @@ def _normalize_bool_rule(rule: BoolRule) -> Dict[str, Any]:
     if not key:
       continue
     per_user[key] = bool(value)
+
+  return {
+    "default": default_val,
+    "per_role": per_role,
+    "per_user": per_user,
+  }
+
+
+def _normalize_distance_threshold(value: Any) -> int:
+  try:
+    ivalue = int(value)
+  except Exception:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="距离阈值必须是整数（米）",
+    )
+
+  if ivalue < 1 or ivalue > 10000:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="距离阈值范围必须在 1~10000 米",
+    )
+  return ivalue
+
+
+def _normalize_int_rule(rule: IntRule) -> Dict[str, Any]:
+  """
+  规范化前端传入的 IntRule，确保：
+  - default 为合法整数
+  - per_role / per_user 的 key 规范化为字符串，值为合法整数
+  """
+  default_val = _normalize_distance_threshold(rule.default)
+
+  per_role: Dict[str, int] = {}
+  for role, value in (rule.per_role or {}).items():
+    role_key = (role or "").strip()
+    if not role_key:
+      continue
+    per_role[role_key] = _normalize_distance_threshold(value)
+
+  per_user: Dict[str, int] = {}
+  for user_id, value in (rule.per_user or {}).items():
+    key = str(user_id).strip()
+    if not key:
+      continue
+    per_user[key] = _normalize_distance_threshold(value)
 
   return {
     "default": default_val,
@@ -270,6 +339,46 @@ def _resolve_bool_for_user(
   return default_val
 
 
+def _resolve_int_for_user(
+  settings: Dict[str, Any],
+  key: str,
+  user: Optional[User],
+  default: int,
+) -> int:
+  """
+  根据配置与用户信息，解析对该用户最终生效的整型配置。
+
+  优先级：
+  1. per_user[user.id]
+  2. per_role[user.role]
+  3. default（若配置中缺失，则回退到传入的 default）
+  """
+  rule = (settings or {}).get(key) or {}
+  raw_default = rule.get("default")
+  if raw_default is None:
+    default_val = default
+  else:
+    default_val = _normalize_distance_threshold(raw_default)
+
+  per_role = rule.get("per_role") or {}
+  per_user = rule.get("per_user") or {}
+
+  # 1. 按用户覆盖
+  if user is not None and getattr(user, "id", None) is not None:
+    ukey = str(user.id)
+    if ukey in per_user:
+      return _normalize_distance_threshold(per_user[ukey])
+
+  # 2. 按角色覆盖
+  if user is not None and getattr(user, "role", None):
+    role_key = user.role
+    if role_key in per_role:
+      return _normalize_distance_threshold(per_role[role_key])
+
+  # 3. 全局默认
+  return default_val
+
+
 def _get_location_mode_default(db: Session) -> str:
   """
   获取 location_mode 的全局默认值（不考虑 per_user、per_role）。
@@ -313,6 +422,9 @@ async def get_mobile_settings(
   allow_upload_rule = raw.get("allow_local_photo_upload") or {}
   local_upload_watermark_rule = raw.get("local_upload_watermark_with_geo") or {}
   legacy_scan_pickup_rule = raw.get("enable_legacy_scan_pickup") or {}
+  location_distance_check_rule = raw.get("enable_photo_location_distance_check") or {}
+  distance_block_upload_rule = raw.get("distance_exceed_block_upload") or {}
+  distance_threshold_rule = raw.get("photo_location_distance_threshold_m") or {}
 
   # 构造 LocationModeRule，保证字段存在
   lm = LocationModeRule(
@@ -333,6 +445,32 @@ async def get_mobile_settings(
     per_user=local_upload_watermark_rule.get("per_user") or {},
   )
 
+  location_distance_check = BoolRule(
+    default=location_distance_check_rule.get("default") if isinstance(location_distance_check_rule.get("default"), bool) else True,
+    per_role=location_distance_check_rule.get("per_role") or {},
+    per_user=location_distance_check_rule.get("per_user") or {},
+  )
+
+  distance_block_upload = BoolRule(
+    default=distance_block_upload_rule.get("default") if isinstance(distance_block_upload_rule.get("default"), bool) else False,
+    per_role=distance_block_upload_rule.get("per_role") or {},
+    per_user=distance_block_upload_rule.get("per_user") or {},
+  )
+
+  distance_threshold = IntRule(
+    default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
+    per_role={
+      str(k): _normalize_distance_threshold(v)
+      for k, v in (distance_threshold_rule.get("per_role") or {}).items()
+      if str(k).strip() != ""
+    },
+    per_user={
+      str(k): _normalize_distance_threshold(v)
+      for k, v in (distance_threshold_rule.get("per_user") or {}).items()
+      if str(k).strip() != ""
+    },
+  )
+
   return MobileSettingsPayload(
     location_mode=lm,
     allow_local_photo_upload=allow_upload,
@@ -342,6 +480,9 @@ async def get_mobile_settings(
       per_role=legacy_scan_pickup_rule.get("per_role") or {},
       per_user=legacy_scan_pickup_rule.get("per_user") or {},
     ),
+    enable_photo_location_distance_check=location_distance_check,
+    distance_exceed_block_upload=distance_block_upload,
+    photo_location_distance_threshold_m=distance_threshold,
   )
 
 
@@ -385,6 +526,15 @@ async def update_mobile_settings(
   if payload.enable_legacy_scan_pickup is not None:
     settings["enable_legacy_scan_pickup"] = _normalize_bool_rule(payload.enable_legacy_scan_pickup)
 
+  if payload.enable_photo_location_distance_check is not None:
+    settings["enable_photo_location_distance_check"] = _normalize_bool_rule(payload.enable_photo_location_distance_check)
+
+  if payload.distance_exceed_block_upload is not None:
+    settings["distance_exceed_block_upload"] = _normalize_bool_rule(payload.distance_exceed_block_upload)
+
+  if payload.photo_location_distance_threshold_m is not None:
+    settings["photo_location_distance_threshold_m"] = _normalize_int_rule(payload.photo_location_distance_threshold_m)
+
   _save_mobile_settings(db, settings)
 
   # 返回最新配置
@@ -416,11 +566,43 @@ async def update_mobile_settings(
     per_user=legacy_scan_pickup_rule.get("per_user") or {},
   )
 
+  location_distance_check_rule = settings.get("enable_photo_location_distance_check") or {}
+  location_distance_check = BoolRule(
+    default=location_distance_check_rule.get("default") if isinstance(location_distance_check_rule.get("default"), bool) else True,
+    per_role=location_distance_check_rule.get("per_role") or {},
+    per_user=location_distance_check_rule.get("per_user") or {},
+  )
+
+  distance_block_upload_rule = settings.get("distance_exceed_block_upload") or {}
+  distance_block_upload = BoolRule(
+    default=distance_block_upload_rule.get("default") if isinstance(distance_block_upload_rule.get("default"), bool) else False,
+    per_role=distance_block_upload_rule.get("per_role") or {},
+    per_user=distance_block_upload_rule.get("per_user") or {},
+  )
+
+  distance_threshold_rule = settings.get("photo_location_distance_threshold_m") or {}
+  distance_threshold = IntRule(
+    default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
+    per_role={
+      str(k): _normalize_distance_threshold(v)
+      for k, v in (distance_threshold_rule.get("per_role") or {}).items()
+      if str(k).strip() != ""
+    },
+    per_user={
+      str(k): _normalize_distance_threshold(v)
+      for k, v in (distance_threshold_rule.get("per_user") or {}).items()
+      if str(k).strip() != ""
+    },
+  )
+
   return MobileSettingsPayload(
     location_mode=lm,
     allow_local_photo_upload=allow_upload,
     local_upload_watermark_with_geo=local_upload_watermark,
     enable_legacy_scan_pickup=legacy_scan_pickup,
+    enable_photo_location_distance_check=location_distance_check,
+    distance_exceed_block_upload=distance_block_upload,
+    photo_location_distance_threshold_m=distance_threshold,
   )
 
 
@@ -455,11 +637,32 @@ async def get_effective_mobile_settings(
     user=current_user,
     default=False,
   )
+  enable_photo_location_distance_check = _resolve_bool_for_user(
+    settings,
+    key="enable_photo_location_distance_check",
+    user=current_user,
+    default=True,
+  )
+  distance_exceed_block_upload = _resolve_bool_for_user(
+    settings,
+    key="distance_exceed_block_upload",
+    user=current_user,
+    default=False,
+  )
+  photo_location_distance_threshold_m = _resolve_int_for_user(
+    settings,
+    key="photo_location_distance_threshold_m",
+    user=current_user,
+    default=100,
+  )
   return EffectiveMobileSettingsResponse(
     location_mode=location_mode,
     allow_local_photo_upload=allow_local_photo_upload,
     local_upload_watermark_with_geo=local_upload_watermark_with_geo,
     enable_legacy_scan_pickup=enable_legacy_scan_pickup,
+    enable_photo_location_distance_check=enable_photo_location_distance_check,
+    distance_exceed_block_upload=distance_exceed_block_upload,
+    photo_location_distance_threshold_m=photo_location_distance_threshold_m,
   )
 
 

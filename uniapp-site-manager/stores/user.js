@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { buildApiUrl, API_ENDPOINTS, createRequestConfig } from '@/config/api.js'
-import { setLocationMode, setAllowLocalPhotoUpload, setLocalUploadWatermarkWithGeo } from '@/utils/locationStrategy.js'
+import {
+	setLocationMode,
+	setAllowLocalPhotoUpload,
+	setLocalUploadWatermarkWithGeo,
+	setEnablePhotoLocationDistanceCheck,
+	setDistanceExceedBlockUpload,
+	setPhotoLocationDistanceThresholdM,
+} from '@/utils/locationStrategy.js'
 import { flush, startMobileLogReporter, stopMobileLogReporter } from '@/utils/mobileLogReporter.js'
 
 export const useUserStore = defineStore('user', () => {
@@ -102,6 +109,21 @@ export const useUserStore = defineStore('user', () => {
 							} else {
 								// 未返回时默认携带（沿用现状）
 								setLocalUploadWatermarkWithGeo(true)
+							}
+							if (typeof settingsRes.data.enable_photo_location_distance_check === 'boolean') {
+								setEnablePhotoLocationDistanceCheck(settingsRes.data.enable_photo_location_distance_check)
+							} else {
+								setEnablePhotoLocationDistanceCheck(true)
+							}
+							if (typeof settingsRes.data.distance_exceed_block_upload === 'boolean') {
+								setDistanceExceedBlockUpload(settingsRes.data.distance_exceed_block_upload)
+							} else {
+								setDistanceExceedBlockUpload(false)
+							}
+							if (typeof settingsRes.data.photo_location_distance_threshold_m === 'number') {
+								setPhotoLocationDistanceThresholdM(settingsRes.data.photo_location_distance_threshold_m)
+							} else {
+								setPhotoLocationDistanceThresholdM(100)
 							}
 							if (typeof settingsRes.data.enable_legacy_scan_pickup === 'boolean') {
 								legacyScanPickupEnabled.value = settingsRes.data.enable_legacy_scan_pickup === true
@@ -282,6 +304,21 @@ export const useUserStore = defineStore('user', () => {
 								setLocalUploadWatermarkWithGeo(settingsRes.data.local_upload_watermark_with_geo)
 							} else {
 								setLocalUploadWatermarkWithGeo(true)
+							}
+							if (typeof settingsRes.data.enable_photo_location_distance_check === 'boolean') {
+								setEnablePhotoLocationDistanceCheck(settingsRes.data.enable_photo_location_distance_check)
+							} else {
+								setEnablePhotoLocationDistanceCheck(true)
+							}
+							if (typeof settingsRes.data.distance_exceed_block_upload === 'boolean') {
+								setDistanceExceedBlockUpload(settingsRes.data.distance_exceed_block_upload)
+							} else {
+								setDistanceExceedBlockUpload(false)
+							}
+							if (typeof settingsRes.data.photo_location_distance_threshold_m === 'number') {
+								setPhotoLocationDistanceThresholdM(settingsRes.data.photo_location_distance_threshold_m)
+							} else {
+								setPhotoLocationDistanceThresholdM(100)
 							}
 							if (typeof settingsRes.data.enable_legacy_scan_pickup === 'boolean') {
 								legacyScanPickupEnabled.value = settingsRes.data.enable_legacy_scan_pickup === true

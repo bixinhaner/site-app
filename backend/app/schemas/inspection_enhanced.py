@@ -204,9 +204,11 @@ class InspectionPhotoResponse(BaseModel):
     file_size: int
     latitude: Optional[float]
     longitude: Optional[float]
+    gps_accuracy: Optional[float] = None
     address: Optional[str]
     taken_at: datetime
     has_watermark: bool
+    watermark_data: Optional[Dict[str, Any]] = None
     review_status: Optional[str]
     created_at: datetime
 

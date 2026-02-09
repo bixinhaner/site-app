@@ -347,7 +347,27 @@ export class WatermarkTool {
       const hasCoords = isFinite(latitude) && isFinite(longitude) && !(latitude === 0 && longitude === 0)
 
       if (hasCoords) {
-        lines.push(`📍 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
+        const plannedLatitude = Number(gps.plannedLatitude)
+        const plannedLongitude = Number(gps.plannedLongitude)
+        const hasPlannedCoords = (
+          isFinite(plannedLatitude) &&
+          isFinite(plannedLongitude) &&
+          !(plannedLatitude === 0 && plannedLongitude === 0)
+        )
+        const distanceToPlan = Number(gps.distanceToPlanM)
+        const hasDistanceToPlan = isFinite(distanceToPlan) && distanceToPlan >= 0
+        const planCoordinateMissing = gps.planCoordinateMissing === true
+
+        if (hasPlannedCoords) {
+          const distanceText = hasDistanceToPlan ? ` | 距离:${distanceToPlan.toFixed(1)}m` : ''
+          lines.push(
+            `📍 实拍:${latitude.toFixed(6)},${longitude.toFixed(6)} | 规划:${plannedLatitude.toFixed(6)},${plannedLongitude.toFixed(6)}${distanceText}`,
+          )
+        } else if (planCoordinateMissing) {
+          lines.push(`📍 实拍:${latitude.toFixed(6)},${longitude.toFixed(6)} | 规划坐标缺失`)
+        } else {
+          lines.push(`📍 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
+        }
 
         const accuracy = Number(gps.accuracy || 0)
         if (isFinite(accuracy) && accuracy > 0) {
@@ -659,6 +679,24 @@ export class WatermarkTool {
           accuracy: o.accuracy || 0,
           provider: o.provider || 'native-plugin'
         }
+        if (o.plannedLatitude !== undefined && o.plannedLatitude !== null) {
+          data.plannedLatitude = o.plannedLatitude
+        }
+        if (o.plannedLongitude !== undefined && o.plannedLongitude !== null) {
+          data.plannedLongitude = o.plannedLongitude
+        }
+        if (o.distanceToPlanM !== undefined && o.distanceToPlanM !== null) {
+          data.distanceToPlanM = o.distanceToPlanM
+        }
+        if (o.planCoordinateMissing !== undefined) {
+          data.planCoordinateMissing = o.planCoordinateMissing === true
+        }
+        if (o.distanceThresholdM !== undefined && o.distanceThresholdM !== null) {
+          data.distanceThresholdM = o.distanceThresholdM
+        }
+        if (o.distanceExceeded !== undefined) {
+          data.distanceExceeded = o.distanceExceeded === true
+        }
         const addressObj = o.addressInfo || (typeof o.address === 'string' ? { formattedAddress: o.address } : o.address) || (o.formattedAddress ? { formattedAddress: o.formattedAddress } : null)
         locationResult = {
           code: 0,
@@ -769,7 +807,13 @@ export class WatermarkTool {
         address: address,
         watermarkAddress: watermarkAddress,
         addressInfo: locationResult.address,
-        provider: locationResult.data.provider || 'native-plugin'
+        provider: locationResult.data.provider || 'native-plugin',
+        plannedLatitude: locationResult.data.plannedLatitude,
+        plannedLongitude: locationResult.data.plannedLongitude,
+        distanceToPlanM: locationResult.data.distanceToPlanM,
+        planCoordinateMissing: locationResult.data.planCoordinateMissing === true,
+        distanceThresholdM: locationResult.data.distanceThresholdM,
+        distanceExceeded: locationResult.data.distanceExceeded === true,
       }
       
       // 合并GPS信息到水印数据

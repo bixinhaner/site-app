@@ -836,6 +836,11 @@
 	
 	// 响应式数据
 		const inspectionData = ref(null)
+		const plannedSiteLocation = ref({
+			latitude: null,
+			longitude: null,
+			loaded: false
+		})
 		const checkItems = ref([])
 		const categories = ref([])
 		const currentCategory = ref('all')
@@ -864,6 +869,88 @@
 	}
 
 	const issueCount = computed(() => checkItems.value.filter(isIssueItem).length)
+
+	const toFiniteCoord = (value) => {
+		const n = Number(value)
+		return isFinite(n) ? n : null
+	}
+
+	const isValidCoordinatePair = (latitude, longitude) => {
+		return (
+			isFinite(latitude) &&
+			isFinite(longitude) &&
+			!(Number(latitude) === 0 && Number(longitude) === 0)
+		)
+	}
+
+	const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
+		const R = 6371000
+		const dLat = ((lat2 - lat1) * Math.PI) / 180
+		const dLon = ((lon2 - lon1) * Math.PI) / 180
+		const a =
+			Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+			Math.cos((lat1 * Math.PI) / 180) *
+				Math.cos((lat2 * Math.PI) / 180) *
+				Math.sin(dLon / 2) *
+				Math.sin(dLon / 2)
+		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+		return R * c
+	}
+
+	const isPhotoAlreadyUploaded = (photo) => {
+		if (!photo) return false
+		if (photo.id) return true
+		const path = String(photo.file_path || '')
+		return (
+			path.startsWith('uploads/') ||
+			path.startsWith('/uploads') ||
+			path.startsWith('http')
+		)
+	}
+
+	const buildLocationCompareResult = ({
+		actualLatitude,
+		actualLongitude,
+		compareEnabled,
+		thresholdM
+	}) => {
+		const normalizedThreshold = Math.max(
+			1,
+			Math.min(10000, Math.round(Number(thresholdM) || 100))
+		)
+		const result = {
+			compareEnabled: compareEnabled === true,
+			thresholdM: normalizedThreshold,
+			plannedLatitude: null,
+			plannedLongitude: null,
+			distanceM: null,
+			exceeded: false,
+			planCoordinateMissing: false
+		}
+
+		if (!result.compareEnabled) {
+			return result
+		}
+
+		const shotLat = Number(actualLatitude)
+		const shotLon = Number(actualLongitude)
+		if (!isValidCoordinatePair(shotLat, shotLon)) {
+			return result
+		}
+
+		const planLat = toFiniteCoord(plannedSiteLocation.value?.latitude)
+		const planLon = toFiniteCoord(plannedSiteLocation.value?.longitude)
+		if (!isValidCoordinatePair(Number(planLat), Number(planLon))) {
+			result.planCoordinateMissing = true
+			return result
+		}
+
+		result.plannedLatitude = planLat
+		result.plannedLongitude = planLon
+		result.distanceM = calculateDistanceMeters(shotLat, shotLon, Number(planLat), Number(planLon))
+		result.exceeded = isFinite(result.distanceM) && result.distanceM > result.thresholdM
+		return result
+	}
 	
 	// 提交前核查弹窗控制
 	const showPreSubmitCheckModal = ref(false)
@@ -1082,6 +1169,53 @@
 				omcEverTimer = null
 			}
 		}
+
+		const loadPlannedSiteLocation = async (siteId) => {
+			const normalizedSiteId = String(siteId || '').trim()
+			if (!normalizedSiteId || !userStore.token) {
+				plannedSiteLocation.value = {
+					latitude: null,
+					longitude: null,
+					loaded: true
+				}
+				return
+			}
+
+			try {
+				const siteResponse = await uni.request({
+					url: buildApiUrl(`/api/sites/${normalizedSiteId}`),
+					...createRequestConfig({
+						method: 'GET',
+						headers: getAuthHeaders(userStore.token)
+					})
+				})
+
+				if (siteResponse.statusCode === 200 && siteResponse.data) {
+					const siteData = siteResponse.data
+					plannedSiteLocation.value = {
+						latitude: toFiniteCoord(siteData.latitude),
+						longitude: toFiniteCoord(siteData.longitude),
+						loaded: true
+					}
+
+					if (!inspectionData.value?.site_name) {
+						const serverSiteName = siteData.site_name || siteData.name
+						if (serverSiteName) {
+							inspectionData.value.site_name = serverSiteName
+						}
+					}
+					return
+				}
+			} catch (siteErr) {
+				console.warn('加载站点规划坐标失败:', siteErr)
+			}
+
+			plannedSiteLocation.value = {
+				latitude: null,
+				longitude: null,
+				loaded: true
+			}
+		}
 		
 		// 生命周期
 		onLoad((options) => {
@@ -1121,23 +1255,8 @@
 						}
 					}
 
-					// 备用方案：通过site_id获取站点名称
-					if (!inspectionData.value.site_name && inspectionData.value.site_id) {
-						try {
-							const siteResponse = await uni.request({
-								url: buildApiUrl(`/api/sites/${inspectionData.value.site_id}`),
-								...createRequestConfig({
-									method: 'GET',
-									headers: getAuthHeaders(userStore.token)
-								})
-							})
-							if (siteResponse.statusCode === 200) {
-								inspectionData.value.site_name = siteResponse.data?.name || inspectionData.value.site_name
-							}
-						} catch (siteErr) {
-							console.warn('通过site_id获取站点信息失败:', siteErr)
-						}
-					}
+					// 补全站点名称与规划坐标（用于拍照距离比对）
+					await loadPlannedSiteLocation(inspectionData.value.site_id)
 				
 				// 调试检查数据结构
 				console.log('检查数据调试信息:', {
@@ -1597,9 +1716,18 @@
 
 	const takePhotoInternal = async ({ fieldId = null, fieldLabel = '' } = {}) => {
 		// 根据移动端配置决定是否允许本地上传
-		const { getAllowLocalPhotoUpload, getLocalUploadWatermarkWithGeo } = await import('@/utils/locationStrategy.js')
+		const {
+			getAllowLocalPhotoUpload,
+			getLocalUploadWatermarkWithGeo,
+			getEnablePhotoLocationDistanceCheck,
+			getDistanceExceedBlockUpload,
+			getPhotoLocationDistanceThresholdM
+		} = await import('@/utils/locationStrategy.js')
 		const allowAlbum = getAllowLocalPhotoUpload()
 		const localUploadWatermarkWithGeo = getLocalUploadWatermarkWithGeo()
+		const enableLocationDistanceCompare = getEnablePhotoLocationDistanceCheck()
+		const distanceExceedBlockUpload = getDistanceExceedBlockUpload()
+		const distanceThresholdM = getPhotoLocationDistanceThresholdM()
 
 		const itemList = allowAlbum
 			? [$t('common.takePhoto'), $t('common.selectFromAlbum')]
@@ -1656,6 +1784,12 @@
 											: $t('messages.addingGPSWatermark'),
 										mask: true
 									})
+									let locationCompare = buildLocationCompareResult({
+										actualLatitude: gpsUsed.latitude,
+										actualLongitude: gpsUsed.longitude,
+										compareEnabled: enableLocationDistanceCompare,
+										thresholdM: distanceThresholdM
+									})
 									try {
 										// 相册模式需要现取一次定位
 										if (!isCamera) {
@@ -1671,6 +1805,21 @@
 												gpsUsed = { latitude: 0, longitude: 0, accuracy: 0, address: '' }
 											}
 										}
+										locationCompare = buildLocationCompareResult({
+											actualLatitude: gpsUsed.latitude,
+											actualLongitude: gpsUsed.longitude,
+											compareEnabled: enableLocationDistanceCompare,
+											thresholdM: distanceThresholdM
+										})
+										const gpsForWatermark = {
+											...gpsUsed,
+											plannedLatitude: locationCompare.plannedLatitude,
+											plannedLongitude: locationCompare.plannedLongitude,
+											distanceToPlanM: locationCompare.distanceM,
+											planCoordinateMissing: locationCompare.planCoordinateMissing,
+											distanceThresholdM: locationCompare.thresholdM,
+											distanceExceeded: locationCompare.exceeded,
+										}
 										const watermarkTool = getWatermarkTool()
 										const wmFieldLabel = String(fieldLabel || '').trim()
 										const wmItemName = wmFieldLabel
@@ -1678,12 +1827,12 @@
 											: (currentItem.value.item_name || $t('inspection.checkItem'))
 										finalImagePath = await watermarkTool.addWatermark(
 											finalImagePath,
-											gpsUsed.latitude,
-											gpsUsed.longitude,
-											gpsUsed.address,
+											gpsForWatermark.latitude,
+											gpsForWatermark.longitude,
+											gpsForWatermark.address,
 											userStore.userInfo?.username || $t('messages.unknownInspector'),
 											wmItemName,
-											gpsUsed,
+											gpsForWatermark,
 											(!isCamera && !localUploadWatermarkWithGeo)
 												? { skipLocation: true, localUploadNote: $t('messages.localUploadPhotoWatermark') }
 												: {}
@@ -1718,12 +1867,31 @@
 										address: gpsUsed.address,
 										has_watermark: usedWatermark,
 										local_upload_without_geo: (!isCamera && !localUploadWatermarkWithGeo),
+										location_compare: {
+											compare_enabled: enableLocationDistanceCompare === true,
+											threshold_m: Math.max(1, Math.min(10000, Math.round(Number(distanceThresholdM) || 100))),
+											block_upload_when_exceed: distanceExceedBlockUpload === true,
+											plan_coordinate_missing: locationCompare.planCoordinateMissing === true,
+											planned_latitude: locationCompare.plannedLatitude,
+											planned_longitude: locationCompare.plannedLongitude,
+											distance_to_plan_m: locationCompare.distanceM,
+											distance_exceeded: locationCompare.exceeded === true,
+										},
 										watermark_data: usedWatermark ? {
 											timestamp: new Date().toISOString(),
 											coordinates: (!isCamera && !localUploadWatermarkWithGeo) ? '' : `${gpsUsed.latitude},${gpsUsed.longitude}`,
 											accuracy: (!isCamera && !localUploadWatermarkWithGeo) ? undefined : gpsUsed.accuracy,
-										inspector: userStore.userInfo?.username || $t('messages.unknownInspector'),
-										item_name: currentItem.value.item_name || $t('inspection.checkItem')
+											inspector: userStore.userInfo?.username || $t('messages.unknownInspector'),
+											item_name: currentItem.value.item_name || $t('inspection.checkItem'),
+											location_compare: {
+												planned_coordinates: (locationCompare.plannedLatitude !== null && locationCompare.plannedLongitude !== null)
+													? `${Number(locationCompare.plannedLatitude).toFixed(6)}, ${Number(locationCompare.plannedLongitude).toFixed(6)}`
+													: null,
+												distance_to_plan_m: locationCompare.distanceM,
+												distance_threshold_m: Math.max(1, Math.min(10000, Math.round(Number(distanceThresholdM) || 100))),
+												distance_exceeded: locationCompare.exceeded === true,
+												plan_coordinate_missing: locationCompare.planCoordinateMissing === true,
+											},
 										} : null
 									}
 								
@@ -2136,6 +2304,29 @@
 								
 								// 添加水印文字
 								const ts = formatWatermarkTimestamp()
+								const compareCoordLine = (() => {
+									const shotLat = Number(latitude)
+									const shotLon = Number(longitude)
+									const hasShotCoords = isValidCoordinatePair(shotLat, shotLon)
+									if (!hasShotCoords) return `📍 ${t('messages.gpsNotObtained')}`
+
+									const planLat = Number(gpsExtra?.plannedLatitude)
+									const planLon = Number(gpsExtra?.plannedLongitude)
+									const hasPlanCoords = isValidCoordinatePair(planLat, planLon)
+									const distanceToPlan = Number(gpsExtra?.distanceToPlanM)
+									const hasDistanceToPlan = isFinite(distanceToPlan) && distanceToPlan >= 0
+
+									if (hasPlanCoords) {
+										const distanceText = hasDistanceToPlan ? ` | 距离:${distanceToPlan.toFixed(1)}m` : ''
+										return `📍 实拍:${shotLat.toFixed(6)},${shotLon.toFixed(6)} | 规划:${planLat.toFixed(6)},${planLon.toFixed(6)}${distanceText}`
+									}
+
+									if (gpsExtra?.planCoordinateMissing === true) {
+										return `📍 实拍:${shotLat.toFixed(6)},${shotLon.toFixed(6)} | 规划坐标缺失`
+									}
+
+									return `📍 ${shotLat.toFixed(6)}, ${shotLon.toFixed(6)}`
+								})()
 								const watermarkText = skipLocation
 									? [
 										`🕐 ${ts}`,
@@ -2145,7 +2336,7 @@
 									]
 									: [
 										`🕐 ${ts}`,
-										`📍 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+										compareCoordLine,
 										...(address ? [`🏠 ${address}`] : []),
 										`👤 ${inspector}`,
 										`📋 ${itemName}`
@@ -2713,6 +2904,62 @@
 			console.error('清除自动保存数据失败:', e)
 		}
 	}
+
+	const confirmLocationDistancePolicyBeforeUpload = async (photos) => {
+		const sourcePhotos = Array.isArray(photos) ? photos : []
+		const comparedPhotos = sourcePhotos
+			.map((photo) => photo?.location_compare || {})
+			.filter((compare) => compare && compare.compare_enabled === true)
+
+		if (!comparedPhotos.length) return true
+
+		const exceededPhotos = comparedPhotos.filter((compare) => compare.distance_exceeded === true)
+		if (!exceededPhotos.length) return true
+
+		const maxDistance = exceededPhotos.reduce((maxVal, compare) => {
+			const current = Number(compare.distance_to_plan_m)
+			if (!isFinite(current)) return maxVal
+			return Math.max(maxVal, current)
+		}, 0)
+		const thresholdVal = Number(exceededPhotos[0]?.threshold_m)
+		const thresholdText = isFinite(thresholdVal) ? `${thresholdVal}米` : '阈值'
+		const blockUpload = exceededPhotos.some((compare) => compare.block_upload_when_exceed === true)
+
+		const missingPlanCount = comparedPhotos.filter((compare) => compare.plan_coordinate_missing === true).length
+		const maxDistanceText = isFinite(maxDistance) && maxDistance > 0
+			? `，最大约${maxDistance.toFixed(1)}米`
+			: ''
+		const missingPlanText = missingPlanCount > 0
+			? `；另有${missingPlanCount}张照片规划坐标缺失`
+			: ''
+
+		const content = `检测到${exceededPhotos.length}张照片与规划坐标距离超过${thresholdText}${maxDistanceText}${missingPlanText}。`
+
+		if (blockUpload) {
+			await new Promise((resolve) => {
+				uni.showModal({
+					title: '位置超阈值，已阻断上传',
+					content: `${content}请返回重拍后再保存。`,
+					showCancel: false,
+					confirmText: '我知道了',
+					success: () => resolve(true),
+					fail: () => resolve(true)
+				})
+			})
+			return false
+		}
+
+		return await new Promise((resolve) => {
+			uni.showModal({
+				title: '位置超阈值提醒',
+				content: `${content}是否继续上传？`,
+				confirmText: '继续上传',
+				cancelText: '返回检查',
+				success: (res) => resolve(!!res.confirm),
+				fail: () => resolve(false)
+			})
+		})
+	}
 		
 		const saveCurrentItem = async () => {
 		// 设备级检查项必须先绑定设备，防止误保存
@@ -2818,6 +3065,14 @@
 			
 			// 先上传照片（如果有新照片的话）
 			if (currentItem.value.photos && currentItem.value.photos.length > 0) {
+				const pendingUploadPhotos = currentItem.value.photos.filter((photo) => {
+					return !isPhotoAlreadyUploaded(photo) && !!photo?.file_path
+				})
+				const canContinueUpload = await confirmLocationDistancePolicyBeforeUpload(pendingUploadPhotos)
+				if (!canContinueUpload) {
+					return
+				}
+
 				console.log('开始上传照片，照片数量:', currentItem.value.photos.length)
 				uni.showLoading({ title: $t('messages.uploadingPhoto') })
 				
@@ -2830,14 +3085,7 @@
 							console.log('检查照片路径:', photo.file_path)
 						
 						// 跳过已上传的照片（有photo.id或已是服务器路径）
-						if (
-							photo?.id ||
-							(photo.file_path && (
-								photo.file_path.startsWith('uploads/') ||
-								photo.file_path.startsWith('/uploads') ||
-								photo.file_path.startsWith('http')
-							))
-						) {
+						if (isPhotoAlreadyUploaded(photo)) {
 							console.log('跳过已上传的照片:', photo.file_path, photo?.id)
 							continue
 						}
@@ -2876,9 +3124,47 @@
 							if (photo.longitude !== undefined && photo.longitude !== null) {
 								photoData.gps_longitude = photo.longitude
 							}
-							if (photo.gps_accuracy !== undefined && photo.gps_accuracy !== null) {
+								if (photo.gps_accuracy !== undefined && photo.gps_accuracy !== null) {
 								photoData.gps_accuracy = photo.gps_accuracy
 							}
+
+								const compare = photo?.location_compare || {}
+								if (typeof compare.compare_enabled === 'boolean') {
+									photoData.distance_compare_enabled = compare.compare_enabled
+								}
+								if (typeof compare.block_upload_when_exceed === 'boolean') {
+									photoData.distance_exceed_block_upload = compare.block_upload_when_exceed
+								}
+								if (compare.threshold_m !== undefined && compare.threshold_m !== null) {
+									const thresholdM = Number(compare.threshold_m)
+									if (isFinite(thresholdM)) {
+										photoData.location_distance_threshold_m = thresholdM
+									}
+								}
+								if (compare.distance_to_plan_m !== undefined && compare.distance_to_plan_m !== null) {
+									const distanceToPlan = Number(compare.distance_to_plan_m)
+									if (isFinite(distanceToPlan)) {
+										photoData.distance_to_plan_m = distanceToPlan
+									}
+								}
+								if (typeof compare.distance_exceeded === 'boolean') {
+									photoData.location_distance_exceeded = compare.distance_exceeded
+								}
+								if (typeof compare.plan_coordinate_missing === 'boolean') {
+									photoData.plan_coordinate_missing = compare.plan_coordinate_missing
+								}
+								if (compare.planned_latitude !== undefined && compare.planned_latitude !== null) {
+									const plannedLatitude = Number(compare.planned_latitude)
+									if (isFinite(plannedLatitude)) {
+										photoData.planned_latitude = plannedLatitude
+									}
+								}
+								if (compare.planned_longitude !== undefined && compare.planned_longitude !== null) {
+									const plannedLongitude = Number(compare.planned_longitude)
+									if (isFinite(plannedLongitude)) {
+										photoData.planned_longitude = plannedLongitude
+									}
+								}
 							
 							console.log('照片上传数据:', photoData)
 							

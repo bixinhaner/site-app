@@ -949,6 +949,14 @@ async def upload_inspection_photo(
     gps_latitude: float = Form(0),
     gps_longitude: float = Form(0),
     gps_accuracy: Optional[float] = Form(None),
+    planned_latitude: Optional[float] = Form(None),
+    planned_longitude: Optional[float] = Form(None),
+    distance_to_plan_m: Optional[float] = Form(None),
+    location_distance_threshold_m: Optional[float] = Form(None),
+    location_distance_exceeded: Optional[bool] = Form(None),
+    plan_coordinate_missing: Optional[bool] = Form(None),
+    distance_compare_enabled: Optional[bool] = Form(None),
+    distance_exceed_block_upload: Optional[bool] = Form(None),
     has_watermark: bool = Form(False),
     local_upload_without_geo: bool = Form(False),
     replace_existing: bool = Form(False),
@@ -965,6 +973,14 @@ async def upload_inspection_photo(
     print(f"  gps_latitude: {gps_latitude} (type: {type(gps_latitude)})")
     print(f"  gps_longitude: {gps_longitude} (type: {type(gps_longitude)})")
     print(f"  gps_accuracy: {gps_accuracy} (type: {type(gps_accuracy)})")
+    print(f"  planned_latitude: {planned_latitude} (type: {type(planned_latitude)})")
+    print(f"  planned_longitude: {planned_longitude} (type: {type(planned_longitude)})")
+    print(f"  distance_to_plan_m: {distance_to_plan_m} (type: {type(distance_to_plan_m)})")
+    print(f"  location_distance_threshold_m: {location_distance_threshold_m} (type: {type(location_distance_threshold_m)})")
+    print(f"  location_distance_exceeded: {location_distance_exceeded} (type: {type(location_distance_exceeded)})")
+    print(f"  plan_coordinate_missing: {plan_coordinate_missing} (type: {type(plan_coordinate_missing)})")
+    print(f"  distance_compare_enabled: {distance_compare_enabled} (type: {type(distance_compare_enabled)})")
+    print(f"  distance_exceed_block_upload: {distance_exceed_block_upload} (type: {type(distance_exceed_block_upload)})")
     print(f"  has_watermark: {has_watermark} (type: {type(has_watermark)})")
     print(f"  local_upload_without_geo: {local_upload_without_geo} (type: {type(local_upload_without_geo)})")
     print(f"  file.filename: {file.filename}")
@@ -1117,6 +1133,21 @@ async def upload_inspection_photo(
     # 根据是否已有水印决定是否添加水印
     watermarked_path = file_path
     watermark_data = None
+    location_compare = {}
+    if planned_latitude is not None and planned_longitude is not None:
+        location_compare["planned_coordinates"] = f"{planned_latitude:.6f}, {planned_longitude:.6f}"
+    if distance_to_plan_m is not None:
+        location_compare["distance_to_plan_m"] = round(float(distance_to_plan_m), 2)
+    if location_distance_threshold_m is not None:
+        location_compare["distance_threshold_m"] = round(float(location_distance_threshold_m), 2)
+    if location_distance_exceeded is not None:
+        location_compare["distance_exceeded"] = bool(location_distance_exceeded)
+    if plan_coordinate_missing is not None:
+        location_compare["plan_coordinate_missing"] = bool(plan_coordinate_missing)
+    if distance_compare_enabled is not None:
+        location_compare["distance_compare_enabled"] = bool(distance_compare_enabled)
+    if distance_exceed_block_upload is not None:
+        location_compare["distance_exceed_block_upload"] = bool(distance_exceed_block_upload)
     
     if not has_watermark:
         # 前端没有水印，后端添加水印
@@ -1127,6 +1158,8 @@ async def upload_inspection_photo(
             "inspector": current_user.full_name or current_user.username,
             "accuracy": f"{gps_accuracy}m" if gps_accuracy else "N/A"
         }
+        if location_compare:
+            watermark_data["location_compare"] = location_compare
         watermarked_path = await generate_watermark(file_path, watermark_data)
     else:
         # 前端已有水印，跳过后端水印处理
@@ -1137,6 +1170,8 @@ async def upload_inspection_photo(
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "inspector": current_user.full_name or current_user.username
         }
+        if location_compare:
+            watermark_data["location_compare"] = location_compare
 
     # 兜底校验：图片必须可完整解码；并检测“下半截空白”异常（Android canvas 偶发）
     try:

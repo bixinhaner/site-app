@@ -460,7 +460,361 @@
       </el-collapse>
     </el-card>
 
-    <!-- 卡片 4：旧流程扫码领货（我的设备） -->
+    <!-- 卡片 4：拍照规划坐标比对 -->
+    <el-card class="mb16" v-loading="loading">
+      <template #header>
+        <div class="card-header">
+          <span>拍照规划坐标比对</span>
+        </div>
+      </template>
+
+      <el-form :model="form" label-width="200px" :disabled="!canEdit">
+        <el-form-item label="全局比对开关">
+          <el-switch
+            v-model="form.enable_photo_location_distance_check.default"
+            active-text="开启比对"
+            inactive-text="关闭比对"
+          />
+        </el-form-item>
+
+        <el-form-item label="全局阈值（米）">
+          <el-input-number
+            v-model="form.photo_location_distance_threshold_m.default"
+            :min="1"
+            :max="10000"
+            :step="1"
+            controls-position="right"
+          />
+        </el-form-item>
+
+        <el-form-item label="超限上传策略">
+          <el-switch
+            v-model="form.distance_exceed_block_upload.default"
+            active-text="超限阻断上传"
+            inactive-text="超限仅提醒不阻断"
+          />
+        </el-form-item>
+
+        <el-form-item label="说明">
+          <ul class="hint-list">
+            <li>开启后：移动端拍照会将“实拍坐标 vs 规划坐标”的距离写入水印与上传元数据。</li>
+            <li>阈值默认 100 米，可按角色和用户覆盖。</li>
+            <li>超限阻断关闭时：保存前仅提示可继续上传；开启时：超限会阻断上传。</li>
+            <li>当站点没有规划坐标时，水印会显示“规划坐标缺失”。</li>
+          </ul>
+        </el-form-item>
+      </el-form>
+
+      <el-collapse v-model="activeAdvancedLocationDistanceCheck" class="mt8">
+        <el-collapse-item name="role-distance-check">
+          <template #title>
+            <span>按角色覆盖（距离比对开关）</span>
+          </template>
+          <el-table :data="roleRows" size="small" border style="width: 100%">
+            <el-table-column prop="label" label="角色" width="140" />
+            <el-table-column label="距离比对开关">
+              <template #default="{ row }">
+                <el-select
+                  v-model="form.enable_photo_location_distance_check.per_role[row.key]"
+                  placeholder="跟随全局"
+                  style="width: 220px"
+                  :disabled="!canEdit"
+                  clearable
+                >
+                  <el-option label="跟随全局" :value="''" />
+                  <el-option label="开启比对" value="allow" />
+                  <el-option label="关闭比对" value="deny" />
+                </el-select>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-collapse-item>
+
+        <el-collapse-item name="user-distance-check">
+          <template #title>
+            <span>按用户覆盖（距离比对开关）</span>
+          </template>
+          <div class="user-rules">
+            <div class="user-rule-form">
+              <el-select
+                v-model="newLocationDistanceCheckUserRule.user_id"
+                filterable
+                remote
+                reserve-keyword
+                placeholder="搜索用户名/姓名/邮箱"
+                :remote-method="searchUsers"
+                :loading="userSelectLoading"
+                style="width: 260px"
+                :disabled="!canEdit"
+              >
+                <el-option
+                  v-for="opt in userOptions"
+                  :key="opt.id"
+                  :label="opt.label"
+                  :value="String(opt.id)"
+                />
+              </el-select>
+              <el-select
+                v-model="newLocationDistanceCheckUserRule.flag"
+                placeholder="距离比对开关"
+                style="width: 180px; margin-left: 8px"
+                :disabled="!canEdit"
+              >
+                <el-option label="开启比对" value="allow" />
+                <el-option label="关闭比对" value="deny" />
+              </el-select>
+              <el-button
+                type="primary"
+                size="small"
+                style="margin-left: 8px"
+                :disabled="!canEdit"
+                @click="addLocationDistanceCheckUserRule"
+              >
+                添加
+              </el-button>
+            </div>
+
+            <el-table
+              v-if="form.enable_photo_location_distance_check.per_user.length"
+              :data="form.enable_photo_location_distance_check.per_user"
+              size="small"
+              border
+              style="width: 100%; margin-top: 8px"
+            >
+              <el-table-column prop="user_id" label="用户ID" width="120" />
+              <el-table-column prop="flag" label="距离比对开关" width="180">
+                <template #default="{ row }">
+                  <span v-if="row.flag === 'allow'">开启比对</span>
+                  <span v-else-if="row.flag === 'deny'">关闭比对</span>
+                  <span v-else>（未知）</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="80">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    text
+                    size="small"
+                    :disabled="!canEdit"
+                    @click="removeLocationDistanceCheckUserRule($index)"
+                  >
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+
+      <el-collapse v-model="activeAdvancedDistanceBlockUpload" class="mt8">
+        <el-collapse-item name="role-distance-block">
+          <template #title>
+            <span>按角色覆盖（超限阻断上传）</span>
+          </template>
+          <el-table :data="roleRows" size="small" border style="width: 100%">
+            <el-table-column prop="label" label="角色" width="140" />
+            <el-table-column label="超限上传策略">
+              <template #default="{ row }">
+                <el-select
+                  v-model="form.distance_exceed_block_upload.per_role[row.key]"
+                  placeholder="跟随全局"
+                  style="width: 220px"
+                  :disabled="!canEdit"
+                  clearable
+                >
+                  <el-option label="跟随全局" :value="''" />
+                  <el-option label="超限阻断上传" value="allow" />
+                  <el-option label="超限仅提醒不阻断" value="deny" />
+                </el-select>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-collapse-item>
+
+        <el-collapse-item name="user-distance-block">
+          <template #title>
+            <span>按用户覆盖（超限阻断上传）</span>
+          </template>
+          <div class="user-rules">
+            <div class="user-rule-form">
+              <el-select
+                v-model="newDistanceBlockUploadUserRule.user_id"
+                filterable
+                remote
+                reserve-keyword
+                placeholder="搜索用户名/姓名/邮箱"
+                :remote-method="searchUsers"
+                :loading="userSelectLoading"
+                style="width: 260px"
+                :disabled="!canEdit"
+              >
+                <el-option
+                  v-for="opt in userOptions"
+                  :key="opt.id"
+                  :label="opt.label"
+                  :value="String(opt.id)"
+                />
+              </el-select>
+              <el-select
+                v-model="newDistanceBlockUploadUserRule.flag"
+                placeholder="超限上传策略"
+                style="width: 220px; margin-left: 8px"
+                :disabled="!canEdit"
+              >
+                <el-option label="超限阻断上传" value="allow" />
+                <el-option label="超限仅提醒不阻断" value="deny" />
+              </el-select>
+              <el-button
+                type="primary"
+                size="small"
+                style="margin-left: 8px"
+                :disabled="!canEdit"
+                @click="addDistanceBlockUploadUserRule"
+              >
+                添加
+              </el-button>
+            </div>
+
+            <el-table
+              v-if="form.distance_exceed_block_upload.per_user.length"
+              :data="form.distance_exceed_block_upload.per_user"
+              size="small"
+              border
+              style="width: 100%; margin-top: 8px"
+            >
+              <el-table-column prop="user_id" label="用户ID" width="120" />
+              <el-table-column prop="flag" label="超限上传策略" width="220">
+                <template #default="{ row }">
+                  <span v-if="row.flag === 'allow'">超限阻断上传</span>
+                  <span v-else-if="row.flag === 'deny'">超限仅提醒不阻断</span>
+                  <span v-else>（未知）</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="80">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    text
+                    size="small"
+                    :disabled="!canEdit"
+                    @click="removeDistanceBlockUploadUserRule($index)"
+                  >
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+
+      <el-collapse v-model="activeAdvancedDistanceThreshold" class="mt8">
+        <el-collapse-item name="role-distance-threshold">
+          <template #title>
+            <span>按角色覆盖（超限阈值米数）</span>
+          </template>
+          <el-table :data="roleRows" size="small" border style="width: 100%">
+            <el-table-column prop="label" label="角色" width="140" />
+            <el-table-column label="阈值（米）">
+              <template #default="{ row }">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <el-input-number
+                    v-model="form.photo_location_distance_threshold_m.per_role[row.key]"
+                    :min="1"
+                    :max="10000"
+                    :step="1"
+                    controls-position="right"
+                    :disabled="!canEdit"
+                    style="width: 180px"
+                  />
+                  <el-button
+                    size="small"
+                    text
+                    :disabled="!canEdit"
+                    @click="form.photo_location_distance_threshold_m.per_role[row.key] = null"
+                  >
+                    跟随全局
+                  </el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-collapse-item>
+
+        <el-collapse-item name="user-distance-threshold">
+          <template #title>
+            <span>按用户覆盖（超限阈值米数）</span>
+          </template>
+          <div class="user-rules">
+            <div class="user-rule-form">
+              <el-select
+                v-model="newDistanceThresholdUserRule.user_id"
+                filterable
+                remote
+                reserve-keyword
+                placeholder="搜索用户名/姓名/邮箱"
+                :remote-method="searchUsers"
+                :loading="userSelectLoading"
+                style="width: 260px"
+                :disabled="!canEdit"
+              >
+                <el-option
+                  v-for="opt in userOptions"
+                  :key="opt.id"
+                  :label="opt.label"
+                  :value="String(opt.id)"
+                />
+              </el-select>
+              <el-input-number
+                v-model="newDistanceThresholdUserRule.value"
+                :min="1"
+                :max="10000"
+                :step="1"
+                controls-position="right"
+                style="width: 180px; margin-left: 8px"
+                :disabled="!canEdit"
+              />
+              <el-button
+                type="primary"
+                size="small"
+                style="margin-left: 8px"
+                :disabled="!canEdit"
+                @click="addDistanceThresholdUserRule"
+              >
+                添加
+              </el-button>
+            </div>
+
+            <el-table
+              v-if="form.photo_location_distance_threshold_m.per_user.length"
+              :data="form.photo_location_distance_threshold_m.per_user"
+              size="small"
+              border
+              style="width: 100%; margin-top: 8px"
+            >
+              <el-table-column prop="user_id" label="用户ID" width="120" />
+              <el-table-column prop="value" label="阈值（米）" width="160" />
+              <el-table-column label="操作" width="80">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    text
+                    size="small"
+                    :disabled="!canEdit"
+                    @click="removeDistanceThresholdUserRule($index)"
+                  >
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
+    <!-- 卡片 5：旧流程扫码领货（我的设备） -->
     <el-card class="mb16" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -671,6 +1025,39 @@ const form = ref({
     },
     per_user: [],
   },
+  enable_photo_location_distance_check: {
+    default: true,
+    per_role: {
+      admin: '',
+      manager: '',
+      inspector: '',
+      surveyor: '',
+      user: '',
+    },
+    per_user: [],
+  },
+  distance_exceed_block_upload: {
+    default: false,
+    per_role: {
+      admin: '',
+      manager: '',
+      inspector: '',
+      surveyor: '',
+      user: '',
+    },
+    per_user: [],
+  },
+  photo_location_distance_threshold_m: {
+    default: 100,
+    per_role: {
+      admin: null,
+      manager: null,
+      inspector: null,
+      surveyor: null,
+      user: null,
+    },
+    per_user: [],
+  },
 })
 
 const newLocationUserRule = ref({
@@ -693,11 +1080,29 @@ const newLegacyScanPickupUserRule = ref({
   flag: 'deny',
 })
 
+const newLocationDistanceCheckUserRule = ref({
+  user_id: '',
+  flag: 'allow',
+})
+
+const newDistanceBlockUploadUserRule = ref({
+  user_id: '',
+  flag: 'deny',
+})
+
+const newDistanceThresholdUserRule = ref({
+  user_id: '',
+  value: 100,
+})
+
 // 高级配置折叠面板（默认全部收起，减少页面占用）
 const activeAdvancedLocation = ref([])
 const activeAdvancedUpload = ref([])
 const activeAdvancedLocalUploadWatermark = ref([])
 const activeAdvancedLegacyScanPickup = ref([])
+const activeAdvancedLocationDistanceCheck = ref([])
+const activeAdvancedDistanceBlockUpload = ref([])
+const activeAdvancedDistanceThreshold = ref([])
 
 // 用户搜索下拉选项
 const userOptions = ref([])
@@ -775,6 +1180,67 @@ const buildBoolRulePayload = (formRule) => {
   return payload
 }
 
+// 通用整型规则：后端 -> 表单
+const fillIntRuleToForm = (formRule, serverRule, roles, defaultValue = 100) => {
+  const safeRule = serverRule || {}
+  const perRole = safeRule.per_role || {}
+  const perUser = safeRule.per_user || {}
+  const defaultNum = Number(safeRule.default)
+  formRule.default = Number.isFinite(defaultNum) ? Math.max(1, Math.min(10000, Math.round(defaultNum))) : defaultValue
+
+  const mappedPerRole = {}
+  roles.forEach((role) => {
+    if (Object.prototype.hasOwnProperty.call(perRole, role)) {
+      const roleVal = Number(perRole[role])
+      mappedPerRole[role] = Number.isFinite(roleVal)
+        ? Math.max(1, Math.min(10000, Math.round(roleVal)))
+        : null
+    } else {
+      mappedPerRole[role] = null
+    }
+  })
+  formRule.per_role = mappedPerRole
+
+  formRule.per_user = Object.entries(perUser).map(([id, val]) => {
+    const num = Number(val)
+    return {
+      user_id: id,
+      value: Number.isFinite(num) ? Math.max(1, Math.min(10000, Math.round(num))) : defaultValue,
+    }
+  })
+}
+
+// 通用整型规则：表单 -> 后端 payload
+const buildIntRulePayload = (formRule, fallbackDefault = 100) => {
+  const defaultNumRaw = Number(formRule.default)
+  const defaultNum = Number.isFinite(defaultNumRaw)
+    ? Math.max(1, Math.min(10000, Math.round(defaultNumRaw)))
+    : fallbackDefault
+
+  const payload = {
+    default: defaultNum,
+    per_role: {},
+    per_user: {},
+  }
+
+  Object.entries(formRule.per_role || {}).forEach(([role, value]) => {
+    if (value === null || value === undefined || value === '') return
+    const num = Number(value)
+    if (!Number.isFinite(num)) return
+    payload.per_role[role] = Math.max(1, Math.min(10000, Math.round(num)))
+  })
+
+  ;(formRule.per_user || []).forEach((rule) => {
+    const id = String(rule.user_id || '').trim()
+    if (!id) return
+    const num = Number(rule.value)
+    if (!Number.isFinite(num)) return
+    payload.per_user[id] = Math.max(1, Math.min(10000, Math.round(num)))
+  })
+
+  return payload
+}
+
 const loadConfig = async () => {
   try {
     loading.value = true
@@ -786,6 +1252,9 @@ const loadConfig = async () => {
     const uploadRule = raw.allow_local_photo_upload || {}
     const localUploadWatermarkRule = raw.local_upload_watermark_with_geo || {}
     const legacyScanPickupRule = raw.enable_legacy_scan_pickup || {}
+    const locationDistanceCheckRule = raw.enable_photo_location_distance_check || {}
+    const distanceBlockUploadRule = raw.distance_exceed_block_upload || {}
+    const distanceThresholdRule = raw.photo_location_distance_threshold_m || {}
 
     form.value.location_mode.default =
       (lm.default && lm.default.toLowerCase()) === 'native' ? 'native' : 'baidu'
@@ -825,6 +1294,27 @@ const loadConfig = async () => {
       false,
     )
 
+    fillBoolRuleToForm(
+      form.value.enable_photo_location_distance_check,
+      locationDistanceCheckRule,
+      roleKeys,
+      true,
+    )
+
+    fillBoolRuleToForm(
+      form.value.distance_exceed_block_upload,
+      distanceBlockUploadRule,
+      roleKeys,
+      false,
+    )
+
+    fillIntRuleToForm(
+      form.value.photo_location_distance_threshold_m,
+      distanceThresholdRule,
+      roleKeys,
+      100,
+    )
+
   } catch (e) {
     console.error(e)
     const detail = e?.response?.data?.detail
@@ -850,6 +1340,9 @@ const save = async () => {
       allow_local_photo_upload: {},
       local_upload_watermark_with_geo: {},
       enable_legacy_scan_pickup: {},
+      enable_photo_location_distance_check: {},
+      distance_exceed_block_upload: {},
+      photo_location_distance_threshold_m: {},
     }
 
     // 构建 per_role：仅提交明确选择的模式
@@ -880,6 +1373,19 @@ const save = async () => {
 
     payload.enable_legacy_scan_pickup = buildBoolRulePayload(
       form.value.enable_legacy_scan_pickup,
+    )
+
+    payload.enable_photo_location_distance_check = buildBoolRulePayload(
+      form.value.enable_photo_location_distance_check,
+    )
+
+    payload.distance_exceed_block_upload = buildBoolRulePayload(
+      form.value.distance_exceed_block_upload,
+    )
+
+    payload.photo_location_distance_threshold_m = buildIntRulePayload(
+      form.value.photo_location_distance_threshold_m,
+      100,
     )
 
     await mobileSettingsApi.updateMobileSettings(payload)
@@ -1023,6 +1529,96 @@ const addLegacyScanPickupUserRule = () => {
 
 const removeLegacyScanPickupUserRule = (index) => {
   form.value.enable_legacy_scan_pickup.per_user.splice(index, 1)
+}
+
+const addLocationDistanceCheckUserRule = () => {
+  const id = String(newLocationDistanceCheckUserRule.value.user_id || '').trim()
+  const flag = newLocationDistanceCheckUserRule.value.flag
+  if (!id) {
+    ElMessage.warning('请选择用户')
+    return
+  }
+  if (flag !== 'allow' && flag !== 'deny') {
+    ElMessage.warning('请选择比对开关策略')
+    return
+  }
+  const exists = form.value.enable_photo_location_distance_check.per_user.some(
+    (r) => String(r.user_id) === id,
+  )
+  if (exists) {
+    ElMessage.warning('该用户已存在距离比对策略')
+    return
+  }
+  form.value.enable_photo_location_distance_check.per_user.push({
+    user_id: id,
+    flag,
+  })
+  newLocationDistanceCheckUserRule.value.user_id = ''
+  newLocationDistanceCheckUserRule.value.flag = 'allow'
+}
+
+const removeLocationDistanceCheckUserRule = (index) => {
+  form.value.enable_photo_location_distance_check.per_user.splice(index, 1)
+}
+
+const addDistanceBlockUploadUserRule = () => {
+  const id = String(newDistanceBlockUploadUserRule.value.user_id || '').trim()
+  const flag = newDistanceBlockUploadUserRule.value.flag
+  if (!id) {
+    ElMessage.warning('请选择用户')
+    return
+  }
+  if (flag !== 'allow' && flag !== 'deny') {
+    ElMessage.warning('请选择超限阻断策略')
+    return
+  }
+  const exists = form.value.distance_exceed_block_upload.per_user.some(
+    (r) => String(r.user_id) === id,
+  )
+  if (exists) {
+    ElMessage.warning('该用户已存在超限阻断策略')
+    return
+  }
+  form.value.distance_exceed_block_upload.per_user.push({
+    user_id: id,
+    flag,
+  })
+  newDistanceBlockUploadUserRule.value.user_id = ''
+  newDistanceBlockUploadUserRule.value.flag = 'deny'
+}
+
+const removeDistanceBlockUploadUserRule = (index) => {
+  form.value.distance_exceed_block_upload.per_user.splice(index, 1)
+}
+
+const addDistanceThresholdUserRule = () => {
+  const id = String(newDistanceThresholdUserRule.value.user_id || '').trim()
+  const value = Number(newDistanceThresholdUserRule.value.value)
+  if (!id) {
+    ElMessage.warning('请选择用户')
+    return
+  }
+  if (!Number.isFinite(value) || value < 1 || value > 10000) {
+    ElMessage.warning('请输入 1-10000 之间的米数阈值')
+    return
+  }
+  const exists = form.value.photo_location_distance_threshold_m.per_user.some(
+    (r) => String(r.user_id) === id,
+  )
+  if (exists) {
+    ElMessage.warning('该用户已存在阈值策略')
+    return
+  }
+  form.value.photo_location_distance_threshold_m.per_user.push({
+    user_id: id,
+    value: Math.round(value),
+  })
+  newDistanceThresholdUserRule.value.user_id = ''
+  newDistanceThresholdUserRule.value.value = 100
+}
+
+const removeDistanceThresholdUserRule = (index) => {
+  form.value.photo_location_distance_threshold_m.per_user.splice(index, 1)
 }
 
 // 远程搜索用户（用于按用户覆盖的选择器）

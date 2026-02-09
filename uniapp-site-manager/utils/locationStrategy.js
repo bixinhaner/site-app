@@ -28,6 +28,12 @@ let locationMode = 'baidu'
 let allowLocalPhotoUpload = true
 // 检查详情“本地/相册上传”照片水印是否携带经纬度和地址，默认携带（沿用现状）
 let localUploadWatermarkWithGeo = true
+// 是否启用“实拍坐标 vs 规划坐标”距离比对
+let enablePhotoLocationDistanceCheck = true
+// 超距是否阻断上传
+let distanceExceedBlockUpload = false
+// 超距阈值（米）
+let photoLocationDistanceThresholdM = 100
 
 export const getLocationMode = () => locationMode
 
@@ -52,6 +58,30 @@ export const getLocalUploadWatermarkWithGeo = () => localUploadWatermarkWithGeo
 export const setLocalUploadWatermarkWithGeo = (flag) => {
   // 任何非严格 false 的传入都视为携带，避免因为后端缺字段导致意外禁用
   localUploadWatermarkWithGeo = flag !== false
+}
+
+export const getEnablePhotoLocationDistanceCheck = () => enablePhotoLocationDistanceCheck
+
+export const setEnablePhotoLocationDistanceCheck = (flag) => {
+  enablePhotoLocationDistanceCheck = flag !== false
+}
+
+export const getDistanceExceedBlockUpload = () => distanceExceedBlockUpload
+
+export const setDistanceExceedBlockUpload = (flag) => {
+  distanceExceedBlockUpload = flag === true
+}
+
+export const getPhotoLocationDistanceThresholdM = () => photoLocationDistanceThresholdM
+
+export const setPhotoLocationDistanceThresholdM = (value) => {
+  const parsed = Number(value)
+  if (!isFinite(parsed)) {
+    photoLocationDistanceThresholdM = 100
+    return
+  }
+  const rounded = Math.round(parsed)
+  photoLocationDistanceThresholdM = Math.max(1, Math.min(10000, rounded))
 }
 
 /**

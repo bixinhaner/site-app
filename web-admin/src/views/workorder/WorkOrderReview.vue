@@ -222,6 +222,10 @@
 	              <el-radio-button label="小区" />
 	              <el-radio-button label="设备" />
 	            </el-radio-group>
+	            <el-radio-group v-model="distanceFilter" size="small">
+	              <el-radio-button label="全部距离" />
+	              <el-radio-button label="仅超距" />
+	            </el-radio-group>
 	            <el-dropdown
 	              style="margin-left: 12px;"
 	              trigger="click"
@@ -341,6 +345,31 @@
                   <el-tag size="small" type="warning">无内容</el-tag>
                 </div>
               </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="位置比对" width="180">
+            <template #default="{ row }">
+              <template v-if="getItemLocationCompareStats(row).comparedCount > 0">
+                <el-tag
+                  :type="getItemLocationCompareStats(row).exceededCount > 0 ? 'danger' : 'success'"
+                  size="small"
+                >
+                  {{
+                    getItemLocationCompareStats(row).exceededCount > 0
+                      ? `超距 ${getItemLocationCompareStats(row).exceededCount} 张`
+                      : '正常'
+                  }}
+                </el-tag>
+                <el-tag
+                  v-if="getItemLocationCompareStats(row).missingPlanCount > 0"
+                  type="warning"
+                  size="small"
+                  style="margin-left: 4px;"
+                >
+                  缺规划 {{ getItemLocationCompareStats(row).missingPlanCount }} 张
+                </el-tag>
+              </template>
+              <span v-else>-</span>
             </template>
           </el-table-column>
           <el-table-column prop="status" label="提交状态" width="120">
@@ -741,6 +770,36 @@
               <el-descriptions-item label="经度">{{ selectedPhoto.longitude || '-' }}</el-descriptions-item>
               <el-descriptions-item label="GPS精度">{{ selectedPhoto.gps_accuracy || '-' }}</el-descriptions-item>
               <el-descriptions-item label="地址">{{ selectedPhoto.address || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="规划坐标">
+                {{
+                  selectedPhotoLocationCompare?.plannedCoordinatesText
+                    || (selectedPhotoLocationCompare?.planCoordinateMissing ? '规划坐标缺失' : '-')
+                }}
+              </el-descriptions-item>
+              <el-descriptions-item label="距规划距离">
+                {{
+                  Number.isFinite(selectedPhotoLocationCompare?.distanceToPlanM)
+                    ? `${selectedPhotoLocationCompare.distanceToPlanM.toFixed(1)} m`
+                    : '-'
+                }}
+              </el-descriptions-item>
+              <el-descriptions-item label="位置结论">
+                <template v-if="selectedPhotoLocationCompare">
+                  <el-tag
+                    :type="selectedPhotoLocationCompare.exceeded ? 'danger' : 'success'"
+                    size="small"
+                  >
+                    {{ selectedPhotoLocationCompare.exceeded ? '超阈值' : '正常' }}
+                  </el-tag>
+                  <span
+                    v-if="Number.isFinite(selectedPhotoLocationCompare.thresholdM)"
+                    style="margin-left: 6px;"
+                  >
+                    (阈值 {{ selectedPhotoLocationCompare.thresholdM }}m)
+                  </span>
+                </template>
+                <span v-else>-</span>
+              </el-descriptions-item>
               <el-descriptions-item label="水印">{{ selectedPhoto.has_watermark ? '是' : '否' }}</el-descriptions-item>
             </el-descriptions>
           </el-col>
@@ -1030,6 +1089,7 @@ const comments = ref('')
 const commentsI18n = reactive({ en: '', id: '' })
 const reviewListMode = ref('全部')
 const scopeFilter = ref('全部范围')
+const distanceFilter = ref('全部距离')
 const photoDetailVisible = ref(false)
 const selectedPhoto = ref(null)
 const itemDetailVisible = ref(false)
@@ -1356,6 +1416,77 @@ const canReviewCheckItem = (item) => {
   return status === 'completed'
 }
 
+const toBool = (value) => {
+  if (value === true || value === false) return value
+  if (typeof value === 'number') return value === 1
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    return normalized === 'true' || normalized === '1' || normalized === 'yes'
+  }
+  return false
+}
+
+const getPhotoLocationCompare = (photo) => {
+  if (!photo || typeof photo !== 'object') return null
+  const rawCompare = photo?.watermark_data?.location_compare || photo?.location_compare
+  if (!rawCompare || typeof rawCompare !== 'object') return null
+
+  const distanceToPlanRaw = Number(rawCompare.distance_to_plan_m)
+  const thresholdRaw = Number(rawCompare.distance_threshold_m)
+  const hasDistance = Number.isFinite(distanceToPlanRaw) && distanceToPlanRaw >= 0
+  const hasThreshold = Number.isFinite(thresholdRaw) && thresholdRaw > 0
+  const exceeded = toBool(rawCompare.distance_exceeded)
+  const planCoordinateMissing = toBool(rawCompare.plan_coordinate_missing)
+
+  const plannedCoordinatesText = (() => {
+    const text = String(rawCompare.planned_coordinates || '').trim()
+    if (text) return text
+    const lat = Number(rawCompare.planned_latitude)
+    const lon = Number(rawCompare.planned_longitude)
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return `${lat.toFixed(6)}, ${lon.toFixed(6)}`
+    }
+    return ''
+  })()
+
+  return {
+    distanceToPlanM: hasDistance ? distanceToPlanRaw : null,
+    thresholdM: hasThreshold ? thresholdRaw : null,
+    exceeded,
+    planCoordinateMissing,
+    plannedCoordinatesText,
+    compared: hasDistance || planCoordinateMissing || plannedCoordinatesText !== '',
+  }
+}
+
+const getItemLocationCompareStats = (item) => {
+  const photos = Array.isArray(item?.photos) ? item.photos : []
+  const stats = {
+    comparedCount: 0,
+    exceededCount: 0,
+    missingPlanCount: 0,
+    maxDistanceM: null,
+  }
+
+  photos.forEach((photo) => {
+    const compare = getPhotoLocationCompare(photo)
+    if (!compare || compare.compared !== true) return
+    stats.comparedCount += 1
+    if (compare.exceeded === true) {
+      stats.exceededCount += 1
+    }
+    if (compare.planCoordinateMissing === true) {
+      stats.missingPlanCount += 1
+    }
+    if (Number.isFinite(compare.distanceToPlanM)) {
+      const v = Number(compare.distanceToPlanM)
+      stats.maxDistanceM = stats.maxDistanceM === null ? v : Math.max(stats.maxDistanceM, v)
+    }
+  })
+
+  return stats
+}
+
 const checkItemReviewDisabledReason = (item) => {
   const statusText = checkItemStatusText(item?.status)
   return `该检查项未完成提交（当前：${statusText}），无法审核`
@@ -1425,7 +1556,14 @@ const displayedItems = computed(() => {
   if (scopeFilter.value && scopeFilter.value !== '全部范围') {
     list = list.filter(item => getItemScopeLevel(item) === scopeFilter.value)
   }
+  if (distanceFilter.value === '仅超距') {
+    list = list.filter((item) => getItemLocationCompareStats(item).exceededCount > 0)
+  }
   return list
+})
+
+const selectedPhotoLocationCompare = computed(() => {
+  return getPhotoLocationCompare(selectedPhoto.value)
 })
 
 // 检查是否有未审核的检查项
