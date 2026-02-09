@@ -101,8 +101,28 @@
 					<view class="block">
 						<view class="block-head">
 							<text class="block-title">{{ $t('stock.mainDevice') }}</text>
-							<text class="block-sub">{{ $t('stock.scanAddMainDevice') }}</text>
+							<text class="block-sub">{{ $t('stock.returnMainSnListHint') }}</text>
 						</view>
+						<view v-if="mainSnItems.length" class="main-sn-list">
+							<view class="main-sn-head">
+								<text class="main-sn-title">{{ $t('stock.returnMainSnListTitle', { count: mainSnItems.length }) }}</text>
+								<text
+									v-if="mainSnCanToggle"
+									class="main-sn-toggle u-pressable"
+									@click="toggleMainSnExpanded"
+								>
+									{{ mainSnExpanded ? $t('stock.returnMainSnCollapse') : $t('stock.returnMainSnExpand') }}
+								</text>
+							</view>
+							<view v-for="row in visibleMainSnItems" :key="row.key" class="main-sn-row">
+								<text class="mono main-sn-value">{{ row.sn || '-' }}</text>
+								<text class="main-sn-status" :class="`status-${row.status}`">{{ mainSnStatusText(row.status) }}</text>
+							</view>
+							<text v-if="mainSnHiddenCount > 0 && !mainSnExpanded" class="main-sn-more">
+								{{ $t('stock.returnMainSnMoreCount', { count: mainSnHiddenCount }) }}
+							</text>
+						</view>
+						<view v-else class="main-sn-empty">{{ $t('stock.returnMainSnListEmpty') }}</view>
 						<button class="u-btn u-btn-primary u-btn-sm u-pressable" @click="scanAddMain">
 							<uni-icons type="scan" size="18" color="#fff" />
 							<text>{{ $t('stock.scanAddMainDevice') }}</text>
@@ -227,6 +247,8 @@
 	const selectedMainSns = ref([])
 	const auxQtyMap = ref({})
 	const offlineDocumentId = ref(null)
+	const MAIN_SN_COLLAPSE_THRESHOLD = 8
+	const mainSnExpanded = ref(true)
 
 	// 从“我的设备→设备详情→退库”带入
 	const preselectOutId = ref('')
@@ -251,6 +273,51 @@
 		const items = selectedOut.value?.items || []
 		return items.filter(it => it && !it.is_main_device)
 	})
+
+	const mainSnItems = computed(() => {
+		const items = selectedOut.value?.items || []
+		return items
+			.filter(it => it && it.is_main_device)
+			.map((it, idx) => {
+				const rawSn = String(it?.serial_number || '').trim()
+				const maxReturnable = Number(it?.max_returnable || 0)
+				let status = 'returnable'
+				if (!rawSn) status = 'missing_sn'
+				else if (maxReturnable <= 0) status = 'already_requested'
+				return {
+					key: String(it?.item_id || rawSn || `main_${idx}`),
+					sn: rawSn,
+					status,
+				}
+			})
+	})
+
+	const mainSnCanToggle = computed(() => mainSnItems.value.length > MAIN_SN_COLLAPSE_THRESHOLD)
+	const visibleMainSnItems = computed(() => {
+		if (mainSnExpanded.value) return mainSnItems.value
+		if (!mainSnCanToggle.value) return mainSnItems.value
+		return mainSnItems.value.slice(0, MAIN_SN_COLLAPSE_THRESHOLD)
+	})
+	const mainSnHiddenCount = computed(() => {
+		if (!mainSnCanToggle.value || mainSnExpanded.value) return 0
+		return Math.max(mainSnItems.value.length - MAIN_SN_COLLAPSE_THRESHOLD, 0)
+	})
+
+	const mainSnStatusText = (status) => {
+		if (status === 'already_requested') return $t('stock.returnMainSnStatusAlreadyRequested')
+		if (status === 'missing_sn') return $t('stock.returnMainSnStatusMissing')
+		return $t('stock.returnMainSnStatusReturnable')
+	}
+
+	const setMainSnDefaultExpanded = (out) => {
+		const totalMainSn = (out?.items || []).filter(it => it?.is_main_device).length
+		mainSnExpanded.value = totalMainSn <= MAIN_SN_COLLAPSE_THRESHOLD
+	}
+
+	const toggleMainSnExpanded = () => {
+		if (!mainSnCanToggle.value) return
+		mainSnExpanded.value = !mainSnExpanded.value
+	}
 
 	const timeAgo = (iso) => {
 		if (!iso) return '-'
@@ -342,6 +409,7 @@
 	const selectOut = (o) => {
 		selectedOut.value = o
 		selectedMainSns.value = []
+		setMainSnDefaultExpanded(o)
 		const map = {}
 		for (const it of (o?.items || [])) {
 			if (it?.is_main_device) continue
@@ -830,6 +898,18 @@
 	.picked-list { margin-top: 10px; display: grid; gap: 8px; }
 	.picked-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.9); border: 1px solid rgba(229, 231, 235, 0.9); }
 	.remove { font-size: 18px; font-weight: 900; color: #ef4444; }
+	.main-sn-list { margin-bottom: 10px; padding: 10px; border-radius: 14px; background: rgba(255, 255, 255, 0.9); border: 1px solid rgba(229, 231, 235, 0.9); display: grid; gap: 8px; }
+	.main-sn-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+	.main-sn-title { font-size: 12px; color: var(--text-secondary); }
+	.main-sn-toggle { font-size: 12px; font-weight: 700; color: var(--color-primary); }
+	.main-sn-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 12px; background: rgba(243, 244, 246, 0.72); border: 1px solid rgba(229, 231, 235, 0.9); }
+	.main-sn-value { font-size: 12px; color: var(--text-primary); flex: 1; min-width: 0; word-break: break-all; }
+	.main-sn-status { font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+	.status-returnable { color: #15803d; background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.22); }
+	.status-already_requested { color: #475569; background: rgba(148, 163, 184, 0.10); border: 1px solid rgba(148, 163, 184, 0.18); }
+	.status-missing_sn { color: #b45309; background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.22); }
+	.main-sn-more { font-size: 11px; color: var(--text-secondary); text-align: center; }
+	.main-sn-empty { margin-bottom: 10px; font-size: 12px; color: var(--text-secondary); }
 
 	.aux-list { display: grid; gap: 10px; }
 	.aux-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
