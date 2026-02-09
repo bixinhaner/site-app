@@ -308,11 +308,18 @@
               <text class="summary-label">{{ $t('stock.returnDocumentNumber') }}</text>
               <text class="summary-value mono">{{ deviceDetailRecord.return_document_number }}</text>
             </view>
-            <view v-if="deviceDetailRecord.return_warehouse_name" class="summary-row">
-              <text class="summary-label">{{ $t('stock.returnWarehouseLabel') }}</text>
-              <text class="summary-value">{{ deviceDetailRecord.return_warehouse_name }}</text>
-            </view>
-          </view>
+	            <view v-if="deviceDetailRecord.return_warehouse_name" class="summary-row">
+	              <text class="summary-label">{{ $t('stock.returnWarehouseLabel') }}</text>
+	              <text class="summary-value">{{ deviceDetailRecord.return_warehouse_name }}</text>
+	            </view>
+	            <view v-if="showDeviceRejectReason" class="summary-reject-box">
+	              <text class="reject-icon">!</text>
+	              <view class="reject-content">
+	                <text class="reject-title">{{ $t('stock.rejectReason') }}</text>
+	                <text class="reject-text">{{ deviceRejectReasonText }}</text>
+	              </view>
+	            </view>
+	          </view>
 
           <view class="device-section">
             <view class="device-section-title-row">
@@ -585,12 +592,13 @@ export default {
       issuedHasMore: false,
       issuedLoading: false,
       issuedLoadingMore: false,
-      issuedTabCounts: {
-        picked: 0,
-        pending_receive: 0,
-        installed: 0,
-        returned: 0,
-      },
+	      issuedTabCounts: {
+	        picked: 0,
+	        pending_receive: 0,
+	        rejected: 0,
+	        installed: 0,
+	        returned: 0,
+	      },
 
       // 设备详情 Bottom Sheet
       deviceDetailVisible: false,
@@ -619,15 +627,16 @@ export default {
 	      return this.availablePackages[this.selectedPackageIndex]
 	    },
 
-    pickupTabOptions() {
-      const c = this.issuedTabCounts || {}
-      return [
-        { key: 'picked', label: this.$t('stock.pickupTabPicked'), count: Number(c.picked || 0) },
-        { key: 'installed', label: this.$t('stock.pickupTabInstalled'), count: Number(c.installed || 0) },
-        { key: 'pending_receive', label: this.$t('stock.pickupTabPendingReceive'), count: Number(c.pending_receive || 0) },
-        { key: 'returned', label: this.$t('stock.pickupTabReturned'), count: Number(c.returned || 0) },
-      ]
-    },
+	    pickupTabOptions() {
+	      const c = this.issuedTabCounts || {}
+	      return [
+	        { key: 'picked', label: this.$t('stock.pickupTabPicked'), count: Number(c.picked || 0) },
+	        { key: 'installed', label: this.$t('stock.pickupTabInstalled'), count: Number(c.installed || 0) },
+	        { key: 'pending_receive', label: this.$t('stock.pickupTabPendingReceive'), count: Number(c.pending_receive || 0) },
+	        { key: 'rejected', label: this.$t('stock.pickupTabRejected'), count: Number(c.rejected || 0) },
+	        { key: 'returned', label: this.$t('stock.pickupTabReturned'), count: Number(c.returned || 0) },
+	      ]
+	    },
 
     visiblePickupTabOptions() {
       if (this.materialTab === 'aux') {
@@ -644,17 +653,18 @@ export default {
       return (this.deviceDetailRecord?.serial_number || this.deviceDetailRecord?.main_device_barcode || '').trim()
     },
 
-    deviceStatusBadgeText() {
-      if (!this.deviceDetailRecord) return '-'
-      if (this.deviceDetailRecord.is_returned) return this.$t('stock.statusReturned')
-      if (this.deviceDetailRecord.return_status) return this.statusTextForReturn(this.deviceDetailRecord.return_status)
-      const g = String(this.deviceDetailRecord.status_group || this.deviceDetailRecord.pickup_group || '').trim()
-      if (g === 'returned') return this.$t('stock.statusReturned')
-      if (g === 'pending_receive') return this.statusTextForReturn('pending_receive')
-      if (g === 'installed') return this.$t('stock.statusInstalled')
-      if (g === 'picked') return this.$t('stock.pickupTabPicked')
-      return '-'
-    },
+	    deviceStatusBadgeText() {
+	      if (!this.deviceDetailRecord) return '-'
+	      if (this.deviceDetailRecord.is_returned) return this.$t('stock.statusReturned')
+	      if (this.deviceDetailRecord.return_status) return this.statusTextForReturn(this.deviceDetailRecord.return_status)
+	      const g = String(this.deviceDetailRecord.status_group || this.deviceDetailRecord.pickup_group || '').trim()
+	      if (g === 'returned') return this.$t('stock.statusReturned')
+	      if (g === 'pending_receive') return this.statusTextForReturn('pending_receive')
+	      if (g === 'rejected') return this.$t('stock.returnStatusRejectedShort')
+	      if (g === 'installed') return this.$t('stock.statusInstalled')
+	      if (g === 'picked') return this.$t('stock.pickupTabPicked')
+	      return '-'
+	    },
 
     deviceStatusBadgeClass() {
       if (!this.deviceDetailRecord) return 'none'
@@ -665,12 +675,26 @@ export default {
       if (s === 'rejected') return 'rejected'
       if (s === 'canceled') return 'canceled'
 
-      const g = String(this.deviceDetailRecord.status_group || this.deviceDetailRecord.pickup_group || '').trim()
-      if (g === 'returned') return 'done'
-      if (g === 'pending_receive') return 'pending'
-      if (g === 'installed') return 'installed'
-      return 'none'
-    },
+	      const g = String(this.deviceDetailRecord.status_group || this.deviceDetailRecord.pickup_group || '').trim()
+	      if (g === 'returned') return 'done'
+	      if (g === 'pending_receive') return 'pending'
+	      if (g === 'rejected') return 'rejected'
+	      if (g === 'installed') return 'installed'
+	      return 'none'
+	    },
+	
+	    showDeviceRejectReason() {
+	      if (!this.deviceDetailRecord) return false
+	      const status = String(this.deviceDetailRecord.return_status || '').trim()
+	      const g = String(this.deviceDetailRecord.status_group || this.deviceDetailRecord.pickup_group || '').trim()
+	      return status === 'rejected' || g === 'rejected'
+	    },
+
+	    deviceRejectReasonText() {
+	      const text = String(this.deviceDetailRecord?.return_reject_reason || '').trim()
+	      if (text) return text
+	      return this.$t('stock.returnRejectReasonEmpty')
+	    },
 
     deviceDetailBindings() {
       if (this.deviceDetailPreviewAction === 'need_unbind') return this.deviceDetailPreviewData?.need_unbind || []
@@ -1465,15 +1489,16 @@ export default {
 
 	        const data = response.data || {}
 	        const records = Array.isArray(data.items) ? data.items : []
-	        if (data.group_counts) {
-	          const c = data.group_counts || {}
-	          this.issuedTabCounts = {
-	            picked: Number(c.picked || 0),
-	            pending_receive: Number(c.pending_receive || 0),
-	            installed: Number(c.installed || 0),
-	            returned: Number(c.returned || 0),
-	          }
-	        }
+		        if (data.group_counts) {
+		          const c = data.group_counts || {}
+		          this.issuedTabCounts = {
+		            picked: Number(c.picked || 0),
+		            pending_receive: Number(c.pending_receive || 0),
+		            rejected: Number(c.rejected || 0),
+		            installed: Number(c.installed || 0),
+		            returned: Number(c.returned || 0),
+		          }
+		        }
 	        if (wantReset) {
 	          this.issuedItems = records
 	        } else {
@@ -1556,15 +1581,16 @@ export default {
 	        }
 	      })
 
-	      if (data.group_counts) {
-	        const c = data.group_counts || {}
-	        this.issuedTabCounts = {
-	          picked: Number(c.picked || 0),
-	          pending_receive: Number(c.pending_receive || 0),
-	          installed: Number(c.installed || 0),
-	          returned: Number(c.returned || 0),
-	        }
-	      }
+		      if (data.group_counts) {
+		        const c = data.group_counts || {}
+		        this.issuedTabCounts = {
+		          picked: Number(c.picked || 0),
+		          pending_receive: Number(c.pending_receive || 0),
+		          rejected: Number(c.rejected || 0),
+		          installed: Number(c.installed || 0),
+		          returned: Number(c.returned || 0),
+		        }
+		      }
 
 	      if (wantReset) {
 	        this.issuedItems = records
@@ -1624,6 +1650,7 @@ export default {
 	      const g = String(record.status_group || record.pickup_group || '').trim()
 	      if (g === 'installed') return this.$t('stock.pickupTabInstalled')
 	      if (g === 'pending_receive') return this.$t('stock.pickupTabPendingReceive')
+	      if (g === 'rejected') return this.$t('stock.pickupTabRejected')
 	      if (g === 'returned') return this.$t('stock.pickupTabReturned')
 	      return this.$t('stock.pickupTabPicked')
 	    },
@@ -1634,6 +1661,7 @@ export default {
 	        confirmed: g === 'picked',
 	        installed: g === 'installed',
 	        'return-pending': g === 'pending_receive',
+	        'return-rejected': g === 'rejected',
 	        returned: g === 'returned',
 	      }
 	    },
@@ -2811,7 +2839,9 @@ export default {
 }
 
 .reject-icon { font-size: 28rpx; line-height: 28rpx; }
-.reject-text { flex: 1; font-size: 24rpx; color: #b91c1c; line-height: 1.4; }
+.reject-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6rpx; }
+.reject-title { font-size: 24rpx; color: #991b1b; font-weight: 700; }
+.reject-text { flex: 1; font-size: 24rpx; color: #b91c1c; line-height: 1.4; word-break: break-all; }
 
 .return-hint-card {
   padding: 18rpx;

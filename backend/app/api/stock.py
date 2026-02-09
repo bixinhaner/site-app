@@ -652,7 +652,7 @@ async def get_my_pickup_records(
     current_user: User = Depends(get_current_user)
 ):
     """获取我的领料记录"""
-    allowed_groups = {"picked", "pending_receive", "installed", "returned"}
+    allowed_groups = {"picked", "pending_receive", "installed", "returned", "rejected"}
     if pickup_group and pickup_group not in allowed_groups:
         raise HTTPException(status_code=400, detail="pickup_group 参数不合法")
 
@@ -740,6 +740,14 @@ async def get_my_pickup_records(
         StockTransaction.approval_status == "received",
         return_item_match_cond,
     ).exists()
+    return_rejected_exists = db.query(StockTransaction.id).join(
+        StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id
+    ).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+        StockTransaction.related_transaction_id == PickupRecord.transaction_id,
+        StockTransaction.approval_status == "rejected",
+        return_item_match_cond,
+    ).exists()
     return_reject_or_cancel_exists = db.query(StockTransaction.id).join(
         StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id
     ).filter(
@@ -783,16 +791,24 @@ async def get_my_pickup_records(
         ~return_received_exists,
         return_pending_exists,
     )
+    rejected_cond = and_(
+        PickupRecord.is_returned == False,
+        ~return_received_exists,
+        ~return_pending_exists,
+        return_rejected_exists,
+    )
     installed_cond = and_(
         PickupRecord.is_returned == False,
         ~return_received_exists,
         ~return_pending_exists,
+        ~return_rejected_exists,
         installed_locked_exists,
     )
     picked_cond = and_(
         PickupRecord.is_returned == False,
         ~return_received_exists,
         ~return_pending_exists,
+        ~return_rejected_exists,
         ~installed_locked_exists,
     )
 
@@ -801,6 +817,7 @@ async def get_my_pickup_records(
         .with_entities(
             func.sum(case((picked_cond, 1), else_=0)).label("picked"),
             func.sum(case((pending_receive_cond, 1), else_=0)).label("pending_receive"),
+            func.sum(case((rejected_cond, 1), else_=0)).label("rejected"),
             func.sum(case((installed_cond, 1), else_=0)).label("installed"),
             func.sum(case((returned_cond, 1), else_=0)).label("returned"),
         )
@@ -809,6 +826,7 @@ async def get_my_pickup_records(
     group_counts = {
         "picked": int(getattr(counts_row, "picked", 0) or 0),
         "pending_receive": int(getattr(counts_row, "pending_receive", 0) or 0),
+        "rejected": int(getattr(counts_row, "rejected", 0) or 0),
         "installed": int(getattr(counts_row, "installed", 0) or 0),
         "returned": int(getattr(counts_row, "returned", 0) or 0),
     }
@@ -824,6 +842,9 @@ async def get_my_pickup_records(
         query = query.filter(
             installed_cond,
         ).order_by(desc(PickupRecord.pickup_time))
+    elif pickup_group == "rejected":
+        query = query.filter(rejected_cond)
+        query = query.order_by(desc(PickupRecord.pickup_time))
     elif pickup_group == "picked":
         query = query.filter(picked_cond)
         priority = case(
@@ -953,6 +974,8 @@ async def get_my_pickup_records(
             pickup_group_value = "returned"
         elif latest_return_status in {"pending_receive", "partially_received"}:
             pickup_group_value = "pending_receive"
+        elif latest_return_status == "rejected":
+            pickup_group_value = "rejected"
         elif binding_state == "installed_locked":
             pickup_group_value = "installed"
 
@@ -5977,7 +6000,7 @@ def _list_issued_items_for_user(
     if t not in {"main", "aux"}:
         raise HTTPException(status_code=400, detail="item_type 参数不合法")
 
-    allowed_groups = {"picked", "installed", "pending_receive", "returned"}
+    allowed_groups = {"picked", "installed", "pending_receive", "returned", "rejected"}
     g = str(status_group or "").strip()
     if g and g not in allowed_groups:
         raise HTTPException(status_code=400, detail="status_group 参数不合法")
@@ -5998,7 +6021,7 @@ def _list_issued_items_for_user(
     like_contains = f"%{search}%"
     like_prefix = f"{search}%"
 
-    group_counts = {"picked": 0, "installed": 0, "pending_receive": 0, "returned": 0}
+    group_counts = {"picked": 0, "installed": 0, "pending_receive": 0, "returned": 0, "rejected": 0}
 
     # 归属规则：
     # 1) issued_to 有值：归属到 issued_to；
@@ -6199,6 +6222,7 @@ def _list_issued_items_for_user(
                     StockTransaction.id.label("return_id"),
                     StockTransaction.document_number.label("return_document_number"),
                     StockTransaction.approval_status.label("return_status"),
+                    StockTransaction.approval_comments.label("approval_comments"),
                     StockTransaction.created_at.label("created_at"),
                     StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
                     StockTransactionItem.quantity.label("quantity"),
@@ -6208,7 +6232,7 @@ def _list_issued_items_for_user(
                 .filter(
                     StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
                     StockTransaction.related_transaction_id.in_(out_ids),
-                    StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received"]),
+                    StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received", "rejected"]),
                     StockTransactionItem.equipment_instance_id.in_(instance_ids),
                 )
                 .order_by(desc(StockTransaction.created_at))
@@ -6228,6 +6252,7 @@ def _list_issued_items_for_user(
                     "return_status": status,
                     "quantity": qty,
                     "received_qty": eff_received,
+                    "return_reject_reason": rr.approval_comments if status == "rejected" else None,
                 }
 
         out_meta_map: Dict[str, dict] = {}
@@ -6283,8 +6308,10 @@ def _list_issued_items_for_user(
                 if return_status == "received" or (qty > 0 and received_qty >= qty):
                     status_value = "returned"
                     is_returned = True
-                else:
+                elif return_status in {"pending_receive", "partially_received"}:
                     status_value = "pending_receive"
+                elif return_status == "rejected":
+                    status_value = "rejected"
             else:
                 if sn and sn in installed_locked_sns:
                     status_value = "installed"
@@ -6314,6 +6341,7 @@ def _list_issued_items_for_user(
                     "return_status": return_status,
                     "return_transaction_id": return_tx_id,
                     "return_document_number": return_doc,
+                    "return_reject_reason": ret.get("return_reject_reason") if ret else None,
                     "is_returned": is_returned,
                 }
             )
@@ -7624,7 +7652,7 @@ async def list_my_issued_items(
     if t not in {"main", "aux"}:
         raise HTTPException(status_code=400, detail="item_type 参数不合法")
 
-    allowed_groups = {"picked", "installed", "pending_receive", "returned"}
+    allowed_groups = {"picked", "installed", "pending_receive", "returned", "rejected"}
     g = str(status_group or "").strip()
     if g and g not in allowed_groups:
         raise HTTPException(status_code=400, detail="status_group 参数不合法")
@@ -7650,7 +7678,7 @@ async def list_my_issued_items(
     like_contains = f"%{search}%"
     like_prefix = f"{search}%"
 
-    group_counts = {"picked": 0, "installed": 0, "pending_receive": 0, "returned": 0}
+    group_counts = {"picked": 0, "installed": 0, "pending_receive": 0, "returned": 0, "rejected": 0}
 
     if t == "main":
         query = (
@@ -7781,6 +7809,7 @@ async def list_my_issued_items(
                     StockTransaction.id.label("return_id"),
                     StockTransaction.document_number.label("return_document_number"),
                     StockTransaction.approval_status.label("return_status"),
+                    StockTransaction.approval_comments.label("approval_comments"),
                     StockTransaction.created_at.label("created_at"),
                     StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
                     StockTransactionItem.quantity.label("quantity"),
@@ -7790,7 +7819,7 @@ async def list_my_issued_items(
                 .filter(
                     StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
                     StockTransaction.related_transaction_id.in_(out_ids),
-                    StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received"]),
+                    StockTransaction.approval_status.in_(["pending_receive", "partially_received", "received", "rejected"]),
                     StockTransactionItem.equipment_instance_id.in_(instance_ids),
                 )
                 .order_by(desc(StockTransaction.created_at))
@@ -7810,6 +7839,7 @@ async def list_my_issued_items(
                     "return_status": status,
                     "quantity": qty,
                     "received_qty": eff_received,
+                    "return_reject_reason": rr.approval_comments if status == "rejected" else None,
                 }
 
         out_meta_map: Dict[str, dict] = {}
@@ -7858,8 +7888,10 @@ async def list_my_issued_items(
                 if return_status == "received" or (qty > 0 and received_qty >= qty):
                     status_value = "returned"
                     is_returned = True
-                else:
+                elif return_status in {"pending_receive", "partially_received"}:
                     status_value = "pending_receive"
+                elif return_status == "rejected":
+                    status_value = "rejected"
             else:
                 if sn and sn in installed_locked_sns:
                     status_value = "installed"
@@ -7887,6 +7919,7 @@ async def list_my_issued_items(
                     "return_status": return_status,
                     "return_transaction_id": return_tx_id,
                     "return_document_number": return_doc,
+                    "return_reject_reason": ret.get("return_reject_reason") if ret else None,
                     "is_returned": is_returned,
                 }
             )

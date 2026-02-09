@@ -80,6 +80,16 @@
 							<text class="summary-v mono">{{ r.out_document_number }}</text>
 						</view>
 
+						<view
+							v-if="showRejectReason(r)"
+							class="reject-row u-pressable"
+							@click="openRejectReason(r)"
+						>
+							<text class="reject-k">{{ $t('stock.rejectReason') }}</text>
+							<text class="reject-v">{{ rejectReasonPreview(r) }}</text>
+							<text class="reject-action">{{ $t('stock.viewRejectReason') }}</text>
+						</view>
+
 						<view class="stats">
 							<view class="stat">
 								<text class="k">{{ $t('stock.selectedMainDevices') }}</text>
@@ -177,6 +187,25 @@
 	const pendingTotal = (r) => {
 		if (!Array.isArray(r.items)) return 0
 		return r.items.reduce((sum, it) => sum + Number(it?.pending_quantity || 0), 0)
+	}
+	const showRejectReason = (r) => String(r?.status || '') === 'rejected'
+	const rejectReasonText = (r) => {
+		const text = String(r?.approval_comments || '').trim()
+		return text || $t('stock.returnRejectReasonEmpty')
+	}
+	const rejectReasonPreview = (r) => {
+		const text = rejectReasonText(r)
+		if (text.length <= 26) return text
+		return `${text.slice(0, 26)}...`
+	}
+	const openRejectReason = (r) => {
+		if (!showRejectReason(r)) return
+		uni.showModal({
+			title: $t('stock.rejectReason'),
+			content: rejectReasonText(r),
+			showCancel: false,
+			confirmText: $t('common.confirm'),
+		})
 	}
 
 	const load = async (reset = true) => {
@@ -318,6 +347,27 @@
 	.summary { margin-top: 10px; display: flex; justify-content: space-between; gap: 10px; }
 	.summary-k { font-size: 12px; color: var(--text-secondary); }
 	.summary-v { font-size: 12px; color: var(--text-primary); font-weight: 700; max-width: 68%; text-align: right; word-break: break-all; }
+	.reject-row {
+		margin-top: 10px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 12px;
+		border-radius: 12px;
+		border: 1px solid #fecaca;
+		background: #fef2f2;
+	}
+	.reject-k { font-size: 12px; color: #b91c1c; font-weight: 800; flex-shrink: 0; }
+	.reject-v {
+		flex: 1;
+		min-width: 0;
+		font-size: 12px;
+		color: #7f1d1d;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.reject-action { font-size: 12px; color: #991b1b; font-weight: 800; flex-shrink: 0; }
 
 	.stats { margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 	.stat { padding: 10px; border-radius: 14px; background: rgba(243, 244, 246, 0.8); border: 1px solid rgba(229, 231, 235, 0.9); }
