@@ -172,25 +172,23 @@
             </div>
           </div>
 
-          <div class="scanner">
-            <div class="label">扫码快速选择 SN（仅选择待收货的 SN）</div>
-            <el-input
-              v-model="mainScanInput"
-              placeholder="用扫码枪扫 SN 后回车"
-              clearable
-              @keyup.enter="onMainScanEnter"
-            >
-              <template #prefix>
-                <el-icon><Aim /></el-icon>
-              </template>
-              <template #append>
-                <el-button @click="onMainScanEnter">选择</el-button>
-              </template>
-            </el-input>
-            <div class="scanner-sub">提示：未输入 SN 时，点击“选择”无动作</div>
-          </div>
-
           <el-divider content-position="left">主设备（SN）</el-divider>
+          <div class="main-sn-actions">
+            <el-button
+              size="small"
+              @click="selectAllReceivableMainSns"
+              :disabled="!canReceiveCurrent || receivableMainSns.length === 0"
+            >
+              一键勾选全部可收货 SN
+            </el-button>
+            <el-button
+              size="small"
+              @click="clearSelectedMain"
+              :disabled="selectedMainSns.size === 0"
+            >
+              清空已选 SN
+            </el-button>
+          </div>
           <el-table :data="mainItems" size="small" border max-height="240px">
             <el-table-column label="" width="56">
               <template #default="{ row }">
@@ -290,7 +288,6 @@ const receiveDialogVisible = ref(false)
 const rejectDialogVisible = ref(false)
 const currentRecord = ref(null)
 
-const mainScanInput = ref('')
 const selectedMainSns = reactive(new Set())
 const auxRows = ref([])
 const receiveNotes = ref('')
@@ -441,7 +438,6 @@ const openReceive = async (row, scannedSn = '') => {
   receiveDialogVisible.value = true
   currentRecord.value = null
   receiveNotes.value = ''
-  mainScanInput.value = scannedSn || ''
   clearSelectedMain()
   auxRows.value = []
 
@@ -485,6 +481,12 @@ const mainItems = computed(() => {
 })
 
 const pendingMainItems = computed(() => mainItems.value.filter((it) => Number(it?.pending_quantity || 0) > 0))
+const receivableMainSns = computed(() => {
+  return mainItems.value
+    .filter((it) => canSelectMain(it))
+    .map((it) => String(it?.serial_number || '').trim())
+    .filter(Boolean)
+})
 
 const auxReceiveTotal = computed(() => {
   return auxRows.value.reduce((sum, it) => sum + Number(it?._receive_qty || 0), 0)
@@ -506,18 +508,8 @@ const toggleMain = (sn, checked) => {
   else selectedMainSns.delete(snv)
 }
 
-const onMainScanEnter = async () => {
-  const snv = String(mainScanInput.value || '').trim()
-  if (!snv) return
-  const hit = pendingMainItems.value.find((it) => String(it.serial_number || '') === snv)
-  if (!hit) {
-    ElMessage.warning('该SN不在待收货列表中')
-    mainScanInput.value = ''
-    return
-  }
-  selectedMainSns.add(snv)
-  mainScanInput.value = ''
-  await nextTick()
+const selectAllReceivableMainSns = () => {
+  receivableMainSns.value.forEach((sn) => selectedMainSns.add(sn))
 }
 
 const submitReceive = async () => {
@@ -651,20 +643,11 @@ onMounted(async () => {
   background: rgba(59, 130, 246, 0.08);
 }
 
-.scanner {
+.main-sn-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 6px 0 12px;
-}
-
-.scanner .label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.scanner-sub {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
 }
 
 .dialog-form {
