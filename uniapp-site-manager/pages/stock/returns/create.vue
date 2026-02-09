@@ -519,6 +519,57 @@
 		}
 	}
 
+	const buildSubmitConfirmAuxRows = (payload) => {
+		const itemMap = new Map((auxItems.value || []).map(it => [Number(it?.equipment_id), it]))
+		const rows = []
+		for (const row of (payload?.aux_items || [])) {
+			const eid = Number(row?.equipment_id)
+			const qty = Number(row?.quantity || 0)
+			if (!Number.isFinite(eid) || qty <= 0) continue
+			const matched = itemMap.get(eid)
+			rows.push({
+				equipment_id: eid,
+				quantity: qty,
+				equipment_name: String(matched?.equipment_name || eid),
+				unit: String(matched?.unit || ''),
+			})
+		}
+		return rows
+	}
+
+	const buildSubmitConfirmContent = (payload) => {
+		const mainList = Array.isArray(payload?.main_sns) ? payload.main_sns : []
+		const auxRows = buildSubmitConfirmAuxRows(payload)
+
+		const mainLines = mainList.length
+			? mainList.map((sn, idx) => `${idx + 1}. ${sn}`).join('\n')
+			: $t('stock.returnSubmitConfirmNone')
+
+		const auxLines = auxRows.length
+			? auxRows.map((row, idx) => `${idx + 1}. ${row.equipment_name} x ${row.quantity}${row.unit ? ` ${row.unit}` : ''}`).join('\n')
+			: $t('stock.returnSubmitConfirmNone')
+
+		return [
+			`${$t('stock.returnSubmitConfirmOutNo')}: ${selectedOut.value?.document_number || '-'}`,
+			`${$t('stock.returnSubmitConfirmWarehouse')}: ${selectedWarehouse.value?.warehouse_name || '-'}`,
+			`${$t('stock.returnSubmitConfirmMainTitle', { count: mainList.length })}:`,
+			mainLines,
+			`${$t('stock.returnSubmitConfirmAuxTitle', { count: auxRows.length })}:`,
+			auxLines,
+		].join('\n')
+	}
+
+	const confirmSubmitPayload = async (payload) => await new Promise((resolve) => {
+		uni.showModal({
+			title: $t('stock.returnSubmitConfirmTitle'),
+			content: buildSubmitConfirmContent(payload),
+			confirmText: $t('common.confirm'),
+			cancelText: $t('common.cancel'),
+			success: (r) => resolve(!!r.confirm),
+			fail: () => resolve(false),
+		})
+	})
+
 	const goAfterCreateSuccess = () => {
 		// 避免 create -> redirectTo(list) 造成 list 页面被重复压栈（返回按钮需点多次）
 		try {
@@ -536,8 +587,8 @@
 		uni.redirectTo({ url: '/pages/stock/returns/list' })
 	}
 
-	const doSubmit = async () => {
-		const payload = buildSubmitPayload()
+	const doSubmit = async (preparedPayload = null) => {
+		const payload = preparedPayload || buildSubmitPayload()
 		if (!payload) return
 
 		try {
@@ -578,7 +629,12 @@
 	}
 
 	const submit = async () => {
-		await doSubmit()
+		if (submitting.value) return
+		const payload = buildSubmitPayload()
+		if (!payload) return
+		const confirmed = await confirmSubmitPayload(payload)
+		if (!confirmed) return
+		await doSubmit(payload)
 	}
 
 	const fetchOutDetail = async (outId) => {
