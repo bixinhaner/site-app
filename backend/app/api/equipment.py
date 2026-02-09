@@ -257,16 +257,24 @@ def _normalize_package_items(db: Session, *, main_equipment_id, items_data) -> L
 @router.get("/packages", response_model=List[dict])
 async def get_equipment_packages(
     site_type: Optional[str] = None,
+    status: Optional[str] = Query(None, description="状态过滤: active/inactive/discontinued"),
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """获取设备套装列表"""
-    query = db.query(EquipmentPackage)  # 移除状态过滤，显示所有套装
+    query = db.query(EquipmentPackage)  # 默认显示全部，可按状态筛选
     
     if site_type:
         query = query.filter(EquipmentPackage.site_type == site_type)
+    if status:
+        status_value = str(status).strip().lower()
+        try:
+            status_enum = EquipmentStatusEnum(status_value)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="status 参数不合法")
+        query = query.filter(EquipmentPackage.status == status_enum)
     
     packages = query.offset(skip).limit(limit).all()
     

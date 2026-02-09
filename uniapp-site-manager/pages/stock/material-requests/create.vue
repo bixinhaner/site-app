@@ -263,6 +263,15 @@
 		return detail?.message || fallback || $t('messages.operationFailed')
 	}
 
+	const filterActivePackages = (source) => {
+		const list = Array.isArray(source) ? source : []
+		return list.filter((pkg) => {
+			const status = String(pkg?.status || '').trim().toLowerCase()
+			if (!status) return true
+			return status === 'active'
+		})
+	}
+
 	const ensureLoggedIn = () => {
 		if (!userStore.isLoggedIn) {
 			uni.reLaunch({ url: '/pages/login/login' })
@@ -291,12 +300,13 @@
 
 	const loadPackages = async () => {
 		const res = await uni.request({
-			url: buildApiUrl(API_ENDPOINTS.EQUIPMENT.PACKAGES),
+			url: buildApiUrl(`${API_ENDPOINTS.EQUIPMENT.PACKAGES}?status=active`),
 			method: 'GET',
 			header: getAuthHeaders(userStore.token),
 		})
 		if (res.statusCode === 200) {
-			packages.value = Array.isArray(res.data) ? res.data : []
+			packages.value = filterActivePackages(res.data)
+			if (packageIndex.value >= packages.value.length) packageIndex.value = 0
 			return
 		}
 		if (res.statusCode === 401) userStore.logout()

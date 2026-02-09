@@ -736,6 +736,16 @@ export default {
       this.startScan()
     },
 
+    filterActivePackages(packages) {
+      const list = Array.isArray(packages) ? packages : []
+      return list.filter((pkg) => {
+        if (!pkg || typeof pkg !== 'object') return false
+        const status = String(pkg.status || '').trim().toLowerCase()
+        if (!status) return true
+        return status === 'active'
+      })
+    },
+
     recordKey(record) {
       if (!record) return Math.random().toString(16).slice(2)
       const outId = String(record.out_transaction_id || '').trim()
@@ -1097,6 +1107,10 @@ export default {
         const equipmentData = response.data || response
         const statusCode = response.statusCode || response.status || 0
         this.scannedEquipmentInstance = equipmentData.equipment_instance || null
+        const packageCandidates = Array.isArray(equipmentData?.available_packages)
+          ? equipmentData.available_packages
+          : []
+        const activePackages = this.filterActivePackages(packageCandidates)
 
         const showIdentifyModal = (titleKey, hintKey, prefixLine = '') => {
           let message = ''
@@ -1150,19 +1164,19 @@ export default {
           return
         }
         
-        if (equipmentData.equipment && equipmentData.available_packages && equipmentData.available_packages.length > 0) {
+        if (equipmentData.equipment && activePackages.length > 0) {
           console.log('=== 查询成功 ===')
           console.log('找到设备:', equipmentData.equipment.name)
-          console.log('可用套装数量:', equipmentData.available_packages.length)
+          console.log('可用套装数量:', activePackages.length)
           
-          this.availablePackages = equipmentData.available_packages
+          this.availablePackages = activePackages
           this.selectedPackageIndex = 0
           
           uni.showToast({
             title: this.$t('stock.deviceRecognizedToast', { name: equipmentData.equipment.name }),
             icon: 'success'
           })
-        } else if (equipmentData.equipment && equipmentData.available_packages && equipmentData.available_packages.length === 0) {
+        } else if (equipmentData.equipment && activePackages.length === 0) {
           console.log('=== 查询失败：未配置套装 ===')
           showIdentifyModal(
             'stock.packageNotConfiguredTitle',
@@ -1172,8 +1186,8 @@ export default {
         } else {
           console.log('=== 查询失败 ===')
           console.log('设备存在?:', !!equipmentData.equipment)
-          console.log('套装存在?:', !!equipmentData.available_packages)
-          console.log('套装数量:', equipmentData.available_packages ? equipmentData.available_packages.length : 0)
+          console.log('套装存在?:', packageCandidates.length > 0)
+          console.log('套装数量:', packageCandidates.length)
           showIdentifyModal('stock.deviceNotInInventoryTitle', 'stock.deviceNotInInventoryHint')
         }
       } catch (error) {
@@ -1257,7 +1271,8 @@ export default {
         // HTTP 非 200：优先按后端返回的 action 处理，否则提示错误信息
         if (statusCode && statusCode !== 200) {
           if (responseData?.action === 'select_package' && Array.isArray(responseData?.available_packages)) {
-            this.availablePackages = responseData.available_packages
+            const activePackages = this.filterActivePackages(responseData.available_packages)
+            this.availablePackages = activePackages
             this.selectedPackageIndex = 0
             uni.showToast({
               title: responseData.message || this.$t('stock.pleaseSelectPackage'),
@@ -1309,7 +1324,8 @@ export default {
             showCancel: false
           })
         } else if (responseData.action === 'select_package' && Array.isArray(responseData?.available_packages)) {
-          this.availablePackages = responseData.available_packages
+          const activePackages = this.filterActivePackages(responseData.available_packages)
+          this.availablePackages = activePackages
           this.selectedPackageIndex = 0
           uni.showToast({
             title: responseData.message || this.$t('stock.pleaseSelectPackage'),
