@@ -57,6 +57,7 @@ from app.services.photo_similarity_guard import (
     detect_similar_photo_warning,
     extract_similarity_features,
 )
+from app.utils.timezone import to_utc_iso
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
 from app.models.work_order import WorkOrder, WorkOrderTypeEnum
