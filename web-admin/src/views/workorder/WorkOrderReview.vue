@@ -891,12 +891,71 @@
                 </template>
                 <span v-else>否</span>
               </el-descriptions-item>
+              <el-descriptions-item label="相似度详情">
+                <el-button size="small" type="primary" plain @click="openPhotoSimilarityDetail">
+                  查看详情
+                </el-button>
+              </el-descriptions-item>
             </el-descriptions>
           </el-col>
         </el-row>
       </div>
       <template #footer>
         <el-button @click="photoDetailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="photoSimilarityDetailVisible"
+      title="相似度详情"
+      width="820px"
+      :close-on-click-modal="false"
+    >
+      <el-alert
+        :type="selectedPhotoSimilarityRiskTagType"
+        :title="selectedPhotoSimilarityConclusionText"
+        show-icon
+        :closable="false"
+        style="margin-bottom: 12px;"
+      />
+
+      <el-descriptions :column="1" border size="small">
+        <el-descriptions-item label="判定结论">
+          {{ selectedPhotoSimilarityDecisionText }}
+        </el-descriptions-item>
+        <el-descriptions-item label="校验范围">
+          {{ selectedPhotoSimilarityWindowText }}
+        </el-descriptions-item>
+        <el-descriptions-item label="提醒阈值">
+          {{ selectedPhotoSimilarityThresholdText }}
+        </el-descriptions-item>
+        <el-descriptions-item label="候选筛选过程">
+          {{ selectedPhotoSimilarityCandidateText }}
+        </el-descriptions-item>
+        <el-descriptions-item label="最接近的历史照片">
+          {{ selectedPhotoSimilarityBestMatchText }}
+        </el-descriptions-item>
+        <el-descriptions-item label="处理建议">
+          {{ selectedPhotoSimilarityAdviceText }}
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <div class="similarity-human-lines" v-if="selectedPhotoSimilarityHumanLines.length > 0">
+        <div class="similarity-human-lines__title">说明</div>
+        <div
+          v-for="(line, idx) in selectedPhotoSimilarityHumanLines"
+          :key="`similarity-line-${idx}`"
+          class="similarity-human-lines__item"
+        >
+          {{ line }}
+        </div>
+      </div>
+
+      <el-divider>后台校验原始数据</el-divider>
+      <pre class="similarity-debug-json">{{ selectedPhotoSimilarityDebugJson }}</pre>
+
+      <template #footer>
+        <el-button @click="photoSimilarityDetailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -1181,6 +1240,7 @@ const reviewListMode = ref('全部')
 const scopeFilter = ref('全部范围')
 const distanceFilter = ref('全部距离')
 const photoDetailVisible = ref(false)
+const photoSimilarityDetailVisible = ref(false)
 const selectedPhoto = ref(null)
 const itemDetailVisible = ref(false)
 const selectedItem = ref(null)
@@ -1714,6 +1774,59 @@ const getPhotoSimilarInfo = (photo) => {
   return info && typeof info === 'object' ? info : null
 }
 
+const getPhotoSimilarityEvaluation = (photo) => {
+  const info = getPhotoSimilarInfo(photo)
+  const evaluation = info?.evaluation
+  return evaluation && typeof evaluation === 'object' ? evaluation : null
+}
+
+const SIMILARITY_REASON_TEXT_MAP = {
+  POLICY_DISABLED: '当前未启用相似度校验，本次仅保存图片，不做相似风险判断。',
+  MISSING_QUERY_PHASH: '当前图片特征提取不完整，无法完成相似度比较。',
+  MISSING_QUERY_VECTOR: '当前图片精细特征提取失败，无法完成相似度比较。',
+  NO_CANDIDATES: '在配置的时间窗口内，没有可比较的历史照片。',
+  NO_PHASH_MATCH: '历史照片存在，但基础外观差异较大，未进入高风险候选。',
+  NO_VECTOR_MATCH: '存在外观接近的历史照片，但未达到高风险提醒标准。',
+  NO_MATCH: '本次未发现需要提醒的高相似风险。',
+  MATCHED: '检测到高相似风险，建议结合站点与工单信息重点复核。',
+}
+
+const formatSimilarityCandidateLine = (candidate) => {
+  if (!candidate || typeof candidate !== 'object') return '未找到可说明的历史候选'
+  const site = candidate.site_display || candidate.site_name || (candidate.site_id ? `站点ID:${candidate.site_id}` : '未知站点')
+  const uploader = candidate.uploader_display || candidate.uploader_name || (candidate.uploader_id ? `用户ID:${candidate.uploader_id}` : '未知用户')
+  const time = candidate.uploaded_at || '-'
+  const percent = Number(candidate.similarity_percent)
+  const percentText = Number.isFinite(percent) ? ` / 相似度${percent.toFixed(2)}%` : ''
+  const distance = Number(candidate.phash_distance)
+  const distanceText = Number.isFinite(distance) ? ` / 粗筛差异值${distance}` : ''
+  return `${site} / ${uploader} / ${time}${percentText}${distanceText}`
+}
+
+const pickBestSimilarityCandidate = (photo) => {
+  const info = getPhotoSimilarInfo(photo)
+  const evaluation = getPhotoSimilarityEvaluation(photo)
+  if (evaluation?.matched_candidate) return evaluation.matched_candidate
+  if (evaluation?.best_similarity_candidate) return evaluation.best_similarity_candidate
+  if (evaluation?.closest_phash_candidate) return evaluation.closest_phash_candidate
+
+  if (info?.matched_photo_id || info?.site_display || info?.site_name || info?.uploader_display || info?.uploader_name) {
+    return {
+      photo_id: info.matched_photo_id || null,
+      site_id: info.site_id || null,
+      site_name: info.site_name || null,
+      site_display: info.site_display || null,
+      uploader_id: info.uploader_id || null,
+      uploader_name: info.uploader_name || null,
+      uploader_display: info.uploader_display || null,
+      uploaded_at: info.uploaded_at || null,
+      similarity_percent: info.similarity_percent,
+      phash_distance: info.phash_distance,
+    }
+  }
+  return null
+}
+
 const getPhotoSimilarBrief = (photo) => {
   const info = getPhotoSimilarInfo(photo)
   if (!photo?.is_similar_risk || !info) return ''
@@ -1764,6 +1877,110 @@ const similarPhotoSummary = computed(() => {
     }
   })
   return { total, items: itemsWithRisk }
+})
+
+const selectedPhotoSimilarityEvaluation = computed(() => getPhotoSimilarityEvaluation(selectedPhoto.value))
+
+const selectedPhotoSimilarityReasonCode = computed(() => {
+  const evaluation = selectedPhotoSimilarityEvaluation.value
+  if (evaluation?.reason_code) return String(evaluation.reason_code)
+  return selectedPhoto.value?.is_similar_risk ? 'MATCHED' : 'NO_MATCH'
+})
+
+const selectedPhotoSimilarityDecisionText = computed(() => {
+  const isRisk = selectedPhoto.value?.is_similar_risk === true
+  if (isRisk) return '检测到高相似风险（建议复核）'
+  const reasonCode = selectedPhotoSimilarityReasonCode.value
+  return SIMILARITY_REASON_TEXT_MAP[reasonCode] || '未触发高相似风险提醒'
+})
+
+const selectedPhotoSimilarityWindowText = computed(() => {
+  const evaluation = selectedPhotoSimilarityEvaluation.value
+  const days = Number(evaluation?.window_days)
+  if (Number.isFinite(days) && days > 0) return `仅比较最近 ${days} 天内上传的检查项照片`
+  return '未记录时间窗口（可能为历史数据）'
+})
+
+const selectedPhotoSimilarityThresholdText = computed(() => {
+  const evaluation = selectedPhotoSimilarityEvaluation.value
+  const phashThreshold = Number(evaluation?.phash_threshold)
+  const vectorThreshold = Number(evaluation?.vector_threshold)
+  const phashText = Number.isFinite(phashThreshold) ? `快速筛选阈值 ${phashThreshold}` : '快速筛选阈值 -'
+  const vectorText = Number.isFinite(vectorThreshold) ? `精细比对阈值 ${(vectorThreshold * 100).toFixed(2)}%` : '精细比对阈值 -'
+  return `${phashText} / ${vectorText}`
+})
+
+const selectedPhotoSimilarityCandidateText = computed(() => {
+  const evaluation = selectedPhotoSimilarityEvaluation.value
+  if (!evaluation) return '暂无候选筛选数据（可能为历史数据）'
+  const total = Number(evaluation.candidate_total)
+  const phashPass = Number(evaluation.candidate_phash_pass)
+  const vectorPass = Number(evaluation.candidate_vector_pass)
+  const totalText = Number.isFinite(total) ? `${total}` : '-'
+  const phashPassText = Number.isFinite(phashPass) ? `${phashPass}` : '-'
+  const vectorPassText = Number.isFinite(vectorPass) ? `${vectorPass}` : '-'
+  return `共扫描 ${totalText} 张历史照片；快速筛选通过 ${phashPassText} 张；精细比对通过 ${vectorPassText} 张`
+})
+
+const selectedPhotoSimilarityBestMatchText = computed(() => {
+  const bestCandidate = pickBestSimilarityCandidate(selectedPhoto.value)
+  return formatSimilarityCandidateLine(bestCandidate)
+})
+
+const selectedPhotoSimilarityAdviceText = computed(() => {
+  if (selectedPhoto.value?.is_similar_risk) {
+    return '建议到详情页核对站点、上传人、上传时间，并结合现场情况判断是否复用历史照片。'
+  }
+  return '当前未命中高风险提醒。如对结果有疑问，可适度放宽阈值后再次测试。'
+})
+
+const selectedPhotoSimilarityConclusionText = computed(() => {
+  if (selectedPhoto.value?.is_similar_risk) {
+    return '已命中高相似风险：建议重点复核该照片是否复用历史素材。'
+  }
+  return '未命中高相似风险：系统未发现需要预警的历史复用迹象。'
+})
+
+const selectedPhotoSimilarityRiskTagType = computed(() => {
+  return selectedPhoto.value?.is_similar_risk ? 'error' : 'success'
+})
+
+const selectedPhotoSimilarityHumanLines = computed(() => {
+  const lines = []
+  const reasonCode = selectedPhotoSimilarityReasonCode.value
+  const reasonText = SIMILARITY_REASON_TEXT_MAP[reasonCode]
+  if (reasonText) lines.push(reasonText)
+  lines.push(selectedPhotoSimilarityCandidateText.value)
+  lines.push(`最接近历史照片：${selectedPhotoSimilarityBestMatchText.value}`)
+  return lines
+})
+
+const selectedPhotoSimilarityDebugData = computed(() => {
+  const photo = selectedPhoto.value || {}
+  return {
+    raw_photo_payload: photo,
+    similar_validation: {
+      is_similar_risk: !!photo?.is_similar_risk,
+      similar_info: getPhotoSimilarInfo(photo),
+      evaluation: selectedPhotoSimilarityEvaluation.value,
+      reason_code: selectedPhotoSimilarityReasonCode.value,
+    },
+    duplicate_validation: {
+      is_duplicate_global: !!photo?.is_duplicate_global,
+      duplicate_info: getPhotoDuplicateInfo(photo),
+    },
+    feature_fields: {
+      content_hash: photo?.content_hash ?? null,
+      original_content_hash: photo?.original_content_hash ?? null,
+      content_phash: photo?.content_phash ?? null,
+      content_vector_backend: photo?.content_vector_backend ?? null,
+      hash_value: photo?.hash_value ?? null,
+    },
+  }
+})
+
+const selectedPhotoSimilarityDebugJson = computed(() => {
+  return JSON.stringify(selectedPhotoSimilarityDebugData.value, null, 2)
 })
 
 // 检查是否有未审核的检查项
@@ -2454,12 +2671,21 @@ const viewItemDetail = (item) => {
 const viewPhotoDetail = (photo) => {
   console.log('viewPhotoDetail called with photo:', photo)
   selectedPhoto.value = photo
+  photoSimilarityDetailVisible.value = false
   photoDetailVisible.value = true
   console.log('photoDetailVisible set to:', photoDetailVisible.value)
   // 重置查看器状态
   resetZoom()
   isFullscreen.value = false
   loadSelectedPhotoForViewer()
+}
+
+const openPhotoSimilarityDetail = () => {
+  if (!selectedPhoto.value) {
+    ElMessage.warning('请先选择照片')
+    return
+  }
+  photoSimilarityDetailVisible.value = true
 }
 
 const loadSelectedPhotoForViewer = async () => {
@@ -3299,5 +3525,43 @@ onMounted(refresh)
   color: #b91c1c;
   line-height: 1.5;
   font-size: 12px;
+}
+
+.similarity-human-lines {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.similarity-human-lines__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.similarity-human-lines__item {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+
+.similarity-human-lines__item:last-child {
+  margin-bottom: 0;
+}
+
+.similarity-debug-json {
+  margin: 0;
+  padding: 12px;
+  max-height: 280px;
+  overflow: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

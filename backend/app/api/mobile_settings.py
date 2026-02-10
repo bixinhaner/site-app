@@ -68,6 +68,20 @@ class IntRule(BaseModel):
   per_user: Dict[str, int] = {}
 
 
+class FloatRule(BaseModel):
+  """
+  通用浮点配置项规则（用于相似度阈值等）：
+
+  - default: 全局默认值
+  - per_role: 按角色覆盖
+  - per_user: 按用户覆盖（key 为用户ID字符串）
+  """
+
+  default: float = 0.975
+  per_role: Dict[str, float] = {}
+  per_user: Dict[str, float] = {}
+
+
 class MobileSettingsPayload(BaseModel):
   """
   移动端配置载荷。
@@ -81,6 +95,8 @@ class MobileSettingsPayload(BaseModel):
   - block_duplicate_check_item_photo_upload: 是否阻断检查项重复图片上传
   - enable_check_item_photo_similarity_alert: 是否启用检查项照片相似度提醒
   - check_item_photo_similarity_window_days: 相似度匹配窗口（天）
+  - check_item_photo_similarity_phash_threshold: 相似度粗筛阈值（0~64）
+  - check_item_photo_similarity_vector_threshold: 相似度精筛阈值（0~1）
 
   未来可在此处继续新增更多配置项，
   每个配置项都采用类似 *Rule 的结构。
@@ -95,6 +111,8 @@ class MobileSettingsPayload(BaseModel):
   block_duplicate_check_item_photo_upload: Optional[BoolRule] = None
   enable_check_item_photo_similarity_alert: Optional[BoolRule] = None
   check_item_photo_similarity_window_days: Optional[IntRule] = None
+  check_item_photo_similarity_phash_threshold: Optional[IntRule] = None
+  check_item_photo_similarity_vector_threshold: Optional[FloatRule] = None
   photo_location_distance_threshold_m: Optional[IntRule] = None
 
 
@@ -110,6 +128,8 @@ class EffectiveMobileSettingsResponse(BaseModel):
   block_duplicate_check_item_photo_upload: bool = True
   enable_check_item_photo_similarity_alert: bool = True
   check_item_photo_similarity_window_days: int = 180
+  check_item_photo_similarity_phash_threshold: int = 8
+  check_item_photo_similarity_vector_threshold: float = 0.975
   photo_location_distance_threshold_m: int = 100
 
 
@@ -215,6 +235,40 @@ def _normalize_similarity_window_days(value: Any) -> int:
   return ivalue
 
 
+def _normalize_similarity_phash_threshold(value: Any) -> int:
+  try:
+    ivalue = int(value)
+  except Exception:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="相似度粗筛阈值必须是整数",
+    )
+
+  if ivalue < 0 or ivalue > 64:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="相似度粗筛阈值范围必须在 0~64",
+    )
+  return ivalue
+
+
+def _normalize_similarity_vector_threshold(value: Any) -> float:
+  try:
+    fvalue = float(value)
+  except Exception:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="相似度精筛阈值必须是数字",
+    )
+
+  if fvalue < 0.0 or fvalue > 1.0:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="相似度精筛阈值范围必须在 0~1",
+    )
+  return round(fvalue, 6)
+
+
 def _normalize_int_rule(
   rule: IntRule,
   value_normalizer: Callable[[Any], int] = _normalize_distance_threshold,
@@ -234,6 +288,38 @@ def _normalize_int_rule(
     per_role[role_key] = value_normalizer(value)
 
   per_user: Dict[str, int] = {}
+  for user_id, value in (rule.per_user or {}).items():
+    key = str(user_id).strip()
+    if not key:
+      continue
+    per_user[key] = value_normalizer(value)
+
+  return {
+    "default": default_val,
+    "per_role": per_role,
+    "per_user": per_user,
+  }
+
+
+def _normalize_float_rule(
+  rule: FloatRule,
+  value_normalizer: Callable[[Any], float] = _normalize_similarity_vector_threshold,
+) -> Dict[str, Any]:
+  """
+  规范化前端传入的 FloatRule，确保：
+  - default 为合法浮点数
+  - per_role / per_user 的 key 规范化为字符串，值为合法浮点数
+  """
+  default_val = value_normalizer(rule.default)
+
+  per_role: Dict[str, float] = {}
+  for role, value in (rule.per_role or {}).items():
+    role_key = (role or "").strip()
+    if not role_key:
+      continue
+    per_role[role_key] = value_normalizer(value)
+
+  per_user: Dict[str, float] = {}
   for user_id, value in (rule.per_user or {}).items():
     key = str(user_id).strip()
     if not key:
@@ -409,6 +495,47 @@ def _resolve_int_for_user(
   return default_val
 
 
+def _resolve_float_for_user(
+  settings: Dict[str, Any],
+  key: str,
+  user: Optional[User],
+  default: float,
+  value_normalizer: Callable[[Any], float] = _normalize_similarity_vector_threshold,
+) -> float:
+  """
+  根据配置与用户信息，解析对该用户最终生效的浮点配置。
+
+  优先级：
+  1. per_user[user.id]
+  2. per_role[user.role]
+  3. default（若配置中缺失，则回退到传入的 default）
+  """
+  rule = (settings or {}).get(key) or {}
+  raw_default = rule.get("default")
+  if raw_default is None:
+    default_val = default
+  else:
+    default_val = value_normalizer(raw_default)
+
+  per_role = rule.get("per_role") or {}
+  per_user = rule.get("per_user") or {}
+
+  # 1. 按用户覆盖
+  if user is not None and getattr(user, "id", None) is not None:
+    ukey = str(user.id)
+    if ukey in per_user:
+      return value_normalizer(per_user[ukey])
+
+  # 2. 按角色覆盖
+  if user is not None and getattr(user, "role", None):
+    role_key = user.role
+    if role_key in per_role:
+      return value_normalizer(per_role[role_key])
+
+  # 3. 全局默认
+  return default_val
+
+
 def _get_location_mode_default(db: Session) -> str:
   """
   获取 location_mode 的全局默认值（不考虑 per_user、per_role）。
@@ -457,6 +584,8 @@ async def get_mobile_settings(
   duplicate_check_item_photo_rule = raw.get("block_duplicate_check_item_photo_upload") or {}
   similarity_alert_rule = raw.get("enable_check_item_photo_similarity_alert") or {}
   similarity_window_days_rule = raw.get("check_item_photo_similarity_window_days") or {}
+  similarity_phash_threshold_rule = raw.get("check_item_photo_similarity_phash_threshold") or {}
+  similarity_vector_threshold_rule = raw.get("check_item_photo_similarity_vector_threshold") or {}
   distance_threshold_rule = raw.get("photo_location_distance_threshold_m") or {}
 
   # 构造 LocationModeRule，保证字段存在
@@ -516,6 +645,34 @@ async def get_mobile_settings(
     },
   )
 
+  similarity_phash_threshold = IntRule(
+    default=_normalize_similarity_phash_threshold(similarity_phash_threshold_rule.get("default")) if similarity_phash_threshold_rule.get("default") is not None else 8,
+    per_role={
+      str(k): _normalize_similarity_phash_threshold(v)
+      for k, v in (similarity_phash_threshold_rule.get("per_role") or {}).items()
+      if str(k).strip() != ""
+    },
+    per_user={
+      str(k): _normalize_similarity_phash_threshold(v)
+      for k, v in (similarity_phash_threshold_rule.get("per_user") or {}).items()
+      if str(k).strip() != ""
+    },
+  )
+
+  similarity_vector_threshold = FloatRule(
+    default=_normalize_similarity_vector_threshold(similarity_vector_threshold_rule.get("default")) if similarity_vector_threshold_rule.get("default") is not None else 0.975,
+    per_role={
+      str(k): _normalize_similarity_vector_threshold(v)
+      for k, v in (similarity_vector_threshold_rule.get("per_role") or {}).items()
+      if str(k).strip() != ""
+    },
+    per_user={
+      str(k): _normalize_similarity_vector_threshold(v)
+      for k, v in (similarity_vector_threshold_rule.get("per_user") or {}).items()
+      if str(k).strip() != ""
+    },
+  )
+
   distance_threshold = IntRule(
     default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
     per_role={
@@ -544,6 +701,8 @@ async def get_mobile_settings(
     block_duplicate_check_item_photo_upload=duplicate_check_item_photo_upload,
     enable_check_item_photo_similarity_alert=similarity_alert,
     check_item_photo_similarity_window_days=similarity_window_days,
+    check_item_photo_similarity_phash_threshold=similarity_phash_threshold,
+    check_item_photo_similarity_vector_threshold=similarity_vector_threshold,
     photo_location_distance_threshold_m=distance_threshold,
   )
 
@@ -604,6 +763,18 @@ async def update_mobile_settings(
     settings["check_item_photo_similarity_window_days"] = _normalize_int_rule(
       payload.check_item_photo_similarity_window_days,
       value_normalizer=_normalize_similarity_window_days,
+    )
+
+  if payload.check_item_photo_similarity_phash_threshold is not None:
+    settings["check_item_photo_similarity_phash_threshold"] = _normalize_int_rule(
+      payload.check_item_photo_similarity_phash_threshold,
+      value_normalizer=_normalize_similarity_phash_threshold,
+    )
+
+  if payload.check_item_photo_similarity_vector_threshold is not None:
+    settings["check_item_photo_similarity_vector_threshold"] = _normalize_float_rule(
+      payload.check_item_photo_similarity_vector_threshold,
+      value_normalizer=_normalize_similarity_vector_threshold,
     )
 
   if payload.photo_location_distance_threshold_m is not None:
@@ -683,6 +854,36 @@ async def update_mobile_settings(
     },
   )
 
+  similarity_phash_threshold_rule = settings.get("check_item_photo_similarity_phash_threshold") or {}
+  similarity_phash_threshold = IntRule(
+    default=_normalize_similarity_phash_threshold(similarity_phash_threshold_rule.get("default")) if similarity_phash_threshold_rule.get("default") is not None else 8,
+    per_role={
+      str(k): _normalize_similarity_phash_threshold(v)
+      for k, v in (similarity_phash_threshold_rule.get("per_role") or {}).items()
+      if str(k).strip() != ""
+    },
+    per_user={
+      str(k): _normalize_similarity_phash_threshold(v)
+      for k, v in (similarity_phash_threshold_rule.get("per_user") or {}).items()
+      if str(k).strip() != ""
+    },
+  )
+
+  similarity_vector_threshold_rule = settings.get("check_item_photo_similarity_vector_threshold") or {}
+  similarity_vector_threshold = FloatRule(
+    default=_normalize_similarity_vector_threshold(similarity_vector_threshold_rule.get("default")) if similarity_vector_threshold_rule.get("default") is not None else 0.975,
+    per_role={
+      str(k): _normalize_similarity_vector_threshold(v)
+      for k, v in (similarity_vector_threshold_rule.get("per_role") or {}).items()
+      if str(k).strip() != ""
+    },
+    per_user={
+      str(k): _normalize_similarity_vector_threshold(v)
+      for k, v in (similarity_vector_threshold_rule.get("per_user") or {}).items()
+      if str(k).strip() != ""
+    },
+  )
+
   distance_threshold_rule = settings.get("photo_location_distance_threshold_m") or {}
   distance_threshold = IntRule(
     default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
@@ -708,6 +909,8 @@ async def update_mobile_settings(
     block_duplicate_check_item_photo_upload=duplicate_check_item_photo_upload,
     enable_check_item_photo_similarity_alert=similarity_alert,
     check_item_photo_similarity_window_days=similarity_window_days,
+    check_item_photo_similarity_phash_threshold=similarity_phash_threshold,
+    check_item_photo_similarity_vector_threshold=similarity_vector_threshold,
     photo_location_distance_threshold_m=distance_threshold,
   )
 
@@ -774,6 +977,20 @@ async def get_effective_mobile_settings(
     default=180,
     value_normalizer=_normalize_similarity_window_days,
   )
+  check_item_photo_similarity_phash_threshold = _resolve_int_for_user(
+    settings,
+    key="check_item_photo_similarity_phash_threshold",
+    user=current_user,
+    default=8,
+    value_normalizer=_normalize_similarity_phash_threshold,
+  )
+  check_item_photo_similarity_vector_threshold = _resolve_float_for_user(
+    settings,
+    key="check_item_photo_similarity_vector_threshold",
+    user=current_user,
+    default=0.975,
+    value_normalizer=_normalize_similarity_vector_threshold,
+  )
   photo_location_distance_threshold_m = _resolve_int_for_user(
     settings,
     key="photo_location_distance_threshold_m",
@@ -791,6 +1008,8 @@ async def get_effective_mobile_settings(
     block_duplicate_check_item_photo_upload=block_duplicate_check_item_photo_upload,
     enable_check_item_photo_similarity_alert=enable_check_item_photo_similarity_alert,
     check_item_photo_similarity_window_days=check_item_photo_similarity_window_days,
+    check_item_photo_similarity_phash_threshold=check_item_photo_similarity_phash_threshold,
+    check_item_photo_similarity_vector_threshold=check_item_photo_similarity_vector_threshold,
     photo_location_distance_threshold_m=photo_location_distance_threshold_m,
   )
 

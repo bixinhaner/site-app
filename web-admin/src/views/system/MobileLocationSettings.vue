@@ -457,6 +457,9 @@
       <template #header>
         <div class="card-header">
           <span>检查项照片相似度提醒</span>
+          <el-button type="primary" link @click="openSimilarityThresholdGuide">
+            调参建议
+          </el-button>
         </div>
       </template>
 
@@ -482,15 +485,93 @@
           <span class="hint" style="margin-left: 8px;">仅匹配最近N天内的历史检查项照片</span>
         </el-form-item>
 
+        <el-form-item label="相似度粗筛阈值">
+          <el-input-number
+            v-model="form.check_item_photo_similarity_phash_threshold.default"
+            :min="0"
+            :max="64"
+            :step="1"
+            step-strictly
+            controls-position="right"
+            style="width: 220px"
+          />
+          <span class="hint" style="margin-left: 8px;">值越大越宽松，更容易触发“相似提醒”</span>
+        </el-form-item>
+
+        <el-form-item label="相似度精筛阈值">
+          <el-input-number
+            v-model="form.check_item_photo_similarity_vector_threshold.default"
+            :min="0"
+            :max="1"
+            :step="0.001"
+            :precision="3"
+            controls-position="right"
+            style="width: 220px"
+          />
+          <span class="hint" style="margin-left: 8px;">值越大越严格，更不容易误报</span>
+        </el-form-item>
+
         <el-form-item label="说明">
           <ul class="hint-list">
             <li>仅影响“检查项”照片（不含线下票据/单据照片）。</li>
-            <li>判定逻辑：pHash粗筛 + 向量二次判定（极度相似提醒，不阻断上传）。</li>
+            <li>系统会先做快速筛选，再做精细比对；两步都通过才会提示“高相似风险”。</li>
             <li>提醒场景：APP上传后提示 + 工单审核台列表/详情提醒。</li>
           </ul>
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-dialog
+      v-model="similarityGuideDialogVisible"
+      title="相似度阈值调参建议（检查项照片）"
+      width="980px"
+      destroy-on-close
+    >
+      <div class="similarity-guide">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="这张表是实战调参参考，不是死规则。建议先看“当前值”，再按你们现场误报/漏报情况微调。"
+        />
+
+        <el-descriptions class="mt12" :column="2" border size="small">
+          <el-descriptions-item label="当前粗筛阈值（phash）">
+            {{ formatSimilarityPhashValue(form.check_item_photo_similarity_phash_threshold.default) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="当前精筛阈值（向量）">
+            {{ formatSimilarityVectorValue(form.check_item_photo_similarity_vector_threshold.default) }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-table
+          class="mt12"
+          :data="similarityThresholdSuggestionRows"
+          size="small"
+          border
+          style="width: 100%"
+        >
+          <el-table-column prop="level" label="档位" width="140" />
+          <el-table-column prop="phash" label="粗筛阈值" width="120" />
+          <el-table-column prop="vector" label="精筛阈值" width="130" />
+          <el-table-column prop="scenario" label="适用场景" min-width="220" />
+          <el-table-column prop="result" label="效果（说人话）" min-width="300" />
+        </el-table>
+
+        <div class="similarity-guide__human mt12">
+          <div class="similarity-guide__title">怎么调（说人话）</div>
+          <ul class="hint-list">
+            <li>现场反馈“提醒太少，担心漏掉复用照片”：先把粗筛阈值加 1~2（例如 8→9/10），观察 2~3 天。</li>
+            <li>现场反馈“提醒太多，审核压力大”：先把精筛阈值加 0.005~0.01（例如 0.975→0.980/0.985）。</li>
+            <li>优先单参数微调，不建议两项同时大幅改，避免不知道是哪一项导致变化。</li>
+            <li>默认推荐：`粗筛=8` + `精筛=0.975`，适合大多数场景作为起点。</li>
+          </ul>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="similarityGuideDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 卡片 5：检查详情本地上传水印定位信息 -->
     <el-card class="mb16" v-loading="loading">
@@ -1155,6 +1236,44 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const saving = ref(false)
+const similarityGuideDialogVisible = ref(false)
+const similarityThresholdSuggestionRows = [
+  {
+    level: '1档（极严）',
+    phash: 4,
+    vector: '0.990',
+    scenario: '项目初期、先稳住误报，审核人力紧张',
+    result: '只有非常接近的历史照片才会提醒，误报最低，但可能漏掉部分“轻微改图”复用。',
+  },
+  {
+    level: '2档（偏严）',
+    phash: 6,
+    vector: '0.985',
+    scenario: '站点拍摄环境差异较大，不想被频繁打扰',
+    result: '提醒频次偏低，适合先跑一段时间摸底。',
+  },
+  {
+    level: '3档（推荐）',
+    phash: 8,
+    vector: '0.975',
+    scenario: '大多数项目默认起步档',
+    result: '在误报与漏报之间比较平衡，建议先从这一档开始。',
+  },
+  {
+    level: '4档（偏松）',
+    phash: 10,
+    vector: '0.970',
+    scenario: '历史照片复用风险高，希望更敏感',
+    result: '会抓到更多“改曝光/改水印”类复用，但提醒数量会明显增多。',
+  },
+  {
+    level: '5档（高敏）',
+    phash: 12,
+    vector: '0.965',
+    scenario: '专项治理期，需要尽量多发现可疑照片',
+    result: '提醒最多，审核压力最大，建议短期使用并配合人工复核。',
+  },
+]
 
 const form = ref({
   location_mode: {
@@ -1214,6 +1333,28 @@ const form = ref({
   },
   check_item_photo_similarity_window_days: {
     default: 180,
+    per_role: {
+      admin: null,
+      manager: null,
+      inspector: null,
+      surveyor: null,
+      user: null,
+    },
+    per_user: [],
+  },
+  check_item_photo_similarity_phash_threshold: {
+    default: 8,
+    per_role: {
+      admin: null,
+      manager: null,
+      inspector: null,
+      surveyor: null,
+      user: null,
+    },
+    per_user: [],
+  },
+  check_item_photo_similarity_vector_threshold: {
+    default: 0.975,
     per_role: {
       admin: null,
       manager: null,
@@ -1395,21 +1536,42 @@ const buildBoolRulePayload = (formRule) => {
   return payload
 }
 
+const clampInt = (value, minValue, maxValue, fallbackValue) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return fallbackValue
+  return Math.max(minValue, Math.min(maxValue, Math.round(num)))
+}
+
+const clampFloat = (value, minValue, maxValue, precision, fallbackValue) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return fallbackValue
+  const clamped = Math.max(minValue, Math.min(maxValue, num))
+  if (!Number.isFinite(clamped)) return fallbackValue
+  return Number(clamped.toFixed(precision))
+}
+
+const formatSimilarityPhashValue = (value) => clampInt(value, 0, 64, 8)
+
+const formatSimilarityVectorValue = (value) => {
+  const val = clampFloat(value, 0, 1, 3, 0.975)
+  return Number(val).toFixed(3)
+}
+
+const openSimilarityThresholdGuide = () => {
+  similarityGuideDialogVisible.value = true
+}
+
 // 通用整型规则：后端 -> 表单
-const fillIntRuleToForm = (formRule, serverRule, roles, defaultValue = 100) => {
+const fillIntRuleToForm = (formRule, serverRule, roles, defaultValue = 100, minValue = 1, maxValue = 10000) => {
   const safeRule = serverRule || {}
   const perRole = safeRule.per_role || {}
   const perUser = safeRule.per_user || {}
-  const defaultNum = Number(safeRule.default)
-  formRule.default = Number.isFinite(defaultNum) ? Math.max(1, Math.min(10000, Math.round(defaultNum))) : defaultValue
+  formRule.default = clampInt(safeRule.default, minValue, maxValue, defaultValue)
 
   const mappedPerRole = {}
   roles.forEach((role) => {
     if (Object.prototype.hasOwnProperty.call(perRole, role)) {
-      const roleVal = Number(perRole[role])
-      mappedPerRole[role] = Number.isFinite(roleVal)
-        ? Math.max(1, Math.min(10000, Math.round(roleVal)))
-        : null
+      mappedPerRole[role] = clampInt(perRole[role], minValue, maxValue, null)
     } else {
       mappedPerRole[role] = null
     }
@@ -1417,20 +1579,16 @@ const fillIntRuleToForm = (formRule, serverRule, roles, defaultValue = 100) => {
   formRule.per_role = mappedPerRole
 
   formRule.per_user = Object.entries(perUser).map(([id, val]) => {
-    const num = Number(val)
     return {
       user_id: id,
-      value: Number.isFinite(num) ? Math.max(1, Math.min(10000, Math.round(num))) : defaultValue,
+      value: clampInt(val, minValue, maxValue, defaultValue),
     }
   })
 }
 
 // 通用整型规则：表单 -> 后端 payload
-const buildIntRulePayload = (formRule, fallbackDefault = 100) => {
-  const defaultNumRaw = Number(formRule.default)
-  const defaultNum = Number.isFinite(defaultNumRaw)
-    ? Math.max(1, Math.min(10000, Math.round(defaultNumRaw)))
-    : fallbackDefault
+const buildIntRulePayload = (formRule, fallbackDefault = 100, minValue = 1, maxValue = 10000) => {
+  const defaultNum = clampInt(formRule.default, minValue, maxValue, fallbackDefault)
 
   const payload = {
     default: defaultNum,
@@ -1440,17 +1598,80 @@ const buildIntRulePayload = (formRule, fallbackDefault = 100) => {
 
   Object.entries(formRule.per_role || {}).forEach(([role, value]) => {
     if (value === null || value === undefined || value === '') return
-    const num = Number(value)
-    if (!Number.isFinite(num)) return
-    payload.per_role[role] = Math.max(1, Math.min(10000, Math.round(num)))
+    const clamped = clampInt(value, minValue, maxValue, null)
+    if (clamped === null) return
+    payload.per_role[role] = clamped
   })
 
   ;(formRule.per_user || []).forEach((rule) => {
     const id = String(rule.user_id || '').trim()
     if (!id) return
-    const num = Number(rule.value)
-    if (!Number.isFinite(num)) return
-    payload.per_user[id] = Math.max(1, Math.min(10000, Math.round(num)))
+    const clamped = clampInt(rule.value, minValue, maxValue, null)
+    if (clamped === null) return
+    payload.per_user[id] = clamped
+  })
+
+  return payload
+}
+
+const fillFloatRuleToForm = (
+  formRule,
+  serverRule,
+  roles,
+  defaultValue = 0.975,
+  minValue = 0,
+  maxValue = 1,
+  precision = 3,
+) => {
+  const safeRule = serverRule || {}
+  const perRole = safeRule.per_role || {}
+  const perUser = safeRule.per_user || {}
+  formRule.default = clampFloat(safeRule.default, minValue, maxValue, precision, defaultValue)
+
+  const mappedPerRole = {}
+  roles.forEach((role) => {
+    if (Object.prototype.hasOwnProperty.call(perRole, role)) {
+      mappedPerRole[role] = clampFloat(perRole[role], minValue, maxValue, precision, null)
+    } else {
+      mappedPerRole[role] = null
+    }
+  })
+  formRule.per_role = mappedPerRole
+
+  formRule.per_user = Object.entries(perUser).map(([id, val]) => ({
+    user_id: id,
+    value: clampFloat(val, minValue, maxValue, precision, defaultValue),
+  }))
+}
+
+const buildFloatRulePayload = (
+  formRule,
+  fallbackDefault = 0.975,
+  minValue = 0,
+  maxValue = 1,
+  precision = 3,
+) => {
+  const defaultNum = clampFloat(formRule.default, minValue, maxValue, precision, fallbackDefault)
+
+  const payload = {
+    default: defaultNum,
+    per_role: {},
+    per_user: {},
+  }
+
+  Object.entries(formRule.per_role || {}).forEach(([role, value]) => {
+    if (value === null || value === undefined || value === '') return
+    const clamped = clampFloat(value, minValue, maxValue, precision, null)
+    if (clamped === null) return
+    payload.per_role[role] = clamped
+  })
+
+  ;(formRule.per_user || []).forEach((rule) => {
+    const id = String(rule.user_id || '').trim()
+    if (!id) return
+    const clamped = clampFloat(rule.value, minValue, maxValue, precision, null)
+    if (clamped === null) return
+    payload.per_user[id] = clamped
   })
 
   return payload
@@ -1469,6 +1690,8 @@ const loadConfig = async () => {
     const duplicatePhotoBlockRule = raw.block_duplicate_check_item_photo_upload || {}
     const similarityAlertRule = raw.enable_check_item_photo_similarity_alert || {}
     const similarityWindowDaysRule = raw.check_item_photo_similarity_window_days || {}
+    const similarityPhashThresholdRule = raw.check_item_photo_similarity_phash_threshold || {}
+    const similarityVectorThresholdRule = raw.check_item_photo_similarity_vector_threshold || {}
     const legacyScanPickupRule = raw.enable_legacy_scan_pickup || {}
     const locationDistanceCheckRule = raw.enable_photo_location_distance_check || {}
     const distanceBlockUploadRule = raw.distance_exceed_block_upload || {}
@@ -1523,6 +1746,27 @@ const loadConfig = async () => {
       similarityWindowDaysRule,
       roleKeys,
       180,
+      1,
+      3650,
+    )
+
+    fillIntRuleToForm(
+      form.value.check_item_photo_similarity_phash_threshold,
+      similarityPhashThresholdRule,
+      roleKeys,
+      8,
+      0,
+      64,
+    )
+
+    fillFloatRuleToForm(
+      form.value.check_item_photo_similarity_vector_threshold,
+      similarityVectorThresholdRule,
+      roleKeys,
+      0.975,
+      0,
+      1,
+      3,
     )
 
     // enable_legacy_scan_pickup：默认关闭（false）
@@ -1552,6 +1796,8 @@ const loadConfig = async () => {
       distanceThresholdRule,
       roleKeys,
       100,
+      1,
+      10000,
     )
 
   } catch (e) {
@@ -1581,6 +1827,8 @@ const save = async () => {
       block_duplicate_check_item_photo_upload: {},
       enable_check_item_photo_similarity_alert: {},
       check_item_photo_similarity_window_days: {},
+      check_item_photo_similarity_phash_threshold: {},
+      check_item_photo_similarity_vector_threshold: {},
       enable_legacy_scan_pickup: {},
       enable_photo_location_distance_check: {},
       distance_exceed_block_upload: {},
@@ -1624,6 +1872,23 @@ const save = async () => {
     payload.check_item_photo_similarity_window_days = buildIntRulePayload(
       form.value.check_item_photo_similarity_window_days,
       180,
+      1,
+      3650,
+    )
+
+    payload.check_item_photo_similarity_phash_threshold = buildIntRulePayload(
+      form.value.check_item_photo_similarity_phash_threshold,
+      8,
+      0,
+      64,
+    )
+
+    payload.check_item_photo_similarity_vector_threshold = buildFloatRulePayload(
+      form.value.check_item_photo_similarity_vector_threshold,
+      0.975,
+      0,
+      1,
+      3,
     )
 
     payload.enable_legacy_scan_pickup = buildBoolRulePayload(
@@ -1641,6 +1906,8 @@ const save = async () => {
     payload.photo_location_distance_threshold_m = buildIntRulePayload(
       form.value.photo_location_distance_threshold_m,
       100,
+      1,
+      10000,
     )
 
     await mobileSettingsApi.updateMobileSettings(payload)
@@ -1995,6 +2262,10 @@ const searchUsers = async (query) => {
   margin-top: 8px;
 }
 
+.mt12 {
+  margin-top: 12px;
+}
+
 .user-rules {
   width: 100%;
 }
@@ -2003,5 +2274,18 @@ const searchUsers = async (query) => {
   display: flex;
   align-items: center;
   margin-bottom: 4px;
+}
+
+.similarity-guide__human {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: #fcfcfd;
+}
+
+.similarity-guide__title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 6px;
 }
 </style>

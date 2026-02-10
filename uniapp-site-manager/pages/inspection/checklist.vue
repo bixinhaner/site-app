@@ -1752,6 +1752,9 @@
 				duplicateWarning: (data.duplicate_warning && typeof data.duplicate_warning === 'object')
 					? data.duplicate_warning
 					: null,
+				similarWarning: (data.similar_warning && typeof data.similar_warning === 'object')
+					? data.similar_warning
+					: null,
 				shouldBlock
 			}
 		}
@@ -1854,6 +1857,7 @@
 										let gpsUsed = { ...gpsData }
 										let uploadTicket = ''
 										let originalContentHash = ''
+										let precheckRiskKeys = []
 
 										const precheckResult = await precheckPhotoBeforeUpload({
 											imagePath: finalImagePath,
@@ -1873,6 +1877,23 @@
 										if (precheckResult.shouldBlock) {
 											await showDuplicateBlockedModal(precheckResult?.duplicateWarning)
 											return
+										}
+										const precheckRiskCandidates = []
+										if (precheckResult?.duplicateWarning && typeof precheckResult.duplicateWarning === 'object') {
+											precheckRiskCandidates.push({ type: 'duplicate', payload: precheckResult.duplicateWarning })
+										}
+										if (precheckResult?.similarWarning && typeof precheckResult.similarWarning === 'object') {
+											precheckRiskCandidates.push({ type: 'similar', payload: precheckResult.similarWarning })
+										}
+										if (precheckRiskCandidates.length > 0) {
+											const precheckRiskSummary = collectUnseenPhotoRiskWarnings(precheckRiskCandidates, new Set())
+											if (precheckRiskSummary.lines.length > 0) {
+												const continueAddPhoto = await showPhotoPrecheckRiskModal(precheckRiskSummary.lines)
+												if (!continueAddPhoto) {
+													return
+												}
+											}
+											precheckRiskKeys = precheckRiskSummary.keys
 										}
 										uploadTicket = String(precheckResult.uploadTicket || '')
 										originalContentHash = String(precheckResult.originalContentHash || '')
@@ -1967,6 +1988,7 @@
 											file_path: finalImagePath,
 											upload_ticket: uploadTicket || undefined,
 											original_content_hash: originalContentHash || undefined,
+											precheck_risk_keys: precheckRiskKeys,
 											taken_at: new Date().toISOString(),
 											latitude: gpsUsed.latitude,
 											longitude: gpsUsed.longitude,
@@ -3145,6 +3167,103 @@
 				})
 			})
 		}
+
+		const normalizePhotoRiskType = (riskType) => (String(riskType || '').toLowerCase() === 'similar' ? 'similar' : 'duplicate')
+
+		const getPhotoRiskDetail = (riskType, warningPayload) => {
+			const warning = warningPayload && typeof warningPayload === 'object' ? warningPayload : {}
+			const detail = normalizePhotoRiskType(riskType) === 'similar' ? warning?.similar : warning?.duplicate
+			return detail && typeof detail === 'object' ? detail : {}
+		}
+
+		const buildPhotoRiskWarningKey = (risk) => {
+			const type = normalizePhotoRiskType(risk?.type)
+			const warning = (risk?.payload && typeof risk.payload === 'object') ? risk.payload : {}
+			const detail = getPhotoRiskDetail(type, warning)
+			const keyParts = [
+				detail?.matched_photo_id,
+				detail?.content_hash,
+				detail?.uploaded_at,
+				detail?.source_type,
+				detail?.site_id,
+				detail?.uploader_id,
+				detail?.similarity_score,
+				detail?.similarity_percent,
+				warning?.message,
+			]
+				.map((item) => String(item ?? '').trim())
+				.filter((item) => item.length > 0)
+
+			if (keyParts.length === 0) {
+				const fallback = JSON.stringify(detail || {})
+				return `${type}:${fallback}`
+			}
+			return `${type}:${keyParts.join('|')}`
+		}
+
+		const buildPhotoRiskLineText = (risk) => {
+			const type = normalizePhotoRiskType(risk?.type)
+			const warning = (risk?.payload && typeof risk.payload === 'object') ? risk.payload : {}
+			const detail = getPhotoRiskDetail(type, warning)
+			const site = getDuplicatePhotoSiteLabel(detail)
+			const uploader = getDuplicatePhotoUploaderLabel(detail)
+			const time = detail?.uploaded_at || '-'
+			const source = getDuplicatePhotoSourceLabel(detail)
+			const riskTag = type === 'similar'
+				? $t('inspection.photoRiskTagSimilar')
+				: $t('inspection.photoRiskTagDuplicate')
+			const similarityPercent = Number(detail?.similarity_percent)
+			const similarityText = (type === 'similar' && Number.isFinite(similarityPercent))
+				? ` / ${$t('inspection.photoRiskSimilarityScore', { score: similarityPercent.toFixed(2) })}`
+				: ''
+			return `- [${riskTag}] ${site} / ${uploader} / ${time} / ${source}${similarityText}`
+		}
+
+		const collectUnseenPhotoRiskWarnings = (riskList, seenRiskKeys) => {
+			const sourceList = Array.isArray(riskList) ? riskList : []
+			const seen = seenRiskKeys instanceof Set ? seenRiskKeys : new Set()
+			const warnings = []
+			const lines = []
+			const keys = []
+			for (const risk of sourceList) {
+				if (!risk || typeof risk !== 'object') continue
+				const payload = risk?.payload
+				if (!payload || typeof payload !== 'object') continue
+				const normalizedRisk = {
+					type: normalizePhotoRiskType(risk?.type),
+					payload
+				}
+				const key = buildPhotoRiskWarningKey(normalizedRisk)
+				if (key && seen.has(key)) continue
+				if (key) {
+					seen.add(key)
+					keys.push(key)
+				}
+				warnings.push(normalizedRisk)
+				lines.push(buildPhotoRiskLineText(normalizedRisk))
+			}
+			return { warnings, lines, keys, seen }
+		}
+
+		const showPhotoPrecheckRiskModal = async (riskLines) => {
+			const lines = Array.isArray(riskLines) ? riskLines.filter((line) => String(line || '').trim().length > 0) : []
+			if (!lines.length) return true
+			const contentText = [
+				$t('inspection.photoPrecheckRiskAlertIntro', { count: lines.length }),
+				...lines,
+				$t('inspection.photoPrecheckRiskAlertHint')
+			].join('\n')
+			return await new Promise((resolve) => {
+				uni.showModal({
+					title: $t('inspection.photoPrecheckRiskAlertTitle'),
+					content: contentText,
+					confirmText: $t('inspection.photoPrecheckRiskAlertContinue'),
+					cancelText: $t('inspection.photoPrecheckRiskAlertCancel'),
+					success: (res) => resolve(!!res.confirm),
+					fail: () => resolve(false)
+				})
+			})
+		}
 			
 			const saveCurrentItem = async () => {
 		// 设备级检查项必须先绑定设备，防止误保存
@@ -3265,6 +3384,14 @@
 							const fieldPhotoMode = isFieldPhotoMode()
 							const allowedPhotoFieldIdSet = fieldPhotoMode ? getAllowedPhotoFieldIdSet() : new Set()
 							const riskWarnings = []
+							const acknowledgedRiskKeys = new Set()
+							;(currentItem.value.photos || []).forEach((p) => {
+								if (!Array.isArray(p?.precheck_risk_keys)) return
+								p.precheck_risk_keys.forEach((rawKey) => {
+									const keyText = String(rawKey || '').trim()
+									if (keyText) acknowledgedRiskKeys.add(keyText)
+								})
+							})
 
 							for (let i = 0; i < currentItem.value.photos.length; i++) {
 								const photo = currentItem.value.photos[i]
@@ -3297,6 +3424,28 @@
 									const blockedError = new Error(buildDuplicateBlockedMessage(refreshPrecheckResult.duplicateWarning))
 									blockedError.riskModalShown = true
 									throw blockedError
+								}
+								const refreshRiskCandidates = []
+								if (refreshPrecheckResult?.duplicateWarning && typeof refreshPrecheckResult.duplicateWarning === 'object') {
+									refreshRiskCandidates.push({ type: 'duplicate', payload: refreshPrecheckResult.duplicateWarning })
+								}
+								if (refreshPrecheckResult?.similarWarning && typeof refreshPrecheckResult.similarWarning === 'object') {
+									refreshRiskCandidates.push({ type: 'similar', payload: refreshPrecheckResult.similarWarning })
+								}
+								if (refreshRiskCandidates.length > 0) {
+									const refreshRiskSummary = collectUnseenPhotoRiskWarnings(refreshRiskCandidates, acknowledgedRiskKeys)
+									if (refreshRiskSummary.warnings.length > 0) {
+										riskWarnings.push(...refreshRiskSummary.warnings)
+									}
+									if (refreshRiskSummary.keys.length > 0) {
+										const existingPhotoRiskKeys = Array.isArray(photo.precheck_risk_keys)
+											? photo.precheck_risk_keys
+											: []
+										photo.precheck_risk_keys = Array.from(new Set([
+											...existingPhotoRiskKeys,
+											...refreshRiskSummary.keys
+										]))
+									}
 								}
 								photo.upload_ticket = String(refreshPrecheckResult.uploadTicket || '').trim() || undefined
 								photo.original_content_hash = String(refreshPrecheckResult.originalContentHash || '').trim() || photo.original_content_hash
@@ -3392,14 +3541,22 @@
 									throw new Error(uploadResult.error || $t('inspection.photoUploadFailed'))
 								}
 
+								const uploadRiskCandidates = []
 								const duplicateWarning = uploadResult?.duplicateWarning || uploadResult?.data?.duplicate_warning
 								if (duplicateWarning && typeof duplicateWarning === 'object') {
-									riskWarnings.push({ type: 'duplicate', payload: duplicateWarning })
+									uploadRiskCandidates.push({ type: 'duplicate', payload: duplicateWarning })
 								}
 
 								const similarWarning = uploadResult?.similarWarning || uploadResult?.data?.similar_warning
 								if (similarWarning && typeof similarWarning === 'object') {
-									riskWarnings.push({ type: 'similar', payload: similarWarning })
+									uploadRiskCandidates.push({ type: 'similar', payload: similarWarning })
+								}
+
+								if (uploadRiskCandidates.length > 0) {
+									const uploadRiskSummary = collectUnseenPhotoRiskWarnings(uploadRiskCandidates, acknowledgedRiskKeys)
+									if (uploadRiskSummary.warnings.length > 0) {
+										riskWarnings.push(...uploadRiskSummary.warnings)
+									}
 								}
 								
 								// 用后端返回结果替换本地占位，确保后续删除/展示使用photo.id与服务器路径
@@ -3425,46 +3582,23 @@
 
 						if (riskWarnings.length > 0) {
 							uni.hideLoading()
-							const dedupLines = []
-							const seenKeys = new Set()
-							for (const risk of riskWarnings) {
-								const warning = risk?.payload || {}
-								const isSimilar = risk?.type === 'similar'
-								const detail = isSimilar ? (warning?.similar || {}) : (warning?.duplicate || {})
-								const dedupKeySource = isSimilar
-									? (detail?.matched_photo_id || detail?.similarity_score || warning?.message)
-									: (detail?.content_hash || warning?.message)
-								const key = `${isSimilar ? 'similar' : 'duplicate'}:${String(dedupKeySource || Math.random())}`
-								if (seenKeys.has(key)) continue
-								seenKeys.add(key)
-								const site = getDuplicatePhotoSiteLabel(detail)
-								const uploader = getDuplicatePhotoUploaderLabel(detail)
-								const time = detail?.uploaded_at || '-'
-								const source = getDuplicatePhotoSourceLabel(detail)
-								const riskTag = isSimilar
-									? $t('inspection.photoRiskTagSimilar')
-									: $t('inspection.photoRiskTagDuplicate')
-								const similarityPercent = Number(detail?.similarity_percent)
-								const similarityText = (isSimilar && Number.isFinite(similarityPercent))
-									? ` / ${$t('inspection.photoRiskSimilarityScore', { score: similarityPercent.toFixed(2) })}`
-									: ''
-								dedupLines.push(`- [${riskTag}] ${site} / ${uploader} / ${time} / ${source}${similarityText}`)
-							}
+							const dedupLines = collectUnseenPhotoRiskWarnings(riskWarnings, new Set()).lines
+							if (dedupLines.length > 0) {
+								const contentText = [
+									$t('inspection.photoRiskAlertIntro', { count: dedupLines.length }),
+									...dedupLines,
+								].join('\\n')
 
-							const contentText = [
-								$t('inspection.photoRiskAlertIntro', { count: dedupLines.length }),
-								...dedupLines,
-							].join('\\n')
-
-							await new Promise((resolve) => {
-								uni.showModal({
-									title: $t('inspection.photoRiskAlertTitle'),
-									content: contentText,
-									showCancel: false,
-									success: () => resolve(),
-									fail: () => resolve()
+								await new Promise((resolve) => {
+									uni.showModal({
+										title: $t('inspection.photoRiskAlertTitle'),
+										content: contentText,
+										showCancel: false,
+										success: () => resolve(),
+										fail: () => resolve()
+									})
 								})
-							})
+							}
 						}
 						} catch (photoError) {
 							console.error('照片上传失败:', photoError)

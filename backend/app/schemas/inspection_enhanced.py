@@ -209,6 +209,11 @@ class InspectionPhotoResponse(BaseModel):
     taken_at: datetime
     has_watermark: bool
     watermark_data: Optional[Dict[str, Any]] = None
+    content_hash: Optional[str] = None
+    original_content_hash: Optional[str] = None
+    content_phash: Optional[str] = None
+    content_vector_backend: Optional[str] = None
+    hash_value: Optional[str] = None
     is_duplicate_global: Optional[bool] = False
     duplicate_info: Optional[Dict[str, Any]] = None
     is_similar_risk: Optional[bool] = False

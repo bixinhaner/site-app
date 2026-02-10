@@ -54,7 +54,7 @@ from app.services.photo_similarity_guard import (
     DEFAULT_PHASH_THRESHOLD,
     DEFAULT_VECTOR_THRESHOLD,
     DEFAULT_WINDOW_DAYS,
-    detect_similar_photo_warning,
+    detect_similar_photo_validation,
     extract_similarity_features,
 )
 from app.utils.timezone import to_utc_iso
@@ -738,11 +738,16 @@ def _resolve_similarity_alert_policy(db: Session, current_user: User) -> Dict[st
     """解析检查项照片相似度提醒策略（默认开启，窗口180天）。"""
     enabled = True
     window_days = DEFAULT_WINDOW_DAYS
+    phash_threshold = DEFAULT_PHASH_THRESHOLD
+    vector_threshold = DEFAULT_VECTOR_THRESHOLD
     try:
         from app.api.mobile_settings import (
             _load_mobile_settings,
+            _normalize_similarity_phash_threshold,
+            _normalize_similarity_vector_threshold,
             _normalize_similarity_window_days,
             _resolve_bool_for_user,
+            _resolve_float_for_user,
             _resolve_int_for_user,
         )
 
@@ -760,14 +765,30 @@ def _resolve_similarity_alert_policy(db: Session, current_user: User) -> Dict[st
             default=DEFAULT_WINDOW_DAYS,
             value_normalizer=_normalize_similarity_window_days,
         )
+        phash_threshold = _resolve_int_for_user(
+            settings,
+            key="check_item_photo_similarity_phash_threshold",
+            user=current_user,
+            default=DEFAULT_PHASH_THRESHOLD,
+            value_normalizer=_normalize_similarity_phash_threshold,
+        )
+        vector_threshold = _resolve_float_for_user(
+            settings,
+            key="check_item_photo_similarity_vector_threshold",
+            user=current_user,
+            default=DEFAULT_VECTOR_THRESHOLD,
+            value_normalizer=_normalize_similarity_vector_threshold,
+        )
     except Exception:
         enabled = True
         window_days = DEFAULT_WINDOW_DAYS
+        phash_threshold = DEFAULT_PHASH_THRESHOLD
+        vector_threshold = DEFAULT_VECTOR_THRESHOLD
     return {
         "enabled": bool(enabled),
         "window_days": max(1, min(int(window_days or DEFAULT_WINDOW_DAYS), 3650)),
-        "phash_threshold": DEFAULT_PHASH_THRESHOLD,
-        "vector_threshold": DEFAULT_VECTOR_THRESHOLD,
+        "phash_threshold": max(0, min(int(phash_threshold or DEFAULT_PHASH_THRESHOLD), 64)),
+        "vector_threshold": max(0.0, min(float(vector_threshold if vector_threshold is not None else DEFAULT_VECTOR_THRESHOLD), 1.0)),
     }
 
 
@@ -801,18 +822,39 @@ def _mark_photo_similarity_info(
     *,
     similarity_features: Optional[Dict[str, Any]],
     similar_warning: Optional[Dict[str, Any]],
+    similarity_evaluation: Optional[Dict[str, Any]],
 ) -> None:
     feature_data = similarity_features if isinstance(similarity_features, dict) else {}
     photo.content_phash = feature_data.get("content_phash")
     photo.content_vector = feature_data.get("content_vector")
     photo.content_vector_backend = feature_data.get("content_vector_backend")
 
+    info_payload: Dict[str, Any] = {}
+    warning_payload = similar_warning if isinstance(similar_warning, dict) else {}
+    warning_info = warning_payload.get("similar")
+    if isinstance(warning_info, dict):
+        info_payload.update(warning_info)
+
+    eval_payload = similarity_evaluation if isinstance(similarity_evaluation, dict) else {}
+    if eval_payload:
+        info_payload["evaluation"] = eval_payload
+
+    feature_phash = feature_data.get("content_phash")
+    if feature_phash and "content_phash" not in info_payload:
+        info_payload["content_phash"] = feature_phash
+    vector_backend = feature_data.get("content_vector_backend")
+    if vector_backend and "vector_backend" not in info_payload:
+        info_payload["vector_backend"] = vector_backend
+    vector_raw = feature_data.get("content_vector")
+    if isinstance(vector_raw, list):
+        info_payload["content_vector_dim"] = len(vector_raw)
+
     if similar_warning and isinstance(similar_warning, dict):
         photo.is_similar_risk = True
-        photo.similar_info = similar_warning.get("similar")
+        photo.similar_info = info_payload or warning_payload.get("similar")
         return
     photo.is_similar_risk = False
-    photo.similar_info = None
+    photo.similar_info = info_payload or None
 
 
 def _detect_similar_warning_if_needed(
@@ -825,8 +867,17 @@ def _detect_similar_warning_if_needed(
     """提取相似特征并按策略检测高相似风险。"""
     features = extract_similarity_features(file_path)
     warning = None
+    evaluation = {
+        "checked_at": to_utc_iso(datetime.utcnow()),
+        "enabled": bool(policy.get("enabled")),
+        "window_days": max(1, min(int(policy.get("window_days", DEFAULT_WINDOW_DAYS) or DEFAULT_WINDOW_DAYS), 3650)),
+        "phash_threshold": max(0, min(int(policy.get("phash_threshold", DEFAULT_PHASH_THRESHOLD) or DEFAULT_PHASH_THRESHOLD), 64)),
+        "vector_threshold": round(max(0.0, min(float(policy.get("vector_threshold", DEFAULT_VECTOR_THRESHOLD) or DEFAULT_VECTOR_THRESHOLD), 1.0)), 6),
+        "decision": "not_checked",
+        "reason_code": "POLICY_DISABLED",
+    }
     if policy.get("enabled"):
-        warning = detect_similar_photo_warning(
+        validation = detect_similar_photo_validation(
             db,
             content_phash=features.get("content_phash"),
             content_vector=features.get("content_vector"),
@@ -836,9 +887,15 @@ def _detect_similar_warning_if_needed(
             phash_threshold=policy.get("phash_threshold", DEFAULT_PHASH_THRESHOLD),
             vector_threshold=policy.get("vector_threshold", DEFAULT_VECTOR_THRESHOLD),
         )
+        warning = validation.get("warning")
+        validation_eval = validation.get("evaluation")
+        if isinstance(validation_eval, dict):
+            evaluation = validation_eval
+            evaluation["enabled"] = True
     return {
         "features": features,
         "warning": warning,
+        "evaluation": evaluation,
     }
 
 
@@ -1630,6 +1687,7 @@ async def upload_inspection_photo(
         photo,
         similarity_features=similarity_result.get("features"),
         similar_warning=similar_warning,
+        similarity_evaluation=similarity_result.get("evaluation"),
     )
     
     db.add(photo)
@@ -1854,6 +1912,7 @@ async def replace_inspection_photo(
         existing_photo,
         similarity_features=similarity_result.get("features"),
         similar_warning=similar_warning,
+        similarity_evaluation=similarity_result.get("evaluation"),
     )
     
     try:
@@ -2098,6 +2157,7 @@ async def batch_inspection_photo_operations(
                         existing_photo,
                         similarity_features=similarity_result.get("features"),
                         similar_warning=similar_warning,
+                        similarity_evaluation=similarity_result.get("evaluation"),
                     )
 
                     if not duplicate_detail:
@@ -2282,6 +2342,7 @@ async def batch_inspection_photo_operations(
                         new_photo,
                         similarity_features=similarity_result.get("features"),
                         similar_warning=similar_warning,
+                        similarity_evaluation=similarity_result.get("evaluation"),
                     )
                     db.add(new_photo)
                     if not duplicate_detail:

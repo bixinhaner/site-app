@@ -17,8 +17,8 @@ from app.utils.timezone import to_utc_iso
 
 
 DEFAULT_WINDOW_DAYS = 180
-DEFAULT_PHASH_THRESHOLD = 4
-DEFAULT_VECTOR_THRESHOLD = 0.985
+DEFAULT_PHASH_THRESHOLD = 8
+DEFAULT_VECTOR_THRESHOLD = 0.975
 DEFAULT_MAX_CANDIDATES = 4000
 
 SIMILAR_SOURCE_TYPE = "inspection_photo"
@@ -310,6 +310,28 @@ def _resolve_uploader_name(full_name: Optional[str], username: Optional[str]) ->
     return None
 
 
+def _build_candidate_identity(row: Any) -> Dict[str, Any]:
+    site_id = getattr(row, "site_id", None)
+    site_name = getattr(row, "site_name", None)
+    uploader_id = getattr(row, "uploader_id", None)
+    uploader_name = _resolve_uploader_name(
+        getattr(row, "uploader_full_name", None),
+        getattr(row, "uploader_username", None),
+    )
+    return {
+        "photo_id": getattr(row, "photo_id", None),
+        "inspection_id": getattr(row, "inspection_id", None),
+        "check_item_id": getattr(row, "check_item_id", None),
+        "site_id": site_id,
+        "site_name": site_name,
+        "site_display": _build_site_display(site_name, site_id),
+        "uploader_id": uploader_id,
+        "uploader_name": uploader_name,
+        "uploader_display": _build_uploader_display(uploader_name, uploader_id),
+        "uploaded_at": to_utc_iso(getattr(row, "uploaded_at", None)),
+    }
+
+
 def detect_similar_photo_warning(
     db: Session,
     *,
@@ -321,18 +343,71 @@ def detect_similar_photo_warning(
     phash_threshold: int = DEFAULT_PHASH_THRESHOLD,
     vector_threshold: float = DEFAULT_VECTOR_THRESHOLD,
 ) -> Optional[Dict[str, Any]]:
+    return detect_similar_photo_validation(
+        db,
+        content_phash=content_phash,
+        content_vector=content_vector,
+        content_vector_backend=content_vector_backend,
+        exclude_photo_id=exclude_photo_id,
+        window_days=window_days,
+        phash_threshold=phash_threshold,
+        vector_threshold=vector_threshold,
+    ).get("warning")
+
+
+def detect_similar_photo_validation(
+    db: Session,
+    *,
+    content_phash: Optional[str],
+    content_vector: Any,
+    content_vector_backend: Optional[str],
+    exclude_photo_id: Optional[str] = None,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    phash_threshold: int = DEFAULT_PHASH_THRESHOLD,
+    vector_threshold: float = DEFAULT_VECTOR_THRESHOLD,
+) -> Dict[str, Any]:
     phash_text = str(content_phash or "").strip().lower()
+    vector_backend = str(content_vector_backend or "unknown")
+    evaluation: Dict[str, Any] = {
+        "checked_at": to_utc_iso(datetime.utcnow()),
+        "enabled": True,
+        "window_days": max(1, min(int(window_days or DEFAULT_WINDOW_DAYS), 3650)),
+        "phash_threshold": max(0, min(int(phash_threshold or DEFAULT_PHASH_THRESHOLD), 64)),
+        "vector_threshold": round(
+            max(0.0, min(float(vector_threshold if vector_threshold is not None else DEFAULT_VECTOR_THRESHOLD), 1.0)),
+            6,
+        ),
+        "vector_backend": vector_backend,
+        "query_content_phash": phash_text or None,
+        "query_vector_dim": None,
+        "candidate_total": 0,
+        "candidate_phash_pass": 0,
+        "candidate_vector_pass": 0,
+        "closest_phash_candidate": None,
+        "best_similarity_candidate": None,
+        "matched_candidate": None,
+        "decision": "no_match",
+        "reason_code": "INIT",
+    }
     if not phash_text:
-        return None
+        evaluation["decision"] = "not_checked"
+        evaluation["reason_code"] = "MISSING_QUERY_PHASH"
+        return {"warning": None, "evaluation": evaluation}
 
     query_vec = _parse_vector(content_vector)
     if query_vec is None:
-        return None
+        evaluation["decision"] = "not_checked"
+        evaluation["reason_code"] = "MISSING_QUERY_VECTOR"
+        return {"warning": None, "evaluation": evaluation}
 
     safe_window_days = max(1, min(int(window_days or DEFAULT_WINDOW_DAYS), 3650))
     safe_phash_threshold = max(0, min(int(phash_threshold or DEFAULT_PHASH_THRESHOLD), 64))
     safe_vector_threshold = float(vector_threshold if vector_threshold is not None else DEFAULT_VECTOR_THRESHOLD)
     safe_vector_threshold = max(0.0, min(safe_vector_threshold, 1.0))
+    evaluation["window_days"] = safe_window_days
+    evaluation["phash_threshold"] = safe_phash_threshold
+    evaluation["vector_threshold"] = round(float(safe_vector_threshold), 6)
+    evaluation["query_vector_dim"] = int(query_vec.shape[0]) if query_vec is not None else None
 
     cutoff = datetime.utcnow() - timedelta(days=safe_window_days)
     candidate_query = (
@@ -366,35 +441,63 @@ def detect_similar_photo_warning(
         candidate_query = candidate_query.filter(InspectionPhoto.content_vector_backend == str(content_vector_backend))
 
     candidates = candidate_query.order_by(InspectionPhoto.created_at.desc()).limit(_max_candidates()).all()
+    evaluation["candidate_total"] = len(candidates)
     if not candidates:
-        return None
+        evaluation["reason_code"] = "NO_CANDIDATES"
+        return {"warning": None, "evaluation": evaluation}
 
     best = None
     best_score = -1.0
     best_distance = 999
+    phash_pass_count = 0
+    vector_pass_count = 0
+    closest_phash_distance = 999
+    highest_similarity_score = -1.0
 
     for row in candidates:
         xor_value = _hamming_distance_hex(phash_text, getattr(row, "content_phash", None))
         if xor_value is None:
             continue
         distance = int(xor_value).bit_count()
+        if distance < closest_phash_distance:
+            closest_phash_distance = distance
+            closest_info = _build_candidate_identity(row)
+            closest_info["phash_distance"] = int(distance)
+            evaluation["closest_phash_candidate"] = closest_info
         if distance > safe_phash_threshold:
             continue
+        phash_pass_count += 1
 
         candidate_vec = _parse_vector(getattr(row, "content_vector", None))
         score = _calc_cosine_similarity(query_vec, candidate_vec) if candidate_vec is not None else None
         if score is None:
             continue
+        if score > highest_similarity_score:
+            highest_similarity_score = score
+            best_similarity_info = _build_candidate_identity(row)
+            best_similarity_info["similarity_score"] = round(float(score), 6)
+            best_similarity_info["similarity_percent"] = round(float(score) * 100, 2)
+            best_similarity_info["phash_distance"] = int(distance)
+            evaluation["best_similarity_candidate"] = best_similarity_info
         if score < safe_vector_threshold:
             continue
+        vector_pass_count += 1
 
         if (score > best_score) or (score == best_score and distance < best_distance):
             best = row
             best_score = score
             best_distance = distance
 
+    evaluation["candidate_phash_pass"] = phash_pass_count
+    evaluation["candidate_vector_pass"] = vector_pass_count
     if best is None:
-        return None
+        if phash_pass_count <= 0:
+            evaluation["reason_code"] = "NO_PHASH_MATCH"
+        elif vector_pass_count <= 0:
+            evaluation["reason_code"] = "NO_VECTOR_MATCH"
+        else:
+            evaluation["reason_code"] = "NO_MATCH"
+        return {"warning": None, "evaluation": evaluation}
 
     site_id = getattr(best, "site_id", None)
     site_name = getattr(best, "site_name", None)
@@ -437,4 +540,12 @@ def detect_similar_photo_warning(
             "vector_backend": str(content_vector_backend or "unknown"),
         },
     }
-    return detail
+    matched_candidate = dict(detail["similar"])
+    matched_candidate["photo_id"] = matched_candidate.get("matched_photo_id")
+    evaluation["matched_candidate"] = matched_candidate
+    evaluation["decision"] = "matched"
+    evaluation["reason_code"] = "MATCHED"
+    return {
+        "warning": detail,
+        "evaluation": evaluation,
+    }
