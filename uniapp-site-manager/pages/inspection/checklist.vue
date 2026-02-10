@@ -2905,7 +2905,7 @@
 		}
 	}
 
-	const confirmLocationDistancePolicyBeforeUpload = async (photos) => {
+		const confirmLocationDistancePolicyBeforeUpload = async (photos) => {
 		const sourcePhotos = Array.isArray(photos) ? photos : []
 		const comparedPhotos = sourcePhotos
 			.map((photo) => photo?.location_compare || {})
@@ -2949,8 +2949,8 @@
 			return false
 		}
 
-		return await new Promise((resolve) => {
-			uni.showModal({
+			return await new Promise((resolve) => {
+				uni.showModal({
 				title: '位置超阈值提醒',
 				content: `${content}是否继续上传？`,
 				confirmText: '继续上传',
@@ -2958,10 +2958,60 @@
 				success: (res) => resolve(!!res.confirm),
 				fail: () => resolve(false)
 			})
-		})
-	}
-		
-		const saveCurrentItem = async () => {
+			})
+		}
+
+		const DUPLICATE_PHOTO_SOURCE_TYPE_I18N_KEY_MAP = {
+			inspection_photo: 'inspection.duplicatePhotoSourceType.inspection_photo',
+			survey_archive_photo: 'inspection.duplicatePhotoSourceType.survey_archive_photo',
+			survey_archive_temp_photo: 'inspection.duplicatePhotoSourceType.survey_archive_temp_photo',
+			opening_archive_photo: 'inspection.duplicatePhotoSourceType.opening_archive_photo',
+			opening_archive_temp_photo: 'inspection.duplicatePhotoSourceType.opening_archive_temp_photo',
+			ssv_archive_photo: 'inspection.duplicatePhotoSourceType.ssv_archive_photo',
+			ssv_archive_temp_photo: 'inspection.duplicatePhotoSourceType.ssv_archive_temp_photo'
+		}
+
+		const getDuplicatePhotoSiteLabel = (dup) => {
+			const siteName = String(dup?.site_name || '').trim()
+			const siteId = dup?.site_id
+			if (siteName && siteId !== undefined && siteId !== null && String(siteId).trim() !== '') {
+				return `${siteName}(ID:${siteId})`
+			}
+			if (siteName) return siteName
+			if (siteId !== undefined && siteId !== null && String(siteId).trim() !== '') {
+				return $t('inspection.duplicatePhotoSiteId', { id: siteId })
+			}
+			const siteDisplay = String(dup?.site_display || '').trim()
+			if (siteDisplay) return siteDisplay
+			return $t('inspection.duplicatePhotoUnknownSite')
+		}
+
+		const getDuplicatePhotoUploaderLabel = (dup) => {
+			const uploaderName = String(dup?.uploader_name || '').trim()
+			const uploaderId = dup?.uploader_id
+			if (uploaderName && uploaderId !== undefined && uploaderId !== null && String(uploaderId).trim() !== '') {
+				return `${uploaderName}(ID:${uploaderId})`
+			}
+			if (uploaderName) return uploaderName
+			if (uploaderId !== undefined && uploaderId !== null && String(uploaderId).trim() !== '') {
+				return $t('inspection.duplicatePhotoUserId', { id: uploaderId })
+			}
+			const uploaderDisplay = String(dup?.uploader_display || '').trim()
+			if (uploaderDisplay) return uploaderDisplay
+			return $t('inspection.duplicatePhotoUnknownUploader')
+		}
+
+		const getDuplicatePhotoSourceLabel = (dup) => {
+			const sourceType = String(dup?.source_type || '').trim().toLowerCase()
+			const sourceKey = DUPLICATE_PHOTO_SOURCE_TYPE_I18N_KEY_MAP[sourceType]
+			if (sourceKey) return $t(sourceKey)
+			if (sourceType) return sourceType
+			const sourceTypeLabel = String(dup?.source_type_label || '').trim()
+			if (sourceTypeLabel) return sourceTypeLabel
+			return $t('inspection.duplicatePhotoUnknownSource')
+		}
+			
+			const saveCurrentItem = async () => {
 		// 设备级检查项必须先绑定设备，防止误保存
 		if (isDeviceLevelItem(currentItem.value) && !currentItem.value?.equipment_sn) {
 			uni.showModal({
@@ -3073,15 +3123,16 @@
 					return
 				}
 
-				console.log('开始上传照片，照片数量:', currentItem.value.photos.length)
-				uni.showLoading({ title: $t('messages.uploadingPhoto') })
-				
-					try {
-						const fieldPhotoMode = isFieldPhotoMode()
-						const allowedPhotoFieldIdSet = fieldPhotoMode ? getAllowedPhotoFieldIdSet() : new Set()
+					console.log('开始上传照片，照片数量:', currentItem.value.photos.length)
+					uni.showLoading({ title: $t('messages.uploadingPhoto') })
+					
+						try {
+							const fieldPhotoMode = isFieldPhotoMode()
+							const allowedPhotoFieldIdSet = fieldPhotoMode ? getAllowedPhotoFieldIdSet() : new Set()
+							const duplicateWarnings = []
 
-						for (let i = 0; i < currentItem.value.photos.length; i++) {
-							const photo = currentItem.value.photos[i]
+							for (let i = 0; i < currentItem.value.photos.length; i++) {
+								const photo = currentItem.value.photos[i]
 							console.log('检查照片路径:', photo.file_path)
 						
 						// 跳过已上传的照片（有photo.id或已是服务器路径）
@@ -3176,12 +3227,17 @@
 							
 							console.log('照片上传结果:', uploadResult)
 							
-							if (!uploadResult.success) {
-								throw new Error(uploadResult.error || $t('inspection.photoUploadFailed'))
-							}
-							
-							// 用后端返回结果替换本地占位，确保后续删除/展示使用photo.id与服务器路径
-							currentItem.value.photos[i] = uploadResult.data
+								if (!uploadResult.success) {
+									throw new Error(uploadResult.error || $t('inspection.photoUploadFailed'))
+								}
+
+								const duplicateWarning = uploadResult?.duplicateWarning || uploadResult?.data?.duplicate_warning
+								if (duplicateWarning && typeof duplicateWarning === 'object') {
+									duplicateWarnings.push(duplicateWarning)
+								}
+								
+								// 用后端返回结果替换本地占位，确保后续删除/展示使用photo.id与服务器路径
+								currentItem.value.photos[i] = uploadResult.data
 
 							// 上传成功后：将本地原图持久化缓存（下次优先本地展示）
 							try {
@@ -3197,11 +3253,43 @@
 								// ignore：不影响业务保存
 							}
 						} else {
-							console.log('跳过照片（无有效路径）:', photo.file_path)
+								console.log('跳过照片（无有效路径）:', photo.file_path)
+							}
 						}
-					}
-				} catch (photoError) {
-					console.error('照片上传失败:', photoError)
+
+						if (duplicateWarnings.length > 0) {
+							uni.hideLoading()
+							const dedupLines = []
+							const seenKeys = new Set()
+							for (const warning of duplicateWarnings) {
+								const dup = warning?.duplicate || {}
+								const key = String(dup?.content_hash || warning?.message || Math.random())
+								if (seenKeys.has(key)) continue
+								seenKeys.add(key)
+								const site = getDuplicatePhotoSiteLabel(dup)
+								const uploader = getDuplicatePhotoUploaderLabel(dup)
+								const time = dup?.uploaded_at || '-'
+								const source = getDuplicatePhotoSourceLabel(dup)
+								dedupLines.push(`- ${site} / ${uploader} / ${time} / ${source}`)
+							}
+
+							const contentText = [
+								$t('inspection.duplicatePhotoAlertIntro', { count: dedupLines.length }),
+								...dedupLines,
+							].join('\\n')
+
+							await new Promise((resolve) => {
+								uni.showModal({
+									title: $t('inspection.duplicatePhotoAlertTitle'),
+									content: contentText,
+									showCancel: false,
+									success: () => resolve(),
+									fail: () => resolve()
+								})
+							})
+						}
+					} catch (photoError) {
+						console.error('照片上传失败:', photoError)
 					uni.hideLoading()
 					uni.showToast({
 						title: $t('messages.photoUploadFailedWithReason', { reason: photoError.message }),

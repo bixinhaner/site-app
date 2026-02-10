@@ -195,6 +195,8 @@ class WorkOrderResponse(BaseModel):
     due_date: Optional[datetime]
     review_comments: Optional[str] = None
     review_comments_i18n: Optional[Dict[str, str]] = None
+    has_duplicate_photos: bool = False
+    duplicate_photo_count: int = 0
     extra_data: Optional[Dict[str, Any]] = {}
     
     @validator('extra_data', pre=True)

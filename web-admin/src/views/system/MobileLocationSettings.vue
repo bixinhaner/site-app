@@ -316,7 +316,143 @@
       </el-collapse>
     </el-card>
 
-    <!-- 卡片 3：检查详情本地上传水印定位信息 -->
+    <!-- 卡片 3：检查项重复图片阻断 -->
+    <el-card class="mb16" v-loading="loading">
+      <template #header>
+        <div class="card-header">
+          <span>检查项重复图片阻断</span>
+        </div>
+      </template>
+
+      <el-form :model="form" label-width="200px" :disabled="!canEdit">
+        <el-form-item label="全局默认开关">
+          <el-switch
+            v-model="form.block_duplicate_check_item_photo_upload.default"
+            active-text="阻断重复图片上传"
+            inactive-text="不阻断"
+          />
+        </el-form-item>
+
+        <el-form-item label="说明">
+          <ul class="hint-list">
+            <li>仅影响“检查项”相关的图片上传。</li>
+            <li>开启后：全局范围内（跨站点、跨用户）命中重复图片会被阻断。</li>
+            <li>关闭后：不阻断上传，但仍会提示重复来源并记录重复标记。</li>
+            <li>线下票据/单据照片上传不受此开关影响。</li>
+          </ul>
+        </el-form-item>
+      </el-form>
+
+      <el-collapse v-model="activeAdvancedDuplicatePhotoBlock" class="mt8">
+        <el-collapse-item name="role-duplicate-photo-block">
+          <template #title>
+            <span>按角色覆盖（重复图片阻断）</span>
+          </template>
+          <el-table :data="roleRows" size="small" border style="width: 100%">
+            <el-table-column prop="label" label="角色" width="140" />
+            <el-table-column label="重复图片策略">
+              <template #default="{ row }">
+                <el-select
+                  v-model="form.block_duplicate_check_item_photo_upload.per_role[row.key]"
+                  placeholder="跟随全局"
+                  style="width: 220px"
+                  :disabled="!canEdit"
+                  clearable
+                >
+                  <el-option label="跟随全局" :value="''" />
+                  <el-option label="阻断重复上传" value="allow" />
+                  <el-option label="允许重复上传" value="deny" />
+                </el-select>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p class="hint mt8">
+            留空表示该角色使用“全局默认开关”。当同一用户同时满足多个角色时，APP 端会按后端解析的优先级使用配置。
+          </p>
+        </el-collapse-item>
+
+        <el-collapse-item name="user-duplicate-photo-block">
+          <template #title>
+            <span>按用户覆盖（重复图片阻断）</span>
+          </template>
+          <div class="user-rules">
+            <div class="user-rule-form">
+              <el-select
+                v-model="newDuplicatePhotoBlockUserRule.user_id"
+                filterable
+                remote
+                reserve-keyword
+                placeholder="搜索用户名/姓名/邮箱"
+                :remote-method="searchUsers"
+                :loading="userSelectLoading"
+                style="width: 260px"
+                :disabled="!canEdit"
+              >
+                <el-option
+                  v-for="opt in userOptions"
+                  :key="opt.id"
+                  :label="opt.label"
+                  :value="String(opt.id)"
+                />
+              </el-select>
+              <el-select
+                v-model="newDuplicatePhotoBlockUserRule.flag"
+                placeholder="重复图片策略"
+                style="width: 220px; margin-left: 8px"
+                :disabled="!canEdit"
+              >
+                <el-option label="阻断重复上传" value="allow" />
+                <el-option label="允许重复上传" value="deny" />
+              </el-select>
+              <el-button
+                type="primary"
+                size="small"
+                style="margin-left: 8px"
+                :disabled="!canEdit"
+                @click="addDuplicatePhotoBlockUserRule"
+              >
+                添加
+              </el-button>
+            </div>
+
+            <el-table
+              v-if="form.block_duplicate_check_item_photo_upload.per_user.length"
+              :data="form.block_duplicate_check_item_photo_upload.per_user"
+              size="small"
+              border
+              style="width: 100%; margin-top: 8px"
+            >
+              <el-table-column prop="user_id" label="用户ID" width="120" />
+              <el-table-column prop="flag" label="重复图片策略" width="200">
+                <template #default="{ row }">
+                  <span v-if="row.flag === 'allow'">阻断重复上传</span>
+                  <span v-else-if="row.flag === 'deny'">允许重复上传</span>
+                  <span v-else>（未知）</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="80">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    text
+                    size="small"
+                    :disabled="!canEdit"
+                    @click="removeDuplicatePhotoBlockUserRule($index)"
+                  >
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <p class="hint mt8">
+              按用户配置的优先级最高，会覆盖全局与角色配置。
+            </p>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
+    <!-- 卡片 4：检查详情本地上传水印定位信息 -->
     <el-card class="mb16" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -460,7 +596,7 @@
       </el-collapse>
     </el-card>
 
-    <!-- 卡片 4：拍照规划坐标比对 -->
+    <!-- 卡片 5：拍照规划坐标比对 -->
     <el-card class="mb16" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -814,7 +950,7 @@
       </el-collapse>
     </el-card>
 
-    <!-- 卡片 5：旧流程扫码领货（我的设备） -->
+    <!-- 卡片 6：旧流程扫码领货（我的设备） -->
     <el-card class="mb16" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -1014,6 +1150,17 @@ const form = ref({
     },
     per_user: [],
   },
+  block_duplicate_check_item_photo_upload: {
+    default: true,
+    per_role: {
+      admin: '',
+      manager: '',
+      inspector: '',
+      surveyor: '',
+      user: '',
+    },
+    per_user: [],
+  },
   enable_legacy_scan_pickup: {
     default: false,
     per_role: {
@@ -1075,6 +1222,11 @@ const newLocalUploadWatermarkUserRule = ref({
   flag: 'allow',
 })
 
+const newDuplicatePhotoBlockUserRule = ref({
+  user_id: '',
+  flag: 'allow',
+})
+
 const newLegacyScanPickupUserRule = ref({
   user_id: '',
   flag: 'deny',
@@ -1099,6 +1251,7 @@ const newDistanceThresholdUserRule = ref({
 const activeAdvancedLocation = ref([])
 const activeAdvancedUpload = ref([])
 const activeAdvancedLocalUploadWatermark = ref([])
+const activeAdvancedDuplicatePhotoBlock = ref([])
 const activeAdvancedLegacyScanPickup = ref([])
 const activeAdvancedLocationDistanceCheck = ref([])
 const activeAdvancedDistanceBlockUpload = ref([])
@@ -1251,6 +1404,7 @@ const loadConfig = async () => {
     const perUser = lm.per_user || {}
     const uploadRule = raw.allow_local_photo_upload || {}
     const localUploadWatermarkRule = raw.local_upload_watermark_with_geo || {}
+    const duplicatePhotoBlockRule = raw.block_duplicate_check_item_photo_upload || {}
     const legacyScanPickupRule = raw.enable_legacy_scan_pickup || {}
     const locationDistanceCheckRule = raw.enable_photo_location_distance_check || {}
     const distanceBlockUploadRule = raw.distance_exceed_block_upload || {}
@@ -1282,6 +1436,13 @@ const loadConfig = async () => {
     fillBoolRuleToForm(
       form.value.local_upload_watermark_with_geo,
       localUploadWatermarkRule,
+      roleKeys,
+      true,
+    )
+
+    fillBoolRuleToForm(
+      form.value.block_duplicate_check_item_photo_upload,
+      duplicatePhotoBlockRule,
       roleKeys,
       true,
     )
@@ -1339,6 +1500,7 @@ const save = async () => {
       },
       allow_local_photo_upload: {},
       local_upload_watermark_with_geo: {},
+      block_duplicate_check_item_photo_upload: {},
       enable_legacy_scan_pickup: {},
       enable_photo_location_distance_check: {},
       distance_exceed_block_upload: {},
@@ -1369,6 +1531,10 @@ const save = async () => {
 
     payload.local_upload_watermark_with_geo = buildBoolRulePayload(
       form.value.local_upload_watermark_with_geo,
+    )
+
+    payload.block_duplicate_check_item_photo_upload = buildBoolRulePayload(
+      form.value.block_duplicate_check_item_photo_upload,
     )
 
     payload.enable_legacy_scan_pickup = buildBoolRulePayload(
@@ -1499,6 +1665,36 @@ const addLocalUploadWatermarkUserRule = () => {
 
 const removeLocalUploadWatermarkUserRule = (index) => {
   form.value.local_upload_watermark_with_geo.per_user.splice(index, 1)
+}
+
+const addDuplicatePhotoBlockUserRule = () => {
+  const id = String(newDuplicatePhotoBlockUserRule.value.user_id || '').trim()
+  const flag = newDuplicatePhotoBlockUserRule.value.flag
+  if (!id) {
+    ElMessage.warning('请选择用户')
+    return
+  }
+  if (flag !== 'allow' && flag !== 'deny') {
+    ElMessage.warning('请选择重复图片策略')
+    return
+  }
+  const exists = form.value.block_duplicate_check_item_photo_upload.per_user.some(
+    (r) => String(r.user_id) === id,
+  )
+  if (exists) {
+    ElMessage.warning('该用户已存在重复图片策略')
+    return
+  }
+  form.value.block_duplicate_check_item_photo_upload.per_user.push({
+    user_id: id,
+    flag,
+  })
+  newDuplicatePhotoBlockUserRule.value.user_id = ''
+  newDuplicatePhotoBlockUserRule.value.flag = 'allow'
+}
+
+const removeDuplicatePhotoBlockUserRule = (index) => {
+  form.value.block_duplicate_check_item_photo_upload.per_user.splice(index, 1)
 }
 
 const addLegacyScanPickupUserRule = () => {

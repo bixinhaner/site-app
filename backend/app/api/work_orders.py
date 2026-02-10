@@ -18,7 +18,15 @@ from app.models.work_order import (
     WorkOrderPriorityEnum,
     AuditEvent,
 )
-from app.models.inspection import SiteInspection, InspectionStatusEnum, InspectionTypeEnum, InspectionTemplate, InspectionCheckItem, CheckItemStatusEnum
+from app.models.inspection import (
+    SiteInspection,
+    InspectionStatusEnum,
+    InspectionTypeEnum,
+    InspectionTemplate,
+    InspectionCheckItem,
+    InspectionPhoto,
+    CheckItemStatusEnum,
+)
 from app.models.survey import SiteSurvey, SiteSurveyPhoto
 from app.models.survey_archive import SiteSurveyArchive
 from app.models.opening_archive import SiteOpeningArchive
@@ -396,6 +404,8 @@ def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
         "reviewer_id": wo.reviewer_id,
         "review_comments": wo.review_comments,
         "review_comments_i18n": getattr(wo, "review_comments_i18n", None),
+        "has_duplicate_photos": False,
+        "duplicate_photo_count": 0,
         "assigned_at": wo.assigned_at or current_time,
         "accepted_at": wo.accepted_at,
         "submitted_at": wo.submitted_at,
@@ -428,6 +438,18 @@ def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
         u = db.query(User).filter(User.id == wo.reviewer_id).first()
         if u:
             data["reviewer_name"] = u.full_name or u.username
+
+    if wo.inspection_id:
+        duplicate_photo_count = (
+            db.query(InspectionPhoto)
+            .filter(
+                InspectionPhoto.inspection_id == wo.inspection_id,
+                InspectionPhoto.is_duplicate_global.is_(True),
+            )
+            .count()
+        )
+        data["duplicate_photo_count"] = int(duplicate_photo_count or 0)
+        data["has_duplicate_photos"] = data["duplicate_photo_count"] > 0
     
     return data
 

@@ -239,10 +239,13 @@ class InspectionPhoto(Base):
     camera_info = Column(JSON)  # 相机参数信息
     
     # 水印和验证
+    content_hash = Column(String(64))  # 原始上传内容哈希值（用于重复图片阻断）
     has_watermark = Column(Boolean, default=False)
     watermark_data = Column(JSON)  # 水印信息
     hash_value = Column(String(64))  # 文件哈希值，用于防篡改
     digital_signature = Column(Text)  # 数字签名
+    is_duplicate_global = Column(Boolean, default=False)  # 是否命中“全局重复图片”
+    duplicate_info = Column(JSON)  # 全局重复提示信息（首次上传来源）
     
     # 审核状态
     review_status = Column(String(20))  # approved, rejected, pending
@@ -260,6 +263,31 @@ class InspectionPhoto(Base):
     inspection = relationship("SiteInspection", back_populates="photos")
     check_item = relationship("InspectionCheckItem", back_populates="photos")
     uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
+class GlobalPhotoHashRegistry(Base):
+    """检查项照片全局哈希首传索引（仅记录首次上传）。"""
+
+    __tablename__ = "global_photo_hash_registry"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    content_hash = Column(String(64), index=True, nullable=False)
+
+    source_type = Column(String(50), nullable=False)  # inspection_photo / *_archive_photo / *_archive_temp_photo
+    source_id = Column(String(64), nullable=False)
+
+    site_id = Column(Integer, ForeignKey("sites.id"), index=True)
+    site_name = Column(String(100))
+
+    uploader_id = Column(Integer, ForeignKey("users.id"))
+    uploader_name = Column(String(100))
+    uploaded_at = Column(DateTime, server_default=func.now(), index=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    site = relationship("Site")
+    uploader = relationship("User", foreign_keys=[uploader_id])
 
 class InspectionAuditLog(Base):
     """检查审核日志表"""

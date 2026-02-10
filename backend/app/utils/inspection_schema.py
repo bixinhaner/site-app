@@ -7,6 +7,7 @@ def ensure_inspection_schema(engine: Engine) -> None:
     轻量级表结构迁移（SQLite 友好）：
     - Base.metadata.create_all 不会给旧表补列
     - 这里在启动时检查 site_inspections / inspection_check_items / inspection_photos 缺失列并用 ALTER TABLE ADD COLUMN 补齐
+    - 清理旧版“检查项范围唯一索引”，避免在“只提醒不阻断”模式下误拦截
     """
     required_columns = {
         "site_inspections": {
@@ -28,6 +29,9 @@ def ensure_inspection_schema(engine: Engine) -> None:
         },
         "inspection_photos": {
             "field_id": "field_id TEXT",
+            "content_hash": "content_hash TEXT",
+            "is_duplicate_global": "is_duplicate_global INTEGER DEFAULT 0",
+            "duplicate_info": "duplicate_info TEXT",
         },
     }
 
@@ -52,3 +56,20 @@ def ensure_inspection_schema(engine: Engine) -> None:
                     # 兼容并发启动/重复执行等场景：若已存在则忽略
                     print(f"[Schema Migration] Skipped {column_name} on {table_name}: {e}")
                     continue
+
+        # 兼容新规则：关闭阻断时允许重复上传，因此移除旧版强制唯一索引
+        try:
+            conn.execute(text("DROP INDEX IF EXISTS uq_inspection_photos_scope_content_hash"))
+        except Exception as e:
+            print(f"[Schema Migration] Skipped drop index uq_inspection_photos_scope_content_hash: {e}")
+
+        # 提升哈希查询性能（用于全局重复识别）
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_inspection_photos_content_hash "
+                    "ON inspection_photos (content_hash)"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped index idx_inspection_photos_content_hash: {e}")

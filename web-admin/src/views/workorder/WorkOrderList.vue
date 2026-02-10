@@ -82,7 +82,16 @@
         <el-table-column prop="title" label="标题" min-width="220">
           <template #default="{ row }">
             <div>
-              <div>{{ row.title }}</div>
+              <div class="title-with-duplicate">
+                <span>{{ row.title }}</span>
+                <el-tooltip
+                  v-if="row.has_duplicate_photos"
+                  content="存在重复图片，请进入审核台详情查看来源信息"
+                  placement="top"
+                >
+                  <el-icon class="duplicate-warning-icon"><WarningFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <div class="work-order-id">ID: {{ row.id }}</div>
             </div>
           </template>
@@ -349,7 +358,7 @@ import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Search, Refresh, Plus, Sort } from '@element-plus/icons-vue'
+import { Edit, Delete, Search, Refresh, Plus, Sort, WarningFilled } from '@element-plus/icons-vue'
 import { createDebouncedTracker } from '@/utils/operationTrack'
 
 const route = useRoute()
@@ -1153,6 +1162,17 @@ watch([sortBy, sortOrder], () => {
   color: #909399; 
   margin-top: 4px; 
   font-family: 'Courier New', monospace;
+}
+
+.title-with-duplicate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.duplicate-warning-icon {
+  color: #e6a23c;
+  font-size: 15px;
 }
 
 .batch-operations {

@@ -2,7 +2,7 @@ from .user import User
 from .site import Site
 from .inspection import (
     InspectionTemplate, TemplateBinding, SiteInspection, 
-    InspectionCheckItem, InspectionPhoto
+    InspectionCheckItem, InspectionPhoto, GlobalPhotoHashRegistry
 )
 from .work_order import WorkOrder, WorkOrderItem, AuditEvent
 from .equipment import Equipment, EquipmentPackage, EquipmentPackageItem, EquipmentInstance, Warehouse, Inventory, StockTransaction, StockTransactionItem, PickupRecord
@@ -22,6 +22,7 @@ __all__ = [
     "SiteInspection",
     "InspectionCheckItem",
     "InspectionPhoto",
+    "GlobalPhotoHashRegistry",
     "WorkOrder",
     "WorkOrderItem",
     "AuditEvent",

@@ -557,9 +557,21 @@ async function onUploadPhoto(payload) {
     photoAdds.value.push(rec)
     applyLocalEdits()
     ElMessage.success('已上传，保存后生效')
+    const warning = res?.duplicate_warning
+    if (warning && typeof warning === 'object') {
+      const warningMsg = typeof warning.message === 'string' ? warning.message : '检测到重复图片，当前未阻断上传'
+      ElMessage.warning(warningMsg)
+    }
   } catch (e) {
     console.error(e)
-    ElMessage.error('上传失败')
+    const detail = e?.response?.data?.detail
+    if (typeof detail === 'string') {
+      ElMessage.error(detail)
+    } else if (detail && typeof detail === 'object') {
+      ElMessage.error(detail.message || '上传失败')
+    } else {
+      ElMessage.error('上传失败')
+    }
   }
 }
 

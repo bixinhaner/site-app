@@ -15,6 +15,10 @@ from app.services.opening_archive_service import (
     revert_to_version,
     reindex_kv,
 )
+from app.services.photo_duplicate_guard import (
+    detect_duplicate_detail,
+    register_first_upload_record,
+)
 from app.utils.file_handler import save_uploaded_file, calculate_file_hash, extract_exif, compress_image, add_text_watermark_inline
 from app.utils.timezone import to_utc_iso
 from datetime import datetime
@@ -33,6 +37,62 @@ router = APIRouter()
 def _require_editor(u: User):
     if getattr(u, "role", None) not in ("admin", "manager"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员或经理权限")
+
+
+def _is_duplicate_check_item_photo_block_enabled(db: Session, current_user: User) -> bool:
+    try:
+        from app.api.mobile_settings import _load_mobile_settings, _resolve_bool_for_user
+
+        settings = _load_mobile_settings(db)
+        return _resolve_bool_for_user(
+            settings,
+            key="block_duplicate_check_item_photo_upload",
+            user=current_user,
+            default=True,
+        )
+    except Exception:
+        return True
+
+
+def _resolve_target_photo_list(
+    content: Dict[str, Any],
+    *,
+    category_id: str,
+    item_id: str,
+    level: Optional[str],
+    sector_id: Optional[str],
+    cell_id: Optional[str],
+) -> Optional[List[Dict[str, Any]]]:
+    level_norm = str(level or "site").strip().lower()
+    for cat in (content or {}).get("check_categories", []) or []:
+        if str(cat.get("category_id")) != str(category_id):
+            continue
+        for it in cat.get("items", []) or []:
+            if str(it.get("item_id")) != str(item_id):
+                continue
+            if level_norm == "sector":
+                for sec in it.get("sectors", []) or []:
+                    if str(sec.get("sector_id")) == str(sector_id):
+                        return sec.setdefault("photos", [])
+                return None
+            if level_norm == "cell":
+                for cell in it.get("cells", []) or []:
+                    if str(cell.get("cell_id")) == str(cell_id):
+                        return cell.setdefault("photos", [])
+                return None
+            return it.setdefault("photos", [])
+    return None
+
+
+def _has_duplicate_photo_hash(photos: List[Dict[str, Any]], file_hash: str) -> bool:
+    target = str(file_hash or "").strip().lower()
+    if not target:
+        return False
+    for p in photos or []:
+        existed = str((p or {}).get("hash_value") or "").strip().lower()
+        if existed and existed == target:
+            return True
+    return False
 
 
 @router.get("/page")
@@ -854,6 +914,20 @@ async def upload_temp_photo(
     # 存储文件（与正式上传保持一致的处理流程：压缩 + 水印）
     stored_path = await save_uploaded_file(file, category="survey_archives", sub_folder=archive_id)
     file_hash = calculate_file_hash(stored_path)
+    duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
+    duplicate_detail = detect_duplicate_detail(
+        db,
+        content_hash=file_hash,
+        block_upload=duplicate_block_enabled,
+    )
+    duplicate_warning = duplicate_detail if (duplicate_detail and not duplicate_block_enabled) else None
+    if duplicate_detail and duplicate_block_enabled:
+        try:
+            if stored_path and os.path.exists(stored_path):
+                os.remove(stored_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=409, detail=duplicate_detail)
     is_image = (file.content_type or '').startswith('image/')
     if is_image:
         try:
@@ -865,9 +939,24 @@ async def upload_temp_photo(
             pass
     file_size = os.path.getsize(stored_path) if os.path.exists(stored_path) else None
 
+    temp_photo_id = uuid.uuid4().hex
+    if not duplicate_detail:
+        register_first_upload_record(
+            db,
+            content_hash=file_hash,
+            source_type="opening_archive_temp_photo",
+            source_id=temp_photo_id,
+            site_id=arc.site_id,
+            site_name=getattr(getattr(arc, "site", None), "site_name", None),
+            uploader_id=current_user.id,
+            uploader_name=(current_user.full_name or current_user.username or "").strip(),
+            uploaded_at=datetime.utcnow(),
+        )
+        db.commit()
+
     # 返回一个可直接写入 content.photos 的对象（但不落库）
     return {
-        "id": uuid.uuid4().hex,
+        "id": temp_photo_id,
         "file_path": stored_path,
         "file_size": file_size,
         "mime_type": file.content_type,
@@ -881,6 +970,7 @@ async def upload_temp_photo(
         "_temp": True,
         "category_id": category_id,
         "item_id": item_id,
+        "duplicate_warning": duplicate_warning,
     }
 
 
@@ -972,6 +1062,20 @@ async def upload_photo(
     # 存储文件
     stored_path = await save_uploaded_file(file, category="survey_archives", sub_folder=archive_id)
     file_hash = calculate_file_hash(stored_path)
+    duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
+    duplicate_detail = detect_duplicate_detail(
+        db,
+        content_hash=file_hash,
+        block_upload=duplicate_block_enabled,
+    )
+    duplicate_warning = duplicate_detail if (duplicate_detail and not duplicate_block_enabled) else None
+    if duplicate_detail and duplicate_block_enabled:
+        try:
+            if stored_path and os.path.exists(stored_path):
+                os.remove(stored_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=409, detail=duplicate_detail)
     is_image = (file.content_type or '').startswith('image/')
     if is_image:
         try:
@@ -987,10 +1091,9 @@ async def upload_photo(
     old = arc.content
     new = jsonpatch.apply_patch(old, [], in_place=False)  # 深拷贝
 
-    level_norm = str(level or "site").strip().lower()
-
+    photo_id = uuid.uuid4().hex
     photo_obj = {
-        "id": uuid.uuid4().hex,
+        "id": photo_id,
         "file_path": stored_path,
         "file_size": file_size,
         "mime_type": file.content_type,
@@ -1000,43 +1103,37 @@ async def upload_photo(
         "field_id": field_id,
     }
 
-    # 定位到指定项/层级
-    found = False
-    for cat in new.get("check_categories", []) or []:
-        if str(cat.get("category_id")) != str(category_id):
-            continue
-        for it in cat.get("items", []) or []:
-            if str(it.get("item_id")) != str(item_id):
-                continue
-            if level_norm == "sector":
-                if sector_id is None:
-                    raise HTTPException(status_code=400, detail="sector_id 不能为空")
-                sectors = it.get("sectors") or []
-                for sec in sectors:
-                    if str(sec.get("sector_id")) != str(sector_id):
-                        continue
-                    sec.setdefault("photos", []).append(photo_obj)
-                    found = True
-                    break
-            elif level_norm == "cell":
-                if cell_id is None:
-                    raise HTTPException(status_code=400, detail="cell_id 不能为空")
-                cells = it.get("cells") or []
-                for cell in cells:
-                    if str(cell.get("cell_id")) != str(cell_id):
-                        continue
-                    cell.setdefault("photos", []).append(photo_obj)
-                    found = True
-                    break
-            else:
-                it.setdefault("photos", []).append(photo_obj)
-                found = True
-            if found:
-                break
-        if found:
-            break
-    if not found:
+    target_photos = _resolve_target_photo_list(
+        new,
+        category_id=category_id,
+        item_id=item_id,
+        level=level,
+        sector_id=sector_id,
+        cell_id=cell_id,
+    )
+    if target_photos is None:
+        try:
+            if stored_path and os.path.exists(stored_path):
+                os.remove(stored_path)
+        except Exception:
+            pass
         raise HTTPException(status_code=400, detail="未找到对应的分类/检查项")
+    if duplicate_warning:
+        photo_obj["duplicate_warning"] = duplicate_warning
+    target_photos.append(photo_obj)
+
+    if not duplicate_detail:
+        register_first_upload_record(
+            db,
+            content_hash=file_hash,
+            source_type="opening_archive_photo",
+            source_id=photo_id,
+            site_id=arc.site_id,
+            site_name=getattr(getattr(arc, "site", None), "site_name", None),
+            uploader_id=current_user.id,
+            uploader_name=(current_user.full_name or current_user.username or "").strip(),
+            uploaded_at=datetime.utcnow(),
+        )
 
     patch_ops = jsonpatch.make_patch(old, new).patch
     try:
@@ -1052,7 +1149,11 @@ async def upload_photo(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
-    return {"id": arc.id, "current_version": arc.current_version}
+    return {
+        "id": arc.id,
+        "current_version": arc.current_version,
+        "duplicate_warning": duplicate_warning,
+    }
 
 
 @router.delete("/{archive_id}/photos/{photo_id}")

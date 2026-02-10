@@ -173,32 +173,51 @@ export const useInspectionStore = defineStore('inspection', () => {
 				header: getAuthHeaders(userStore.token)
 			})
 			
-			console.log('照片上传响应:', response)
-			
-			if (response.statusCode === 200) {
-				const data = JSON.parse(response.data)
-				console.log('照片上传成功:', data)
-				return { success: true, data }
-			} else {
-				let detail = ''
+				console.log('照片上传响应:', response)
+				
+				let payload = {}
 				try {
-					const payload = JSON.parse(response.data || '{}')
-					detail = payload?.detail || payload?.message || ''
+					payload = JSON.parse(response.data || '{}')
 				} catch (e) {
-					// ignore
+					payload = {}
 				}
-				console.error('照片上传失败，状态码:', response.statusCode, '响应:', response.data, 'detail:', detail)
+
+				if (response.statusCode === 200) {
+					const data = payload
+					const duplicateWarning = (data?.duplicate_warning && typeof data.duplicate_warning === 'object')
+						? data.duplicate_warning
+						: null
+					console.log('照片上传成功:', data)
+					return { success: true, data, duplicateWarning }
+				}
+
+				const detailRaw = payload?.detail
+				let detailMsg = ''
+				let duplicateWarning = null
+				if (typeof detailRaw === 'string') {
+					detailMsg = detailRaw
+				} else if (detailRaw && typeof detailRaw === 'object') {
+					detailMsg = detailRaw.message || payload?.message || ''
+					if (detailRaw?.code === 'DUPLICATE_PHOTO') {
+						duplicateWarning = detailRaw
+					}
+				} else {
+					detailMsg = payload?.message || ''
+				}
+
+				console.error('照片上传失败，状态码:', response.statusCode, '响应:', response.data, 'detail:', detailMsg)
 				return {
 					success: false,
 					statusCode: response.statusCode,
-					error: detail || `上传照片失败，状态码: ${response.statusCode}`,
-					raw: response.data
+					error: detailMsg || `上传照片失败，状态码: ${response.statusCode}`,
+					detail: detailRaw,
+					duplicateWarning,
+					raw: payload
 				}
+			} catch (error) {
+				console.error('Upload photo error:', error)
+				return { success: false, error: error.message || '上传失败' }
 			}
-		} catch (error) {
-			console.error('Upload photo error:', error)
-			return { success: false, error: error.message || '上传失败' }
-		}
 	}
 	
 	// 删除检查照片

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile,
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import os
 import uuid
@@ -42,6 +42,10 @@ from app.utils.file_handler import (
 from app.utils.gps_utils import reverse_geocode, validate_gps_accuracy
 from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.cell_generator import CellGenerator
+from app.services.photo_duplicate_guard import (
+    detect_duplicate_detail,
+    register_first_upload_record,
+)
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
 from app.models.work_order import WorkOrder, WorkOrderTypeEnum
@@ -494,6 +498,66 @@ def calculate_file_hash(file_path: str) -> str:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
+
+
+def _is_duplicate_check_item_photo_block_enabled(db: Session, current_user: User) -> bool:
+    """是否启用“检查项重复图片上传阻断”开关（默认开启）。"""
+    try:
+        from app.api.mobile_settings import _load_mobile_settings, _resolve_bool_for_user
+
+        settings = _load_mobile_settings(db)
+        return _resolve_bool_for_user(
+            settings,
+            key="block_duplicate_check_item_photo_upload",
+            user=current_user,
+            default=True,
+        )
+    except Exception:
+        return True
+
+
+def _resolve_site_name_by_id(db: Session, site_id: Optional[int]) -> Optional[str]:
+    if site_id is None:
+        return None
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        return None
+    return site.site_name
+
+
+def _resolve_uploader_name(current_user: User) -> str:
+    return (current_user.full_name or current_user.username or "").strip()
+
+
+def _mark_photo_duplicate_info(
+    photo: InspectionPhoto,
+    duplicate_detail: Optional[Dict[str, Any]],
+) -> None:
+    if duplicate_detail and isinstance(duplicate_detail, dict):
+        photo.is_duplicate_global = True
+        photo.duplicate_info = duplicate_detail.get("duplicate")
+        return
+    photo.is_duplicate_global = False
+    photo.duplicate_info = None
+
+
+def _cleanup_paths(*paths: Optional[str]) -> None:
+    for p in set(paths):
+        try:
+            if p and os.path.exists(p):
+                os.remove(p)
+        except Exception as cleanup_err:
+            print(f"清理失败: {p}, err={cleanup_err}")
+
+
+def _build_photo_response_with_warning(
+    photo: InspectionPhoto,
+    duplicate_warning: Optional[Dict[str, Any]],
+) -> InspectionPhotoResponse:
+    payload = InspectionPhotoResponse.model_validate(photo, from_attributes=True)
+    if duplicate_warning:
+        return payload.model_copy(update={"duplicate_warning": duplicate_warning})
+    return payload
 
 @router.post("/", response_model=SiteInspectionResponse)
 async def create_inspection(
@@ -1129,6 +1193,21 @@ async def upload_inspection_photo(
 
     # 保存文件
     file_path = await save_uploaded_file(file, "inspections", inspection_id)
+    raw_content_hash = calculate_file_hash(file_path)
+
+    duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
+    duplicate_detail = detect_duplicate_detail(
+        db,
+        content_hash=raw_content_hash,
+        block_upload=duplicate_block_enabled,
+    )
+    duplicate_warning = duplicate_detail if (duplicate_detail and not duplicate_block_enabled) else None
+    if duplicate_detail and duplicate_block_enabled:
+        _cleanup_paths(file_path)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=duplicate_detail,
+        )
     
     # 根据是否已有水印决定是否添加水印
     watermarked_path = file_path
@@ -1179,12 +1258,7 @@ async def upload_inspection_photo(
     except ImageValidationError as e:
         print(f"图片校验失败，拒收上传: {e}. path={watermarked_path}")
         # 清理落盘文件，避免脏数据长期占用空间
-        for p in {file_path, watermarked_path}:
-            try:
-                if p and os.path.exists(p):
-                    os.remove(p)
-            except Exception as cleanup_err:
-                print(f"清理失败: {p}, err={cleanup_err}")
+        _cleanup_paths(file_path, watermarked_path)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
@@ -1215,15 +1289,35 @@ async def upload_inspection_photo(
         taken_at=datetime.utcnow(),
         has_watermark=has_watermark or watermark_data is not None,
         watermark_data=watermark_data,
+        content_hash=raw_content_hash,
         hash_value=file_hash,
         uploaded_by=current_user.id
     )
+    _mark_photo_duplicate_info(photo, duplicate_detail)
     
     db.add(photo)
-    db.commit()
-    db.refresh(photo)
+    try:
+        db.flush()
+        if not duplicate_detail:
+            register_first_upload_record(
+                db,
+                content_hash=raw_content_hash,
+                source_type="inspection_photo",
+                source_id=photo.id,
+                site_id=inspection.site_id,
+                site_name=_resolve_site_name_by_id(db, inspection.site_id),
+                uploader_id=current_user.id,
+                uploader_name=_resolve_uploader_name(current_user),
+                uploaded_at=datetime.utcnow(),
+            )
+        db.commit()
+        db.refresh(photo)
+    except Exception:
+        db.rollback()
+        _cleanup_paths(file_path, watermarked_path)
+        raise
     
-    return photo
+    return _build_photo_response_with_warning(photo, duplicate_warning)
 
 
 @router.delete("/photos/{photo_id}")
@@ -1337,6 +1431,23 @@ async def replace_inspection_photo(
     
     # 保存新文件
     file_path = await save_uploaded_file(file, "inspections", existing_photo.inspection_id)
+    raw_content_hash = calculate_file_hash(file_path)
+
+    duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
+    duplicate_detail = detect_duplicate_detail(
+        db,
+        content_hash=raw_content_hash,
+        block_upload=duplicate_block_enabled,
+        exclude_source_type="inspection_photo",
+        exclude_source_id=existing_photo.id,
+    )
+    duplicate_warning = duplicate_detail if (duplicate_detail and not duplicate_block_enabled) else None
+    if duplicate_detail and duplicate_block_enabled:
+        _cleanup_paths(file_path)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=duplicate_detail,
+        )
     
     # 根据是否已有水印决定是否添加水印
     watermarked_path = file_path
@@ -1365,12 +1476,7 @@ async def replace_inspection_photo(
         validate_image_on_disk(watermarked_path, detect_blank_bottom=True)
     except ImageValidationError as e:
         print(f"图片校验失败，拒收上传: {e}. path={watermarked_path}")
-        for p in {file_path, watermarked_path}:
-            try:
-                if p and os.path.exists(p):
-                    os.remove(p)
-            except Exception as cleanup_err:
-                print(f"清理失败: {p}, err={cleanup_err}")
+        _cleanup_paths(file_path, watermarked_path)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
@@ -1379,13 +1485,7 @@ async def replace_inspection_photo(
     file_hash = calculate_file_hash(watermarked_path)
     address = await reverse_geocode(latitude, longitude)
     
-    # 删除旧文件
-    try:
-        if existing_photo.file_path and os.path.exists(existing_photo.file_path):
-            os.remove(existing_photo.file_path)
-            print(f"已删除旧检查照片文件: {existing_photo.file_path}")
-    except Exception as e:
-        print(f"删除旧检查照片文件失败: {e}")
+    old_file_path = existing_photo.file_path
     
     # 更新照片记录
     existing_photo.original_name = file.filename
@@ -1399,11 +1499,39 @@ async def replace_inspection_photo(
     existing_photo.taken_at = datetime.utcnow()
     existing_photo.has_watermark = has_watermark or watermark_data is not None
     existing_photo.watermark_data = watermark_data
+    existing_photo.content_hash = raw_content_hash
     existing_photo.hash_value = file_hash
     existing_photo.updated_at = datetime.utcnow()
+    _mark_photo_duplicate_info(existing_photo, duplicate_detail)
     
-    db.commit()
-    db.refresh(existing_photo)
+    try:
+        if not duplicate_detail:
+            register_first_upload_record(
+                db,
+                content_hash=raw_content_hash,
+                source_type="inspection_photo",
+                source_id=existing_photo.id,
+                site_id=inspection.site_id,
+                site_name=_resolve_site_name_by_id(db, inspection.site_id),
+                uploader_id=current_user.id,
+                uploader_name=_resolve_uploader_name(current_user),
+                uploaded_at=datetime.utcnow(),
+            )
+        db.commit()
+        db.refresh(existing_photo)
+    except Exception:
+        db.rollback()
+        _cleanup_paths(file_path, watermarked_path)
+        raise
+
+    # 删除旧文件（提交成功后再清理，避免失败时丢失旧图）
+    if old_file_path and old_file_path != watermarked_path:
+        try:
+            if os.path.exists(old_file_path):
+                os.remove(old_file_path)
+                print(f"已删除旧检查照片文件: {old_file_path}")
+        except Exception as e:
+            print(f"删除旧检查照片文件失败: {e}")
     
     # 记录审计日志
     audit_log = InspectionAuditLog(
@@ -1416,7 +1544,7 @@ async def replace_inspection_photo(
     db.add(audit_log)
     db.commit()
     
-    return existing_photo
+    return _build_photo_response_with_warning(existing_photo, duplicate_warning)
 
 
 @router.post("/detail/{inspection_id}/photos/batch")
@@ -1458,6 +1586,7 @@ async def batch_inspection_photo_operations(
     
     results = []
     affected_check_item_ids = set()
+    duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
     
     for i, operation in enumerate(operations):
         try:
@@ -1525,6 +1654,26 @@ async def batch_inspection_photo_operations(
                     
                     # 保存新文件
                     file_path = await save_uploaded_file(upload_file, "inspections", inspection_id)
+                    raw_content_hash = calculate_file_hash(file_path)
+
+                    duplicate_detail = detect_duplicate_detail(
+                        db,
+                        content_hash=raw_content_hash,
+                        block_upload=duplicate_block_enabled,
+                        exclude_source_type="inspection_photo",
+                        exclude_source_id=existing_photo.id,
+                    )
+                    duplicate_warning = duplicate_detail if (duplicate_detail and not duplicate_block_enabled) else None
+                    if duplicate_detail and duplicate_block_enabled:
+                        _cleanup_paths(file_path)
+                        results.append({
+                            "index": i,
+                            "action": "replace",
+                            "success": False,
+                            "error": duplicate_detail.get("message") if isinstance(duplicate_detail, dict) else "检测到重复图片，已阻断上传",
+                            "duplicate_warning": duplicate_detail,
+                        })
+                        continue
                     
                     # 根据是否已有水印决定是否添加水印
                     watermarked_path = file_path
@@ -1553,12 +1702,7 @@ async def batch_inspection_photo_operations(
                         validate_image_on_disk(watermarked_path, detect_blank_bottom=True)
                     except ImageValidationError as e:
                         print(f"批量操作：图片校验失败，跳过本次replace: {e}. path={watermarked_path}")
-                        for p in {file_path, watermarked_path}:
-                            try:
-                                if p and os.path.exists(p):
-                                    os.remove(p)
-                            except Exception as cleanup_err:
-                                print(f"批量操作：清理失败: {p}, err={cleanup_err}")
+                        _cleanup_paths(file_path, watermarked_path)
                         results.append({"index": i, "action": "replace", "success": False, "error": str(e)})
                         continue
                     
@@ -1584,10 +1728,29 @@ async def batch_inspection_photo_operations(
                     existing_photo.taken_at = datetime.utcnow()
                     existing_photo.has_watermark = has_watermark or watermark_data is not None
                     existing_photo.watermark_data = watermark_data
+                    existing_photo.content_hash = raw_content_hash
                     existing_photo.hash_value = file_hash
                     existing_photo.updated_at = datetime.utcnow()
+                    _mark_photo_duplicate_info(existing_photo, duplicate_detail)
+
+                    if not duplicate_detail:
+                        register_first_upload_record(
+                            db,
+                            content_hash=raw_content_hash,
+                            source_type="inspection_photo",
+                            source_id=existing_photo.id,
+                            site_id=inspection.site_id,
+                            site_name=_resolve_site_name_by_id(db, inspection.site_id),
+                            uploader_id=current_user.id,
+                            uploader_name=_resolve_uploader_name(current_user),
+                            uploaded_at=datetime.utcnow(),
+                        )
                     
-                    results.append({"index": i, "action": "replace", "success": True, "photo_id": photo_id})
+                    success_result = {"index": i, "action": "replace", "success": True, "photo_id": photo_id}
+                    if duplicate_warning:
+                        success_result["warning"] = duplicate_warning.get("message")
+                        success_result["duplicate_warning"] = duplicate_warning
+                    results.append(success_result)
                     
                 except Exception as e:
                     results.append({"index": i, "action": "replace", "success": False, "error": str(e)})
@@ -1661,6 +1824,24 @@ async def batch_inspection_photo_operations(
                     
                     # 保存文件
                     file_path = await save_uploaded_file(upload_file, "inspections", inspection_id)
+                    raw_content_hash = calculate_file_hash(file_path)
+
+                    duplicate_detail = detect_duplicate_detail(
+                        db,
+                        content_hash=raw_content_hash,
+                        block_upload=duplicate_block_enabled,
+                    )
+                    duplicate_warning = duplicate_detail if (duplicate_detail and not duplicate_block_enabled) else None
+                    if duplicate_detail and duplicate_block_enabled:
+                        _cleanup_paths(file_path)
+                        results.append({
+                            "index": i,
+                            "action": "add",
+                            "success": False,
+                            "error": duplicate_detail.get("message") if isinstance(duplicate_detail, dict) else "检测到重复图片，已阻断上传",
+                            "duplicate_warning": duplicate_detail,
+                        })
+                        continue
                     
                     # 根据是否已有水印决定是否添加水印
                     watermarked_path = file_path
@@ -1689,12 +1870,7 @@ async def batch_inspection_photo_operations(
                         validate_image_on_disk(watermarked_path, detect_blank_bottom=True)
                     except ImageValidationError as e:
                         print(f"批量操作：图片校验失败，跳过本次add: {e}. path={watermarked_path}")
-                        for p in {file_path, watermarked_path}:
-                            try:
-                                if p and os.path.exists(p):
-                                    os.remove(p)
-                            except Exception as cleanup_err:
-                                print(f"批量操作：清理失败: {p}, err={cleanup_err}")
+                        _cleanup_paths(file_path, watermarked_path)
                         results.append({"index": i, "action": "add", "success": False, "error": str(e)})
                         continue
                     
@@ -1718,12 +1894,30 @@ async def batch_inspection_photo_operations(
                         taken_at=datetime.utcnow(),
                         has_watermark=has_watermark or watermark_data is not None,
                         watermark_data=watermark_data,
+                        content_hash=raw_content_hash,
                         hash_value=file_hash,
                         uploaded_by=current_user.id
                     )
+                    _mark_photo_duplicate_info(new_photo, duplicate_detail)
                     db.add(new_photo)
+                    if not duplicate_detail:
+                        register_first_upload_record(
+                            db,
+                            content_hash=raw_content_hash,
+                            source_type="inspection_photo",
+                            source_id=new_photo.id,
+                            site_id=inspection.site_id,
+                            site_name=_resolve_site_name_by_id(db, inspection.site_id),
+                            uploader_id=current_user.id,
+                            uploader_name=_resolve_uploader_name(current_user),
+                            uploaded_at=datetime.utcnow(),
+                        )
                     
-                    results.append({"index": i, "action": "add", "success": True, "photo_id": new_photo.id})
+                    success_result = {"index": i, "action": "add", "success": True, "photo_id": new_photo.id}
+                    if duplicate_warning:
+                        success_result["warning"] = duplicate_warning.get("message")
+                        success_result["duplicate_warning"] = duplicate_warning
+                    results.append(success_result)
                     
                 except Exception as e:
                     results.append({"index": i, "action": "add", "success": False, "error": str(e)})
@@ -1748,7 +1942,11 @@ async def batch_inspection_photo_operations(
                 _touch_check_item_and_clear_review(check_item, now)
     
     # 提交所有更改
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     
     # 记录审计日志
     audit_log = InspectionAuditLog(

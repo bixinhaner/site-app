@@ -78,6 +78,7 @@ class MobileSettingsPayload(BaseModel):
   - enable_photo_location_distance_check: 拍照时是否启用“实拍坐标 vs 规划坐标”距离比对
   - photo_location_distance_threshold_m: 超距阈值（米）
   - distance_exceed_block_upload: 超距是否阻断上传
+  - block_duplicate_check_item_photo_upload: 是否阻断检查项重复图片上传
 
   未来可在此处继续新增更多配置项，
   每个配置项都采用类似 *Rule 的结构。
@@ -89,6 +90,7 @@ class MobileSettingsPayload(BaseModel):
   enable_legacy_scan_pickup: Optional[BoolRule] = None
   enable_photo_location_distance_check: Optional[BoolRule] = None
   distance_exceed_block_upload: Optional[BoolRule] = None
+  block_duplicate_check_item_photo_upload: Optional[BoolRule] = None
   photo_location_distance_threshold_m: Optional[IntRule] = None
 
 
@@ -101,6 +103,7 @@ class EffectiveMobileSettingsResponse(BaseModel):
   enable_legacy_scan_pickup: bool = False
   enable_photo_location_distance_check: bool = True
   distance_exceed_block_upload: bool = False
+  block_duplicate_check_item_photo_upload: bool = True
   photo_location_distance_threshold_m: int = 100
 
 
@@ -424,6 +427,7 @@ async def get_mobile_settings(
   legacy_scan_pickup_rule = raw.get("enable_legacy_scan_pickup") or {}
   location_distance_check_rule = raw.get("enable_photo_location_distance_check") or {}
   distance_block_upload_rule = raw.get("distance_exceed_block_upload") or {}
+  duplicate_check_item_photo_rule = raw.get("block_duplicate_check_item_photo_upload") or {}
   distance_threshold_rule = raw.get("photo_location_distance_threshold_m") or {}
 
   # 构造 LocationModeRule，保证字段存在
@@ -457,6 +461,12 @@ async def get_mobile_settings(
     per_user=distance_block_upload_rule.get("per_user") or {},
   )
 
+  duplicate_check_item_photo_upload = BoolRule(
+    default=duplicate_check_item_photo_rule.get("default") if isinstance(duplicate_check_item_photo_rule.get("default"), bool) else True,
+    per_role=duplicate_check_item_photo_rule.get("per_role") or {},
+    per_user=duplicate_check_item_photo_rule.get("per_user") or {},
+  )
+
   distance_threshold = IntRule(
     default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
     per_role={
@@ -482,6 +492,7 @@ async def get_mobile_settings(
     ),
     enable_photo_location_distance_check=location_distance_check,
     distance_exceed_block_upload=distance_block_upload,
+    block_duplicate_check_item_photo_upload=duplicate_check_item_photo_upload,
     photo_location_distance_threshold_m=distance_threshold,
   )
 
@@ -532,6 +543,9 @@ async def update_mobile_settings(
   if payload.distance_exceed_block_upload is not None:
     settings["distance_exceed_block_upload"] = _normalize_bool_rule(payload.distance_exceed_block_upload)
 
+  if payload.block_duplicate_check_item_photo_upload is not None:
+    settings["block_duplicate_check_item_photo_upload"] = _normalize_bool_rule(payload.block_duplicate_check_item_photo_upload)
+
   if payload.photo_location_distance_threshold_m is not None:
     settings["photo_location_distance_threshold_m"] = _normalize_int_rule(payload.photo_location_distance_threshold_m)
 
@@ -580,6 +594,13 @@ async def update_mobile_settings(
     per_user=distance_block_upload_rule.get("per_user") or {},
   )
 
+  duplicate_check_item_photo_rule = settings.get("block_duplicate_check_item_photo_upload") or {}
+  duplicate_check_item_photo_upload = BoolRule(
+    default=duplicate_check_item_photo_rule.get("default") if isinstance(duplicate_check_item_photo_rule.get("default"), bool) else True,
+    per_role=duplicate_check_item_photo_rule.get("per_role") or {},
+    per_user=duplicate_check_item_photo_rule.get("per_user") or {},
+  )
+
   distance_threshold_rule = settings.get("photo_location_distance_threshold_m") or {}
   distance_threshold = IntRule(
     default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
@@ -602,6 +623,7 @@ async def update_mobile_settings(
     enable_legacy_scan_pickup=legacy_scan_pickup,
     enable_photo_location_distance_check=location_distance_check,
     distance_exceed_block_upload=distance_block_upload,
+    block_duplicate_check_item_photo_upload=duplicate_check_item_photo_upload,
     photo_location_distance_threshold_m=distance_threshold,
   )
 
@@ -649,6 +671,12 @@ async def get_effective_mobile_settings(
     user=current_user,
     default=False,
   )
+  block_duplicate_check_item_photo_upload = _resolve_bool_for_user(
+    settings,
+    key="block_duplicate_check_item_photo_upload",
+    user=current_user,
+    default=True,
+  )
   photo_location_distance_threshold_m = _resolve_int_for_user(
     settings,
     key="photo_location_distance_threshold_m",
@@ -662,6 +690,7 @@ async def get_effective_mobile_settings(
     enable_legacy_scan_pickup=enable_legacy_scan_pickup,
     enable_photo_location_distance_check=enable_photo_location_distance_check,
     distance_exceed_block_upload=distance_exceed_block_upload,
+    block_duplicate_check_item_photo_upload=block_duplicate_check_item_photo_upload,
     photo_location_distance_threshold_m=photo_location_distance_threshold_m,
   )
 
