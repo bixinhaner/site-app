@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -79,6 +79,8 @@ class MobileSettingsPayload(BaseModel):
   - photo_location_distance_threshold_m: 超距阈值（米）
   - distance_exceed_block_upload: 超距是否阻断上传
   - block_duplicate_check_item_photo_upload: 是否阻断检查项重复图片上传
+  - enable_check_item_photo_similarity_alert: 是否启用检查项照片相似度提醒
+  - check_item_photo_similarity_window_days: 相似度匹配窗口（天）
 
   未来可在此处继续新增更多配置项，
   每个配置项都采用类似 *Rule 的结构。
@@ -91,6 +93,8 @@ class MobileSettingsPayload(BaseModel):
   enable_photo_location_distance_check: Optional[BoolRule] = None
   distance_exceed_block_upload: Optional[BoolRule] = None
   block_duplicate_check_item_photo_upload: Optional[BoolRule] = None
+  enable_check_item_photo_similarity_alert: Optional[BoolRule] = None
+  check_item_photo_similarity_window_days: Optional[IntRule] = None
   photo_location_distance_threshold_m: Optional[IntRule] = None
 
 
@@ -104,6 +108,8 @@ class EffectiveMobileSettingsResponse(BaseModel):
   enable_photo_location_distance_check: bool = True
   distance_exceed_block_upload: bool = False
   block_duplicate_check_item_photo_upload: bool = True
+  enable_check_item_photo_similarity_alert: bool = True
+  check_item_photo_similarity_window_days: int = 180
   photo_location_distance_threshold_m: int = 100
 
 
@@ -192,27 +198,47 @@ def _normalize_distance_threshold(value: Any) -> int:
   return ivalue
 
 
-def _normalize_int_rule(rule: IntRule) -> Dict[str, Any]:
+def _normalize_similarity_window_days(value: Any) -> int:
+  try:
+    ivalue = int(value)
+  except Exception:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="相似度窗口天数必须是整数",
+    )
+
+  if ivalue < 1 or ivalue > 3650:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="相似度窗口天数范围必须在 1~3650 天",
+    )
+  return ivalue
+
+
+def _normalize_int_rule(
+  rule: IntRule,
+  value_normalizer: Callable[[Any], int] = _normalize_distance_threshold,
+) -> Dict[str, Any]:
   """
   规范化前端传入的 IntRule，确保：
   - default 为合法整数
   - per_role / per_user 的 key 规范化为字符串，值为合法整数
   """
-  default_val = _normalize_distance_threshold(rule.default)
+  default_val = value_normalizer(rule.default)
 
   per_role: Dict[str, int] = {}
   for role, value in (rule.per_role or {}).items():
     role_key = (role or "").strip()
     if not role_key:
       continue
-    per_role[role_key] = _normalize_distance_threshold(value)
+    per_role[role_key] = value_normalizer(value)
 
   per_user: Dict[str, int] = {}
   for user_id, value in (rule.per_user or {}).items():
     key = str(user_id).strip()
     if not key:
       continue
-    per_user[key] = _normalize_distance_threshold(value)
+    per_user[key] = value_normalizer(value)
 
   return {
     "default": default_val,
@@ -347,6 +373,7 @@ def _resolve_int_for_user(
   key: str,
   user: Optional[User],
   default: int,
+  value_normalizer: Callable[[Any], int] = _normalize_distance_threshold,
 ) -> int:
   """
   根据配置与用户信息，解析对该用户最终生效的整型配置。
@@ -361,7 +388,7 @@ def _resolve_int_for_user(
   if raw_default is None:
     default_val = default
   else:
-    default_val = _normalize_distance_threshold(raw_default)
+    default_val = value_normalizer(raw_default)
 
   per_role = rule.get("per_role") or {}
   per_user = rule.get("per_user") or {}
@@ -370,13 +397,13 @@ def _resolve_int_for_user(
   if user is not None and getattr(user, "id", None) is not None:
     ukey = str(user.id)
     if ukey in per_user:
-      return _normalize_distance_threshold(per_user[ukey])
+      return value_normalizer(per_user[ukey])
 
   # 2. 按角色覆盖
   if user is not None and getattr(user, "role", None):
     role_key = user.role
     if role_key in per_role:
-      return _normalize_distance_threshold(per_role[role_key])
+      return value_normalizer(per_role[role_key])
 
   # 3. 全局默认
   return default_val
@@ -428,6 +455,8 @@ async def get_mobile_settings(
   location_distance_check_rule = raw.get("enable_photo_location_distance_check") or {}
   distance_block_upload_rule = raw.get("distance_exceed_block_upload") or {}
   duplicate_check_item_photo_rule = raw.get("block_duplicate_check_item_photo_upload") or {}
+  similarity_alert_rule = raw.get("enable_check_item_photo_similarity_alert") or {}
+  similarity_window_days_rule = raw.get("check_item_photo_similarity_window_days") or {}
   distance_threshold_rule = raw.get("photo_location_distance_threshold_m") or {}
 
   # 构造 LocationModeRule，保证字段存在
@@ -467,6 +496,26 @@ async def get_mobile_settings(
     per_user=duplicate_check_item_photo_rule.get("per_user") or {},
   )
 
+  similarity_alert = BoolRule(
+    default=similarity_alert_rule.get("default") if isinstance(similarity_alert_rule.get("default"), bool) else True,
+    per_role=similarity_alert_rule.get("per_role") or {},
+    per_user=similarity_alert_rule.get("per_user") or {},
+  )
+
+  similarity_window_days = IntRule(
+    default=_normalize_similarity_window_days(similarity_window_days_rule.get("default")) if similarity_window_days_rule.get("default") is not None else 180,
+    per_role={
+      str(k): _normalize_similarity_window_days(v)
+      for k, v in (similarity_window_days_rule.get("per_role") or {}).items()
+      if str(k).strip() != ""
+    },
+    per_user={
+      str(k): _normalize_similarity_window_days(v)
+      for k, v in (similarity_window_days_rule.get("per_user") or {}).items()
+      if str(k).strip() != ""
+    },
+  )
+
   distance_threshold = IntRule(
     default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
     per_role={
@@ -493,6 +542,8 @@ async def get_mobile_settings(
     enable_photo_location_distance_check=location_distance_check,
     distance_exceed_block_upload=distance_block_upload,
     block_duplicate_check_item_photo_upload=duplicate_check_item_photo_upload,
+    enable_check_item_photo_similarity_alert=similarity_alert,
+    check_item_photo_similarity_window_days=similarity_window_days,
     photo_location_distance_threshold_m=distance_threshold,
   )
 
@@ -545,6 +596,15 @@ async def update_mobile_settings(
 
   if payload.block_duplicate_check_item_photo_upload is not None:
     settings["block_duplicate_check_item_photo_upload"] = _normalize_bool_rule(payload.block_duplicate_check_item_photo_upload)
+
+  if payload.enable_check_item_photo_similarity_alert is not None:
+    settings["enable_check_item_photo_similarity_alert"] = _normalize_bool_rule(payload.enable_check_item_photo_similarity_alert)
+
+  if payload.check_item_photo_similarity_window_days is not None:
+    settings["check_item_photo_similarity_window_days"] = _normalize_int_rule(
+      payload.check_item_photo_similarity_window_days,
+      value_normalizer=_normalize_similarity_window_days,
+    )
 
   if payload.photo_location_distance_threshold_m is not None:
     settings["photo_location_distance_threshold_m"] = _normalize_int_rule(payload.photo_location_distance_threshold_m)
@@ -601,6 +661,28 @@ async def update_mobile_settings(
     per_user=duplicate_check_item_photo_rule.get("per_user") or {},
   )
 
+  similarity_alert_rule = settings.get("enable_check_item_photo_similarity_alert") or {}
+  similarity_alert = BoolRule(
+    default=similarity_alert_rule.get("default") if isinstance(similarity_alert_rule.get("default"), bool) else True,
+    per_role=similarity_alert_rule.get("per_role") or {},
+    per_user=similarity_alert_rule.get("per_user") or {},
+  )
+
+  similarity_window_days_rule = settings.get("check_item_photo_similarity_window_days") or {}
+  similarity_window_days = IntRule(
+    default=_normalize_similarity_window_days(similarity_window_days_rule.get("default")) if similarity_window_days_rule.get("default") is not None else 180,
+    per_role={
+      str(k): _normalize_similarity_window_days(v)
+      for k, v in (similarity_window_days_rule.get("per_role") or {}).items()
+      if str(k).strip() != ""
+    },
+    per_user={
+      str(k): _normalize_similarity_window_days(v)
+      for k, v in (similarity_window_days_rule.get("per_user") or {}).items()
+      if str(k).strip() != ""
+    },
+  )
+
   distance_threshold_rule = settings.get("photo_location_distance_threshold_m") or {}
   distance_threshold = IntRule(
     default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
@@ -624,6 +706,8 @@ async def update_mobile_settings(
     enable_photo_location_distance_check=location_distance_check,
     distance_exceed_block_upload=distance_block_upload,
     block_duplicate_check_item_photo_upload=duplicate_check_item_photo_upload,
+    enable_check_item_photo_similarity_alert=similarity_alert,
+    check_item_photo_similarity_window_days=similarity_window_days,
     photo_location_distance_threshold_m=distance_threshold,
   )
 
@@ -677,11 +761,25 @@ async def get_effective_mobile_settings(
     user=current_user,
     default=True,
   )
+  enable_check_item_photo_similarity_alert = _resolve_bool_for_user(
+    settings,
+    key="enable_check_item_photo_similarity_alert",
+    user=current_user,
+    default=True,
+  )
+  check_item_photo_similarity_window_days = _resolve_int_for_user(
+    settings,
+    key="check_item_photo_similarity_window_days",
+    user=current_user,
+    default=180,
+    value_normalizer=_normalize_similarity_window_days,
+  )
   photo_location_distance_threshold_m = _resolve_int_for_user(
     settings,
     key="photo_location_distance_threshold_m",
     user=current_user,
     default=100,
+    value_normalizer=_normalize_distance_threshold,
   )
   return EffectiveMobileSettingsResponse(
     location_mode=location_mode,
@@ -691,6 +789,8 @@ async def get_effective_mobile_settings(
     enable_photo_location_distance_check=enable_photo_location_distance_check,
     distance_exceed_block_upload=distance_exceed_block_upload,
     block_duplicate_check_item_photo_upload=block_duplicate_check_item_photo_upload,
+    enable_check_item_photo_similarity_alert=enable_check_item_photo_similarity_alert,
+    check_item_photo_similarity_window_days=check_item_photo_similarity_window_days,
     photo_location_distance_threshold_m=photo_location_distance_threshold_m,
   )
 

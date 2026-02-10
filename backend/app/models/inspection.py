@@ -239,13 +239,19 @@ class InspectionPhoto(Base):
     camera_info = Column(JSON)  # 相机参数信息
     
     # 水印和验证
-    content_hash = Column(String(64))  # 原始上传内容哈希值（用于重复图片阻断）
+    content_hash = Column(String(64))  # 实际上传文件哈希（通常为加水印后的文件）
+    original_content_hash = Column(String(64))  # 原图哈希（APP 预检票据链路）
+    content_phash = Column(String(16))  # 内容感知哈希（用于相似图片识别）
+    content_vector = Column(JSON)  # 内容向量（用于相似图片二次判定）
+    content_vector_backend = Column(String(32))  # 向量后端：clip / fallback
     has_watermark = Column(Boolean, default=False)
     watermark_data = Column(JSON)  # 水印信息
     hash_value = Column(String(64))  # 文件哈希值，用于防篡改
     digital_signature = Column(Text)  # 数字签名
     is_duplicate_global = Column(Boolean, default=False)  # 是否命中“全局重复图片”
     duplicate_info = Column(JSON)  # 全局重复提示信息（首次上传来源）
+    is_similar_risk = Column(Boolean, default=False)  # 是否命中“高相似风险”
+    similar_info = Column(JSON)  # 高相似风险来源信息
     
     # 审核状态
     review_status = Column(String(20))  # approved, rejected, pending

@@ -30,8 +30,14 @@ def ensure_inspection_schema(engine: Engine) -> None:
         "inspection_photos": {
             "field_id": "field_id TEXT",
             "content_hash": "content_hash TEXT",
+            "original_content_hash": "original_content_hash TEXT",
+            "content_phash": "content_phash TEXT",
+            "content_vector": "content_vector TEXT",
+            "content_vector_backend": "content_vector_backend TEXT",
             "is_duplicate_global": "is_duplicate_global INTEGER DEFAULT 0",
             "duplicate_info": "duplicate_info TEXT",
+            "is_similar_risk": "is_similar_risk INTEGER DEFAULT 0",
+            "similar_info": "similar_info TEXT",
         },
     }
 
@@ -73,3 +79,44 @@ def ensure_inspection_schema(engine: Engine) -> None:
             )
         except Exception as e:
             print(f"[Schema Migration] Skipped index idx_inspection_photos_content_hash: {e}")
+
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_inspection_photos_original_content_hash "
+                    "ON inspection_photos (original_content_hash)"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped index idx_inspection_photos_original_content_hash: {e}")
+
+        # 相似度查询相关索引
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_inspection_photos_content_phash "
+                    "ON inspection_photos (content_phash)"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped index idx_inspection_photos_content_phash: {e}")
+
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_inspection_photos_created_at "
+                    "ON inspection_photos (created_at)"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped index idx_inspection_photos_created_at: {e}")
+
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_inspection_photos_is_similar_risk "
+                    "ON inspection_photos (is_similar_risk)"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped index idx_inspection_photos_is_similar_risk: {e}")

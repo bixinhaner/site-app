@@ -91,6 +91,13 @@
                 >
                   <el-icon class="duplicate-warning-icon"><WarningFilled /></el-icon>
                 </el-tooltip>
+                <el-tooltip
+                  v-if="row.has_similar_photos"
+                  content="存在极度相似图片，请进入审核台详情核验"
+                  placement="top"
+                >
+                  <el-icon class="similar-warning-icon"><WarningFilled /></el-icon>
+                </el-tooltip>
               </div>
               <div class="work-order-id">ID: {{ row.id }}</div>
             </div>
@@ -1172,6 +1179,11 @@ watch([sortBy, sortOrder], () => {
 
 .duplicate-warning-icon {
   color: #e6a23c;
+  font-size: 15px;
+}
+
+.similar-warning-icon {
+  color: #f56c6c;
   font-size: 15px;
 }
 

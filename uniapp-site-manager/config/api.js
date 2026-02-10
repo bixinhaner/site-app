@@ -206,6 +206,7 @@ export const API_ENDPOINTS = {
     CREATE: '/api/inspections/',
     UPDATE: (id) => `/api/inspections/detail/${id}`,
     DELETE: (id) => `/api/inspections/${id}`,
+    PHOTO_PRECHECK: (id) => `/api/inspections/detail/${id}/photos/precheck`,
     PHOTOS: (id) => `/api/inspections/detail/${id}/photos`,
     DELETE_PHOTO: (photoId) => `/api/inspections/photos/${photoId}`
   },

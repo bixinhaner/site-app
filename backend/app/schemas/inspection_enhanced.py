@@ -211,8 +211,12 @@ class InspectionPhotoResponse(BaseModel):
     watermark_data: Optional[Dict[str, Any]] = None
     is_duplicate_global: Optional[bool] = False
     duplicate_info: Optional[Dict[str, Any]] = None
+    is_similar_risk: Optional[bool] = False
+    similar_info: Optional[Dict[str, Any]] = None
     # 上传接口在“命中重复但未阻断”时返回该字段，便于APP弹窗汇总提醒
     duplicate_warning: Optional[Dict[str, Any]] = None
+    # 上传接口在“命中极度相似但未阻断”时返回该字段，便于APP弹窗汇总提醒
+    similar_warning: Optional[Dict[str, Any]] = None
     review_status: Optional[str]
     created_at: datetime
 

@@ -8,6 +8,7 @@
 - If temporary verification and test scripts or code are generated during the task, please create them in the project's temp directory. If the directory does not exist, create it.Other temporary files or code that do not affect business operations during the task should also be placed in the temp directory.
 - python都是用虚拟环境运行的。
 - 不要使用git相关操作。
+- 每次有变动请审视根目录的README.md，并更新内容，确保文档始终与代码实现一致，且该文档说人话易于理解，避免深度技术语言。
 
 ## Project Structure & Module Organization
 - Root helpers: `start_backend.py` boots the FastAPI server; `docs/` holds reference material; DB snapshots live under `db/`.

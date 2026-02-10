@@ -31,6 +31,16 @@
           :description="'列表页已标注，建议进入检查项详情逐张核验来源信息。'"
         />
 
+        <el-alert
+          v-if="similarPhotoSummary.total > 0"
+          class="mb16"
+          type="error"
+          :closable="false"
+          show-icon
+          :title="`检测到极度相似图片：共 ${similarPhotoSummary.total} 张，涉及 ${similarPhotoSummary.items} 个检查项`"
+          :description="'建议重点核验是否存在历史照片复用风险。'"
+        />
+
         <el-divider />
 
         <!-- 设备更换工单信息 -->
@@ -376,6 +386,25 @@
               <span v-else>-</span>
             </template>
           </el-table-column>
+          <el-table-column label="相似图" width="130">
+            <template #default="{ row }">
+              <template v-if="getItemSimilarStats(row).count > 0">
+                <el-popover placement="top" width="420" trigger="hover">
+                  <template #reference>
+                    <el-tag type="danger" size="small">相似 {{ getItemSimilarStats(row).count }} 张</el-tag>
+                  </template>
+                  <div
+                    v-for="(line, idx) in getItemSimilarHintLines(row)"
+                    :key="`${row.id}-sim-${idx}`"
+                    class="duplicate-hint-line"
+                  >
+                    {{ line }}
+                  </div>
+                </el-popover>
+              </template>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="位置比对" width="180">
             <template #default="{ row }">
               <template v-if="getItemLocationCompareStats(row).comparedCount > 0">
@@ -687,6 +716,9 @@
                     <div v-if="p.is_duplicate_global" class="duplicate-photo-tip">
                       {{ getPhotoDuplicateBrief(p) }}
                     </div>
+                    <div v-if="p.is_similar_risk" class="similar-photo-tip">
+                      {{ getPhotoSimilarBrief(p) }}
+                    </div>
                   </div>
                 </div>
               </el-col>
@@ -711,6 +743,9 @@
                   <div class="photo-time">{{ formatDateTime(photo.taken_at) }}</div>
                   <div v-if="photo.is_duplicate_global" class="duplicate-photo-tip">
                     {{ getPhotoDuplicateBrief(photo) }}
+                  </div>
+                  <div v-if="photo.is_similar_risk" class="similar-photo-tip">
+                    {{ getPhotoSimilarBrief(photo) }}
                   </div>
                   <div v-if="photo.latitude && photo.longitude" class="photo-location">
                     {{ photo.latitude.toFixed(6) }}, {{ photo.longitude.toFixed(6) }}
@@ -842,6 +877,16 @@
                   <div class="duplicate-detail-block">
                     <div>{{ getPhotoDuplicateBrief(selectedPhoto) }}</div>
                     <div>{{ getPhotoDuplicateSourceLine(selectedPhoto) }}</div>
+                  </div>
+                </template>
+                <span v-else>否</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="相似图片">
+                <template v-if="selectedPhoto.is_similar_risk">
+                  <el-tag type="danger" size="small">是</el-tag>
+                  <div class="similar-detail-block">
+                    <div>{{ getPhotoSimilarBrief(selectedPhoto) }}</div>
+                    <div>{{ getPhotoSimilarSourceLine(selectedPhoto) }}</div>
                   </div>
                 </template>
                 <span v-else>否</span>
@@ -1662,6 +1707,63 @@ const duplicatePhotoSummary = computed(() => {
     }
   })
   return { total, items: itemsWithDup }
+})
+
+const getPhotoSimilarInfo = (photo) => {
+  const info = photo?.similar_info
+  return info && typeof info === 'object' ? info : null
+}
+
+const getPhotoSimilarBrief = (photo) => {
+  const info = getPhotoSimilarInfo(photo)
+  if (!photo?.is_similar_risk || !info) return ''
+  const site = info.site_display || info.site_name || (info.site_id ? `站点ID:${info.site_id}` : '未知站点')
+  const uploader = info.uploader_display || info.uploader_name || (info.uploader_id ? `用户ID:${info.uploader_id}` : '未知用户')
+  const time = info.uploaded_at || '-'
+  const percent = Number(info.similarity_percent)
+  const percentText = Number.isFinite(percent) ? ` / 相似度:${percent.toFixed(2)}%` : ''
+  return `相似来源：${site} / ${uploader} / ${time}${percentText}`
+}
+
+const getPhotoSimilarSourceLine = (photo) => {
+  const info = getPhotoSimilarInfo(photo)
+  if (!photo?.is_similar_risk || !info) return ''
+  const source = info.source_type_label || info.source_type || '未知来源'
+  const matchedPhotoId = info.matched_photo_id || '-'
+  const phashDistance = Number(info.phash_distance)
+  const distanceText = Number.isFinite(phashDistance) ? `，pHash距离: ${phashDistance}` : ''
+  return `来源：${source}（匹配照片ID: ${matchedPhotoId}${distanceText}）`
+}
+
+const getItemSimilarStats = (item) => {
+  const photos = Array.isArray(item?.photos) ? item.photos : []
+  const similarPhotos = photos.filter((p) => p?.is_similar_risk)
+  return {
+    count: similarPhotos.length,
+    similarPhotos,
+  }
+}
+
+const getItemSimilarHintLines = (item) => {
+  const stats = getItemSimilarStats(item)
+  return stats.similarPhotos.slice(0, 3).map((photo, idx) => {
+    const name = photo?.original_name || `图片${idx + 1}`
+    const brief = getPhotoSimilarBrief(photo)
+    return brief ? `${name}: ${brief}` : `${name}: 检测到高相似来源`
+  })
+}
+
+const similarPhotoSummary = computed(() => {
+  let total = 0
+  let itemsWithRisk = 0
+  ;(items.value || []).forEach((item) => {
+    const count = getItemSimilarStats(item).count
+    if (count > 0) {
+      itemsWithRisk += 1
+      total += count
+    }
+  })
+  return { total, items: itemsWithRisk }
 })
 
 // 检查是否有未审核的检查项
@@ -3181,6 +3283,20 @@ onMounted(refresh)
 .duplicate-detail-block {
   margin-top: 8px;
   color: #8a6d3b;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.similar-photo-tip {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #b91c1c;
+  line-height: 1.4;
+}
+
+.similar-detail-block {
+  margin-top: 8px;
+  color: #b91c1c;
   line-height: 1.5;
   font-size: 12px;
 }

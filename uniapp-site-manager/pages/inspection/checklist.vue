@@ -1668,10 +1668,10 @@
 		return photos.filter(p => p && p.field_id !== undefined && p.field_id !== null && String(p.field_id) === String(fid))
 	}
 
-	const getUnlinkedPhotos = () => {
-		if (!currentItem.value) return []
-		const photos = currentItem.value.photos || []
-		const known = new Set(
+		const getUnlinkedPhotos = () => {
+			if (!currentItem.value) return []
+			const photos = currentItem.value.photos || []
+			const known = new Set(
 			(currentItem.value.dataFields || [])
 				.map(f => f?.field_id)
 				.filter(v => v !== undefined && v !== null && String(v).trim() !== '')
@@ -1681,7 +1681,88 @@
 			const fid = p?.field_id
 			if (fid === undefined || fid === null || String(fid).trim() === '') return true
 			return !known.has(String(fid))
-		})
+			})
+			}
+
+		const normalizePhotoHashHex = (value) => {
+			const text = String(value || '').trim().toLowerCase()
+			if (!text) return ''
+			return /^[0-9a-f]{16,128}$/.test(text) ? text : ''
+		}
+
+		const getLocalPhotoContentHash = async (filePath) => {
+			const path = String(filePath || '').trim()
+			if (!path) {
+				throw new Error($t('messages.photoPathInvalid'))
+			}
+			return await new Promise((resolve, reject) => {
+				uni.getFileInfo({
+					filePath: path,
+					digestAlgorithm: 'md5',
+					success: (res) => {
+						const hash = normalizePhotoHashHex(res?.digest)
+						if (!hash) {
+							reject(new Error($t('messages.photoHashUnavailable')))
+							return
+						}
+						resolve(hash)
+					},
+					fail: (err) => {
+						reject(new Error(err?.errMsg || $t('messages.photoHashCalcFailed')))
+					}
+				})
+			})
+		}
+
+		const requestPhotoUploadTicketByHash = async ({ checkItemId, fieldId, originalContentHash }) => {
+			const cid = String(checkItemId || '').trim()
+			if (!cid) {
+				return { success: false, error: $t('messages.photoPrecheckInvalidCheckItem') }
+			}
+			const normalizedHash = normalizePhotoHashHex(originalContentHash)
+			if (!normalizedHash) {
+				return { success: false, error: $t('messages.photoHashCalcFailed') }
+			}
+			const payload = {
+				check_item_id: cid,
+				original_content_hash: normalizedHash
+			}
+			const fid = String(fieldId || '').trim()
+			if (fid) {
+				payload.field_id = fid
+			}
+			const precheckRes = await inspectionStore.precheckPhotoUpload(inspectionId.value, payload)
+			if (!precheckRes.success) {
+				return {
+					success: false,
+					error: precheckRes.error || $t('messages.photoPrecheckFailed'),
+					detail: precheckRes.detail
+				}
+			}
+			const data = precheckRes.data || {}
+			const uploadTicket = String(data.upload_ticket || '').trim()
+			const shouldBlock = data.should_block === true
+			if (!shouldBlock && !uploadTicket) {
+				return { success: false, error: $t('messages.photoPrecheckTicketMissing') }
+			}
+			return {
+				success: true,
+				originalContentHash: normalizedHash,
+				uploadTicket,
+				duplicateWarning: (data.duplicate_warning && typeof data.duplicate_warning === 'object')
+					? data.duplicate_warning
+					: null,
+				shouldBlock
+			}
+		}
+
+		const precheckPhotoBeforeUpload = async ({ imagePath, checkItemId, fieldId }) => {
+			const originalContentHash = await getLocalPhotoContentHash(imagePath)
+			return await requestPhotoUploadTicketByHash({
+				checkItemId,
+				fieldId,
+				originalContentHash
+			})
 		}
 
 		const takePhotoForField = async (dataField) => {
@@ -1766,16 +1847,40 @@
 						count: 1,
 						sizeType: ['original'],
 						sourceType: sourceType,
-						success: async (chooseRes) => {
-								try {
-									let finalImagePath = chooseRes.tempFilePaths[0]
-									let usedWatermark = false
-									let gpsUsed = { ...gpsData }
-									
-									// 拍照/相册均添加GPS水印，确保上传后端校验通过
-									console.log(
-										isCamera
-											? '拍照模式，添加GPS水印'
+							success: async (chooseRes) => {
+									try {
+										let finalImagePath = chooseRes.tempFilePaths[0]
+										let usedWatermark = false
+										let gpsUsed = { ...gpsData }
+										let uploadTicket = ''
+										let originalContentHash = ''
+
+										const precheckResult = await precheckPhotoBeforeUpload({
+											imagePath: finalImagePath,
+											checkItemId: currentItem.value?.id,
+											fieldId
+										})
+										if (!precheckResult.success) {
+											uni.showToast({
+												title: $t('messages.photoUploadFailedWithReason', {
+													reason: precheckResult.error || $t('messages.photoPrecheckFailed')
+												}),
+												icon: 'none',
+												duration: 3200
+											})
+											return
+										}
+										if (precheckResult.shouldBlock) {
+											await showDuplicateBlockedModal(precheckResult?.duplicateWarning)
+											return
+										}
+										uploadTicket = String(precheckResult.uploadTicket || '')
+										originalContentHash = String(precheckResult.originalContentHash || '')
+										
+										// 拍照/相册均添加GPS水印，确保上传后端校验通过
+										console.log(
+											isCamera
+												? '拍照模式，添加GPS水印'
 											: (localUploadWatermarkWithGeo ? '相册模式，添加GPS水印' : '相册模式，添加本地上传水印（不带经纬度/地址）')
 									)
 									uni.showLoading({
@@ -1857,12 +1962,14 @@
 									}
 									
 									// 创建照片对象
-									const photo = {
-										field_id: (fieldId !== undefined && fieldId !== null && String(fieldId).trim() !== '') ? String(fieldId) : undefined,
-										file_path: finalImagePath,
-										taken_at: new Date().toISOString(),
-										latitude: gpsUsed.latitude,
-										longitude: gpsUsed.longitude,
+										const photo = {
+											field_id: (fieldId !== undefined && fieldId !== null && String(fieldId).trim() !== '') ? String(fieldId) : undefined,
+											file_path: finalImagePath,
+											upload_ticket: uploadTicket || undefined,
+											original_content_hash: originalContentHash || undefined,
+											taken_at: new Date().toISOString(),
+											latitude: gpsUsed.latitude,
+											longitude: gpsUsed.longitude,
 										gps_accuracy: gpsUsed.accuracy,
 										address: gpsUsed.address,
 										has_watermark: usedWatermark,
@@ -3010,6 +3117,34 @@
 			if (sourceTypeLabel) return sourceTypeLabel
 			return $t('inspection.duplicatePhotoUnknownSource')
 		}
+
+		const buildDuplicateBlockedMessage = (warning) => {
+			const duplicate = warning?.duplicate
+			if (duplicate && typeof duplicate === 'object') {
+				return $t('inspection.photoDuplicateBlockedMessage', {
+					site: getDuplicatePhotoSiteLabel(duplicate),
+					uploader: getDuplicatePhotoUploaderLabel(duplicate),
+					time: String(duplicate?.uploaded_at || '-'),
+					source: getDuplicatePhotoSourceLabel(duplicate)
+				})
+			}
+			const serverMessage = String(warning?.message || '').trim()
+			if (serverMessage) return serverMessage
+			return $t('inspection.photoDuplicateBlockedFallback')
+		}
+
+		const showDuplicateBlockedModal = async (warning) => {
+			const blockedMessage = buildDuplicateBlockedMessage(warning)
+			await new Promise((resolve) => {
+				uni.showModal({
+					title: $t('inspection.photoRiskAlertTitle'),
+					content: blockedMessage,
+					showCancel: false,
+					success: () => resolve(),
+					fail: () => resolve()
+				})
+			})
+		}
 			
 			const saveCurrentItem = async () => {
 		// 设备级检查项必须先绑定设备，防止误保存
@@ -3129,7 +3264,7 @@
 						try {
 							const fieldPhotoMode = isFieldPhotoMode()
 							const allowedPhotoFieldIdSet = fieldPhotoMode ? getAllowedPhotoFieldIdSet() : new Set()
-							const duplicateWarnings = []
+							const riskWarnings = []
 
 							for (let i = 0; i < currentItem.value.photos.length; i++) {
 								const photo = currentItem.value.photos[i]
@@ -3145,12 +3280,39 @@
 						if (photo.file_path) {
 							const localFilePath = photo.file_path
 							console.log('开始上传照片:', photo.file_path)
+							const photoFieldId = (photo.field_id !== undefined && photo.field_id !== null) ? String(photo.field_id).trim() : ''
+
+							if (photo.original_content_hash) {
+								const refreshPrecheckResult = await requestPhotoUploadTicketByHash({
+									checkItemId: currentItem.value.id,
+									fieldId: fieldPhotoMode ? photoFieldId : undefined,
+									originalContentHash: photo.original_content_hash
+								})
+								if (!refreshPrecheckResult.success) {
+									throw new Error(refreshPrecheckResult.error || $t('messages.photoPrecheckFailed'))
+								}
+								if (refreshPrecheckResult.shouldBlock) {
+									uni.hideLoading()
+									await showDuplicateBlockedModal(refreshPrecheckResult.duplicateWarning)
+									const blockedError = new Error(buildDuplicateBlockedMessage(refreshPrecheckResult.duplicateWarning))
+									blockedError.riskModalShown = true
+									throw blockedError
+								}
+								photo.upload_ticket = String(refreshPrecheckResult.uploadTicket || '').trim() || undefined
+								photo.original_content_hash = String(refreshPrecheckResult.originalContentHash || '').trim() || photo.original_content_hash
+							}
 							
 							// 构建照片上传数据，只传递有效字段（过滤undefined）
-							const photoData = {
-								check_item_id: currentItem.value.id,
-								has_watermark: photo.has_watermark || false
-							}
+								const photoData = {
+									check_item_id: currentItem.value.id,
+									has_watermark: photo.has_watermark || false
+								}
+								if (photo.upload_ticket) {
+									photoData.upload_ticket = String(photo.upload_ticket).trim()
+								}
+								if (photo.original_content_hash) {
+									photoData.original_content_hash = String(photo.original_content_hash).trim()
+								}
 
 								if (photo.local_upload_without_geo) {
 									photoData.local_upload_without_geo = true
@@ -3158,14 +3320,13 @@
 
 								// 字段级照片：仅在“字段拍照模式”下才允许传 field_id（且必须属于 allow_photo=true 的字段）
 								if (fieldPhotoMode) {
-									const fidStr = (photo.field_id !== undefined && photo.field_id !== null) ? String(photo.field_id).trim() : ''
-									if (!fidStr) {
+									if (!photoFieldId) {
 										throw new Error('字段照片缺少field_id，无法上传')
 									}
-									if (!allowedPhotoFieldIdSet.has(fidStr)) {
+									if (!allowedPhotoFieldIdSet.has(photoFieldId)) {
 										throw new Error('field_id无效或该字段禁止拍照')
 									}
-									photoData.field_id = fidStr
+									photoData.field_id = photoFieldId
 								}
 								
 								// 只在有效时添加GPS相关字段
@@ -3233,7 +3394,12 @@
 
 								const duplicateWarning = uploadResult?.duplicateWarning || uploadResult?.data?.duplicate_warning
 								if (duplicateWarning && typeof duplicateWarning === 'object') {
-									duplicateWarnings.push(duplicateWarning)
+									riskWarnings.push({ type: 'duplicate', payload: duplicateWarning })
+								}
+
+								const similarWarning = uploadResult?.similarWarning || uploadResult?.data?.similar_warning
+								if (similarWarning && typeof similarWarning === 'object') {
+									riskWarnings.push({ type: 'similar', payload: similarWarning })
 								}
 								
 								// 用后端返回结果替换本地占位，确保后续删除/展示使用photo.id与服务器路径
@@ -3257,30 +3423,42 @@
 							}
 						}
 
-						if (duplicateWarnings.length > 0) {
+						if (riskWarnings.length > 0) {
 							uni.hideLoading()
 							const dedupLines = []
 							const seenKeys = new Set()
-							for (const warning of duplicateWarnings) {
-								const dup = warning?.duplicate || {}
-								const key = String(dup?.content_hash || warning?.message || Math.random())
+							for (const risk of riskWarnings) {
+								const warning = risk?.payload || {}
+								const isSimilar = risk?.type === 'similar'
+								const detail = isSimilar ? (warning?.similar || {}) : (warning?.duplicate || {})
+								const dedupKeySource = isSimilar
+									? (detail?.matched_photo_id || detail?.similarity_score || warning?.message)
+									: (detail?.content_hash || warning?.message)
+								const key = `${isSimilar ? 'similar' : 'duplicate'}:${String(dedupKeySource || Math.random())}`
 								if (seenKeys.has(key)) continue
 								seenKeys.add(key)
-								const site = getDuplicatePhotoSiteLabel(dup)
-								const uploader = getDuplicatePhotoUploaderLabel(dup)
-								const time = dup?.uploaded_at || '-'
-								const source = getDuplicatePhotoSourceLabel(dup)
-								dedupLines.push(`- ${site} / ${uploader} / ${time} / ${source}`)
+								const site = getDuplicatePhotoSiteLabel(detail)
+								const uploader = getDuplicatePhotoUploaderLabel(detail)
+								const time = detail?.uploaded_at || '-'
+								const source = getDuplicatePhotoSourceLabel(detail)
+								const riskTag = isSimilar
+									? $t('inspection.photoRiskTagSimilar')
+									: $t('inspection.photoRiskTagDuplicate')
+								const similarityPercent = Number(detail?.similarity_percent)
+								const similarityText = (isSimilar && Number.isFinite(similarityPercent))
+									? ` / ${$t('inspection.photoRiskSimilarityScore', { score: similarityPercent.toFixed(2) })}`
+									: ''
+								dedupLines.push(`- [${riskTag}] ${site} / ${uploader} / ${time} / ${source}${similarityText}`)
 							}
 
 							const contentText = [
-								$t('inspection.duplicatePhotoAlertIntro', { count: dedupLines.length }),
+								$t('inspection.photoRiskAlertIntro', { count: dedupLines.length }),
 								...dedupLines,
 							].join('\\n')
 
 							await new Promise((resolve) => {
 								uni.showModal({
-									title: $t('inspection.duplicatePhotoAlertTitle'),
+									title: $t('inspection.photoRiskAlertTitle'),
 									content: contentText,
 									showCancel: false,
 									success: () => resolve(),
@@ -3288,14 +3466,17 @@
 								})
 							})
 						}
-					} catch (photoError) {
-						console.error('照片上传失败:', photoError)
-					uni.hideLoading()
-					uni.showToast({
-						title: $t('messages.photoUploadFailedWithReason', { reason: photoError.message }),
-						icon: 'error',
-						duration: 3000
-					})
+						} catch (photoError) {
+							console.error('照片上传失败:', photoError)
+						uni.hideLoading()
+						if (photoError?.riskModalShown) {
+							return
+						}
+						uni.showToast({
+							title: $t('messages.photoUploadFailedWithReason', { reason: photoError.message }),
+							icon: 'error',
+							duration: 3000
+						})
 					return
 				} finally {
 					uni.hideLoading()

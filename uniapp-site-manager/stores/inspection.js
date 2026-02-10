@@ -150,6 +150,46 @@ export const useInspectionStore = defineStore('inspection', () => {
 			return { success: false, error: error.message || '网络错误' }
 		}
 	}
+
+	// 上传前预检：基于原图特征码申请上传票据
+	const precheckPhotoUpload = async (inspectionId, payload = {}) => {
+		if (!userStore.token) return { success: false, error: '未登录' }
+
+		try {
+			const response = await uni.request({
+				url: buildApiUrl(API_ENDPOINTS.INSPECTIONS.PHOTO_PRECHECK(inspectionId)),
+				...createRequestConfig({
+					method: 'POST',
+					data: payload,
+					headers: getAuthHeaders(userStore.token)
+				})
+			})
+
+			if (response.statusCode === 200) {
+				return { success: true, data: response.data }
+			}
+
+			const detailRaw = response?.data?.detail
+			let detailMsg = ''
+			if (typeof detailRaw === 'string') {
+				detailMsg = detailRaw
+			} else if (detailRaw && typeof detailRaw === 'object') {
+				detailMsg = detailRaw.message || response?.data?.message || ''
+			} else {
+				detailMsg = response?.data?.message || ''
+			}
+			return {
+				success: false,
+				statusCode: response.statusCode,
+				error: detailMsg || `上传前预检失败，状态码: ${response.statusCode}`,
+				detail: detailRaw,
+				raw: response.data
+			}
+		} catch (error) {
+			console.error('Precheck photo upload error:', error)
+			return { success: false, error: error.message || '上传前预检失败' }
+		}
+	}
 	
 	// 上传检查照片
 	const uploadPhoto = async (inspectionId, filePath, additionalData = {}) => {
@@ -187,19 +227,26 @@ export const useInspectionStore = defineStore('inspection', () => {
 					const duplicateWarning = (data?.duplicate_warning && typeof data.duplicate_warning === 'object')
 						? data.duplicate_warning
 						: null
+					const similarWarning = (data?.similar_warning && typeof data.similar_warning === 'object')
+						? data.similar_warning
+						: null
 					console.log('照片上传成功:', data)
-					return { success: true, data, duplicateWarning }
+					return { success: true, data, duplicateWarning, similarWarning }
 				}
 
 				const detailRaw = payload?.detail
 				let detailMsg = ''
 				let duplicateWarning = null
+				let similarWarning = null
 				if (typeof detailRaw === 'string') {
 					detailMsg = detailRaw
 				} else if (detailRaw && typeof detailRaw === 'object') {
 					detailMsg = detailRaw.message || payload?.message || ''
 					if (detailRaw?.code === 'DUPLICATE_PHOTO') {
 						duplicateWarning = detailRaw
+					}
+					if (detailRaw?.code === 'SIMILAR_PHOTO') {
+						similarWarning = detailRaw
 					}
 				} else {
 					detailMsg = payload?.message || ''
@@ -212,6 +259,7 @@ export const useInspectionStore = defineStore('inspection', () => {
 					error: detailMsg || `上传照片失败，状态码: ${response.statusCode}`,
 					detail: detailRaw,
 					duplicateWarning,
+					similarWarning,
 					raw: payload
 				}
 			} catch (error) {
@@ -397,12 +445,13 @@ export const useInspectionStore = defineStore('inspection', () => {
 		getInspection,
 		getInspectionDetail,
 		getInspectionItems,
-		updateInspectionItem,
-		createInspection,
-		updateInspection,
-		deleteInspection,
-		deleteInspectionPhoto,
-		uploadPhoto,
+			updateInspectionItem,
+			createInspection,
+			updateInspection,
+			precheckPhotoUpload,
+			deleteInspection,
+			deleteInspectionPhoto,
+			uploadPhoto,
 		getStatistics,
 		getTemplates
 	}

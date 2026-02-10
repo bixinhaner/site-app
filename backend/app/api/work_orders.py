@@ -406,6 +406,8 @@ def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
         "review_comments_i18n": getattr(wo, "review_comments_i18n", None),
         "has_duplicate_photos": False,
         "duplicate_photo_count": 0,
+        "has_similar_photos": False,
+        "similar_photo_count": 0,
         "assigned_at": wo.assigned_at or current_time,
         "accepted_at": wo.accepted_at,
         "submitted_at": wo.submitted_at,
@@ -450,6 +452,17 @@ def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
         )
         data["duplicate_photo_count"] = int(duplicate_photo_count or 0)
         data["has_duplicate_photos"] = data["duplicate_photo_count"] > 0
+
+        similar_photo_count = (
+            db.query(InspectionPhoto)
+            .filter(
+                InspectionPhoto.inspection_id == wo.inspection_id,
+                InspectionPhoto.is_similar_risk.is_(True),
+            )
+            .count()
+        )
+        data["similar_photo_count"] = int(similar_photo_count or 0)
+        data["has_similar_photos"] = data["similar_photo_count"] > 0
     
     return data
 

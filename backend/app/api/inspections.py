@@ -3,13 +3,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import uuid
 import hashlib
 import json
 import copy
 import logging
+import re
+
+from jose import JWTError, jwt
+from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -46,12 +50,30 @@ from app.services.photo_duplicate_guard import (
     detect_duplicate_detail,
     register_first_upload_record,
 )
+from app.services.photo_similarity_guard import (
+    DEFAULT_PHASH_THRESHOLD,
+    DEFAULT_VECTOR_THRESHOLD,
+    DEFAULT_WINDOW_DAYS,
+    detect_similar_photo_warning,
+    extract_similarity_features,
+)
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
 from app.models.work_order import WorkOrder, WorkOrderTypeEnum
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+PHOTO_PRECHECK_TICKET_TYPE = "inspection_photo_precheck"
+DEFAULT_PHOTO_PRECHECK_TTL_MINUTES = 10
+PHOTO_CONTENT_HASH_PATTERN = re.compile(r"^[0-9a-f]{16,128}$")
+
+
+class PhotoUploadPrecheckRequest(BaseModel):
+    check_item_id: str
+    field_id: Optional[str] = None
+    original_content_hash: str
 
 def _is_field_worker(u) -> bool:
     r = getattr(u, 'role', None)
@@ -63,6 +85,201 @@ def _ensure_surveyor_inspection_type(db: Session, u, inspection: SiteInspection)
         wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
         if not wo or wo.type != WorkOrderTypeEnum.SITE_SURVEY:
             raise HTTPException(status_code=403, detail="仅可操作勘察检查")
+
+
+def _normalize_photo_content_hash(raw_hash: Optional[str], *, required: bool = False) -> Optional[str]:
+    text = str(raw_hash or "").strip().lower()
+    if not text:
+        if required:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="original_content_hash 不能为空",
+            )
+        return None
+    if not PHOTO_CONTENT_HASH_PATTERN.fullmatch(text):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="original_content_hash 格式无效",
+        )
+    return text
+
+
+def _photo_precheck_ttl_minutes() -> int:
+    raw = str(os.getenv("PHOTO_PRECHECK_TICKET_TTL_MINUTES", str(DEFAULT_PHOTO_PRECHECK_TTL_MINUTES))).strip()
+    try:
+        ttl = int(raw)
+    except Exception:
+        ttl = DEFAULT_PHOTO_PRECHECK_TTL_MINUTES
+    return max(1, min(ttl, 1440))
+
+
+def _create_photo_precheck_ticket(
+    *,
+    current_user: User,
+    inspection_id: str,
+    check_item_id: str,
+    field_id: Optional[str],
+    original_content_hash: str,
+) -> Dict[str, Any]:
+    expires_at = datetime.utcnow() + timedelta(minutes=_photo_precheck_ttl_minutes())
+    payload = {
+        "type": PHOTO_PRECHECK_TICKET_TYPE,
+        "uid": int(current_user.id),
+        "inspection_id": str(inspection_id),
+        "check_item_id": str(check_item_id),
+        "field_id": str(field_id or ""),
+        "original_content_hash": str(original_content_hash),
+        "exp": expires_at,
+    }
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return {
+        "token": token,
+        "expires_at": expires_at,
+    }
+
+
+def _verify_photo_precheck_ticket(
+    *,
+    upload_ticket: str,
+    current_user: User,
+    inspection_id: str,
+    check_item_id: str,
+    field_id: Optional[str],
+    original_content_hash: Optional[str],
+) -> Dict[str, Any]:
+    token = str(upload_ticket or "").strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PHOTO_UPLOAD_TICKET_MISSING", "message": "缺少上传预检票据，请重新选择图片后上传"},
+        )
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PHOTO_UPLOAD_TICKET_INVALID", "message": "上传预检票据无效或已过期，请重新选择图片后上传"},
+        )
+
+    if str(payload.get("type") or "") != PHOTO_PRECHECK_TICKET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PHOTO_UPLOAD_TICKET_INVALID", "message": "上传预检票据类型不匹配，请重新选择图片后上传"},
+        )
+    if str(payload.get("uid") or "") != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "PHOTO_UPLOAD_TICKET_FORBIDDEN", "message": "上传预检票据与当前用户不匹配"},
+        )
+    if str(payload.get("inspection_id") or "") != str(inspection_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PHOTO_UPLOAD_TICKET_SCOPE_MISMATCH", "message": "上传预检票据与当前检查不匹配，请重新选择图片后上传"},
+        )
+    if str(payload.get("check_item_id") or "") != str(check_item_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PHOTO_UPLOAD_TICKET_SCOPE_MISMATCH", "message": "上传预检票据与当前检查项不匹配，请重新选择图片后上传"},
+        )
+    expected_field_id = str(field_id or "")
+    ticket_field_id = str(payload.get("field_id") or "")
+    if ticket_field_id != expected_field_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PHOTO_UPLOAD_TICKET_SCOPE_MISMATCH", "message": "上传预检票据与当前拍照字段不匹配，请重新选择图片后上传"},
+        )
+
+    ticket_hash = _normalize_photo_content_hash(payload.get("original_content_hash"), required=True)
+    provided_hash = _normalize_photo_content_hash(original_content_hash, required=False)
+    if provided_hash and provided_hash != ticket_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PHOTO_UPLOAD_TICKET_HASH_MISMATCH", "message": "上传预检票据与图片特征码不匹配，请重新选择图片后上传"},
+        )
+    return {
+        "original_content_hash": ticket_hash,
+    }
+
+
+def _get_uploadable_inspection_or_raise(
+    db: Session,
+    inspection_id: str,
+    current_user: User,
+) -> SiteInspection:
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+    if not inspection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="检查记录不存在",
+        )
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限操作该检查")
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
+    if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"检查状态 {_enum_value(inspection.status)} 下不允许上传照片",
+        )
+    return inspection
+
+
+def _resolve_photo_upload_check_item_and_field(
+    db: Session,
+    *,
+    inspection_id: str,
+    check_item_id: Optional[str],
+    field_id: Optional[str],
+) -> tuple[InspectionCheckItem, Optional[str]]:
+    if not check_item_id or str(check_item_id).strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="check_item_id 不能为空，照片必须关联到具体的检查项",
+        )
+    normalized_check_item_id = str(check_item_id).strip()
+
+    check_item = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.id == normalized_check_item_id,
+        InspectionCheckItem.inspection_id == inspection_id,
+    ).first()
+    if not check_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="检查项不存在",
+        )
+
+    normalized_field_id: Optional[str] = None
+    allowed_field_id_set = set()
+    if str(getattr(check_item, "required_type", None) or "") == "both":
+        if isinstance(check_item.fields, list) and check_item.fields:
+            for f in check_item.fields:
+                if not isinstance(f, dict):
+                    continue
+                fid_str = str(f.get("field_id") or "").strip()
+                if not fid_str:
+                    continue
+                if _truthy(f.get("allow_photo")):
+                    allowed_field_id_set.add(fid_str)
+
+    if allowed_field_id_set:
+        if not field_id or str(field_id).strip() == "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="field_id 不能为空，照片必须关联到允许拍照的检查字段",
+            )
+        normalized_field_id = str(field_id).strip()
+        if normalized_field_id not in allowed_field_id_set:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="field_id 无效或该字段禁止拍照",
+            )
+    else:
+        if field_id and str(field_id).strip() != "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该检查项未启用字段拍照，请勿传入field_id",
+            )
+
+    return check_item, normalized_field_id
 
 def _truthy(v) -> bool:
     if v is True:
@@ -516,6 +733,43 @@ def _is_duplicate_check_item_photo_block_enabled(db: Session, current_user: User
         return True
 
 
+def _resolve_similarity_alert_policy(db: Session, current_user: User) -> Dict[str, Any]:
+    """解析检查项照片相似度提醒策略（默认开启，窗口180天）。"""
+    enabled = True
+    window_days = DEFAULT_WINDOW_DAYS
+    try:
+        from app.api.mobile_settings import (
+            _load_mobile_settings,
+            _normalize_similarity_window_days,
+            _resolve_bool_for_user,
+            _resolve_int_for_user,
+        )
+
+        settings = _load_mobile_settings(db)
+        enabled = _resolve_bool_for_user(
+            settings,
+            key="enable_check_item_photo_similarity_alert",
+            user=current_user,
+            default=True,
+        )
+        window_days = _resolve_int_for_user(
+            settings,
+            key="check_item_photo_similarity_window_days",
+            user=current_user,
+            default=DEFAULT_WINDOW_DAYS,
+            value_normalizer=_normalize_similarity_window_days,
+        )
+    except Exception:
+        enabled = True
+        window_days = DEFAULT_WINDOW_DAYS
+    return {
+        "enabled": bool(enabled),
+        "window_days": max(1, min(int(window_days or DEFAULT_WINDOW_DAYS), 3650)),
+        "phash_threshold": DEFAULT_PHASH_THRESHOLD,
+        "vector_threshold": DEFAULT_VECTOR_THRESHOLD,
+    }
+
+
 def _resolve_site_name_by_id(db: Session, site_id: Optional[int]) -> Optional[str]:
     if site_id is None:
         return None
@@ -541,6 +795,52 @@ def _mark_photo_duplicate_info(
     photo.duplicate_info = None
 
 
+def _mark_photo_similarity_info(
+    photo: InspectionPhoto,
+    *,
+    similarity_features: Optional[Dict[str, Any]],
+    similar_warning: Optional[Dict[str, Any]],
+) -> None:
+    feature_data = similarity_features if isinstance(similarity_features, dict) else {}
+    photo.content_phash = feature_data.get("content_phash")
+    photo.content_vector = feature_data.get("content_vector")
+    photo.content_vector_backend = feature_data.get("content_vector_backend")
+
+    if similar_warning and isinstance(similar_warning, dict):
+        photo.is_similar_risk = True
+        photo.similar_info = similar_warning.get("similar")
+        return
+    photo.is_similar_risk = False
+    photo.similar_info = None
+
+
+def _detect_similar_warning_if_needed(
+    db: Session,
+    *,
+    file_path: str,
+    policy: Dict[str, Any],
+    exclude_photo_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """提取相似特征并按策略检测高相似风险。"""
+    features = extract_similarity_features(file_path)
+    warning = None
+    if policy.get("enabled"):
+        warning = detect_similar_photo_warning(
+            db,
+            content_phash=features.get("content_phash"),
+            content_vector=features.get("content_vector"),
+            content_vector_backend=features.get("content_vector_backend"),
+            exclude_photo_id=exclude_photo_id,
+            window_days=policy.get("window_days", DEFAULT_WINDOW_DAYS),
+            phash_threshold=policy.get("phash_threshold", DEFAULT_PHASH_THRESHOLD),
+            vector_threshold=policy.get("vector_threshold", DEFAULT_VECTOR_THRESHOLD),
+        )
+    return {
+        "features": features,
+        "warning": warning,
+    }
+
+
 def _cleanup_paths(*paths: Optional[str]) -> None:
     for p in set(paths):
         try:
@@ -550,13 +850,32 @@ def _cleanup_paths(*paths: Optional[str]) -> None:
             print(f"清理失败: {p}, err={cleanup_err}")
 
 
-def _build_photo_response_with_warning(
+def _merge_warning_messages(*warnings: Optional[Dict[str, Any]]) -> Optional[str]:
+    parts: List[str] = []
+    for warning in warnings:
+        if not warning or not isinstance(warning, dict):
+            continue
+        message = str(warning.get("message") or "").strip()
+        if message:
+            parts.append(message)
+    if not parts:
+        return None
+    return "；".join(parts)
+
+
+def _build_photo_response_with_warnings(
     photo: InspectionPhoto,
     duplicate_warning: Optional[Dict[str, Any]],
+    similar_warning: Optional[Dict[str, Any]],
 ) -> InspectionPhotoResponse:
     payload = InspectionPhotoResponse.model_validate(photo, from_attributes=True)
+    updates: Dict[str, Any] = {}
     if duplicate_warning:
-        return payload.model_copy(update={"duplicate_warning": duplicate_warning})
+        updates["duplicate_warning"] = duplicate_warning
+    if similar_warning:
+        updates["similar_warning"] = similar_warning
+    if updates:
+        return payload.model_copy(update=updates)
     return payload
 
 @router.post("/", response_model=SiteInspectionResponse)
@@ -1003,6 +1322,48 @@ async def update_inspection(
     
     return inspection
 
+@router.post("/detail/{inspection_id}/photos/precheck")
+async def precheck_inspection_photo_upload(
+    inspection_id: str,
+    payload: PhotoUploadPrecheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """检查项照片上传前预检（基于原图特征码，返回短期上传票据）。"""
+    _get_uploadable_inspection_or_raise(db, inspection_id, current_user)
+    check_item, normalized_field_id = _resolve_photo_upload_check_item_and_field(
+        db,
+        inspection_id=inspection_id,
+        check_item_id=payload.check_item_id,
+        field_id=payload.field_id,
+    )
+
+    normalized_original_hash = _normalize_photo_content_hash(payload.original_content_hash, required=True)
+    duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
+    duplicate_detail = detect_duplicate_detail(
+        db,
+        content_hash=normalized_original_hash,
+        block_upload=duplicate_block_enabled,
+    )
+
+    ticket_data = _create_photo_precheck_ticket(
+        current_user=current_user,
+        inspection_id=inspection_id,
+        check_item_id=check_item.id,
+        field_id=normalized_field_id,
+        original_content_hash=normalized_original_hash,
+    )
+
+    should_block = bool(duplicate_detail and duplicate_block_enabled)
+    return {
+        "ok": True,
+        "upload_ticket": ticket_data["token"],
+        "expires_at": to_utc_iso(ticket_data["expires_at"]),
+        "duplicate_warning": duplicate_detail if isinstance(duplicate_detail, dict) else None,
+        "should_block": should_block,
+    }
+
+
 @router.post("/detail/{inspection_id}/photos", response_model=InspectionPhotoResponse)
 async def upload_inspection_photo(
     request: Request,
@@ -1024,6 +1385,8 @@ async def upload_inspection_photo(
     has_watermark: bool = Form(False),
     local_upload_without_geo: bool = Form(False),
     replace_existing: bool = Form(False),
+    original_content_hash: Optional[str] = Form(None),
+    upload_ticket: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -1047,6 +1410,8 @@ async def upload_inspection_photo(
     print(f"  distance_exceed_block_upload: {distance_exceed_block_upload} (type: {type(distance_exceed_block_upload)})")
     print(f"  has_watermark: {has_watermark} (type: {type(has_watermark)})")
     print(f"  local_upload_without_geo: {local_upload_without_geo} (type: {type(local_upload_without_geo)})")
+    print(f"  original_content_hash: {original_content_hash} (type: {type(original_content_hash)})")
+    print(f"  upload_ticket存在: {bool(str(upload_ticket or '').strip())}")
     print(f"  file.filename: {file.filename}")
     print(f"  file.content_type: {file.content_type}")
     print(f"  current_user: {current_user.username}")
@@ -1057,13 +1422,6 @@ async def upload_inspection_photo(
         print(f"  原始表单数据: {dict(form)}")
     except Exception as e:
         print(f"  无法获取原始表单数据: {e}")
-    
-    # 验证必需参数
-    if not check_item_id or check_item_id.strip() == "":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="check_item_id 不能为空，照片必须关联到具体的检查项"
-        )
     
     # 本地上传（不带经纬度/地址）允许GPS为0，其他场景仍要求有效GPS
     if local_upload_without_geo:
@@ -1081,70 +1439,13 @@ async def upload_inspection_photo(
                 detail="GPS坐标无效，现场拍照必须包含有效的位置信息"
             )
     
-    # 验证检查记录存在
-    inspection = db.query(SiteInspection).filter(
-        SiteInspection.id == inspection_id
-    ).first()
-    
-    if not inspection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="检查记录不存在"
-        )
-
-    # 检查状态门禁：仅允许草稿/进行中/驳回继续上传（与删除/替换保持一致）
-    if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"检查状态 {_enum_value(inspection.status)} 下不允许上传照片"
-        )
-
-    # 照片变更属于检查项内容变更：触发该检查项回到待审核（仅清空该项，不影响其他项）
-    check_item = db.query(InspectionCheckItem).filter(
-        InspectionCheckItem.id == check_item_id,
-        InspectionCheckItem.inspection_id == inspection_id
-    ).first()
-    if not check_item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="检查项不存在"
-        )
-
-    # 字段级照片归属：按字段 allow_photo 控制
-    # - 若该检查项存在 allow_photo=True 的字段，则照片必须带 field_id 且必须属于“允许拍照”的字段集合
-    # - 若不存在任何 allow_photo=True 字段，则走“未关联照片”模式（允许上传但不允许传入 field_id）
-    normalized_field_id: Optional[str] = None
-    allowed_field_id_set = set()
-    # 字段拍照仅对 required_type=both 生效（字段来源于 dataFields）
-    if str(getattr(check_item, "required_type", None) or "") == "both":
-        if isinstance(check_item.fields, list) and check_item.fields:
-            for f in check_item.fields:
-                if not isinstance(f, dict):
-                    continue
-                fid_str = str(f.get("field_id") or "").strip()
-                if not fid_str:
-                    continue
-                if _truthy(f.get("allow_photo")):
-                    allowed_field_id_set.add(fid_str)
-
-    if allowed_field_id_set:
-        if not field_id or str(field_id).strip() == "":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="field_id 不能为空，照片必须关联到允许拍照的检查字段"
-            )
-        normalized_field_id = str(field_id).strip()
-        if normalized_field_id not in allowed_field_id_set:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="field_id 无效或该字段禁止拍照"
-            )
-    else:
-        if field_id and str(field_id).strip() != "":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="该检查项未启用字段拍照，请勿传入field_id"
-            )
+    inspection = _get_uploadable_inspection_or_raise(db, inspection_id, current_user)
+    check_item, normalized_field_id = _resolve_photo_upload_check_item_and_field(
+        db,
+        inspection_id=inspection_id,
+        check_item_id=check_item_id,
+        field_id=field_id,
+    )
 
     _touch_check_item_and_clear_review(check_item, datetime.utcnow())
     
@@ -1167,7 +1468,7 @@ async def upload_inspection_photo(
         # 删除同一检查项的已有照片
         existing_photos_query = db.query(InspectionPhoto).filter(
             InspectionPhoto.inspection_id == inspection_id,
-            InspectionPhoto.check_item_id == check_item_id
+            InspectionPhoto.check_item_id == check_item.id
         )
         # 字段级：仅替换同一字段下的照片；无字段配置时保持历史行为（整项替换）
         if normalized_field_id is not None:
@@ -1196,9 +1497,31 @@ async def upload_inspection_photo(
     raw_content_hash = calculate_file_hash(file_path)
 
     duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
+    similarity_policy = _resolve_similarity_alert_policy(db, current_user)
+    trusted_original_content_hash: Optional[str] = None
+    duplicate_detection_hash = raw_content_hash
+    upload_ticket_text = str(upload_ticket or "").strip()
+    if upload_ticket_text:
+        try:
+            ticket_info = _verify_photo_precheck_ticket(
+                upload_ticket=upload_ticket_text,
+                current_user=current_user,
+                inspection_id=inspection_id,
+                check_item_id=check_item.id,
+                field_id=normalized_field_id,
+                original_content_hash=original_content_hash,
+            )
+        except HTTPException:
+            _cleanup_paths(file_path)
+            raise
+        trusted_original_content_hash = ticket_info.get("original_content_hash")
+        duplicate_detection_hash = trusted_original_content_hash or raw_content_hash
+    elif original_content_hash:
+        print("DEBUG: 收到 original_content_hash 但未携带 upload_ticket，按兼容模式忽略原图特征码")
+
     duplicate_detail = detect_duplicate_detail(
         db,
-        content_hash=raw_content_hash,
+        content_hash=duplicate_detection_hash,
         block_upload=duplicate_block_enabled,
     )
     duplicate_warning = duplicate_detail if (duplicate_detail and not duplicate_block_enabled) else None
@@ -1208,6 +1531,13 @@ async def upload_inspection_photo(
             status_code=status.HTTP_409_CONFLICT,
             detail=duplicate_detail,
         )
+
+    similarity_result = _detect_similar_warning_if_needed(
+        db,
+        file_path=file_path,
+        policy=similarity_policy,
+    )
+    similar_warning = similarity_result.get("warning")
     
     # 根据是否已有水印决定是否添加水印
     watermarked_path = file_path
@@ -1276,7 +1606,7 @@ async def upload_inspection_photo(
     photo = InspectionPhoto(
         id=str(uuid.uuid4()),
         inspection_id=inspection_id,
-        check_item_id=check_item_id,
+        check_item_id=check_item.id,
         field_id=normalized_field_id,
         original_name=file.filename,
         file_path=watermarked_path,
@@ -1290,10 +1620,16 @@ async def upload_inspection_photo(
         has_watermark=has_watermark or watermark_data is not None,
         watermark_data=watermark_data,
         content_hash=raw_content_hash,
+        original_content_hash=trusted_original_content_hash,
         hash_value=file_hash,
         uploaded_by=current_user.id
     )
     _mark_photo_duplicate_info(photo, duplicate_detail)
+    _mark_photo_similarity_info(
+        photo,
+        similarity_features=similarity_result.get("features"),
+        similar_warning=similar_warning,
+    )
     
     db.add(photo)
     try:
@@ -1301,7 +1637,7 @@ async def upload_inspection_photo(
         if not duplicate_detail:
             register_first_upload_record(
                 db,
-                content_hash=raw_content_hash,
+                content_hash=duplicate_detection_hash,
                 source_type="inspection_photo",
                 source_id=photo.id,
                 site_id=inspection.site_id,
@@ -1317,7 +1653,7 @@ async def upload_inspection_photo(
         _cleanup_paths(file_path, watermarked_path)
         raise
     
-    return _build_photo_response_with_warning(photo, duplicate_warning)
+    return _build_photo_response_with_warnings(photo, duplicate_warning, similar_warning)
 
 
 @router.delete("/photos/{photo_id}")
@@ -1434,6 +1770,7 @@ async def replace_inspection_photo(
     raw_content_hash = calculate_file_hash(file_path)
 
     duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
+    similarity_policy = _resolve_similarity_alert_policy(db, current_user)
     duplicate_detail = detect_duplicate_detail(
         db,
         content_hash=raw_content_hash,
@@ -1448,6 +1785,14 @@ async def replace_inspection_photo(
             status_code=status.HTTP_409_CONFLICT,
             detail=duplicate_detail,
         )
+
+    similarity_result = _detect_similar_warning_if_needed(
+        db,
+        file_path=file_path,
+        policy=similarity_policy,
+        exclude_photo_id=existing_photo.id,
+    )
+    similar_warning = similarity_result.get("warning")
     
     # 根据是否已有水印决定是否添加水印
     watermarked_path = file_path
@@ -1500,9 +1845,15 @@ async def replace_inspection_photo(
     existing_photo.has_watermark = has_watermark or watermark_data is not None
     existing_photo.watermark_data = watermark_data
     existing_photo.content_hash = raw_content_hash
+    existing_photo.original_content_hash = None
     existing_photo.hash_value = file_hash
     existing_photo.updated_at = datetime.utcnow()
     _mark_photo_duplicate_info(existing_photo, duplicate_detail)
+    _mark_photo_similarity_info(
+        existing_photo,
+        similarity_features=similarity_result.get("features"),
+        similar_warning=similar_warning,
+    )
     
     try:
         if not duplicate_detail:
@@ -1544,7 +1895,7 @@ async def replace_inspection_photo(
     db.add(audit_log)
     db.commit()
     
-    return _build_photo_response_with_warning(existing_photo, duplicate_warning)
+    return _build_photo_response_with_warnings(existing_photo, duplicate_warning, similar_warning)
 
 
 @router.post("/detail/{inspection_id}/photos/batch")
@@ -1587,6 +1938,7 @@ async def batch_inspection_photo_operations(
     results = []
     affected_check_item_ids = set()
     duplicate_block_enabled = _is_duplicate_check_item_photo_block_enabled(db, current_user)
+    similarity_policy = _resolve_similarity_alert_policy(db, current_user)
     
     for i, operation in enumerate(operations):
         try:
@@ -1674,6 +2026,14 @@ async def batch_inspection_photo_operations(
                             "duplicate_warning": duplicate_detail,
                         })
                         continue
+
+                    similarity_result = _detect_similar_warning_if_needed(
+                        db,
+                        file_path=file_path,
+                        policy=similarity_policy,
+                        exclude_photo_id=existing_photo.id,
+                    )
+                    similar_warning = similarity_result.get("warning")
                     
                     # 根据是否已有水印决定是否添加水印
                     watermarked_path = file_path
@@ -1729,9 +2089,15 @@ async def batch_inspection_photo_operations(
                     existing_photo.has_watermark = has_watermark or watermark_data is not None
                     existing_photo.watermark_data = watermark_data
                     existing_photo.content_hash = raw_content_hash
+                    existing_photo.original_content_hash = None
                     existing_photo.hash_value = file_hash
                     existing_photo.updated_at = datetime.utcnow()
                     _mark_photo_duplicate_info(existing_photo, duplicate_detail)
+                    _mark_photo_similarity_info(
+                        existing_photo,
+                        similarity_features=similarity_result.get("features"),
+                        similar_warning=similar_warning,
+                    )
 
                     if not duplicate_detail:
                         register_first_upload_record(
@@ -1747,9 +2113,13 @@ async def batch_inspection_photo_operations(
                         )
                     
                     success_result = {"index": i, "action": "replace", "success": True, "photo_id": photo_id}
+                    merged_warning = _merge_warning_messages(duplicate_warning, similar_warning)
+                    if merged_warning:
+                        success_result["warning"] = merged_warning
                     if duplicate_warning:
-                        success_result["warning"] = duplicate_warning.get("message")
                         success_result["duplicate_warning"] = duplicate_warning
+                    if similar_warning:
+                        success_result["similar_warning"] = similar_warning
                     results.append(success_result)
                     
                 except Exception as e:
@@ -1842,6 +2212,13 @@ async def batch_inspection_photo_operations(
                             "duplicate_warning": duplicate_detail,
                         })
                         continue
+
+                    similarity_result = _detect_similar_warning_if_needed(
+                        db,
+                        file_path=file_path,
+                        policy=similarity_policy,
+                    )
+                    similar_warning = similarity_result.get("warning")
                     
                     # 根据是否已有水印决定是否添加水印
                     watermarked_path = file_path
@@ -1895,10 +2272,16 @@ async def batch_inspection_photo_operations(
                         has_watermark=has_watermark or watermark_data is not None,
                         watermark_data=watermark_data,
                         content_hash=raw_content_hash,
+                        original_content_hash=None,
                         hash_value=file_hash,
                         uploaded_by=current_user.id
                     )
                     _mark_photo_duplicate_info(new_photo, duplicate_detail)
+                    _mark_photo_similarity_info(
+                        new_photo,
+                        similarity_features=similarity_result.get("features"),
+                        similar_warning=similar_warning,
+                    )
                     db.add(new_photo)
                     if not duplicate_detail:
                         register_first_upload_record(
@@ -1914,9 +2297,13 @@ async def batch_inspection_photo_operations(
                         )
                     
                     success_result = {"index": i, "action": "add", "success": True, "photo_id": new_photo.id}
+                    merged_warning = _merge_warning_messages(duplicate_warning, similar_warning)
+                    if merged_warning:
+                        success_result["warning"] = merged_warning
                     if duplicate_warning:
-                        success_result["warning"] = duplicate_warning.get("message")
                         success_result["duplicate_warning"] = duplicate_warning
+                    if similar_warning:
+                        success_result["similar_warning"] = similar_warning
                     results.append(success_result)
                     
                 except Exception as e:

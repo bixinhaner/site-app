@@ -452,7 +452,47 @@
       </el-collapse>
     </el-card>
 
-    <!-- 卡片 4：检查详情本地上传水印定位信息 -->
+    <!-- 卡片 4：检查项照片相似度提醒 -->
+    <el-card class="mb16" v-loading="loading">
+      <template #header>
+        <div class="card-header">
+          <span>检查项照片相似度提醒</span>
+        </div>
+      </template>
+
+      <el-form :model="form" label-width="200px" :disabled="!canEdit">
+        <el-form-item label="全局默认开关">
+          <el-switch
+            v-model="form.enable_check_item_photo_similarity_alert.default"
+            active-text="开启相似度提醒"
+            inactive-text="关闭提醒"
+          />
+        </el-form-item>
+
+        <el-form-item label="匹配窗口（天）">
+          <el-input-number
+            v-model="form.check_item_photo_similarity_window_days.default"
+            :min="1"
+            :max="3650"
+            :step="1"
+            step-strictly
+            controls-position="right"
+            style="width: 220px"
+          />
+          <span class="hint" style="margin-left: 8px;">仅匹配最近N天内的历史检查项照片</span>
+        </el-form-item>
+
+        <el-form-item label="说明">
+          <ul class="hint-list">
+            <li>仅影响“检查项”照片（不含线下票据/单据照片）。</li>
+            <li>判定逻辑：pHash粗筛 + 向量二次判定（极度相似提醒，不阻断上传）。</li>
+            <li>提醒场景：APP上传后提示 + 工单审核台列表/详情提醒。</li>
+          </ul>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <!-- 卡片 5：检查详情本地上传水印定位信息 -->
     <el-card class="mb16" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -596,7 +636,7 @@
       </el-collapse>
     </el-card>
 
-    <!-- 卡片 5：拍照规划坐标比对 -->
+    <!-- 卡片 6：拍照规划坐标比对 -->
     <el-card class="mb16" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -950,7 +990,7 @@
       </el-collapse>
     </el-card>
 
-    <!-- 卡片 6：旧流程扫码领货（我的设备） -->
+    <!-- 卡片 7：旧流程扫码领货（我的设备） -->
     <el-card class="mb16" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -1158,6 +1198,28 @@ const form = ref({
       inspector: '',
       surveyor: '',
       user: '',
+    },
+    per_user: [],
+  },
+  enable_check_item_photo_similarity_alert: {
+    default: true,
+    per_role: {
+      admin: '',
+      manager: '',
+      inspector: '',
+      surveyor: '',
+      user: '',
+    },
+    per_user: [],
+  },
+  check_item_photo_similarity_window_days: {
+    default: 180,
+    per_role: {
+      admin: null,
+      manager: null,
+      inspector: null,
+      surveyor: null,
+      user: null,
     },
     per_user: [],
   },
@@ -1405,6 +1467,8 @@ const loadConfig = async () => {
     const uploadRule = raw.allow_local_photo_upload || {}
     const localUploadWatermarkRule = raw.local_upload_watermark_with_geo || {}
     const duplicatePhotoBlockRule = raw.block_duplicate_check_item_photo_upload || {}
+    const similarityAlertRule = raw.enable_check_item_photo_similarity_alert || {}
+    const similarityWindowDaysRule = raw.check_item_photo_similarity_window_days || {}
     const legacyScanPickupRule = raw.enable_legacy_scan_pickup || {}
     const locationDistanceCheckRule = raw.enable_photo_location_distance_check || {}
     const distanceBlockUploadRule = raw.distance_exceed_block_upload || {}
@@ -1445,6 +1509,20 @@ const loadConfig = async () => {
       duplicatePhotoBlockRule,
       roleKeys,
       true,
+    )
+
+    fillBoolRuleToForm(
+      form.value.enable_check_item_photo_similarity_alert,
+      similarityAlertRule,
+      roleKeys,
+      true,
+    )
+
+    fillIntRuleToForm(
+      form.value.check_item_photo_similarity_window_days,
+      similarityWindowDaysRule,
+      roleKeys,
+      180,
     )
 
     // enable_legacy_scan_pickup：默认关闭（false）
@@ -1501,6 +1579,8 @@ const save = async () => {
       allow_local_photo_upload: {},
       local_upload_watermark_with_geo: {},
       block_duplicate_check_item_photo_upload: {},
+      enable_check_item_photo_similarity_alert: {},
+      check_item_photo_similarity_window_days: {},
       enable_legacy_scan_pickup: {},
       enable_photo_location_distance_check: {},
       distance_exceed_block_upload: {},
@@ -1535,6 +1615,15 @@ const save = async () => {
 
     payload.block_duplicate_check_item_photo_upload = buildBoolRulePayload(
       form.value.block_duplicate_check_item_photo_upload,
+    )
+
+    payload.enable_check_item_photo_similarity_alert = buildBoolRulePayload(
+      form.value.enable_check_item_photo_similarity_alert,
+    )
+
+    payload.check_item_photo_similarity_window_days = buildIntRulePayload(
+      form.value.check_item_photo_similarity_window_days,
+      180,
     )
 
     payload.enable_legacy_scan_pickup = buildBoolRulePayload(
