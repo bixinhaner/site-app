@@ -307,6 +307,54 @@ export const buildApiUrl = (endpoint) => {
 }
 
 /**
+ * 判断是否为本地图片路径（不应拼接 API BASE URL）
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+export const isLocalImagePath = (filePath) => {
+  const raw = String(filePath || '').trim()
+  if (!raw) return false
+
+  const lower = raw.toLowerCase()
+  if (
+    lower.startsWith('file://') ||
+    lower.startsWith('content://') ||
+    lower.startsWith('wxfile://') ||
+    lower.startsWith('blob:') ||
+    lower.startsWith('data:image/')
+  ) {
+    return true
+  }
+
+  // 绝对路径但并非服务端 uploads 路径时，视为本地文件
+  if (raw.startsWith('/') && !raw.startsWith('/uploads')) {
+    return true
+  }
+
+  if (
+    lower.includes('/storage/') ||
+    lower.includes('/sdcard/') ||
+    lower.includes('/data/user/') ||
+    lower.includes('/cache/') ||
+    lower.includes('/tmp/') ||
+    lower.includes('_doc/') ||
+    lower.includes('uniapp_temp') ||
+    lower.includes('dcim/')
+  ) {
+    return true
+  }
+
+  if (
+    lower.includes('temp') ||
+    lower.includes('_tmp_')
+  ) {
+    return true
+  }
+
+  return false
+}
+
+/**
  * 构建图片URL
  * @param {string} filePath - 文件相对路径
  * @returns {string} 完整的图片URL
@@ -314,30 +362,26 @@ export const buildApiUrl = (endpoint) => {
 export const buildImageUrl = (filePath) => {
   if (!filePath) return ''
 
+  const rawPath = String(filePath || '').trim()
+
   // 如果已经是完整URL，直接返回
-  if (filePath.startsWith('http')) {
-    return filePath
+  if (rawPath.startsWith('http')) {
+    return rawPath
   }
 
-  // 如果是本地临时文件（包括uni-app临时文件路径），直接返回
-  if (filePath.includes('temp') ||
-    filePath.includes('tmp') ||
-    filePath.includes('_tmp_') ||
-    filePath.startsWith('wxfile://') ||
-    filePath.startsWith('file://') ||
-    filePath.startsWith('/var/mobile/') ||
-    filePath.includes('uniapp_temp')) {
-    return filePath
+  // 本地路径不拼接API域名
+  if (isLocalImagePath(rawPath)) {
+    return rawPath
   }
 
   // 如果路径已经包含 /uploads，直接拼接
-  if (filePath.startsWith('/uploads') || filePath.startsWith('uploads')) {
-    const cleanPath = filePath.startsWith('/') ? filePath : `/${filePath}`
+  if (rawPath.startsWith('/uploads') || rawPath.startsWith('uploads')) {
+    const cleanPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`
     return `${API_CONFIG.BASE_URL}${cleanPath}`
   }
 
   // 默认情况，假设是 uploads 目录下的文件
-  return `${API_CONFIG.BASE_URL}/${filePath}`
+  return `${API_CONFIG.BASE_URL}/${rawPath}`
 }
 
 /**

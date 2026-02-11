@@ -727,7 +727,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLanguageStore } from '@/stores/language'
-		import { buildImageUrl, buildApiUrl, getAuthHeaders, createRequestConfig, API_ENDPOINTS } from '@/config/api.js'
+	import { buildImageUrl, buildApiUrl, getAuthHeaders, createRequestConfig, API_ENDPOINTS, isLocalImagePath } from '@/config/api.js'
 	import { createPhotoCacheContext, ensurePhotoCached, saveLocalPhotoToCache, removeCachedPhoto } from '@/utils/photoCache.js'
 	import { parseBarcode, formatMacAddress, isValidParseResult } from '@/utils/barcode-parser.js'
 	import { validateField, validateAllFields } from '@/utils/field-validator.js'
@@ -1714,6 +1714,140 @@
 			})
 		}
 
+		const getLocalImageInfo = async (filePath) => {
+			const path = String(filePath || '').trim()
+			if (!path) {
+				throw new Error($t('messages.photoPathInvalid'))
+			}
+			return await new Promise((resolve, reject) => {
+				uni.getImageInfo({
+					src: path,
+					success: (res) => resolve(res || {}),
+					fail: (err) => reject(new Error(err?.errMsg || $t('messages.photoFileNotReadable')))
+				})
+			})
+		}
+
+		const getLocalFileInfo = async (filePath) => {
+			const path = String(filePath || '').trim()
+			if (!path) {
+				throw new Error($t('messages.photoPathInvalid'))
+			}
+			return await new Promise((resolve, reject) => {
+				uni.getFileInfo({
+					filePath: path,
+					success: (res) => resolve(res || {}),
+					fail: (err) => reject(new Error(err?.errMsg || $t('messages.photoFileNotReadable')))
+				})
+			})
+		}
+
+		const normalizeChosenImagePath = async (filePath) => {
+			const path = String(filePath || '').trim()
+			if (!path) throw new Error($t('messages.photoPathInvalid'))
+			try {
+				const info = await getLocalImageInfo(path)
+				const normalized = String(info?.path || '').trim()
+				return normalized || path
+			} catch (e) {
+				return path
+			}
+		}
+
+		const persistChosenImagePath = async (filePath) => {
+			const normalizedPath = await normalizeChosenImagePath(filePath)
+			if (typeof uni.saveFile !== 'function') {
+				return normalizedPath
+			}
+
+			try {
+				const saveRes = await new Promise((resolve, reject) => {
+					uni.saveFile({
+						tempFilePath: normalizedPath,
+						success: resolve,
+						fail: reject,
+					})
+				})
+				const savedPath = String(saveRes?.savedFilePath || '').trim()
+				return savedPath || normalizedPath
+			} catch (err) {
+				console.warn('图片持久化失败，继续使用原路径:', err)
+				return normalizedPath
+			}
+		}
+
+		const validateLocalImageFile = async (filePath, { minBytes = 2048 } = {}) => {
+			const path = String(filePath || '').trim()
+			if (!path) {
+				return { success: false, error: $t('messages.photoPathInvalid') }
+			}
+
+			let imageInfo = null
+			try {
+				imageInfo = await getLocalImageInfo(path)
+			} catch (err) {
+				return { success: false, error: err?.message || $t('messages.photoFileNotReadable') }
+			}
+
+			const width = Number(imageInfo?.width || 0)
+			const height = Number(imageInfo?.height || 0)
+			if (!Number.isFinite(width) || !Number.isFinite(height) || width < 16 || height < 16) {
+				return { success: false, error: $t('messages.photoInvalidImageFile') }
+			}
+
+			try {
+				const fileInfo = await getLocalFileInfo(path)
+				const size = Number(fileInfo?.size || 0)
+				if (Number.isFinite(size) && size > 0 && size < Number(minBytes || 0)) {
+					return {
+						success: false,
+						error: $t('messages.photoFileTooSmall', { size: Math.max(1, Math.round(size / 1024)) }),
+					}
+				}
+			} catch (e) {
+				// 某些机型会拿不到 fileInfo，允许继续（imageInfo 可用即可）
+			}
+
+			return { success: true, filePath: path, imageInfo }
+		}
+
+		const prepareLocalPhotoBeforeProcess = async (filePath) => {
+			const persistedPath = await persistChosenImagePath(filePath)
+			const validation = await validateLocalImageFile(persistedPath, { minBytes: 2048 })
+			if (!validation.success) return validation
+			return {
+				success: true,
+				filePath: persistedPath,
+				imageInfo: validation.imageInfo,
+			}
+		}
+
+		const isSuspiciousWhiteOrBrokenError = (error) => {
+			const text = String(error?.message || error || '')
+			if (!text) return false
+			return (
+				text.includes('Canvas输出疑似纯白图') ||
+				text.includes('Canvas渲染疑似不完整') ||
+				text.includes('纯白图')
+			)
+		}
+
+		const showPhotoAbnormalBlockedModal = async (reasonText = '') => {
+			const reason = String(reasonText || '').trim()
+			const content = reason
+				? $t('messages.photoSuspiciousWhiteBlockedWithReason', { reason })
+				: $t('messages.photoSuspiciousWhiteBlocked')
+			await new Promise((resolve) => {
+				uni.showModal({
+					title: $t('inspection.photoRiskAlertTitle'),
+					content,
+					showCancel: false,
+					success: () => resolve(),
+					fail: () => resolve(),
+				})
+			})
+		}
+
 		const requestPhotoUploadTicketByHash = async ({ checkItemId, fieldId, originalContentHash }) => {
 			const cid = String(checkItemId || '').trim()
 			if (!cid) {
@@ -1850,19 +1984,26 @@
 						count: 1,
 						sizeType: ['original'],
 						sourceType: sourceType,
-							success: async (chooseRes) => {
-									try {
-										let finalImagePath = chooseRes.tempFilePaths[0]
-										let usedWatermark = false
-										let gpsUsed = { ...gpsData }
-										let uploadTicket = ''
-										let originalContentHash = ''
-										let precheckRiskKeys = []
+								success: async (chooseRes) => {
+										try {
+											let finalImagePath = chooseRes.tempFilePaths[0]
+											let usedWatermark = false
+											let gpsUsed = { ...gpsData }
+											let uploadTicket = ''
+											let originalContentHash = ''
+											let precheckRiskKeys = []
 
-										const precheckResult = await precheckPhotoBeforeUpload({
-											imagePath: finalImagePath,
-											checkItemId: currentItem.value?.id,
-											fieldId
+											const preparedPhoto = await prepareLocalPhotoBeforeProcess(finalImagePath)
+											if (!preparedPhoto.success) {
+												await showPhotoAbnormalBlockedModal(preparedPhoto.error || $t('messages.photoInvalidImageFile'))
+												return
+											}
+											finalImagePath = String(preparedPhoto.filePath || '').trim() || finalImagePath
+
+											const precheckResult = await precheckPhotoBeforeUpload({
+												imagePath: finalImagePath,
+												checkItemId: currentItem.value?.id,
+												fieldId
 										})
 										if (!precheckResult.success) {
 											uni.showToast({
@@ -1964,13 +2105,18 @@
 												: {}
 										)
 										usedWatermark = true
-										console.log('水印添加成功，最终图片路径:', finalImagePath)
-									} catch (watermarkError) {
-										console.warn('水印添加失败，使用原图:', watermarkError)
-										// 相册模式若无法添加水印，则不允许继续，避免后端400
-										if (!isCamera) {
-											uni.hideLoading()
-											uni.showToast({
+											console.log('水印添加成功，最终图片路径:', finalImagePath)
+										} catch (watermarkError) {
+											console.warn('水印添加失败，使用原图:', watermarkError)
+											if (isSuspiciousWhiteOrBrokenError(watermarkError)) {
+												uni.hideLoading()
+												await showPhotoAbnormalBlockedModal(watermarkError?.message || '')
+												return
+											}
+											// 相册模式若无法添加水印，则不允许继续，避免后端400
+											if (!isCamera) {
+												uni.hideLoading()
+												uni.showToast({
 												title: (!localUploadWatermarkWithGeo)
 													? $t('messages.photoProcessFailed')
 													: $t('messages.gpsNotObtained'),
@@ -1978,12 +2124,18 @@
 											})
 											return
 										}
-									} finally {
-										uni.hideLoading()
-									}
-									
-									// 创建照片对象
-										const photo = {
+										} finally {
+											uni.hideLoading()
+										}
+
+										const finalValidation = await validateLocalImageFile(finalImagePath, { minBytes: 4096 })
+										if (!finalValidation.success) {
+											await showPhotoAbnormalBlockedModal(finalValidation.error || $t('messages.photoInvalidImageFile'))
+											return
+										}
+										
+										// 创建照片对象
+											const photo = {
 											field_id: (fieldId !== undefined && fieldId !== null && String(fieldId).trim() !== '') ? String(fieldId) : undefined,
 											file_path: finalImagePath,
 											upload_ticket: uploadTicket || undefined,
@@ -2525,7 +2677,12 @@
 		return path
 	}
 
-	const getPhotoRemoteUrl = (photo) => buildImageUrl(photo?.file_path || '')
+		const getPhotoRemoteUrl = (photo) => {
+			const rawPath = String(photo?.file_path || '').trim()
+			if (!rawPath) return ''
+			if (isLocalImagePath(rawPath)) return rawPath
+			return buildImageUrl(rawPath)
+		}
 
 	const isRemotePhoto = (photo) => {
 		const url = getPhotoRemoteUrl(photo)
@@ -2650,16 +2807,19 @@
 		return state?.status === 'ready' && state?.src ? state.src : ''
 	}
 
-	const getPhotoDisplayStatus = (photo) => {
-		if (!photo) return 'ready'
-		if (!photo.id || !isRemotePhoto(photo)) return 'ready'
-		const key = getPhotoStateKey(photo)
-		const state = key ? photoStateMap.value[key] : null
-		if (!state) return 'downloading'
-		if (state.status === 'ready') return 'ready'
-		if (state.status === 'error') return 'error'
-		return 'downloading'
-	}
+		const getPhotoDisplayStatus = (photo) => {
+			if (!photo) return 'ready'
+			const key = getPhotoStateKey(photo)
+			const state = key ? photoStateMap.value[key] : null
+			if (!photo.id || !isRemotePhoto(photo)) {
+				if (state?.status === 'error') return 'error'
+				return 'ready'
+			}
+			if (!state) return 'downloading'
+			if (state.status === 'ready') return 'ready'
+			if (state.status === 'error') return 'error'
+			return 'downloading'
+		}
 
 	const getPhotoProgress = (photo) => {
 		const key = getPhotoStateKey(photo)
@@ -2667,17 +2827,33 @@
 		return typeof state?.progress === 'number' ? state.progress : 0
 	}
 
-	const onPhotoStatusTap = async (photo) => {
-		const status = getPhotoDisplayStatus(photo)
-		if (status !== 'error') return
-		await cachePhotoIfNeeded(photo)
-	}
+		const onPhotoStatusTap = async (photo) => {
+			const status = getPhotoDisplayStatus(photo)
+			if (status !== 'error') return
+			if (!photo?.id || !isRemotePhoto(photo)) {
+				const src = getPhotoRemoteUrl(photo)
+				if (!src) {
+					await showPhotoAbnormalBlockedModal($t('messages.photoLocalPreviewFailedRetake'))
+					return
+				}
+				setPhotoReady(photo, src)
+				return
+			}
+			await cachePhotoIfNeeded(photo)
+		}
 
-	const handlePhotoError = async (photo) => {
-		// 本地缓存被系统清理/文件损坏：自动重新从服务器拉取并缓存
-		if (!photo?.id || !isRemotePhoto(photo)) return
-		await cachePhotoIfNeeded(photo)
-	}
+		const handlePhotoError = async (photo) => {
+			// 本地缓存被系统清理/文件损坏：自动重新从服务器拉取并缓存
+			if (!photo?.id || !isRemotePhoto(photo)) {
+				const key = getPhotoStateKey(photo)
+				const state = key ? photoStateMap.value[key] : null
+				if (state?.status === 'error') return
+				setPhotoError(photo, 'local_preview_failed')
+				await showPhotoAbnormalBlockedModal($t('messages.photoLocalPreviewFailedRetake'))
+				return
+			}
+			await cachePhotoIfNeeded(photo)
+		}
 
 	const buildPreviewUrls = (photos) => {
 		const list = Array.isArray(photos) ? photos : []

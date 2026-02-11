@@ -121,6 +121,33 @@ export class WatermarkTool {
     return total > 0 ? white / total : 0
   }
 
+  _calcLumaMeanStd(imageData) {
+    const data = imageData?.data
+    if (!data || typeof data.length !== 'number' || data.length === 0) {
+      return { mean: 0, std: 0 }
+    }
+
+    let sum = 0
+    let sumSq = 0
+    let count = 0
+    for (let i = 0; i < data.length; i += 4) {
+      const r = Number(data[i] || 0)
+      const g = Number(data[i + 1] || 0)
+      const b = Number(data[i + 2] || 0)
+      const a = Number(data[i + 3] || 0)
+      if (a <= 0) continue
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b
+      sum += luma
+      sumSq += luma * luma
+      count += 1
+    }
+
+    if (count <= 0) return { mean: 0, std: 0 }
+    const mean = sum / count
+    const variance = Math.max(0, sumSq / count - mean * mean)
+    return { mean, std: Math.sqrt(variance) }
+  }
+
   async _assertCanvasRenderOk(canvasId, width, height, options = {}) {
     // 默认开启；如遇兼容问题可传 validateRender=false 关闭
     if (options && options.validateRender === false) return
@@ -160,10 +187,35 @@ export class WatermarkTool {
             .join('/')}`
         )
       }
+
+      // 纯白图阻断：避免“看起来生成成功但实际是白图”进入检查项列表
+      const yTop = 0
+      const topLeft = await this._getCanvasImageData(canvasId, xLeft, yTop, patch, patch)
+      const topMid = await this._getCanvasImageData(canvasId, xMid, yTop, patch, patch)
+      const topRight = await this._getCanvasImageData(canvasId, xRight, yTop, patch, patch)
+      const topWhiteRatios = [
+        this._calcWhiteRatio(topLeft, 252),
+        this._calcWhiteRatio(topMid, 252),
+        this._calcWhiteRatio(topRight, 252),
+        midWhite,
+      ]
+      const topStats = [
+        this._calcLumaMeanStd(topLeft),
+        this._calcLumaMeanStd(topMid),
+        this._calcLumaMeanStd(topRight),
+        this._calcLumaMeanStd(mid),
+      ]
+      const allNearWhite = topWhiteRatios.every((v) => v >= 0.997)
+      const allLowVariance = topStats.every((s) => s.std <= 2.2 && s.mean >= 248)
+      if (allNearWhite && allLowVariance) {
+        throw new Error(
+          `Canvas输出疑似纯白图，white=${topWhiteRatios.map(v => v.toFixed(3)).join('/')}, std=${topStats.map(s => s.std.toFixed(2)).join('/')}`,
+        )
+      }
     } catch (e) {
       // 对“底部空白”的命中必须阻断（用于触发降级重试）；其余 canvas API 异常默认不阻断，避免兼容性问题影响业务
       const msg = e && (e.message || String(e))
-      if (typeof msg === 'string' && msg.includes('Canvas渲染疑似不完整')) {
+      if (typeof msg === 'string' && (msg.includes('Canvas渲染疑似不完整') || msg.includes('Canvas输出疑似纯白图'))) {
         throw e
       }
       const strict = options && options.validateRenderStrict === true
