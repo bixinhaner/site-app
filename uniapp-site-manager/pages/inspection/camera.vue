@@ -888,12 +888,13 @@ export default {
 				origin: { width: originWidth, height: originHeight }
 			})
 
-			// Android canvas 大图偶发渲染不全：优先保持原尺寸（但不超过4K），失败则自动降级尺寸重试
+			// Android 部分机型大图易出现白板：首选2.5K，失败自动降级重试
 			const candidateEdges = []
-			const firstEdge = Math.min(4096, originLongEdge)
+			const firstEdge = Math.min(2560, originLongEdge)
 			candidateEdges.push(firstEdge)
-			if (firstEdge > 2560) candidateEdges.push(2560)
 			if (firstEdge > 2048) candidateEdges.push(2048)
+			if (firstEdge > 1600) candidateEdges.push(1600)
+			if (firstEdge > 1280) candidateEdges.push(1280)
 			const uniqueEdges = [...new Set(candidateEdges.filter(Boolean))]
 
 			const buildTargetSize = (maxEdge) => {
@@ -937,6 +938,8 @@ export default {
 						renderHeight: target.height,
 						maxEdge: target.maxEdge,
 						validateRender: true,
+						validateExportFile: true,
+						minBytesPerPixel: 0.03,
 						postDrawDelayMs: 30,
 					})
 

@@ -125,6 +125,20 @@
 			}
 		},
 		{
+			"path": "pages/stock/material-requests/approval-list",
+			"style": {
+				"navigationBarTitleText": "物料审批",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/material-requests/approve",
+			"style": {
+				"navigationBarTitleText": "申请审批",
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/stock/issue-drafts/pick",
 			"style": {
 				"navigationBarTitleText": "领料",
@@ -135,6 +149,20 @@
 			"path": "pages/stock/issue-drafts/detail",
 			"style": {
 				"navigationBarTitleText": "领料单",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/issue-drafts/confirm-list",
+			"style": {
+				"navigationBarTitleText": "出库确认",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/issue-drafts/confirm",
+			"style": {
+				"navigationBarTitleText": "确认出库",
 				"navigationStyle": "custom"
 			}
 		},

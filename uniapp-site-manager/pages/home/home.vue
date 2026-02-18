@@ -125,6 +125,18 @@
 						<text class="action-label">{{ $t('stock.materialRequestEntry') }}</text>
 					</view>
 
+					<!-- 物料审批 - 仓库角色 -->
+					<view class="action-item u-pressable" v-if="isWarehouseSide" @click="goToMaterialApprovalList">
+						<view class="action-icon">✅</view>
+						<text class="action-label">{{ $t('stock.materialApprovalEntry') }}</text>
+					</view>
+
+					<!-- 出库确认 - 仓库角色 -->
+					<view class="action-item u-pressable" v-if="isWarehouseSide" @click="goToIssueConfirmList">
+						<view class="action-icon">📤</view>
+						<text class="action-label">{{ $t('stock.issueConfirmEntry') }}</text>
+					</view>
+
 					<!-- 退库申请（新流程） - 勘察员不可用 -->
 					<view class="action-item u-pressable" v-if="!isSurveyor" @click="goToReturnRequests">
 						<view class="action-icon">↩️</view>
@@ -271,8 +283,10 @@
 	})
 	const isAdmin = computed(() => userRole.value === 'admin')
 	const isManager = computed(() => userRole.value === 'manager')
+	const isWarehouseManager = computed(() => userRole.value === 'warehouse_manager')
 	const isInspector = computed(() => userRole.value === 'inspector')
 	const isSurveyor = computed(() => userRole.value === 'surveyor')
+	const isWarehouseSide = computed(() => isAdmin.value || isManager.value || isWarehouseManager.value)
 	const canViewStats = computed(() => isAdmin.value || isManager.value)
 // 报告占位入口已移除
 	
@@ -429,6 +443,14 @@
 
 	const goToMaterialRequests = () => {
 		uni.navigateTo({ url: '/pages/stock/material-requests/list' })
+	}
+
+	const goToMaterialApprovalList = () => {
+		uni.navigateTo({ url: '/pages/stock/material-requests/approval-list' })
+	}
+
+	const goToIssueConfirmList = () => {
+		uni.navigateTo({ url: '/pages/stock/issue-drafts/confirm-list' })
 	}
 
 	const goToReturnRequests = () => {

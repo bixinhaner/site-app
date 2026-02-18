@@ -2468,12 +2468,13 @@
 						最终水印数据: watermarkData
 					})
 
-					// Android canvas 大图偶发渲染不全：优先保持原尺寸（但不超过4K），失败则自动降级尺寸重试
+					// Android 部分机型大图易出现白板：首选2.5K，失败自动降级重试
 					const candidateEdges = []
-					const firstEdge = Math.min(4096, originLongEdge)
+					const firstEdge = Math.min(2560, originLongEdge)
 					candidateEdges.push(firstEdge)
-					if (firstEdge > 2560) candidateEdges.push(2560)
 					if (firstEdge > 2048) candidateEdges.push(2048)
+					if (firstEdge > 1600) candidateEdges.push(1600)
+					if (firstEdge > 1280) candidateEdges.push(1280)
 					const uniqueEdges = [...new Set(candidateEdges.filter(Boolean))]
 
 					const buildTargetSize = (maxEdge) => {
@@ -2516,6 +2517,8 @@
 									renderHeight: target.height,
 									maxEdge: target.maxEdge,
 									validateRender: true,
+									validateExportFile: true,
+									minBytesPerPixel: 0.03,
 									postDrawDelayMs: 30,
 								})
 							} else {
@@ -2529,6 +2532,8 @@
 									renderHeight: target.height,
 									maxEdge: target.maxEdge,
 									validateRender: true,
+									validateExportFile: true,
+									minBytesPerPixel: 0.03,
 									postDrawDelayMs: 30,
 								})
 							}
@@ -2563,8 +2568,9 @@
 							success: (imageInfo) => {
 								const imgWidth = imageInfo.width
 								const imgHeight = imageInfo.height
+								const drawSourcePath = String(imageInfo?.path || imagePath || '').trim()
 								const longEdge = Math.max(imgWidth, imgHeight)
-								const maxEdge = Math.min(4096, longEdge)
+								const maxEdge = Math.min(2560, longEdge)
 								const scale = (longEdge > maxEdge && maxEdge > 0) ? (maxEdge / longEdge) : 1
 								const outW = Math.max(1, Math.round(imgWidth * scale))
 								const outH = Math.max(1, Math.round(imgHeight * scale))
@@ -2581,7 +2587,7 @@
 									const ctx = uni.createCanvasContext('watermarkCanvas')
 									
 									// 设置canvas尺寸并绘制图片
-									ctx.drawImage(imagePath, 0, 0, outW, outH)
+									ctx.drawImage(drawSourcePath, 0, 0, outW, outH)
 								
 								// 添加水印文字
 								const ts = formatWatermarkTimestamp()

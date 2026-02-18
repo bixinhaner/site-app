@@ -82,6 +82,129 @@ export class WatermarkTool {
     }
   }
 
+  _buildCanvasImagePathCandidates(rawPath, imageInfo = null) {
+    const candidates = []
+    const pushUnique = (path) => {
+      const text = String(path || '').trim()
+      if (!text) return
+      if (!candidates.includes(text)) {
+        candidates.push(text)
+      }
+    }
+
+    const appendDerived = (path) => {
+      const text = String(path || '').trim()
+      if (!text) return
+
+      if (text.startsWith('file://')) {
+        pushUnique(text.replace(/^file:\/\//, ''))
+      } else if (/^\/(storage|data|sdcard)\//i.test(text)) {
+        pushUnique(`file://${text}`)
+      }
+
+      if (typeof plus !== 'undefined' && plus && plus.io && typeof plus.io.convertLocalFileSystemURL === 'function') {
+        try {
+          const converted = plus.io.convertLocalFileSystemURL(text)
+          pushUnique(converted)
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    const source = String(rawPath || '').trim()
+    const normalized = String(imageInfo?.path || '').trim()
+    pushUnique(normalized)
+    pushUnique(source)
+    appendDerived(normalized)
+    appendDerived(source)
+
+    return candidates
+  }
+
+  _buildFileInfoPathCandidates(filePath) {
+    const paths = []
+    const pushUnique = (path) => {
+      const text = String(path || '').trim()
+      if (!text) return
+      if (!paths.includes(text)) paths.push(text)
+    }
+
+    const raw = String(filePath || '').trim()
+    pushUnique(raw)
+    if (raw.startsWith('file://')) {
+      pushUnique(raw.replace(/^file:\/\//, ''))
+    } else if (/^\/(storage|data|sdcard)\//i.test(raw)) {
+      pushUnique(`file://${raw}`)
+    }
+    return paths
+  }
+
+  async _getFileInfoSafe(filePath) {
+    const candidates = this._buildFileInfoPathCandidates(filePath)
+    for (const candidate of candidates) {
+      try {
+        const info = await new Promise((resolve, reject) => {
+          uni.getFileInfo({
+            filePath: candidate,
+            success: resolve,
+            fail: reject,
+          })
+        })
+        return {
+          ...info,
+          size: Number(info?.size || 0),
+          filePath: candidate,
+        }
+      } catch (e) {
+        // try next candidate
+      }
+    }
+    return null
+  }
+
+  async _assertExportFileLooksValid(filePath, imageInfo, options = {}) {
+    if (options && options.validateExportFile === false) return
+
+    const fileInfo = await this._getFileInfoSafe(filePath)
+    if (!fileInfo) return
+
+    const outputSize = Number(fileInfo.size || 0)
+    if (!Number.isFinite(outputSize) || outputSize <= 0) {
+      throw new Error('Canvas输出疑似纯白图（导出文件大小无效）')
+    }
+
+    const width = Number(imageInfo?.width || 0)
+    const height = Number(imageInfo?.height || 0)
+    const pixelCount = Math.max(1, Math.round(width * height))
+
+    const configuredBpp = Number(options.minBytesPerPixel)
+    const defaultBpp = 0.03
+    const minBytesPerPixel = Number.isFinite(configuredBpp) && configuredBpp > 0 ? configuredBpp : defaultBpp
+    const minOutputBytesConfigured = Number(options.minOutputBytes)
+    const minOutputBytes = Number.isFinite(minOutputBytesConfigured) && minOutputBytesConfigured > 0
+      ? Math.round(minOutputBytesConfigured)
+      : 96 * 1024
+    const minByPixels = Math.round(pixelCount * minBytesPerPixel)
+    const threshold = Math.max(minOutputBytes, minByPixels)
+
+    if (outputSize < threshold) {
+      throw new Error(
+        `Canvas输出疑似纯白图（导出文件偏小），size=${outputSize}, threshold=${threshold}, pixels=${pixelCount}`,
+      )
+    }
+
+    const sourceFileSize = Number(options.sourceFileSize || 0)
+    if (Number.isFinite(sourceFileSize) && sourceFileSize > 0) {
+      const ratio = outputSize / sourceFileSize
+      if (sourceFileSize >= 512 * 1024 && ratio < 0.015) {
+        throw new Error(
+          `Canvas输出疑似纯白图（导出压缩比异常），out=${outputSize}, source=${sourceFileSize}, ratio=${ratio.toFixed(4)}`,
+        )
+      }
+    }
+  }
+
   async _getCanvasImageData(canvasId, x, y, width, height) {
     if (typeof uni?.canvasGetImageData !== 'function') {
       return null
@@ -238,6 +361,13 @@ export class WatermarkTool {
       
       // 获取图片信息
       const originImageInfo = await this.getImageInfo(imagePath)
+      const drawSourceCandidates = this._buildCanvasImagePathCandidates(imagePath, originImageInfo)
+      if (drawSourceCandidates.length === 0) {
+        throw new Error('图片绘制路径为空')
+      }
+      if (drawSourceCandidates[0] !== String(imagePath || '').trim()) {
+        console.log('水印绘制路径已规范化:', { from: imagePath, to: drawSourceCandidates[0] })
+      }
       const render = this._calcRenderSize(originImageInfo, options)
       const imageInfo = {
         ...originImageInfo,
@@ -264,22 +394,48 @@ export class WatermarkTool {
         canvas = await this.createCanvas(imageInfo.width, imageInfo.height)
         console.log('创建新canvas:', canvas.canvasId)
       }
-      
-      // 绘制原始图片
-      await this.drawImage(canvas, imagePath, imageInfo)
-      
-      // 绘制水印
-      await this.drawWatermark(canvas, watermarkData, imageInfo)
 
-      // 某些 Android 机型大图绘制存在“回调已触发但底部未渲染”的偶发现象，做轻量校验 + 可选延迟
-      await this._sleep(options.postDrawDelayMs || 0)
-      await this._assertCanvasRenderOk(canvas.canvasId, imageInfo.width, imageInfo.height, options)
-      
-      // 保存带水印的图片
-      const watermarkedPath = await this.saveCanvasToFile(canvas, imageInfo, options)
-      
-      console.log('水印添加完成:', watermarkedPath)
-      return watermarkedPath
+      const sourceFileInfo =
+        await this._getFileInfoSafe(drawSourceCandidates[0]) ||
+        await this._getFileInfoSafe(imagePath)
+      let lastError = null
+
+      for (let i = 0; i < drawSourceCandidates.length; i += 1) {
+        const drawSourcePath = drawSourceCandidates[i]
+        try {
+          if (i > 0) {
+            console.log('切换备选绘制路径重试:', drawSourcePath)
+          }
+
+          // 绘制原始图片
+          await this.drawImage(canvas, drawSourcePath, imageInfo)
+
+          // 绘制水印
+          await this.drawWatermark(canvas, watermarkData, imageInfo)
+
+          // 某些 Android 机型大图绘制存在“回调已触发但底部未渲染”的偶发现象，做轻量校验 + 可选延迟
+          await this._sleep(options.postDrawDelayMs || 0)
+          await this._assertCanvasRenderOk(canvas.canvasId, imageInfo.width, imageInfo.height, options)
+
+          // 保存带水印的图片
+          const watermarkedPath = await this.saveCanvasToFile(canvas, imageInfo, options)
+          await this._assertExportFileLooksValid(watermarkedPath, imageInfo, {
+            ...options,
+            sourceFileSize: Number(sourceFileInfo?.size || 0),
+          })
+
+          console.log('水印添加完成:', watermarkedPath)
+          return watermarkedPath
+        } catch (attemptError) {
+          lastError = attemptError
+          console.warn('当前绘制路径处理失败，尝试下一路径:', {
+            drawSourcePath,
+            error: attemptError?.message || attemptError,
+          })
+        }
+      }
+
+      throw lastError || new Error('水印添加失败')
       
     } catch (error) {
       console.error('添加水印失败:', error)
