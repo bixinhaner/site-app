@@ -30,6 +30,7 @@ async def get_dashboard_summary(
     - inventory: { low_stock_count, main_device_total_stock, recent_transactions }
     - installed_sites: { count, node }
     - sites: { approx: false, status }
+    - site_progress: { total, survey_done, planning_done, installed, online, activated, ssv_passed }
     - inspections: { pending_review_count }
     - surveys: { last7d_new }
     - time_range: { from, to }
@@ -121,6 +122,7 @@ async def get_dashboard_summary(
         "total": total_sites,
         "survey_done": survey_done,
         "planning_done": planning_done,
+        "installed": installed_site_count,
         "online": online,
         "activated": activated,
         "ssv_passed": ssv_passed_cnt,
