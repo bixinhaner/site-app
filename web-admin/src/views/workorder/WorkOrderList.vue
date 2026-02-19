@@ -16,6 +16,13 @@
         <el-select v-model="statusFilter" clearable placeholder="状态" style="width: 140px">
           <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
+        <el-tooltip
+          v-if="statusInFilter.length > 0 && !statusFilter"
+          :content="`当前按多状态筛选：${statusInFilter.join(' / ')}`"
+          placement="bottom"
+        >
+          <el-tag closable @close="clearStatusInFilter">多状态筛选中</el-tag>
+        </el-tooltip>
         <el-select v-model="typeFilter" clearable placeholder="类型" style="width: 180px">
           <el-option v-for="t in filterTypes" :key="t.value" :label="t.label" :value="t.value" />
         </el-select>
@@ -376,6 +383,7 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const statusFilter = ref('')
+const statusInFilter = ref([])
 const typeFilter = ref('')
 const searchKeyword = ref('')
 const sortBy = ref('created_at')
@@ -390,6 +398,7 @@ const trackSearch = () => {
     data: {
       keyword: searchKeyword.value || undefined,
       status: statusFilter.value || undefined,
+      status_in: statusInFilter.value.length ? statusInFilter.value.join(',') : undefined,
       type: typeFilter.value || undefined,
       sort_by: sortBy.value || undefined,
       sort_order: sortOrder.value || undefined,
@@ -419,6 +428,22 @@ const statuses = [
   { label: '已驳回', value: 'REJECTED' },
   { label: '已完成', value: 'COMPLETED' }
 ]
+const statusValueSet = new Set(statuses.map(s => s.value))
+const INSTALLED_SITE_PRESET_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'ACTIVATED']
+
+const parseCsvQuery = (value) => {
+  const raw = String(_firstQueryValue(value) || '').trim()
+  if (!raw) return []
+  return raw.split(',').map(v => v.trim()).filter(Boolean)
+}
+
+const normalizeStatusList = (list) => {
+  const out = []
+  for (const s of list || []) {
+    if (statusValueSet.has(s) && !out.includes(s)) out.push(s)
+  }
+  return out
+}
 // 类型显示映射（用于表格/详情友好显示历史类型）
 const typeLabelMap = {
   opening_inspection: '新站安装',
@@ -461,7 +486,11 @@ const load = async () => {
       limit: pageSize.value,
     }
     if (searchKeyword.value) params.keyword = searchKeyword.value
-    if (statusFilter.value) params.status = statusFilter.value
+    if (statusFilter.value) {
+      params.status = statusFilter.value
+    } else if (statusInFilter.value.length > 0) {
+      params.status_in = statusInFilter.value.join(',')
+    }
     if (typeFilter.value) params.type = typeFilter.value
     if (sortBy.value) params.sort_by = sortBy.value
     if (sortOrder.value) params.sort_order = sortOrder.value
@@ -564,6 +593,49 @@ const openCreate = () => {
 }
 
 const _firstQueryValue = (v) => (Array.isArray(v) ? v[0] : v)
+
+const applyListFiltersFromRoute = () => {
+  const q = route.query || {}
+  if (String(_firstQueryValue(q.create) || '') === '1') return
+
+  const preset = String(_firstQueryValue(q.preset) || '').trim()
+  if (preset === 'installed_sites') {
+    currentPage.value = 1
+    typeFilter.value = 'opening_inspection'
+    statusFilter.value = ''
+    statusInFilter.value = [...INSTALLED_SITE_PRESET_STATUSES]
+    return
+  }
+
+  const hasFilterQuery = ['type', 'status', 'status_in'].some((key) => {
+    const val = String(_firstQueryValue(q[key]) || '').trim()
+    return !!val
+  })
+  if (!hasFilterQuery) return
+
+  currentPage.value = 1
+  typeFilter.value = String(_firstQueryValue(q.type) || '').trim()
+
+  const statusList = normalizeStatusList(parseCsvQuery(q.status_in))
+  if (statusList.length > 0) {
+    statusFilter.value = ''
+    statusInFilter.value = statusList
+    return
+  }
+
+  const status = String(_firstQueryValue(q.status) || '').trim()
+  if (statusValueSet.has(status)) {
+    statusFilter.value = status
+    statusInFilter.value = []
+    return
+  }
+  statusFilter.value = ''
+  statusInFilter.value = []
+}
+
+const clearStatusInFilter = () => {
+  statusInFilter.value = []
+}
 
 const ensureSiteOption = async (siteId) => {
   if (!siteId) return
@@ -1139,11 +1211,18 @@ const executeBatchPriority = async () => {
 onMounted(load)
 
 watch(() => route.query, () => {
+  applyListFiltersFromRoute()
   applyCreatePrefillFromRoute()
 }, { immediate: true })
 
+watch(statusFilter, (val) => {
+  if (val && statusInFilter.value.length) {
+    statusInFilter.value = []
+  }
+})
+
 // 动态筛选/排序：变化时回到第 1 页并刷新
-watch([searchKeyword, statusFilter, typeFilter], () => {
+watch([searchKeyword, statusFilter, typeFilter, statusInFilter], () => {
   currentPage.value = 1
   trackSearch()
   load()

@@ -49,6 +49,18 @@
         <div class="stat-description">审核中工单</div>
       </div>
     </div>
+
+    <!-- 安装站点数 -->
+    <div class="stat-card" @click="emit('card-click', { route: { name: 'WorkOrderList', query: { preset: 'installed_sites' } } })">
+      <div class="stat-header">
+        <el-icon class="stat-icon install"><OfficeBuilding /></el-icon>
+        <span class="stat-title">安装站点数</span>
+      </div>
+      <div class="stat-body">
+        <div class="stat-value">{{ data?.installed_sites?.count || 0 }}</div>
+        <div class="stat-description">开站工单已提交且未激活上线</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -88,6 +100,7 @@ const stat = () => 0
 .stat-icon.warning { background: linear-gradient(45deg,#f59e0b,#fbbf24); }
 .stat-icon.success { background: linear-gradient(45deg,#10b981,#34d399); }
 .stat-icon.primary { background: linear-gradient(45deg,#f97316,#fb923c); }
+.stat-icon.install { background: linear-gradient(45deg,#0ea5e9,#22d3ee); }
 .stat-title { color: var(--text-secondary); font-weight: 600; }
 .approx { font-size: 12px; color:#909399; margin-left: 6px; }
 .stat-value { font-size: 32px; font-weight: 700; color: var(--text-primary); line-height: 1; margin-bottom: 4px; }

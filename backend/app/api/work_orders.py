@@ -281,6 +281,7 @@ def _get_template_id_from_extra_data(extra_data):
 async def search_work_orders(
     keyword: Optional[str] = Query(None, description="搜索工单标题/描述/站点名称/编码"),
     status: Optional[WorkOrderStatusEnum] = Query(None),
+    status_in: Optional[str] = Query(None, description="多状态筛选，逗号分隔，如 SUBMITTED,UNDER_REVIEW"),
     type: Optional[WorkOrderTypeEnum] = Query(None),
     assigned_to: Optional[int] = Query(None),
     priority: Optional[WorkOrderPriorityEnum] = Query(None),
@@ -319,8 +320,21 @@ async def search_work_orders(
         )
 
     # 状态筛选
+    status_values = []
+    if status_in:
+        for raw in str(status_in).split(","):
+            token = raw.strip()
+            if not token:
+                continue
+            try:
+                status_values.append(WorkOrderStatusEnum(token))
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"不支持的状态值: {token}")
+
     if status:
         query = query.filter(WorkOrder.status == status)
+    elif status_values:
+        query = query.filter(WorkOrder.status.in_(status_values))
 
     # 类型筛选
     if type:

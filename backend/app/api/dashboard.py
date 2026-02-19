@@ -1,13 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
-from typing import Optional, Dict
+from sqlalchemy import func, desc, or_
+from typing import Dict
 
 from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.user import User as UserModel
-from app.models.work_order import WorkOrder, WorkOrderStatusEnum
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
 from app.models.survey_archive import SiteSurveyArchive
@@ -28,6 +28,7 @@ async def get_dashboard_summary(
     - work_orders: { total, status }
     - users: { total, active } （非管理员时置为 null）
     - inventory: { low_stock_count, main_device_total_stock, recent_transactions }
+    - installed_sites: { count, node }
     - sites: { approx: false, status }
     - inspections: { pending_review_count }
     - surveys: { last7d_new }
@@ -64,6 +65,27 @@ async def get_dashboard_summary(
     # 站点状态统计（精准）
     site_rows = db.query(Site.status, func.count(Site.id)).group_by(Site.status).all()
     site_status = {str(s or "unknown"): int(c) for s, c in site_rows}
+
+    # 安装站点统计（按“相片全部提交”节点）：
+    # 开站工单已提交（含审核中/已通过/已开通），且站点未进入已激活运行。
+    installed_site_count = int(
+        db.query(func.count(func.distinct(WorkOrder.site_id)))
+        .join(Site, Site.id == WorkOrder.site_id)
+        .filter(
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status.in_(
+                [
+                    WorkOrderStatusEnum.SUBMITTED,
+                    WorkOrderStatusEnum.UNDER_REVIEW,
+                    WorkOrderStatusEnum.APPROVED,
+                    WorkOrderStatusEnum.ACTIVATED,
+                ]
+            ),
+            or_(Site.status.is_(None), Site.status.notin_(["operational", "maintenance"])),
+        )
+        .scalar()
+        or 0
+    )
 
     # 检查待审统计
     pending_review_count = db.query(func.count(SiteInspection.id)).filter(
@@ -111,6 +133,10 @@ async def get_dashboard_summary(
             "low_stock_count": int(low_stock_count),
             "main_device_total_stock": int(main_device_total_stock or 0),
             "recent_transactions": transactions_data,
+        },
+        "installed_sites": {
+            "count": installed_site_count,
+            "node": "submitted",
         },
         "sites": {"approx": False, "status": site_status},
         "site_progress": site_progress,
