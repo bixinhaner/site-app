@@ -66,67 +66,42 @@
 				<view class="u-card-header">
 					<text class="u-card-title">{{ $t('stock.issueDraftMainDevices') }}</text>
 					<view class="header-actions" v-if="canConfirm">
-						<button class="u-btn u-btn-primary u-btn-sm u-pressable" :disabled="acting" @click="scanByCamera">
-							{{ $t('stock.issueDraftScan') }}
+						<button
+							class="u-btn u-btn-primary u-btn-sm u-pressable"
+							:disabled="acting || pendingSerials.length === 0 || selectedSerials.length === pendingSerials.length"
+							@click="selectAllPendingSn"
+						>
+							{{ $t('stock.issueConfirmSelectAllSn') }}
 						</button>
 						<button class="u-btn u-btn-secondary u-btn-sm u-pressable" :disabled="acting || selectedSerials.length === 0" @click="clearSelectedSn">
-							{{ $t('stock.returnClearSelection') }}
+							{{ $t('stock.issueConfirmDeselectAllSn') }}
 						</button>
 					</view>
 				</view>
 				<view class="u-card-content">
-					<view class="scanner" v-if="canConfirm">
-						<view class="scanner-row">
-							<input
-								class="u-input scanner-input mono"
-								v-model="snInput"
-								:placeholder="$t('stock.issueConfirmScanInputPlaceholder')"
-								confirm-type="done"
-								@confirm="addSnFromInput"
-								:disabled="acting"
-							/>
-							<button class="u-btn u-btn-secondary u-btn-sm u-pressable" :disabled="acting || !snInput" @click="addSnFromInput">
-								{{ $t('common.add') }}
-							</button>
-						</view>
-						<text class="scanner-help">{{ $t('stock.issueConfirmScanInputHelp') }}</text>
-					</view>
-
-					<view class="sub-title-wrap">
-						<text class="sub-title">{{ $t('stock.issueConfirmSelectedSn') }}</text>
-					</view>
-					<view v-if="selectedSerials.length === 0" class="empty compact">
-						<text class="empty-text">{{ $t('stock.issueConfirmSelectedEmpty') }}</text>
-					</view>
-					<view v-else class="serial-list selected-list">
-						<view class="serial selected" v-for="s in selectedSerials" :key="s.id">
-							<view class="serial-left">
-								<text class="sn mono">{{ s.serial_number }}</text>
-								<text class="time">{{ formatDt(s.scanned_at) }}</text>
-							</view>
-							<view class="serial-right">
-								<view class="u-tag u-tag-primary">{{ $t('stock.issueConfirmActionConfirm') }}</view>
-								<view v-if="canConfirm" class="del u-pressable" @click="removeSelectedSn(s.id)">
-									<uni-icons type="closeempty" size="18" color="#ef4444" />
-								</view>
-							</view>
-						</view>
-					</view>
-
 					<view class="sub-title-wrap">
 						<text class="sub-title">{{ $t('stock.issueConfirmPendingReference') }}</text>
 					</view>
+					<text v-if="canConfirm" class="select-help">{{ $t('stock.issueConfirmSnAutoSelectedHelp') }}</text>
 					<view v-if="pendingSerials.length === 0" class="empty compact">
 						<text class="empty-text">{{ $t('stock.issueConfirmNoPendingSn') }}</text>
 					</view>
 					<view v-else class="serial-list">
-						<view class="serial" v-for="s in pendingSerials" :key="s.id">
+						<view
+							class="serial"
+							v-for="s in pendingSerials"
+							:key="s.id"
+							:class="{ selected: isSerialSelected(s.id) }"
+							@click="togglePendingSn(s.id)"
+						>
 							<view class="serial-left">
 								<text class="sn mono">{{ s.serial_number }}</text>
 								<text class="time">{{ formatDt(s.scanned_at) }}</text>
 							</view>
 							<view class="serial-right">
-								<view class="u-tag u-tag-warning">{{ $t('stock.issueDraftSnPending') }}</view>
+								<view class="u-tag" :class="isSerialSelected(s.id) ? 'u-tag-primary' : 'u-tag-warning'">
+									{{ isSerialSelected(s.id) ? $t('common.selected') : $t('stock.issueDraftSnPending') }}
+								</view>
 							</view>
 						</view>
 					</view>
@@ -238,8 +213,6 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
-	import { parseBarcode } from '@/utils/barcode-parser.js'
-	import { scanDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
 	import { formatDateTime } from '@/utils/time.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
@@ -254,7 +227,6 @@
 	const refreshing = ref(false)
 	const acting = ref(false)
 
-	const snInput = ref('')
 	const notes = ref('')
 	const rejectReason = ref('')
 
@@ -400,14 +372,10 @@
 			})
 			if (res.statusCode === 200 && res.data?.draft) {
 				draft.value = res.data.draft
-				const pendingIdSet = new Set(
-					(draft.value?.serials || [])
-						.filter(s => String(s.status) === 'pending')
-						.map(s => Number(s.id))
-				)
-				selectedSerialIds.value = (selectedSerialIds.value || [])
-					.map(id => Number(id))
-					.filter(id => pendingIdSet.has(id))
+				selectedSerialIds.value = (draft.value?.serials || [])
+					.filter(s => String(s.status) === 'pending')
+					.map(s => Number(s.id))
+					.filter(id => Number.isFinite(id) && id > 0)
 				syncAuxRows()
 				return
 			}
@@ -430,87 +398,25 @@
 		await load()
 	}
 
-	const normalizeSn = (raw) => {
-		const trimmed = String(raw || '').trim()
-		if (!trimmed) return ''
-		const parsed = parseBarcode(trimmed)
-		if (parsed?.success && parsed?.sn) {
-			return String(parsed.sn).trim()
-		}
-		return trimmed
+	const isSerialSelected = (serialId) => {
+		const sid = Number(serialId)
+		return selectedSerialIds.value.includes(sid)
 	}
 
-	const addSnRaw = (raw) => {
-		if (!canConfirm.value) return
-		const sn = normalizeSn(raw)
-		if (!sn) {
-			uni.showToast({ title: $t('stock.issueConfirmSnInvalid'), icon: 'none' })
-			return
-		}
-
-		const normSn = String(sn).toUpperCase()
-		const allSerials = draft.value?.serials || []
-		const matchedPending = allSerials.find(s => {
-			return String(s.serial_number || '').trim().toUpperCase() === normSn && String(s.status) === 'pending'
-		})
-
-		if (!matchedPending) {
-			const matchedAny = allSerials.find(s => String(s.serial_number || '').trim().toUpperCase() === normSn)
-			if (matchedAny && String(matchedAny.status) === 'confirmed') {
-				uni.showToast({ title: $t('stock.issueConfirmSnAlreadyConfirmed'), icon: 'none' })
-				return
-			}
-			uni.showToast({ title: $t('stock.issueConfirmSnNotInDraft'), icon: 'none' })
-			return
-		}
-
-		const serialId = Number(matchedPending.id)
-		if (!Number.isFinite(serialId) || serialId <= 0) {
-			uni.showToast({ title: $t('stock.issueConfirmSnInvalid'), icon: 'none' })
-			return
-		}
-		if (selectedSerialIds.value.includes(serialId)) {
-			uni.showToast({ title: $t('stock.issueConfirmSnAlreadyAdded'), icon: 'none' })
-			return
-		}
-
-		selectedSerialIds.value.push(serialId)
-		uni.showToast({ title: $t('stock.issueConfirmSnAdded'), icon: 'success' })
-	}
-
-	const addSnFromInput = () => {
-		if (!canConfirm.value) return
-		const raw = String(snInput.value || '').trim()
-		if (!raw) return
-		snInput.value = ''
-		addSnRaw(raw)
-	}
-
-	const scanByCamera = async () => {
-		if (!canConfirm.value) return
-		const scanned = await scanDeviceCode()
-		if (!scanned.ok) {
-			if (scanned.error === ScanDeviceCodeError.UNSUPPORTED_SCAN_TYPE) {
-				uni.showToast({
-					title: $t('stock.unsupportedScanType', { type: scanned.scanType || 'UNKNOWN' }),
-					icon: 'none',
-				})
-				return
-			}
-			if (scanned.error === ScanDeviceCodeError.EMPTY_RESULT) {
-				uni.showToast({ title: $t('stock.scanResultEmpty'), icon: 'none' })
-				return
-			}
-			uni.showToast({ title: $t('stock.scanFailed'), icon: 'none' })
-			return
-		}
-		addSnRaw(scanned.raw)
-	}
-
-	const removeSelectedSn = (serialId) => {
+	const togglePendingSn = (serialId) => {
 		if (!canConfirm.value) return
 		const sid = Number(serialId)
-		selectedSerialIds.value = (selectedSerialIds.value || []).filter(id => Number(id) !== sid)
+		if (!Number.isFinite(sid) || sid <= 0) return
+		if (isSerialSelected(sid)) {
+			selectedSerialIds.value = (selectedSerialIds.value || []).filter(id => Number(id) !== sid)
+			return
+		}
+		selectedSerialIds.value.push(sid)
+	}
+
+	const selectAllPendingSn = () => {
+		if (!canConfirm.value) return
+		selectedSerialIds.value = pendingSerials.value.map(s => Number(s.id)).filter(id => Number.isFinite(id) && id > 0)
 	}
 
 	const clearSelectedSn = () => {
@@ -745,16 +651,11 @@
 	.section { margin: 16px; border-radius: var(--radius-lg); overflow: hidden; }
 	.header-actions { display: flex; align-items: center; gap: 10px; }
 
-	.scanner { margin-bottom: 14px; }
-	.scanner-row { display: flex; align-items: center; gap: 10px; }
-	.scanner-input { flex: 1; }
-	.scanner-help { margin-top: 8px; font-size: 12px; color: #9ca3af; }
-
 	.sub-title-wrap { margin-top: 10px; margin-bottom: 8px; }
 	.sub-title { font-size: 12px; color: #6b7280; font-weight: 700; }
+	.select-help { margin-bottom: 8px; display: block; font-size: 12px; color: #9ca3af; line-height: 1.5; }
 
 	.serial-list { display: flex; flex-direction: column; gap: 10px; }
-	.selected-list { margin-bottom: 6px; }
 	.serial {
 		border: 1px solid rgba(229, 231, 235, 0.9);
 		background: #fff;
@@ -770,15 +671,6 @@
 	.sn { font-size: 14px; font-weight: 900; color: #111827; }
 	.time { font-size: 12px; color: #9ca3af; }
 	.serial-right { display: flex; align-items: center; gap: 10px; }
-	.del {
-		width: 24px;
-		height: 24px;
-		border-radius: 12px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: rgba(239, 68, 68, 0.1);
-	}
 
 	.aux-list { display: flex; flex-direction: column; gap: 12px; }
 	.aux {
