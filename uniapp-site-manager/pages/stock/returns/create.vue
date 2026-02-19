@@ -5,70 +5,9 @@
 		<scroll-view class="content" scroll-y>
 			<view class="hero u-card">
 				<text class="hero-title">{{ $t('stock.returnNew') }}</text>
-				<text class="hero-sub">{{ $t('stock.selectStockOutHint') }}</text>
+				<text class="hero-sub">{{ $t('stock.returnActualHint') }}</text>
 			</view>
 
-			<!-- 1) 选择出库单 -->
-			<view class="section u-card">
-				<view class="u-card-header">
-					<text class="u-card-title">{{ $t('stock.selectStockOut') }}</text>
-					<text v-if="selectedOut" class="hint mono">{{ selectedOut.document_number }}</text>
-				</view>
-				<view class="u-card-content">
-					<view class="search">
-						<uni-icons type="search" size="18" color="#6b7280" />
-						<input
-							class="search-input"
-							v-model="keyword"
-							:placeholder="$t('stock.materialRequestSearchPlaceholder')"
-							confirm-type="search"
-							@confirm="reloadOuts"
-						/>
-						<uni-icons v-if="keyword" type="clear" size="18" color="#9ca3af" @click="clearKeyword" />
-					</view>
-
-					<view class="out-list">
-						<template v-if="outsLoading && outs.length === 0">
-							<SkeletonCard mode="list" />
-							<SkeletonCard mode="list" />
-						</template>
-						<EmptyState
-							v-else-if="!outsLoading && outs.length === 0"
-							icon="📤"
-							:title="$t('messages.noData')"
-							:description="$t('messages.noData')"
-							:compact="true"
-						/>
-						<template v-else>
-							<view
-								v-for="o in outs"
-								:key="o.id"
-								class="out-card u-pressable-subtle"
-								:class="{ active: selectedOut && selectedOut.id === o.id }"
-								@click="selectOut(o)"
-							>
-								<view class="out-head">
-									<text class="out-no mono">{{ o.document_number }}</text>
-									<view class="u-tag" :class="selectedOut && selectedOut.id === o.id ? 'tag-ok' : 'tag-muted'">
-										{{ selectedOut && selectedOut.id === o.id ? $t('common.selected') : $t('common.select') }}
-									</view>
-								</view>
-								<view class="out-meta">
-									<text class="meta-item">{{ o.warehouse_name || '-' }}</text>
-									<text class="dot">·</text>
-									<text class="meta-item">{{ timeAgo(o.operation_time) }}</text>
-								</view>
-							</view>
-						</template>
-					</view>
-
-					<button class="u-btn u-btn-secondary u-btn-sm u-pressable" :disabled="outsLoading || !hasMoreOuts" @click="loadMoreOuts">
-						{{ $t('stock.loadMore') }}
-					</button>
-				</view>
-			</view>
-
-			<!-- 2) 选择退入仓库 -->
 			<view class="section u-card">
 				<view class="u-card-header">
 					<text class="u-card-title">{{ $t('stock.selectReturnWarehouse') }}</text>
@@ -84,45 +23,19 @@
 				</view>
 			</view>
 
-			<!-- 3) 选择退库明细 -->
-			<view v-if="selectedOut" class="section u-card">
+			<view class="section u-card">
 				<view class="u-card-header">
-					<text class="u-card-title">{{ $t('stock.materialRequestItems') }}</text>
-					<view class="header-actions">
-						<button class="u-btn u-btn-secondary u-btn-xs u-pressable" @click="selectAllReturnable">
-							{{ $t('stock.returnSelectAll') }}
-						</button>
-						<button class="u-btn u-btn-ghost u-btn-xs u-pressable" @click="clearSelection">
-							{{ $t('stock.returnClearSelection') }}
-						</button>
-					</view>
+					<text class="u-card-title">{{ $t('stock.mainDevice') }}</text>
+					<text class="hint">
+						{{ $t('stock.returnMainPoolSummary', { count: candidateSummary.main_returnable_count || 0 }) }}
+					</text>
 				</view>
 				<view class="u-card-content">
 					<view class="block">
 						<view class="block-head">
-							<text class="block-title">{{ $t('stock.mainDevice') }}</text>
-							<text class="block-sub">{{ $t('stock.returnMainSnListHint') }}</text>
+							<text class="block-title">{{ $t('stock.scanAddMainDevice') }}</text>
+							<text class="block-sub">{{ $t('stock.returnMainScanOnlyHint') }}</text>
 						</view>
-						<view v-if="mainSnItems.length" class="main-sn-list">
-							<view class="main-sn-head">
-								<text class="main-sn-title">{{ $t('stock.returnMainSnListTitle', { count: mainSnItems.length }) }}</text>
-								<text
-									v-if="mainSnCanToggle"
-									class="main-sn-toggle u-pressable"
-									@click="toggleMainSnExpanded"
-								>
-									{{ mainSnExpanded ? $t('stock.returnMainSnCollapse') : $t('stock.returnMainSnExpand') }}
-								</text>
-							</view>
-							<view v-for="row in visibleMainSnItems" :key="row.key" class="main-sn-row">
-								<text class="mono main-sn-value">{{ row.sn || '-' }}</text>
-								<text class="main-sn-status" :class="`status-${row.status}`">{{ mainSnStatusText(row.status) }}</text>
-							</view>
-							<text v-if="mainSnHiddenCount > 0 && !mainSnExpanded" class="main-sn-more">
-								{{ $t('stock.returnMainSnMoreCount', { count: mainSnHiddenCount }) }}
-							</text>
-						</view>
-						<view v-else class="main-sn-empty">{{ $t('stock.returnMainSnListEmpty') }}</view>
 						<button class="u-btn u-btn-primary u-btn-sm u-pressable" @click="scanAddMain">
 							<uni-icons type="scan" size="18" color="#fff" />
 							<text>{{ $t('stock.scanAddMainDevice') }}</text>
@@ -133,18 +46,36 @@
 								<text class="remove u-pressable" @click="removeMain(sn)">×</text>
 							</view>
 						</view>
+						<view v-else class="main-sn-empty">{{ $t('stock.returnSelectedMainEmpty') }}</view>
 					</view>
+				</view>
+			</view>
 
+			<view class="section u-card">
+				<view class="u-card-header">
+					<text class="u-card-title">{{ $t('stock.auxMaterial') }}</text>
+					<view class="header-actions">
+						<button class="u-btn u-btn-secondary u-btn-xs u-pressable" @click="selectAllReturnable">
+							{{ $t('stock.returnSelectAll') }}
+						</button>
+						<button class="u-btn u-btn-ghost u-btn-xs u-pressable" @click="clearAuxSelection">
+							{{ $t('stock.returnClearSelection') }}
+						</button>
+					</view>
+				</view>
+				<view class="u-card-content">
 					<view class="block">
 						<view class="block-head">
 							<text class="block-title">{{ $t('stock.auxMaterial') }}</text>
 							<text class="block-sub">{{ $t('stock.returnMaxLabel') }} = {{ $t('stock.qtyRemaining') }}</text>
 						</view>
-						<view class="aux-list">
-							<view v-for="it in auxItems" :key="it.item_id" class="aux-row">
+						<view v-if="auxLoading" class="main-sn-empty">{{ $t('common.loading') }}</view>
+						<view v-else-if="auxItems.length === 0" class="main-sn-empty">{{ $t('messages.noData') }}</view>
+						<view v-else class="aux-list">
+							<view v-for="it in auxItems" :key="it.equipment_id" class="aux-row">
 								<view class="aux-left">
 									<text class="aux-name">{{ it.equipment_name }}</text>
-									<text class="aux-meta">{{ $t('stock.returnMaxLabel') }} {{ it.max_returnable || 0 }} {{ it.unit }}</text>
+									<text class="aux-meta">{{ $t('stock.returnMaxLabel') }} {{ it.max_returnable || 0 }} {{ it.unit || '' }}</text>
 								</view>
 								<view class="stepper">
 									<view class="step u-pressable" @click="decAux(it)">−</view>
@@ -157,7 +88,6 @@
 				</view>
 			</view>
 
-			<!-- 4) 线下单据（可选） -->
 			<view class="section u-card">
 				<view class="u-card-header">
 					<text class="u-card-title">{{ $t('stock.offlineDocTitle') }}</text>
@@ -165,6 +95,12 @@
 				</view>
 				<view class="u-card-content">
 					<OfflineDocumentSection v-model="offlineDocumentId" :disabled="submitting" :showHeader="false" />
+				</view>
+			</view>
+
+			<view class="section u-card">
+				<view class="u-card-content">
+					<text class="hero-sub">{{ $t('stock.returnAutoSplitTip') }}</text>
 				</view>
 			</view>
 
@@ -177,7 +113,6 @@
 			<view class="spacer" />
 		</scroll-view>
 
-		<!-- 检查绑定提示（复用旧退库的规则） -->
 		<view v-if="bindModalVisible" class="bind-modal-mask" @click="closeBindModal">
 			<view class="bind-modal" @click.stop>
 				<view class="bind-modal-header">
@@ -235,102 +170,34 @@
 
 	const warehouses = ref([])
 	const warehouseIndex = ref(0)
+	const warehouseOptions = computed(() => (warehouses.value || []).map(w => w.warehouse_name))
+	const selectedWarehouse = computed(() => warehouses.value?.[warehouseIndex.value] || null)
 
-	const outsLoading = ref(false)
-	const outs = ref([])
-	const outsTotal = ref(0)
-	const outsPage = ref(1)
-	const outsPageSize = ref(10)
-	const keyword = ref('')
-
-	const selectedOut = ref(null)
 	const selectedMainSns = ref([])
+	const auxItems = ref([])
 	const auxQtyMap = ref({})
-	const offlineDocumentId = ref(null)
-	const MAIN_SN_COLLAPSE_THRESHOLD = 8
-	const mainSnExpanded = ref(true)
+	const auxLoading = ref(false)
+	const candidateSummary = ref({
+		main_returnable_count: 0,
+		main_pending_return_count: 0,
+		aux_item_count: 0,
+		aux_total_max_returnable: 0,
+	})
 
-	// 从“我的设备→设备详情→退库”带入
-	const preselectOutId = ref('')
+	const offlineDocumentId = ref(null)
+	const submitting = ref(false)
+
 	const preselectSn = ref('')
 	const preselectApplied = ref(false)
 
-	// 检查绑定弹窗（后端 400 detail.action）
 	const bindModalVisible = ref(false)
 	const bindModalAction = ref('')
 	const bindModalMessage = ref('')
 	const bindModalBindings = ref([])
 	const unbindSubmitting = ref(false)
 
-	const submitting = ref(false)
-
-	const warehouseOptions = computed(() => (warehouses.value || []).map(w => w.warehouse_name))
-	const selectedWarehouse = computed(() => warehouses.value?.[warehouseIndex.value] || null)
-
-	const hasMoreOuts = computed(() => outs.value.length < outsTotal.value)
-
-	const auxItems = computed(() => {
-		const items = selectedOut.value?.items || []
-		return items.filter(it => it && !it.is_main_device)
-	})
-
-	const mainSnItems = computed(() => {
-		const items = selectedOut.value?.items || []
-		return items
-			.filter(it => it && it.is_main_device)
-			.map((it, idx) => {
-				const rawSn = String(it?.serial_number || '').trim()
-				const maxReturnable = Number(it?.max_returnable || 0)
-				let status = 'returnable'
-				if (!rawSn) status = 'missing_sn'
-				else if (maxReturnable <= 0) status = 'already_requested'
-				return {
-					key: String(it?.item_id || rawSn || `main_${idx}`),
-					sn: rawSn,
-					status,
-				}
-			})
-	})
-
-	const mainSnCanToggle = computed(() => mainSnItems.value.length > MAIN_SN_COLLAPSE_THRESHOLD)
-	const visibleMainSnItems = computed(() => {
-		if (mainSnExpanded.value) return mainSnItems.value
-		if (!mainSnCanToggle.value) return mainSnItems.value
-		return mainSnItems.value.slice(0, MAIN_SN_COLLAPSE_THRESHOLD)
-	})
-	const mainSnHiddenCount = computed(() => {
-		if (!mainSnCanToggle.value || mainSnExpanded.value) return 0
-		return Math.max(mainSnItems.value.length - MAIN_SN_COLLAPSE_THRESHOLD, 0)
-	})
-
-	const mainSnStatusText = (status) => {
-		if (status === 'already_requested') return $t('stock.returnMainSnStatusAlreadyRequested')
-		if (status === 'missing_sn') return $t('stock.returnMainSnStatusMissing')
-		return $t('stock.returnMainSnStatusReturnable')
-	}
-
-	const setMainSnDefaultExpanded = (out) => {
-		const totalMainSn = (out?.items || []).filter(it => it?.is_main_device).length
-		mainSnExpanded.value = totalMainSn <= MAIN_SN_COLLAPSE_THRESHOLD
-	}
-
-	const toggleMainSnExpanded = () => {
-		if (!mainSnCanToggle.value) return
-		mainSnExpanded.value = !mainSnExpanded.value
-	}
-
-	const timeAgo = (iso) => {
-		if (!iso) return '-'
-		const d = new Date(iso)
-		if (Number.isNaN(d.getTime())) return String(iso)
-		const diff = Date.now() - d.getTime()
-		const m = Math.floor(diff / 60000)
-		if (m < 1) return '刚刚'
-		if (m < 60) return `${m} 分钟前`
-		const h = Math.floor(m / 60)
-		if (h < 24) return `${h} 小时前`
-		const dd = Math.floor(h / 24)
-		return `${dd} 天前`
+	const onWarehouseChange = (e) => {
+		warehouseIndex.value = Number(e.detail.value || 0)
 	}
 
 	const loadWarehouses = async () => {
@@ -344,86 +211,41 @@
 			})
 			if (res.statusCode === 200) {
 				warehouses.value = Array.isArray(res.data?.warehouses) ? res.data.warehouses : []
-				return
 			}
 		} catch (e) {
 			console.error('加载仓库失败:', e)
 		}
 	}
 
-	const loadOuts = async (reset = true) => {
+	const loadActualCandidates = async () => {
 		if (!userStore.token) return
-		if (reset) {
-			outsPage.value = 1
-			outs.value = []
-			outsTotal.value = 0
-		}
-		outsLoading.value = true
+		auxLoading.value = true
 		try {
-			const params = []
-			params.push(`page=${outsPage.value}`)
-			params.push(`page_size=${outsPageSize.value}`)
-			if (keyword.value?.trim()) params.push(`keyword=${encodeURIComponent(keyword.value.trim())}`)
-			const url = `${buildApiUrl(API_ENDPOINTS.STOCK.MY_STOCK_OUTS)}?${params.join('&')}`
-
 			const res = await uni.request({
-				url,
+				url: buildApiUrl(API_ENDPOINTS.STOCK.RETURN_ACTUAL_CANDIDATES),
 				...createRequestConfig({
 					method: 'GET',
 					headers: getAuthHeaders(userStore.token),
 				})
 			})
-
 			if (res.statusCode === 200) {
-				const list = Array.isArray(res.data?.records) ? res.data.records : []
-				outsTotal.value = Number(res.data?.total || 0)
-				outs.value = reset ? list : outs.value.concat(list)
+				auxItems.value = Array.isArray(res.data?.aux_items) ? res.data.aux_items : []
+				candidateSummary.value = res.data?.summary || candidateSummary.value
+				const map = {}
+				for (const row of auxItems.value) {
+					const eid = Number(row?.equipment_id)
+					if (!Number.isFinite(eid)) continue
+					map[eid] = Number(auxQtyMap.value?.[eid] || 0)
+				}
+				auxQtyMap.value = map
 				return
 			}
-
 			if (res.statusCode === 401) userStore.logout()
-			else uni.showToast({ title: String(res.data?.detail || res.data?.message || '加载失败'), icon: 'none' })
 		} catch (e) {
-			console.error('加载出库记录失败:', e)
-			uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
+			console.error('加载退库候选失败:', e)
 		} finally {
-			outsLoading.value = false
+			auxLoading.value = false
 		}
-	}
-
-	const reloadOuts = async () => {
-		await loadOuts(true)
-	}
-
-	const clearKeyword = async () => {
-		keyword.value = ''
-		await loadOuts(true)
-	}
-
-	const loadMoreOuts = async () => {
-		if (!hasMoreOuts.value || outsLoading.value) return
-		outsPage.value += 1
-		await loadOuts(false)
-	}
-
-	const selectOut = (o) => {
-		selectedOut.value = o
-		selectedMainSns.value = []
-		setMainSnDefaultExpanded(o)
-		const map = {}
-		for (const it of (o?.items || [])) {
-			if (it?.is_main_device) continue
-			map[it.equipment_id] = 0
-		}
-		auxQtyMap.value = map
-
-		// 默认退回到原出库仓库（若存在）
-		const idx = (warehouses.value || []).findIndex(w => w.id === o?.warehouse_id)
-		if (idx >= 0) warehouseIndex.value = idx
-	}
-
-	const onWarehouseChange = (e) => {
-		warehouseIndex.value = Number(e.detail.value || 0)
 	}
 
 	const bindingTitle = (binding) => {
@@ -471,35 +293,91 @@
 		bindModalBindings.value = []
 	}
 
-	const validateMainSnInSelectedOut = (sn) => {
-		const value = String(sn || '').trim()
-		if (!value || !selectedOut.value) return { ok: false, reason: 'not_in_out' }
-
-		const mainItem = (selectedOut.value.items || []).find(it => it?.is_main_device && String(it?.serial_number || '').trim() === value)
-		if (!mainItem) return { ok: false, reason: 'not_in_out' }
-
-		const maxReturnable = Number(mainItem?.max_returnable || 0)
-		if (maxReturnable <= 0) return { ok: false, reason: 'already_return_requested' }
-
-		return { ok: true, value }
+	const formatRelatedInfoLines = (relatedInfo) => {
+		if (!relatedInfo || typeof relatedInfo !== 'object') return []
+		const map = {
+			sn: $t('stock.serialNumber'),
+			current_owner_name: $t('common.user'),
+			out_document_number: $t('stock.documentNumber'),
+			existing_return_document_number: $t('stock.returnDocumentNumber'),
+			existing_return_status: $t('common.status'),
+			out_warehouse_name: $t('stock.warehouse'),
+			existing_return_warehouse_name: $t('stock.returnWarehouseLabel'),
+			out_operator_name: $t('stock.operator'),
+			current_status: $t('common.status'),
+		}
+		const lines = []
+		Object.keys(map).forEach((k) => {
+			const v = relatedInfo?.[k]
+			if (v === undefined || v === null || String(v).trim() === '') return
+			lines.push(`${map[k]}：${v}`)
+		})
+		return lines
 	}
 
-	const showMainSnPickErrorToast = (sn, reason) => {
-		const value = String(sn || '').trim()
-		if (!value) return
-
-		if (reason === 'already_return_requested') {
-			uni.showToast({ title: $t('stock.returnSnAlreadyReturnRequested', { sn: value }), icon: 'none' })
+	const showDetailedError = (detail, fallbackSn = '') => {
+		if (!detail || typeof detail !== 'object') {
+			uni.showToast({ title: String(detail || $t('messages.operationFailed')), icon: 'none' })
 			return
 		}
-		uni.showToast({ title: $t('stock.returnSnNotInStockOut', { sn: value }), icon: 'none' })
+		const reason = String(detail.reason || detail.message || detail.detail || '').trim()
+		const suggestion = String(detail.suggestion || '').trim()
+		const infoLines = formatRelatedInfoLines(detail.related_info)
+		const contentParts = []
+		if (reason) contentParts.push(`原因：${reason}`)
+		if (suggestion) contentParts.push(`建议：${suggestion}`)
+		if (infoLines.length > 0) {
+			contentParts.push('相关信息：')
+			contentParts.push(infoLines.join('\n'))
+		}
+		if (contentParts.length === 0 && fallbackSn) {
+			contentParts.push(`扫码SN为：${fallbackSn}`)
+		}
+		uni.showModal({
+			title: String(detail.title || $t('common.hint')),
+			content: contentParts.join('\n\n') || $t('messages.operationFailed'),
+			showCancel: false,
+			confirmText: $t('common.confirm'),
+		})
+	}
+
+	const addValidatedSn = (sn) => {
+		const value = String(sn || '').trim()
+		if (!value) return
+		if (selectedMainSns.value.includes(value)) return
+		selectedMainSns.value = selectedMainSns.value.concat([value])
+	}
+
+	const validateAndAddSn = async (sn) => {
+		const value = String(sn || '').trim()
+		if (!value) return false
+		try {
+			const res = await uni.request({
+				url: buildApiUrl(API_ENDPOINTS.STOCK.RETURN_VALIDATE_SN),
+				...createRequestConfig({
+					method: 'POST',
+					headers: getAuthHeaders(userStore.token),
+					data: { sn: value },
+				})
+			})
+			if (res.statusCode === 200) {
+				addValidatedSn(value)
+				return true
+			}
+			if (res.statusCode === 401) {
+				userStore.logout()
+				return false
+			}
+			showDetailedError(res.data?.detail || res.data?.message, value)
+			return false
+		} catch (e) {
+			console.error('校验SN失败:', e)
+			uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
+			return false
+		}
 	}
 
 	const scanAddMain = async () => {
-		if (!selectedOut.value) {
-			uni.showToast({ title: $t('stock.selectStockOut'), icon: 'none' })
-			return
-		}
 		try {
 			const res = await uni.scanCode({ scanType: ['qrCode', 'barCode'] })
 			const raw = (res?.result || '').trim()
@@ -510,17 +388,9 @@
 				uni.showToast({ title: $t('stock.scanResultEmpty'), icon: 'none' })
 				return
 			}
-			const exist = selectedMainSns.value.includes(value)
-			if (exist) return
-
-			const check = validateMainSnInSelectedOut(value)
-			if (!check.ok) {
-				showMainSnPickErrorToast(value, check.reason)
-				return
-			}
-			selectedMainSns.value = selectedMainSns.value.concat([value])
+			await validateAndAddSn(value)
 		} catch (e) {
-			// 用户取消扫码无需提示
+			// 用户取消扫码不提示
 		}
 	}
 
@@ -529,12 +399,15 @@
 	}
 
 	const decAux = (it) => {
-		const eid = it?.equipment_id
+		const eid = Number(it?.equipment_id)
+		if (!Number.isFinite(eid)) return
 		const cur = Number(auxQtyMap.value?.[eid] || 0)
 		auxQtyMap.value = { ...(auxQtyMap.value || {}), [eid]: Math.max(0, cur - 1) }
 	}
+
 	const incAux = (it) => {
-		const eid = it?.equipment_id
+		const eid = Number(it?.equipment_id)
+		if (!Number.isFinite(eid)) return
 		const cur = Number(auxQtyMap.value?.[eid] || 0)
 		const max = Number(it?.max_returnable || 0)
 		auxQtyMap.value = { ...(auxQtyMap.value || {}), [eid]: Math.min(max, cur + 1) }
@@ -543,87 +416,74 @@
 	const selectAllReturnable = () => {
 		const map = { ...(auxQtyMap.value || {}) }
 		for (const it of auxItems.value) {
-			map[it.equipment_id] = Math.max(0, Number(it.max_returnable || 0))
+			const eid = Number(it?.equipment_id)
+			if (!Number.isFinite(eid)) continue
+			map[eid] = Math.max(0, Number(it?.max_returnable || 0))
 		}
 		auxQtyMap.value = map
 	}
 
-	const clearSelection = () => {
-		selectedMainSns.value = []
+	const clearAuxSelection = () => {
 		const map = { ...(auxQtyMap.value || {}) }
-		Object.keys(map).forEach(k => { map[k] = 0 })
+		Object.keys(map).forEach((k) => { map[k] = 0 })
 		auxQtyMap.value = map
 	}
 
 	const buildSubmitPayload = () => {
-		if (!selectedOut.value?.id) {
-			uni.showToast({ title: $t('stock.selectStockOut'), icon: 'none' })
-			return null
-		}
 		if (!selectedWarehouse.value) {
 			uni.showToast({ title: $t('stock.selectReturnWarehouse'), icon: 'none' })
 			return null
 		}
-
-		const auxItemsPayload = []
+		const auxPayload = []
 		Object.keys(auxQtyMap.value || {}).forEach((k) => {
-			const qty = Number(auxQtyMap.value[k] || 0)
 			const eid = Number(k)
+			const qty = Number(auxQtyMap.value[k] || 0)
 			if (!Number.isFinite(eid) || qty <= 0) return
-			auxItemsPayload.push({ equipment_id: eid, quantity: qty })
+			auxPayload.push({ equipment_id: eid, quantity: qty })
 		})
-
-		if (selectedMainSns.value.length === 0 && auxItemsPayload.length === 0) {
+		if (selectedMainSns.value.length === 0 && auxPayload.length === 0) {
 			uni.showToast({ title: $t('stock.returnSelectAtLeastOne'), icon: 'none' })
 			return null
 		}
-
 		return {
-			out_transaction_id: selectedOut.value.id,
 			return_warehouse_id: selectedWarehouse.value.id,
 			main_sns: selectedMainSns.value,
-			aux_items: auxItemsPayload,
+			aux_items: auxPayload,
 			offline_document_id: offlineDocumentId.value || undefined,
 		}
 	}
 
 	const buildSubmitConfirmAuxRows = (payload) => {
-		const itemMap = new Map((auxItems.value || []).map(it => [Number(it?.equipment_id), it]))
-		const rows = []
-		for (const row of (payload?.aux_items || [])) {
+		const map = new Map((auxItems.value || []).map(it => [Number(it?.equipment_id), it]))
+		return (payload?.aux_items || []).map((row) => {
 			const eid = Number(row?.equipment_id)
 			const qty = Number(row?.quantity || 0)
-			if (!Number.isFinite(eid) || qty <= 0) continue
-			const matched = itemMap.get(eid)
-			rows.push({
-				equipment_id: eid,
-				quantity: qty,
+			const matched = map.get(eid)
+			return {
 				equipment_name: String(matched?.equipment_name || eid),
 				unit: String(matched?.unit || ''),
-			})
-		}
-		return rows
+				quantity: qty,
+			}
+		}).filter(r => r.quantity > 0)
 	}
 
 	const buildSubmitConfirmContent = (payload) => {
 		const mainList = Array.isArray(payload?.main_sns) ? payload.main_sns : []
 		const auxRows = buildSubmitConfirmAuxRows(payload)
-
 		const mainLines = mainList.length
 			? mainList.map((sn, idx) => `${idx + 1}. ${sn}`).join('\n')
 			: $t('stock.returnSubmitConfirmNone')
-
 		const auxLines = auxRows.length
 			? auxRows.map((row, idx) => `${idx + 1}. ${row.equipment_name} x ${row.quantity}${row.unit ? ` ${row.unit}` : ''}`).join('\n')
 			: $t('stock.returnSubmitConfirmNone')
-
 		return [
-			`${$t('stock.returnSubmitConfirmOutNo')}: ${selectedOut.value?.document_number || '-'}`,
 			`${$t('stock.returnSubmitConfirmWarehouse')}: ${selectedWarehouse.value?.warehouse_name || '-'}`,
 			`${$t('stock.returnSubmitConfirmMainTitle', { count: mainList.length })}:`,
 			mainLines,
 			`${$t('stock.returnSubmitConfirmAuxTitle', { count: auxRows.length })}:`,
 			auxLines,
+			'',
+			$t('stock.returnAutoSplitTip'),
 		].join('\n')
 	}
 
@@ -638,8 +498,27 @@
 		})
 	})
 
+	const showSubmitSuccess = async (data) => await new Promise((resolve) => {
+		const mainCount = Number(data?.summary?.main_device_count || 0)
+		const auxQty = Number(data?.summary?.aux_total_quantity || 0)
+		const createdCount = Number(data?.created_count || 0)
+		const batchId = String(data?.batch_id || '-')
+		uni.showModal({
+			title: $t('stock.createReturnSuccess'),
+			content: [
+				`${$t('stock.returnBatchIdLabel')}: ${batchId}`,
+				`${$t('stock.returnSplitCountLabel')}: ${createdCount}`,
+				`${$t('stock.returnSubmitConfirmMainTitle', { count: mainCount })}`,
+				`${$t('stock.returnSubmitConfirmAuxTitle', { count: auxQty })}`,
+			].join('\n'),
+			showCancel: false,
+			confirmText: $t('common.confirm'),
+			success: () => resolve(true),
+			fail: () => resolve(true),
+		})
+	})
+
 	const goAfterCreateSuccess = () => {
-		// 避免 create -> redirectTo(list) 造成 list 页面被重复压栈（返回按钮需点多次）
 		try {
 			const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
 			const prev = pages?.[pages.length - 2]
@@ -650,7 +529,7 @@
 				return
 			}
 		} catch (e) {
-			// 忽略：兜底跳转到列表页
+			// ignore
 		}
 		uni.redirectTo({ url: '/pages/stock/returns/list' })
 	}
@@ -658,11 +537,10 @@
 	const doSubmit = async (preparedPayload = null) => {
 		const payload = preparedPayload || buildSubmitPayload()
 		if (!payload) return
-
 		try {
 			submitting.value = true
 			const res = await uni.request({
-				url: buildApiUrl(API_ENDPOINTS.STOCK.CREATE_RETURN),
+				url: buildApiUrl(API_ENDPOINTS.STOCK.CREATE_RETURN_BY_ACTUAL),
 				...createRequestConfig({
 					method: 'POST',
 					headers: getAuthHeaders(userStore.token),
@@ -671,23 +549,23 @@
 			})
 
 			if (res.statusCode === 200) {
-				uni.showToast({ title: $t('stock.createReturnSuccess'), icon: 'success' })
-				setTimeout(goAfterCreateSuccess, 500)
+				await showSubmitSuccess(res.data || {})
+				goAfterCreateSuccess()
 				return
 			}
-
 			if (res.statusCode === 401) {
 				userStore.logout()
 				return
 			}
 
-			// 后端返回检查绑定阻断/需解绑：展示弹窗并支持一键解绑重试
-			if (res.statusCode === 400 && res.data?.detail && typeof res.data.detail === 'object') {
-				const handled = openBindModalFromDetail(res.data.detail)
+			const detail = res.data?.detail
+			if (detail && typeof detail === 'object') {
+				const handled = openBindModalFromDetail(detail)
 				if (handled) return
+				showDetailedError(detail)
+				return
 			}
-
-			uni.showToast({ title: String(res.data?.detail || res.data?.message || $t('messages.operationFailed')), icon: 'none' })
+			uni.showToast({ title: String(detail || res.data?.message || $t('messages.operationFailed')), icon: 'none' })
 		} catch (e) {
 			console.error('提交退库失败:', e)
 			uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
@@ -705,70 +583,12 @@
 		await doSubmit(payload)
 	}
 
-	const fetchOutDetail = async (outId) => {
-		const id = String(outId || '').trim()
-		if (!id || !userStore.token) return null
-		try {
-			const res = await uni.request({
-				url: buildApiUrl(`/api/stock/my-stock-outs/${id}`),
-				...createRequestConfig({
-					method: 'GET',
-					headers: getAuthHeaders(userStore.token),
-				})
-			})
-			if (res.statusCode === 200) return res.data || null
-			if (res.statusCode === 401) userStore.logout()
-			return null
-		} catch (e) {
-			console.error('加载出库单详情失败:', e)
-			return null
-		}
-	}
-
-	const ensureSelectedOutById = async (outId) => {
-		const id = String(outId || '').trim()
-		if (!id) return false
-		if (String(selectedOut.value?.id || '') === id) return true
-		const found = (outs.value || []).find(o => String(o?.id || '') === id)
-		if (found) {
-			selectOut(found)
-			return true
-		}
-		const detail = await fetchOutDetail(id)
-		if (!detail?.id) {
-			uni.showToast({ title: $t('stock.stockOutNotFoundOrNoPermission') || '出库单不存在或无权限', icon: 'none' })
-			return false
-		}
-		outs.value = [detail].concat((outs.value || []).filter(o => String(o?.id || '') !== String(detail.id)))
-		selectOut(detail)
-		return true
-	}
-
-	const tryPreselectSn = (sn) => {
-		const value = String(sn || '').trim()
-		if (!value || !selectedOut.value) return { ok: false, reason: 'not_in_out' }
-		const exist = selectedMainSns.value.includes(value)
-		if (exist) return { ok: true }
-
-		const check = validateMainSnInSelectedOut(value)
-		if (!check.ok) return check
-		selectedMainSns.value = selectedMainSns.value.concat([value])
-		return { ok: true }
-	}
-
-	const applyPreselectFromQuery = async () => {
+	const tryPreselectSn = async () => {
 		if (preselectApplied.value) return
-		const outId = String(preselectOutId.value || '').trim()
 		const sn = String(preselectSn.value || '').trim()
-		if (!outId) return
-
-		preselectApplied.value = true
-		const ok = await ensureSelectedOutById(outId)
-		if (!ok) return
 		if (!sn) return
-
-		const picked = tryPreselectSn(sn)
-		if (!picked.ok) showMainSnPickErrorToast(sn, picked.reason)
+		preselectApplied.value = true
+		await validateAndAddSn(sn)
 	}
 
 	const confirmUnbindAndRetry = async () => {
@@ -778,7 +598,6 @@
 			closeBindModal()
 			return
 		}
-
 		uni.showModal({
 			title: $t('stock.oneClickUnbind'),
 			content: $t('stock.unbindWillClearAndDelete'),
@@ -807,7 +626,6 @@
 							return
 						}
 					}
-
 					uni.showToast({ title: $t('messages.operationSuccess'), icon: 'success' })
 					closeBindModal(true)
 					await doSubmit()
@@ -823,12 +641,11 @@
 
 	onMounted(async () => {
 		await loadWarehouses()
-		await loadOuts(true)
-		await applyPreselectFromQuery()
+		await loadActualCandidates()
+		await tryPreselectSn()
 	})
 
 	onLoad((query) => {
-		preselectOutId.value = String(query?.out_transaction_id || '').trim()
 		preselectSn.value = String(query?.sn || '').trim()
 	})
 </script>

@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>退库收货</h2>
+      <h2>退库收货（批次维度）</h2>
       <div class="header-actions">
         <el-button @click="loadData" :loading="loading">
           <el-icon><Refresh /></el-icon>
@@ -12,24 +12,7 @@
 
     <el-card class="toolbar-card">
       <el-row :gutter="16">
-        <el-col :span="8">
-          <el-input
-            ref="snInputRef"
-            v-model="snInput"
-            placeholder="扫码枪输入SN后回车：快速定位待收货退库单"
-            clearable
-            @keyup.enter="handleQuickLookup"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-            <template #append>
-              <el-button type="primary" @click="handleQuickLookup">查找</el-button>
-            </template>
-          </el-input>
-        </el-col>
-
-        <el-col :span="6">
+        <el-col :span="7">
           <el-select
             v-model="selectedWarehouseIds"
             multiple
@@ -48,7 +31,7 @@
           </el-select>
         </el-col>
 
-        <el-col :span="4">
+        <el-col :span="5">
           <el-select v-model="statusFilter" placeholder="状态" style="width: 100%" @change="resetAndLoad">
             <el-option label="待收货（含部分）" value="pending_receive" />
             <el-option label="部分收货" value="partially_received" />
@@ -59,10 +42,10 @@
           </el-select>
         </el-col>
 
-        <el-col :span="6">
+        <el-col :span="10">
           <el-input
             v-model="keyword"
-            placeholder="搜索：退库单号 / 出库单号 / SN"
+            placeholder="搜索：批次号 / 退库单号 / 出库单号 / 申请人"
             clearable
             @keyup.enter="resetAndLoad"
           >
@@ -77,55 +60,113 @@
       </el-row>
     </el-card>
 
-    <el-card class="table-card">
+    <el-card class="table-card" v-loading="loading">
       <div class="table-meta">
-        <el-tag type="info">共 {{ total }} 条</el-tag>
+        <el-tag type="info">批次 {{ total }} 条</el-tag>
       </div>
 
-      <el-table :data="records" v-loading="loading" stripe style="width: 100%">
-        <el-table-column prop="document_number" label="退库单号" min-width="220" />
-        <el-table-column prop="out_document_number" label="关联出库单" min-width="220" />
-        <el-table-column prop="warehouse_name" label="退入仓库" width="160" />
-        <el-table-column prop="operator_name" label="申请人" width="140" />
-        <el-table-column label="待收货" width="180">
-          <template #default="{ row }">
-            <span>主 {{ mainPending(row) }} · 辅 {{ auxPending(row) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="申请时间" width="180">
-          <template #default="{ row }">
-            {{ formatDateTime(row.created_at || row.operation_time) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)">
-              {{ statusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              size="small"
-              type="success"
-              @click="openReceive(row)"
-              :disabled="!canReceiveRow(row)"
-            >
-              收货确认
-            </el-button>
-            <el-button
-              size="small"
-              type="danger"
-              plain
-              @click="openReject(row)"
-              :disabled="!canRejectRow(row)"
-            >
-              拒收
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <el-empty v-if="!loading && batchRecords.length === 0" description="暂无退库批次" />
+
+      <div v-else class="batch-list">
+        <div v-for="batch in batchRecords" :key="batch.batch_id" class="batch-card">
+          <div class="batch-head">
+            <div class="batch-main">
+              <div class="batch-id">{{ batch.batch_id }}</div>
+              <div class="batch-meta">
+                <span>发起：{{ formatDateTime(batch.created_at) }}</span>
+                <span>最近更新：{{ formatDateTime(batch.latest_created_at) }}</span>
+              </div>
+            </div>
+            <el-tag :type="statusTagType(batch.status)">{{ statusText(batch.status) }}</el-tag>
+          </div>
+
+          <div class="batch-stats">
+            <div class="stat-item">
+              <div class="k">退库单</div>
+              <div class="v">{{ batch.document_count }}</div>
+            </div>
+            <div class="stat-item">
+              <div class="k">主设备</div>
+              <div class="v">{{ batch.main_device_count }}</div>
+            </div>
+            <div class="stat-item">
+              <div class="k">辅料数量</div>
+              <div class="v">{{ batch.aux_total_quantity }}</div>
+            </div>
+            <div class="stat-item">
+              <div class="k">待收货</div>
+              <div class="v">{{ batch.pending_total_quantity }}</div>
+            </div>
+          </div>
+
+          <div
+            v-if="showBatchRejectReason(batch)"
+            class="batch-reject"
+            @click="openBatchRejectReason(batch)"
+          >
+            <span class="reject-title">驳回原因</span>
+            <span class="reject-content">{{ rejectReasonPreview(batch) }}</span>
+            <span class="reject-action">查看详情</span>
+          </div>
+
+          <div class="doc-box">
+            <div class="doc-box-head">
+              <span class="doc-title">批次内单据</span>
+              <el-button
+                v-if="batch.documents.length > MAX_DOC_PREVIEW"
+                link
+                type="primary"
+                @click="toggleDocs(batch)"
+              >
+                {{ isDocsExpanded(batch) ? '收起单据' : '展开单据' }}
+              </el-button>
+            </div>
+
+            <el-table :data="visibleDocs(batch)" size="small" border>
+              <el-table-column prop="document_number" label="退库单号" min-width="190" />
+              <el-table-column prop="out_document_number" label="关联出库单" min-width="190" />
+              <el-table-column prop="warehouse_name" label="退入仓库" width="140" />
+              <el-table-column prop="operator_name" label="申请人" width="120" />
+              <el-table-column label="待收货" width="100">
+                <template #default="{ row }">{{ row.pending_total_quantity }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="120">
+                <template #default="{ row }">
+                  <el-tag :type="statusTagType(row.status)">{{ statusText(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="申请时间" width="170">
+                <template #default="{ row }">{{ formatDateTime(row.created_at || row.operation_time) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <el-button
+                    size="small"
+                    type="success"
+                    @click="openReceive(row)"
+                    :disabled="!canReceiveRow(row)"
+                  >
+                    收货确认
+                  </el-button>
+                  <el-button
+                    size="small"
+                    type="danger"
+                    plain
+                    @click="openReject(row)"
+                    :disabled="!canRejectRow(row)"
+                  >
+                    拒收
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <div v-if="!isDocsExpanded(batch) && hiddenDocCount(batch) > 0" class="doc-more">
+              还有 {{ hiddenDocCount(batch) }} 张未展示
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div class="pagination">
         <el-pagination
@@ -139,8 +180,7 @@
       </div>
     </el-card>
 
-    <!-- 收货确认 -->
-    <el-dialog v-model="receiveDialogVisible" title="收货确认（可部分）" width="880px" @closed="focusSnInput">
+    <el-dialog v-model="receiveDialogVisible" title="收货确认（可部分）" width="880px">
       <div v-loading="receiveLoading">
         <div v-if="currentRecord">
           <el-descriptions :column="2" border size="small">
@@ -236,8 +276,7 @@
       </template>
     </el-dialog>
 
-    <!-- 拒收 -->
-    <el-dialog v-model="rejectDialogVisible" title="拒收退库" width="520px" @closed="focusSnInput">
+    <el-dialog v-model="rejectDialogVisible" title="拒收退库" width="520px">
       <el-form label-width="100px">
         <el-form-item label="拒收原因" required>
           <el-input v-model="rejectForm.reason" type="textarea" :rows="3" placeholder="请填写拒收原因" />
@@ -253,9 +292,11 @@
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { stockApi } from '@/api/stock'
 import { useUserStore } from '@/stores/user'
+
+const MAX_DOC_PREVIEW = 8
 
 const userStore = useUserStore()
 
@@ -263,8 +304,6 @@ const loading = ref(false)
 const receiveLoading = ref(false)
 const submitting = ref(false)
 
-const snInputRef = ref(null)
-const snInput = ref('')
 const keyword = ref('')
 const statusFilter = ref('pending_receive')
 
@@ -276,10 +315,10 @@ const selectableWarehouses = computed(() => {
   const uid = userStore.user?.id
   return list.filter((w) => w.manager_id === uid)
 })
-
 const selectedWarehouseIds = ref([])
 
-const records = ref([])
+const batchRecords = ref([])
+const expandedDocsMap = ref({})
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -291,7 +330,6 @@ const currentRecord = ref(null)
 const selectedMainSns = reactive(new Set())
 const auxRows = ref([])
 const receiveNotes = ref('')
-
 const rejectForm = ref({ reason: '' })
 
 const formatDateTime = (iso) => {
@@ -322,22 +360,127 @@ const statusTagType = (s) => {
   return 'info'
 }
 
-const mainPending = (row) => {
-  const items = Array.isArray(row?.items) ? row.items : []
-  return items.filter((it) => it?.is_main_device).reduce((sum, it) => sum + Number(it?.pending_quantity || 0), 0)
-}
-
-const auxPending = (row) => {
-  const items = Array.isArray(row?.items) ? row.items : []
-  return items.filter((it) => !it?.is_main_device).reduce((sum, it) => sum + Number(it?.pending_quantity || 0), 0)
-}
-
 const canReceiveRow = (row) => ['pending_receive', 'partially_received'].includes(String(row?.status || ''))
 const canRejectRow = (row) => String(row?.status || '') === 'pending_receive'
 
-const focusSnInput = async () => {
-  await nextTick()
-  snInputRef.value?.focus?.()
+const normalizeDoc = (doc) => ({
+  id: doc?.id,
+  document_number: String(doc?.document_number || '-'),
+  out_document_number: String(doc?.out_document_number || '-'),
+  out_warehouse_name: String(doc?.out_warehouse_name || ''),
+  warehouse_name: String(doc?.warehouse_name || ''),
+  operator_name: String(doc?.operator_name || ''),
+  status: String(doc?.status || ''),
+  main_device_count: Number(doc?.main_device_count || 0),
+  aux_total_quantity: Number(doc?.aux_total_quantity || 0),
+  pending_total_quantity: Number(doc?.pending_total_quantity || 0),
+  approval_comments: String(doc?.approval_comments || ''),
+  created_at: doc?.created_at || null,
+  operation_time: doc?.operation_time || null,
+})
+
+const normalizeBatch = (batch) => {
+  const docs = Array.isArray(batch?.documents) ? batch.documents.map(normalizeDoc) : []
+  docs.sort((a, b) => (new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()))
+  return {
+    batch_id: String(batch?.batch_id || '-'),
+    status: String(batch?.status || 'pending_receive'),
+    created_at: batch?.created_at || null,
+    latest_created_at: batch?.latest_created_at || null,
+    batch_split_count: Number(batch?.batch_split_count || docs.length || 1),
+    document_count: Number(batch?.document_count || docs.length || 0),
+    main_device_count: Number(batch?.main_device_count || 0),
+    aux_total_quantity: Number(batch?.aux_total_quantity || 0),
+    pending_total_quantity: Number(batch?.pending_total_quantity || 0),
+    reject_reasons: Array.isArray(batch?.reject_reasons)
+      ? batch.reject_reasons.map(x => String(x || '').trim()).filter(Boolean)
+      : [],
+    documents: docs,
+  }
+}
+
+const initExpandState = (list, reset = false) => {
+  const next = reset ? {} : { ...(expandedDocsMap.value || {}) }
+  for (const batch of list || []) {
+    const key = String(batch?.batch_id || '').trim()
+    if (!key || Object.prototype.hasOwnProperty.call(next, key)) continue
+    const size = Array.isArray(batch?.documents) ? batch.documents.length : 0
+    next[key] = size <= MAX_DOC_PREVIEW
+  }
+  expandedDocsMap.value = next
+}
+
+const isDocsExpanded = (batch) => {
+  const key = String(batch?.batch_id || '').trim()
+  if (!key) return true
+  if (!Object.prototype.hasOwnProperty.call(expandedDocsMap.value || {}, key)) {
+    const size = Array.isArray(batch?.documents) ? batch.documents.length : 0
+    return size <= MAX_DOC_PREVIEW
+  }
+  return !!expandedDocsMap.value[key]
+}
+
+const visibleDocs = (batch) => {
+  const docs = Array.isArray(batch?.documents) ? batch.documents : []
+  if (isDocsExpanded(batch)) return docs
+  return docs.slice(0, MAX_DOC_PREVIEW)
+}
+
+const hiddenDocCount = (batch) => {
+  const docs = Array.isArray(batch?.documents) ? batch.documents : []
+  if (isDocsExpanded(batch)) return 0
+  return Math.max(0, docs.length - MAX_DOC_PREVIEW)
+}
+
+const toggleDocs = (batch) => {
+  const key = String(batch?.batch_id || '').trim()
+  if (!key) return
+  const cur = isDocsExpanded(batch)
+  expandedDocsMap.value = { ...(expandedDocsMap.value || {}), [key]: !cur }
+}
+
+const collectBatchRejectRows = (batch) => {
+  const rows = []
+  for (const doc of batch?.documents || []) {
+    if (String(doc?.status || '') !== 'rejected') continue
+    const reason = String(doc?.approval_comments || '').trim()
+    rows.push({
+      document_number: String(doc?.document_number || '-'),
+      reason: reason || '未填写驳回原因',
+    })
+  }
+  if (rows.length > 0) return rows
+  const fallback = Array.isArray(batch?.reject_reasons)
+    ? batch.reject_reasons.map(x => String(x || '').trim()).filter(Boolean)
+    : []
+  return fallback.map((reason) => ({ document_number: '-', reason }))
+}
+
+const showBatchRejectReason = (batch) => collectBatchRejectRows(batch).length > 0
+
+const rejectReasonPreview = (batch) => {
+  const rows = collectBatchRejectRows(batch)
+  if (rows.length === 0) return '未填写驳回原因'
+  const first = rows[0]
+  const base = first.document_number && first.document_number !== '-'
+    ? `${first.document_number}：${first.reason}`
+    : first.reason
+  return base.length > 36 ? `${base.slice(0, 36)}...` : base
+}
+
+const openBatchRejectReason = (batch) => {
+  const rows = collectBatchRejectRows(batch)
+  const content = rows.length
+    ? rows.map((row, idx) => {
+      if (row.document_number && row.document_number !== '-') {
+        return `${idx + 1}. 退库单号：${row.document_number}\n${row.reason}`
+      }
+      return `${idx + 1}. ${row.reason}`
+    }).join('\n\n')
+    : '未填写驳回原因'
+  ElMessageBox.alert(content, `批次 ${batch?.batch_id || '-'} - 驳回原因`, {
+    confirmButtonText: '确定',
+  })
 }
 
 const loadWarehouses = async () => {
@@ -366,55 +509,14 @@ const loadData = async () => {
     if (selectedWarehouseIds.value?.length > 0) {
       params.warehouse_ids = selectedWarehouseIds.value.join(',')
     }
-
-    const res = await stockApi.listReturnsWorkbench(params)
-    records.value = res.records || []
-    total.value = res.total || 0
+    const res = await stockApi.listReturnWorkbenchBatches(params)
+    const list = Array.isArray(res?.records) ? res.records.map(normalizeBatch) : []
+    batchRecords.value = list
+    total.value = Number(res?.total || 0)
+    initExpandState(list, true)
   } catch (error) {
-    console.error('加载退库收货列表失败:', error)
-    ElMessage.error(error?.response?.data?.detail || '加载退库收货列表失败')
-  } finally {
-    loading.value = false
-    await focusSnInput()
-  }
-}
-
-const handleQuickLookup = async () => {
-  const sn = snInput.value?.trim()
-  if (!sn) {
-    ElMessage.warning('请先输入SN')
-    return
-  }
-
-  try {
-    loading.value = true
-    const params = {
-      status_filter: 'pending_receive',
-      sn,
-      skip: 0,
-      limit: 5,
-    }
-    if (selectedWarehouseIds.value?.length > 0) {
-      params.warehouse_ids = selectedWarehouseIds.value.join(',')
-    }
-
-    const res = await stockApi.listReturnsWorkbench(params)
-    const list = res.records || []
-    if (list.length === 0) {
-      ElMessage.warning('未找到该SN对应的待收货退库单')
-      return
-    }
-    if (list.length > 1) {
-      ElMessage.warning('找到多条记录，请在列表中确认后操作')
-      records.value = list
-      total.value = res.total || list.length
-      currentPage.value = 1
-      return
-    }
-    openReceive(list[0], sn)
-  } catch (error) {
-    console.error('SN快速查找失败:', error)
-    ElMessage.error(error?.response?.data?.detail || 'SN快速查找失败')
+    console.error('加载退库批次失败:', error)
+    ElMessage.error(error?.response?.data?.detail || '加载退库批次失败')
   } finally {
     loading.value = false
   }
@@ -428,13 +530,10 @@ const normalizeAuxRows = (record) => {
   const items = Array.isArray(record?.items) ? record.items : []
   auxRows.value = items
     .filter((it) => !it?.is_main_device)
-    .map((it) => ({
-      ...it,
-      _receive_qty: 0,
-    }))
+    .map((it) => ({ ...it, _receive_qty: 0 }))
 }
 
-const openReceive = async (row, scannedSn = '') => {
+const openReceive = async (row) => {
   receiveDialogVisible.value = true
   currentRecord.value = null
   receiveNotes.value = ''
@@ -452,12 +551,6 @@ const openReceive = async (row, scannedSn = '') => {
   } finally {
     receiveLoading.value = false
     normalizeAuxRows(currentRecord.value)
-    if (scannedSn) {
-      const hit = (currentRecord.value?.items || []).find((it) => it?.is_main_device && String(it.serial_number || '') === scannedSn)
-      if (hit && Number(hit.pending_quantity || 0) > 0) {
-        selectedMainSns.add(scannedSn)
-      }
-    }
     await nextTick()
   }
 }
@@ -541,7 +634,6 @@ const submitReceive = async () => {
     })
     ElMessage.success('收货确认成功')
     receiveDialogVisible.value = false
-    snInput.value = ''
     await loadData()
   } catch (error) {
     console.error('收货确认失败:', error)
@@ -565,7 +657,6 @@ const submitReject = async () => {
     })
     ElMessage.success('已拒收退库申请')
     rejectDialogVisible.value = false
-    snInput.value = ''
     await loadData()
   } catch (error) {
     console.error('拒收失败:', error)
@@ -600,10 +691,129 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 
+.table-card {
+  margin-bottom: 12px;
+}
+
 .table-meta {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 12px;
+}
+
+.batch-list {
+  display: grid;
+  gap: 14px;
+}
+
+.batch-card {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  padding: 14px;
+  background: #fff;
+}
+
+.batch-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.batch-id {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.batch-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.batch-stats {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.stat-item {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+
+.stat-item .k {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.stat-item .v {
+  margin-top: 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.batch-reject {
+  margin-top: 10px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.reject-title {
+  color: #b91c1c;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.reject-content {
+  color: #7f1d1d;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reject-action {
+  color: #991b1b;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.doc-box {
+  margin-top: 12px;
+}
+
+.doc-box-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.doc-title {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.doc-more {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
 }
 
 .pagination {
@@ -639,18 +849,13 @@ onMounted(async () => {
 }
 
 .chip.accent {
-  border-color: rgba(59, 130, 246, 0.34);
-  background: rgba(59, 130, 246, 0.08);
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
 }
 
 .main-sn-actions {
   display: flex;
-  align-items: center;
   gap: 8px;
-  margin: 6px 0 12px;
-}
-
-.dialog-form {
-  margin-top: 16px;
+  margin-bottom: 8px;
 }
 </style>

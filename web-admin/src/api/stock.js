@@ -162,8 +162,14 @@ export const stockApi = {
     request.post('/api/stock/manual-stock-out', data),
 
   // ===== 退库（新方案：按出库单明细，可部分收货）=====
+  createReturnByActual: (data) =>
+    request.post('/api/stock/returns/by-actual', data),
+
   listReturnsWorkbench: (params = {}) =>
     request.get('/api/stock/returns', { params }),
+
+  listReturnWorkbenchBatches: (params = {}) =>
+    request.get('/api/stock/returns/workbench-batches', { params }),
 
   getReturnDetail: (id) =>
     request.get(`/api/stock/returns/${id}`),

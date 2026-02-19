@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload, aliased
-from sqlalchemy import and_, or_, desc, func, case
-from typing import List, Optional, Dict
+from sqlalchemy import and_, or_, desc, func, case, text
+from typing import List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel
 import uuid
 import os
 from datetime import datetime
 import logging
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -8314,6 +8314,941 @@ async def create_return_request(
     return {"return_transaction_id": ret_id, "document_number": ret_doc, "status": ret_trans.approval_status}
 
 
+def _display_user_name(user: Optional[User]) -> Optional[str]:
+    if not user:
+        return None
+    name = (getattr(user, "full_name", None) or getattr(user, "username", None) or "").strip()
+    return name or None
+
+
+def _build_return_error_detail(
+    *,
+    code: str,
+    title: str,
+    reason: str,
+    suggestion: str,
+    related_info: Optional[Dict[str, Any]] = None,
+    actions: Optional[List[str]] = None,
+) -> dict:
+    return {
+        "code": code,
+        "title": title,
+        "reason": reason,
+        "suggestion": suggestion,
+        "related_info": related_info or {},
+        "actions": actions or [],
+    }
+
+
+def _raise_return_error(
+    *,
+    code: str,
+    title: str,
+    reason: str,
+    suggestion: str,
+    related_info: Optional[Dict[str, Any]] = None,
+    actions: Optional[List[str]] = None,
+    status_code: int = 400,
+) -> None:
+    raise HTTPException(
+        status_code=status_code,
+        detail=_build_return_error_detail(
+            code=code,
+            title=title,
+            reason=reason,
+            suggestion=suggestion,
+            related_info=related_info,
+            actions=actions,
+        ),
+    )
+
+
+def _db_dialect_name(db: Session) -> str:
+    try:
+        bind = db.get_bind()
+        return str(getattr(getattr(bind, "dialect", None), "name", "") or "").lower()
+    except Exception:
+        return ""
+
+
+def _begin_immediate_if_sqlite(db: Session) -> None:
+    """SQLite 下抢占写锁，避免并发退库导致辅料可退额度被同时读取。"""
+    if _db_dialect_name(db) != "sqlite":
+        return
+    try:
+        db.execute(text("BEGIN IMMEDIATE"))
+    except OperationalError as exc:
+        msg = str(exc).lower()
+        if "within a transaction" in msg:
+            return
+        if "database is locked" in msg:
+            _raise_return_error(
+                code="submit_busy",
+                title="系统繁忙",
+                reason="当前有其他退库提交正在处理，暂时无法完成本次额度锁定。",
+                suggestion="请稍后重试。",
+                actions=["retry"],
+                status_code=409,
+            )
+        raise
+
+
+def _get_accessible_stock_out_ids_for_user(db: Session, current_user: User) -> List[str]:
+    legacy_pick_exists = db.query(PickupRecord.id).filter(
+        PickupRecord.transaction_id == StockTransaction.id,
+        PickupRecord.picker_id == current_user.id,
+    ).exists()
+
+    rows = (
+        db.query(StockTransaction.id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            or_(
+                StockTransaction.issued_to == current_user.id,
+                StockTransaction.operator_id == current_user.id,
+                legacy_pick_exists,
+            ),
+        )
+        .all()
+    )
+    return [str(r[0]) for r in rows if r and r[0]]
+
+
+def _build_stock_out_meta_map(db: Session, out_ids: List[str]) -> Dict[str, dict]:
+    if not out_ids:
+        return {}
+    rows = (
+        db.query(StockTransaction)
+        .options(
+            joinedload(StockTransaction.warehouse),
+            joinedload(StockTransaction.operator),
+        )
+        .filter(
+            StockTransaction.id.in_(out_ids),
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+        )
+        .all()
+    )
+    out_map: Dict[str, dict] = {}
+    for out in rows:
+        out_id = str(out.id)
+        out_map[out_id] = {
+            "out_transaction_id": out_id,
+            "out_document_number": out.document_number,
+            "out_operation_time": to_utc_iso(out.operation_time) if out.operation_time else None,
+            "out_operation_time_raw": out.operation_time,
+            "out_warehouse_id": out.warehouse_id,
+            "out_warehouse_name": out.warehouse.warehouse_name if out.warehouse else None,
+            "out_operator_name": _display_user_name(out.operator),
+        }
+    return out_map
+
+
+def _build_aux_returnable_rows_for_user(
+    db: Session,
+    current_user: User,
+    *,
+    equipment_ids: Optional[List[int]] = None,
+    lock_rows: bool = False,
+) -> List[dict]:
+    out_ids = _get_accessible_stock_out_ids_for_user(db, current_user)
+    if not out_ids:
+        return []
+
+    out_meta_map = _build_stock_out_meta_map(db, out_ids)
+    if not out_meta_map:
+        return []
+
+    eid_list = []
+    if equipment_ids:
+        eid_set = set()
+        for eid in equipment_ids:
+            try:
+                value = int(eid)
+            except Exception:
+                continue
+            if value > 0:
+                eid_set.add(value)
+        eid_list = sorted(eid_set)
+
+    aux_out_query = (
+        db.query(
+            StockTransaction.id.label("out_id"),
+            StockTransactionItem.equipment_id.label("equipment_id"),
+            Equipment.equipment_name.label("equipment_name"),
+            Equipment.equipment_code.label("equipment_code"),
+            Equipment.unit.label("unit"),
+            StockTransactionItem.quantity.label("out_qty"),
+        )
+        .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+        .join(Equipment, Equipment.id == StockTransactionItem.equipment_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransaction.id.in_(out_ids),
+            Equipment.category == EquipmentCategoryEnum.AUXILIARY,
+        )
+    )
+    if eid_list:
+        aux_out_query = aux_out_query.filter(StockTransactionItem.equipment_id.in_(eid_list))
+    if lock_rows and _db_dialect_name(db) != "sqlite":
+        aux_out_query = aux_out_query.with_for_update()
+    aux_out_base_rows = aux_out_query.all()
+
+    aux_out_map: Dict[Tuple[str, int], dict] = {}
+    for row in aux_out_base_rows:
+        out_id = str(row.out_id)
+        equipment_id = int(row.equipment_id)
+        key = (out_id, equipment_id)
+        cur = aux_out_map.get(key)
+        if not cur:
+            cur = {
+                "out_id": out_id,
+                "equipment_id": equipment_id,
+                "equipment_name": row.equipment_name,
+                "equipment_code": row.equipment_code,
+                "unit": row.unit,
+                "out_qty": 0,
+            }
+            aux_out_map[key] = cur
+        cur["out_qty"] += int(row.out_qty or 0)
+    aux_out_rows = list(aux_out_map.values())
+
+    reserved_query = (
+        db.query(
+            StockTransaction.related_transaction_id.label("out_id"),
+            StockTransactionItem.equipment_id.label("equipment_id"),
+            StockTransactionItem.quantity.label("reserved_qty"),
+        )
+        .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+            StockTransaction.related_transaction_id.in_(out_ids),
+            StockTransaction.approval_status.notin_(["rejected", "canceled"]),
+            StockTransactionItem.equipment_instance_id.is_(None),
+        )
+    )
+    if eid_list:
+        reserved_query = reserved_query.filter(StockTransactionItem.equipment_id.in_(eid_list))
+    if lock_rows and _db_dialect_name(db) != "sqlite":
+        reserved_query = reserved_query.with_for_update()
+    reserved_rows = reserved_query.all()
+    reserved_map: Dict[Tuple[str, int], int] = {}
+    for rr in reserved_rows:
+        key = (str(rr.out_id), int(rr.equipment_id))
+        reserved_map[key] = int(reserved_map.get(key, 0) or 0) + int(rr.reserved_qty or 0)
+
+    rows: List[dict] = []
+    for row in aux_out_rows:
+        out_id = str(row["out_id"])
+        if out_id not in out_meta_map:
+            continue
+        equipment_id = int(row["equipment_id"])
+        out_qty = int(row["out_qty"] or 0)
+        reserved_qty = int(reserved_map.get((out_id, equipment_id), 0) or 0)
+        max_returnable = max(out_qty - reserved_qty, 0)
+        if max_returnable <= 0:
+            continue
+
+        meta = out_meta_map[out_id]
+        rows.append(
+            {
+                "out_transaction_id": out_id,
+                "out_document_number": meta.get("out_document_number"),
+                "out_operation_time": meta.get("out_operation_time"),
+                "out_operation_time_raw": meta.get("out_operation_time_raw"),
+                "out_warehouse_id": meta.get("out_warehouse_id"),
+                "out_warehouse_name": meta.get("out_warehouse_name"),
+                "out_operator_name": meta.get("out_operator_name"),
+                "equipment_id": equipment_id,
+                "equipment_name": row["equipment_name"],
+                "equipment_code": row["equipment_code"],
+                "unit": row["unit"],
+                "out_quantity": out_qty,
+                "reserved_quantity": reserved_qty,
+                "max_returnable": max_returnable,
+            }
+        )
+
+    rows.sort(key=lambda x: x.get("out_operation_time_raw") or datetime.min)
+    return rows
+
+
+def _validate_actual_return_sn(
+    db: Session,
+    *,
+    current_user: User,
+    sn: str,
+) -> Tuple[bool, dict]:
+    sn_value = str(sn or "").strip()
+    if not sn_value:
+        return False, _build_return_error_detail(
+            code="scan_invalid",
+            title="扫码无效",
+            reason="未识别到有效的主设备SN。",
+            suggestion="请重新扫码主设备标签，确认二维码/条码清晰。",
+            related_info={"sn": sn_value or None},
+            actions=["rescan"],
+        )
+
+    inst = (
+        db.query(EquipmentInstance)
+        .options(joinedload(EquipmentInstance.equipment))
+        .filter(EquipmentInstance.serial_number == sn_value)
+        .first()
+    )
+    if not inst:
+        return False, _build_return_error_detail(
+            code="sn_not_found",
+            title="SN未建档",
+            reason=f"扫码SN为 {sn_value}，系统中不存在该设备SN记录。",
+            suggestion="若该设备确实需要入库，请走新入库流程；否则请联系仓库管理员核对设备台账。",
+            related_info={"sn": sn_value},
+            actions=["go_new_inbound", "contact_warehouse_admin"],
+        )
+
+    owner_name = None
+    if getattr(inst, "issued_to", None):
+        owner = db.query(User).filter(User.id == inst.issued_to).first()
+        owner_name = _display_user_name(owner)
+
+    legacy_pick_exists = db.query(PickupRecord.id).filter(
+        PickupRecord.transaction_id == StockTransaction.id,
+        PickupRecord.picker_id == current_user.id,
+    ).exists()
+
+    out_row = (
+        db.query(
+            StockTransaction.id.label("out_id"),
+            StockTransaction.document_number.label("out_document_number"),
+            StockTransaction.operation_time.label("out_operation_time"),
+            StockTransaction.warehouse_id.label("out_warehouse_id"),
+            Warehouse.warehouse_name.label("out_warehouse_name"),
+            StockTransaction.operator_id.label("out_operator_id"),
+            User.full_name.label("out_operator_full_name"),
+            User.username.label("out_operator_username"),
+            StockTransactionItem.equipment_id.label("equipment_id"),
+            StockTransactionItem.equipment_instance_id.label("equipment_instance_id"),
+        )
+        .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+        .outerjoin(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+        .outerjoin(User, User.id == StockTransaction.operator_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransactionItem.equipment_instance_id == inst.id,
+            or_(
+                StockTransaction.issued_to == current_user.id,
+                StockTransaction.operator_id == current_user.id,
+                legacy_pick_exists,
+            ),
+        )
+        .order_by(desc(StockTransaction.operation_time))
+        .first()
+    )
+
+    if not out_row:
+        if inst.issued_to and inst.issued_to != current_user.id:
+            return False, _build_return_error_detail(
+                code="sn_not_owned",
+                title="SN归属非当前用户",
+                reason=f"SN {sn_value} 存在，但当前归属不是你，无法发起退库。",
+                suggestion="请联系仓库管理员确认设备归属后再操作。",
+                related_info={
+                    "sn": sn_value,
+                    "current_owner_name": owner_name,
+                },
+                actions=["contact_warehouse_admin"],
+            )
+        return False, _build_return_error_detail(
+            code="sn_no_traceable_out",
+            title="缺少可追溯出库记录",
+            reason=f"SN {sn_value} 未找到当前用户可退库的历史出库记录。",
+            suggestion="请联系仓库管理员核对历史出库单据与设备归属。",
+            related_info={
+                "sn": sn_value,
+                "current_owner_name": owner_name,
+            },
+            actions=["contact_warehouse_admin"],
+        )
+
+    out_operator_name = (out_row.out_operator_full_name or out_row.out_operator_username or "").strip() or None
+    related_info = {
+        "sn": sn_value,
+        "out_transaction_id": str(out_row.out_id),
+        "out_document_number": out_row.out_document_number,
+        "out_warehouse_name": out_row.out_warehouse_name,
+        "out_operator_name": out_operator_name,
+        "current_owner_name": owner_name,
+    }
+
+    active_ret = (
+        db.query(
+            StockTransaction.id.label("return_id"),
+            StockTransaction.document_number.label("return_document_number"),
+            StockTransaction.approval_status.label("return_status"),
+            StockTransaction.warehouse_id.label("return_warehouse_id"),
+            Warehouse.warehouse_name.label("return_warehouse_name"),
+        )
+        .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+        .outerjoin(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+            StockTransaction.related_transaction_id == str(out_row.out_id),
+            StockTransaction.approval_status.notin_(["rejected", "canceled"]),
+            StockTransactionItem.equipment_instance_id == inst.id,
+        )
+        .order_by(desc(StockTransaction.created_at))
+        .first()
+    )
+
+    if active_ret or _enum_value(inst.status) == InventoryStatusEnum.RETURN_PENDING_RECEIVE.value:
+        if active_ret:
+            related_info.update(
+                {
+                    "existing_return_transaction_id": str(active_ret.return_id),
+                    "existing_return_document_number": active_ret.return_document_number,
+                    "existing_return_status": active_ret.return_status,
+                    "existing_return_warehouse_name": active_ret.return_warehouse_name,
+                }
+            )
+        return False, _build_return_error_detail(
+            code="sn_pending_return",
+            title="SN已存在退库申请",
+            reason=f"SN {sn_value} 已在退库流程中，不能重复提交。",
+            suggestion="请先查看已存在的退库单处理进度；如需调整，先取消原申请再重提。",
+            related_info=related_info,
+            actions=["view_existing_return"],
+        )
+
+    inst_status = _enum_value(inst.status)
+    if inst_status != InventoryStatusEnum.ISSUED.value:
+        return False, _build_return_error_detail(
+            code="sn_status_invalid",
+            title="SN当前状态不可退库",
+            reason=f"SN {sn_value} 当前状态为 {inst_status or '-'}，不满足退库条件。",
+            suggestion="请先核对设备状态；若设备已在库则无需退库，若状态异常请联系仓库管理员处理。",
+            related_info={**related_info, "current_status": inst_status},
+            actions=["contact_warehouse_admin"],
+        )
+
+    return True, {
+        "sn": sn_value,
+        "equipment_instance_id": inst.id,
+        "equipment_id": out_row.equipment_id,
+        "out_transaction_id": str(out_row.out_id),
+        "out_document_number": out_row.out_document_number,
+        "out_warehouse_id": out_row.out_warehouse_id,
+        "out_warehouse_name": out_row.out_warehouse_name,
+        "out_operator_name": out_operator_name,
+        "current_owner_name": owner_name,
+    }
+
+
+@router.post("/returns/validate-sn")
+async def validate_return_sn_for_actual(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """校验主设备 SN 是否可用于“按实际申请退库”。"""
+    _ensure_not_surveyor(current_user)
+    sn = (payload.get("sn") or "").strip() if isinstance(payload, dict) else ""
+    ok, result = _validate_actual_return_sn(db, current_user=current_user, sn=sn)
+    if not ok:
+        raise HTTPException(status_code=400, detail=result)
+    return {"ok": True, "data": result}
+
+
+@router.get("/returns/actual-candidates")
+async def get_actual_return_candidates(
+    keyword: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取“按实际申请退库”的候选数据（主要用于辅料可退上限展示）。"""
+    _ensure_not_surveyor(current_user)
+
+    rows = _build_aux_returnable_rows_for_user(db, current_user)
+    kw = (keyword or "").strip().lower()
+
+    aux_map: Dict[int, dict] = {}
+    for row in rows:
+        equipment_id = int(row["equipment_id"])
+        item = aux_map.get(equipment_id)
+        if not item:
+            item = {
+                "equipment_id": equipment_id,
+                "equipment_name": row.get("equipment_name"),
+                "equipment_code": row.get("equipment_code"),
+                "unit": row.get("unit"),
+                "max_returnable": 0,
+                "related_out_count": 0,
+            }
+            aux_map[equipment_id] = item
+        item["max_returnable"] += int(row.get("max_returnable") or 0)
+        item["related_out_count"] += 1
+
+    aux_items = list(aux_map.values())
+    if kw:
+        aux_items = [
+            it
+            for it in aux_items
+            if kw in str(it.get("equipment_name") or "").lower()
+            or kw in str(it.get("equipment_code") or "").lower()
+        ]
+
+    aux_items.sort(key=lambda x: (str(x.get("equipment_name") or ""), int(x.get("equipment_id") or 0)))
+
+    main_issued_count = (
+        db.query(func.count(EquipmentInstance.id))
+        .join(Equipment, Equipment.id == EquipmentInstance.equipment_id)
+        .filter(
+            Equipment.category == EquipmentCategoryEnum.MAIN_DEVICE,
+            EquipmentInstance.issued_to == current_user.id,
+            EquipmentInstance.status == InventoryStatusEnum.ISSUED,
+        )
+        .scalar()
+        or 0
+    )
+    main_pending_return_count = (
+        db.query(func.count(EquipmentInstance.id))
+        .join(Equipment, Equipment.id == EquipmentInstance.equipment_id)
+        .filter(
+            Equipment.category == EquipmentCategoryEnum.MAIN_DEVICE,
+            EquipmentInstance.issued_to == current_user.id,
+            EquipmentInstance.status == InventoryStatusEnum.RETURN_PENDING_RECEIVE,
+        )
+        .scalar()
+        or 0
+    )
+
+    return {
+        "aux_items": aux_items,
+        "summary": {
+            "main_returnable_count": int(main_issued_count),
+            "main_pending_return_count": int(main_pending_return_count),
+            "aux_item_count": len(aux_items),
+            "aux_total_max_returnable": int(sum(int(it.get("max_returnable") or 0) for it in aux_items)),
+        },
+    }
+
+
+@router.post("/returns/by-actual")
+async def create_return_request_by_actual(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按实际申请退库：不要求用户手工选择出库单，后台自动关联并拆分退库单。"""
+    _ensure_not_surveyor(current_user)
+
+    main_sns = payload.get("main_sns") if isinstance(payload, dict) else []
+    aux_items = payload.get("aux_items") if isinstance(payload, dict) else []
+    return_warehouse_id = payload.get("return_warehouse_id") if isinstance(payload, dict) else None
+    offline_document_id = payload.get("offline_document_id") if isinstance(payload, dict) else None
+    notes = (payload.get("notes") or "").strip() if isinstance(payload, dict) else ""
+    work_order_id = (payload.get("work_order_id") or "").strip() if isinstance(payload, dict) else ""
+
+    picked_main_sns: List[str] = []
+    seen_sn = set()
+    for row in (main_sns or []):
+        sn = str(row or "").strip()
+        if not sn or sn in seen_sn:
+            continue
+        seen_sn.add(sn)
+        picked_main_sns.append(sn)
+
+    aux_req_map: Dict[int, int] = {}
+    for row in (aux_items or []):
+        if not isinstance(row, dict):
+            continue
+        try:
+            equipment_id = int(row.get("equipment_id"))
+            quantity = int(row.get("quantity") or 0)
+        except Exception:
+            continue
+        if equipment_id <= 0 or quantity <= 0:
+            continue
+        aux_req_map[equipment_id] = aux_req_map.get(equipment_id, 0) + quantity
+
+    if not picked_main_sns and not aux_req_map:
+        _raise_return_error(
+            code="empty_request",
+            title="退库内容为空",
+            reason="请至少扫码1个主设备SN或填写1条辅料退库数量。",
+            suggestion="请先扫码主设备或录入辅料数量后再提交。",
+            actions=["rescan"],
+        )
+
+    # SQLite 无行锁语义，先抢占写锁避免并发下辅料额度被双读
+    if aux_req_map:
+        _begin_immediate_if_sqlite(db)
+
+    default_return_wh = None
+    if return_warehouse_id is not None and str(return_warehouse_id).strip() != "":
+        try:
+            default_return_wh = _ensure_active_warehouse(db, int(return_warehouse_id))
+        except Exception:
+            _raise_return_error(
+                code="return_warehouse_invalid",
+                title="退入仓库无效",
+                reason="所选退入仓库不存在或不可用。",
+                suggestion="请重新选择有效仓库后再提交。",
+                actions=["choose_return_warehouse"],
+            )
+
+    offline_doc = _get_offline_document_for_use(
+        db,
+        current_user=current_user,
+        offline_document_id=offline_document_id,
+    )
+
+    validated_main: List[dict] = []
+    for sn in picked_main_sns:
+        ok, result = _validate_actual_return_sn(db, current_user=current_user, sn=sn)
+        if not ok:
+            raise HTTPException(status_code=400, detail=result)
+        validated_main.append(result)
+
+    # 复用旧退库逻辑的“检查绑定”规则
+    blocked_bindings: List[dict] = []
+    need_unbind_bindings: List[dict] = []
+    for sn in picked_main_sns:
+        try:
+            bindings = _get_blocking_bindings(db, sn=sn, current_user=current_user)
+        except Exception:
+            bindings = {"need_unbind": [], "blocked": []}
+        for b in (bindings.get("blocked") or []):
+            row = dict(b) if isinstance(b, dict) else {"detail": str(b)}
+            row["sn"] = sn
+            blocked_bindings.append(row)
+        for b in (bindings.get("need_unbind") or []):
+            row = dict(b) if isinstance(b, dict) else {"detail": str(b)}
+            row["sn"] = sn
+            need_unbind_bindings.append(row)
+
+    if blocked_bindings:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "action": "unbind_blocked",
+                "message": "存在不可解绑的检查绑定，无法发起退库",
+                "blocked_bindings": blocked_bindings,
+            },
+        )
+    if need_unbind_bindings:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "action": "need_unbind",
+                "message": "存在设备级检查绑定，需先解绑并清理检查内容",
+                "need_unbind": need_unbind_bindings,
+            },
+        )
+
+    out_alloc_map: Dict[str, dict] = {}
+    for row in validated_main:
+        out_id = str(row["out_transaction_id"])
+        if out_id not in out_alloc_map:
+            out_alloc_map[out_id] = {"main": [], "aux": {}}
+        out_alloc_map[out_id]["main"].append(row)
+
+    if aux_req_map:
+        aux_rows = _build_aux_returnable_rows_for_user(
+            db,
+            current_user,
+            equipment_ids=list(aux_req_map.keys()),
+            lock_rows=True,
+        )
+        aux_by_eid: Dict[int, List[dict]] = {}
+        for row in aux_rows:
+            eid = int(row["equipment_id"])
+            aux_by_eid.setdefault(eid, []).append(row)
+        for rows in aux_by_eid.values():
+            rows.sort(key=lambda x: x.get("out_operation_time_raw") or datetime.min)
+
+        for equipment_id, need_qty in aux_req_map.items():
+            candidates = aux_by_eid.get(int(equipment_id), [])
+            if not candidates:
+                _raise_return_error(
+                    code="aux_not_returnable",
+                    title="辅料不可退库",
+                    reason=f"辅料ID {equipment_id} 当前没有可退数量。",
+                    suggestion="请核对辅料是否已出库到当前用户名下。",
+                    related_info={"equipment_id": equipment_id, "requested_quantity": need_qty},
+                    actions=["refresh_data"],
+                )
+
+            total_available = int(sum(int(c.get("max_returnable") or 0) for c in candidates))
+            if need_qty > total_available:
+                sample_rows = [
+                    {
+                        "out_document_number": c.get("out_document_number"),
+                        "max_returnable": int(c.get("max_returnable") or 0),
+                    }
+                    for c in candidates[:5]
+                ]
+                _raise_return_error(
+                    code="aux_quota_changed",
+                    title="辅料可退额度已变化",
+                    reason=f"辅料ID {equipment_id} 本次申请数量为 {need_qty}，但当前可退总量为 {total_available}。",
+                    suggestion="请刷新页面后重试，或减少本次申请数量。",
+                    related_info={
+                        "equipment_id": equipment_id,
+                        "requested_quantity": need_qty,
+                        "max_returnable_total": total_available,
+                        "reference_documents": sample_rows,
+                    },
+                    actions=["refresh_data", "adjust_aux_quantity"],
+                    status_code=409,
+                )
+
+            remain = int(need_qty)
+            # FIFO：按最早出库优先核销
+            for cand in candidates:
+                if remain <= 0:
+                    break
+                can_use = int(cand.get("max_returnable") or 0)
+                if can_use <= 0:
+                    continue
+                take = min(remain, can_use)
+                out_id = str(cand["out_transaction_id"])
+                if out_id not in out_alloc_map:
+                    out_alloc_map[out_id] = {"main": [], "aux": {}}
+                out_alloc_map[out_id]["aux"][equipment_id] = int(out_alloc_map[out_id]["aux"].get(equipment_id, 0) or 0) + int(take)
+                remain -= take
+
+    if not out_alloc_map:
+        _raise_return_error(
+            code="empty_allocation",
+            title="未生成有效退库单",
+            reason="本次提交内容未匹配到可退库的主设备或辅料。",
+            suggestion="请刷新数据后重新扫码或调整数量。",
+            actions=["refresh_data"],
+        )
+
+    out_ids = list(out_alloc_map.keys())
+    out_meta_map = _build_stock_out_meta_map(db, out_ids)
+
+    batch_id = _build_request_no("RB", current_user.id)
+    now = datetime.now()
+    split_count = len(out_alloc_map)
+    created_docs: List[dict] = []
+    total_main_count = 0
+    total_aux_qty = 0
+
+    # 固定顺序：按出库时间升序，便于与 FIFO 认知一致
+    sorted_out_ids = sorted(
+        out_ids,
+        key=lambda oid: out_meta_map.get(oid, {}).get("out_operation_time_raw") or datetime.min,
+    )
+
+    for out_id in sorted_out_ids:
+        meta = out_meta_map.get(out_id) or {}
+        if not meta:
+            _raise_return_error(
+                code="out_document_missing",
+                title="关联出库单不存在",
+                reason=f"系统无法找到关联出库单：{out_id}",
+                suggestion="请联系仓库管理员核对出库台账后重试。",
+                related_info={"out_transaction_id": out_id},
+                actions=["contact_warehouse_admin"],
+            )
+
+        out_trans = (
+            db.query(StockTransaction)
+            .filter(
+                StockTransaction.id == out_id,
+                StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            )
+            .first()
+        )
+        if not out_trans:
+            _raise_return_error(
+                code="out_document_missing",
+                title="关联出库单不存在",
+                reason=f"系统无法找到关联出库单：{out_id}",
+                suggestion="请联系仓库管理员核对出库台账后重试。",
+                related_info={
+                    "out_transaction_id": out_id,
+                    "out_document_number": meta.get("out_document_number"),
+                },
+                actions=["contact_warehouse_admin"],
+            )
+
+        return_wh = default_return_wh or _ensure_active_warehouse(db, int(meta.get("out_warehouse_id") or 0))
+
+        doc_alloc = out_alloc_map.get(out_id) or {"main": [], "aux": {}}
+        main_rows = list(doc_alloc.get("main") or [])
+        aux_map = dict(doc_alloc.get("aux") or {})
+        doc_main_count = len(main_rows)
+        doc_aux_qty = int(sum(int(v or 0) for v in aux_map.values()))
+        if doc_main_count <= 0 and doc_aux_qty <= 0:
+            continue
+
+        ret_id = uuid.uuid4().hex
+        ret_doc = _build_request_no("RET", current_user.id)
+        loc = {
+            "_source": "return_by_actual",
+            "return_batch_id": batch_id,
+            "return_batch_split_count": split_count,
+        }
+        if work_order_id:
+            loc["work_order_id"] = work_order_id
+
+        ret_trans = StockTransaction(
+            id=ret_id,
+            transaction_type=TransactionTypeEnum.RETURN,
+            warehouse_id=return_wh.id,
+            operator_id=current_user.id,
+            offline_document_id=offline_doc.id if offline_doc else None,
+            related_transaction_id=out_id,
+            document_number=ret_doc,
+            total_quantity=doc_main_count + doc_aux_qty,
+            notes=notes or "按实际申请退库",
+            approval_status="pending_receive",
+            scan_location=loc,
+        )
+        db.add(ret_trans)
+        db.flush()
+
+        for row in main_rows:
+            inst_id = row.get("equipment_instance_id")
+            try:
+                equipment_id = int(row.get("equipment_id"))
+            except Exception:
+                equipment_id = 0
+            sn_value = str(row.get("sn") or "").strip()
+            if not inst_id or equipment_id <= 0:
+                _raise_return_error(
+                    code="sn_instance_missing",
+                    title="设备实例不存在",
+                    reason=f"SN {sn_value or '-'} 对应的设备实例不存在。",
+                    suggestion="请联系仓库管理员核对设备台账。",
+                    related_info={"sn": sn_value or None, "equipment_instance_id": inst_id},
+                    actions=["contact_warehouse_admin"],
+                )
+
+            # 原子占用：仅当状态仍为 ISSUED 才可切到 RETURN_PENDING_RECEIVE
+            updated = (
+                db.query(EquipmentInstance)
+                .filter(
+                    EquipmentInstance.id == inst_id,
+                    EquipmentInstance.status == InventoryStatusEnum.ISSUED,
+                )
+                .update(
+                    {
+                        EquipmentInstance.status: InventoryStatusEnum.RETURN_PENDING_RECEIVE,
+                        EquipmentInstance.updated_at: now,
+                    },
+                    synchronize_session=False,
+                )
+            )
+
+            if updated != 1:
+                has_active_return = (
+                    db.query(StockTransaction.id)
+                    .join(StockTransactionItem, StockTransactionItem.transaction_id == StockTransaction.id)
+                    .filter(
+                        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+                        StockTransaction.related_transaction_id == out_id,
+                        StockTransaction.approval_status.notin_(["rejected", "canceled"]),
+                        StockTransactionItem.equipment_instance_id == inst_id,
+                        StockTransaction.id != ret_id,
+                    )
+                    .first()
+                )
+                if has_active_return:
+                    _raise_return_error(
+                        code="sn_pending_return",
+                        title="SN已存在退库申请",
+                        reason=f"SN {sn_value or '-'} 在提交过程中被其他申请占用。",
+                        suggestion="请刷新后重试。",
+                        related_info={"sn": sn_value or None},
+                        actions=["refresh_data"],
+                        status_code=409,
+                    )
+
+                current_inst = db.query(EquipmentInstance).filter(EquipmentInstance.id == inst_id).first()
+                if not current_inst:
+                    _raise_return_error(
+                        code="sn_instance_missing",
+                        title="设备实例不存在",
+                        reason=f"SN {sn_value or '-'} 对应的设备实例不存在。",
+                        suggestion="请联系仓库管理员核对设备台账。",
+                        related_info={"sn": sn_value or None, "equipment_instance_id": inst_id},
+                        actions=["contact_warehouse_admin"],
+                    )
+                current_status = _enum_value(current_inst.status)
+                _raise_return_error(
+                    code="sn_status_changed",
+                    title="SN状态已变化",
+                    reason=f"SN {sn_value or '-'} 当前状态为 {current_status or '-'}，本次提交未生效。",
+                    suggestion="请刷新页面后重试。",
+                    related_info={"sn": sn_value or None, "current_status": current_status},
+                    actions=["refresh_data"],
+                    status_code=409,
+                )
+
+            db.add(
+                StockTransactionItem(
+                    transaction_id=ret_id,
+                    equipment_instance_id=inst_id,
+                    equipment_id=equipment_id,
+                    quantity=1,
+                    received_qty=0,
+                )
+            )
+
+        for equipment_id, qty in aux_map.items():
+            q = int(qty or 0)
+            if q <= 0:
+                continue
+            db.add(
+                StockTransactionItem(
+                    transaction_id=ret_id,
+                    equipment_id=int(equipment_id),
+                    quantity=q,
+                    received_qty=0,
+                )
+            )
+
+        total_main_count += doc_main_count
+        total_aux_qty += doc_aux_qty
+        created_docs.append(
+            {
+                "return_transaction_id": ret_id,
+                "return_document_number": ret_doc,
+                "status": "pending_receive",
+                "out_transaction_id": out_id,
+                "out_document_number": meta.get("out_document_number"),
+                "return_warehouse_id": return_wh.id,
+                "return_warehouse_name": return_wh.warehouse_name if return_wh else None,
+                "main_device_count": doc_main_count,
+                "aux_total_quantity": doc_aux_qty,
+            }
+        )
+
+    if not created_docs:
+        _raise_return_error(
+            code="empty_allocation",
+            title="未生成有效退库单",
+            reason="系统未生成任何退库单，请刷新后重试。",
+            suggestion="如多次出现，请联系仓库管理员排查。",
+            actions=["refresh_data", "contact_warehouse_admin"],
+        )
+
+    db.commit()
+    return {
+        "batch_id": batch_id,
+        "created_count": len(created_docs),
+        "summary": {
+            "main_device_count": int(total_main_count),
+            "aux_total_quantity": int(total_aux_qty),
+        },
+        "documents": created_docs,
+    }
+
+
 @router.post("/returns/by-sns")
 async def create_return_request_by_sns(
     payload: dict,
@@ -8449,6 +9384,8 @@ async def create_return_request_by_sns(
 
     created = []
     now = datetime.now()
+    batch_id = _build_request_no("RB", current_user.id)
+    split_count = len(group)
 
     # 逐出库单创建退库单
     for out_id, sns_group in group.items():
@@ -8482,7 +9419,11 @@ async def create_return_request_by_sns(
         ret_id = uuid.uuid4().hex
         ret_doc = _build_request_no("RET", current_user.id)
 
-        loc = {"_source": "batch_return_by_sns"}
+        loc = {
+            "_source": "batch_return_by_sns",
+            "return_batch_id": batch_id,
+            "return_batch_split_count": split_count,
+        }
         if work_order_id:
             loc["work_order_id"] = work_order_id
 
@@ -8506,6 +9447,22 @@ async def create_return_request_by_sns(
             inst = inst_by_sn.get(sn)
             if not inst:
                 continue
+            updated = (
+                db.query(EquipmentInstance)
+                .filter(
+                    EquipmentInstance.id == inst.id,
+                    EquipmentInstance.status == InventoryStatusEnum.ISSUED,
+                )
+                .update(
+                    {
+                        EquipmentInstance.status: InventoryStatusEnum.RETURN_PENDING_RECEIVE,
+                        EquipmentInstance.updated_at: now,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if updated != 1:
+                raise HTTPException(status_code=409, detail=f"SN状态已变化，无法重复退库：{sn}")
             db.add(
                 StockTransactionItem(
                     transaction_id=ret_id,
@@ -8515,8 +9472,6 @@ async def create_return_request_by_sns(
                     received_qty=0,
                 )
             )
-            inst.status = InventoryStatusEnum.RETURN_PENDING_RECEIVE
-            inst.updated_at = now
 
         created.append(
             {
@@ -8532,7 +9487,7 @@ async def create_return_request_by_sns(
         )
 
     db.commit()
-    return {"created_count": len(created), "created": created}
+    return {"batch_id": batch_id, "created_count": len(created), "created": created}
 
 
 def _serialize_return_transaction(db: Session, t: StockTransaction) -> dict:
@@ -8581,6 +9536,169 @@ def _serialize_return_transaction(db: Session, t: StockTransaction) -> dict:
         "out_warehouse_name": out_trans.warehouse.warehouse_name if out_trans and out_trans.warehouse else None,
         "items": items,
         "approval_comments": t.approval_comments,
+    }
+
+
+def _aggregate_return_batch_status(statuses: List[str]) -> str:
+    uniq = {str(s or "").strip() for s in statuses if str(s or "").strip()}
+    if not uniq:
+        return "pending_receive"
+    if uniq == {"received"}:
+        return "received"
+    if uniq == {"rejected"}:
+        return "rejected"
+    if uniq == {"canceled"}:
+        return "canceled"
+    if "pending_receive" in uniq or "partially_received" in uniq:
+        return "partially_received"
+    if "received" in uniq and ("rejected" in uniq or "canceled" in uniq):
+        return "partially_received"
+    if "rejected" in uniq:
+        return "rejected"
+    if "canceled" in uniq:
+        return "canceled"
+    return "pending_receive"
+
+
+@router.get("/my-return-batches")
+async def list_my_return_batches(
+    status_filter: str = "all",
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """退库批次列表：一次提交视为一个批次，后端可拆分为多张退库单。"""
+    _ensure_not_surveyor(current_user)
+
+    try:
+        page = int(page or 1)
+    except Exception:
+        page = 1
+    page = max(1, page)
+
+    try:
+        page_size = int(page_size or 20)
+    except Exception:
+        page_size = 20
+    page_size = max(1, min(page_size, 50))
+
+    query = (
+        db.query(StockTransaction)
+        .options(
+            joinedload(StockTransaction.warehouse),
+            joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment),
+            joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment_instance),
+        )
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+            StockTransaction.operator_id == current_user.id,
+        )
+        .order_by(desc(StockTransaction.created_at))
+    )
+    rows = query.all()
+
+    batch_map: Dict[str, dict] = {}
+    for t in rows:
+        loc = t.scan_location if isinstance(t.scan_location, dict) else {}
+        batch_id = str(loc.get("return_batch_id") or "").strip()
+        if not batch_id:
+            batch_id = f"SINGLE-{str(t.id)[:8]}"
+
+        batch = batch_map.get(batch_id)
+        if not batch:
+            batch = {
+                "batch_id": batch_id,
+                "created_at_raw": t.created_at,
+                "latest_created_at_raw": t.created_at,
+                "created_at": to_utc_iso(t.created_at) if t.created_at else None,
+                "document_count": 0,
+                "main_device_count": 0,
+                "aux_total_quantity": 0,
+                "pending_total_quantity": 0,
+                "statuses": [],
+                "reject_reasons": [],
+                "documents": [],
+            }
+            batch_map[batch_id] = batch
+        else:
+            if t.created_at and (batch.get("created_at_raw") is None or t.created_at < batch.get("created_at_raw")):
+                batch["created_at_raw"] = t.created_at
+                batch["created_at"] = to_utc_iso(t.created_at)
+            if t.created_at and (batch.get("latest_created_at_raw") is None or t.created_at > batch.get("latest_created_at_raw")):
+                batch["latest_created_at_raw"] = t.created_at
+
+        main_count = 0
+        aux_qty = 0
+        pending_qty = 0
+        for it in (t.transaction_items or []):
+            eq = it.equipment
+            cat = _enum_value(eq.category) if eq else None
+            qty = int(it.quantity or 0)
+            rec = int(getattr(it, "received_qty", 0) or 0)
+            pending_qty += max(qty - rec, 0)
+            if cat == EquipmentCategoryEnum.MAIN_DEVICE.value:
+                main_count += 1
+            else:
+                aux_qty += qty
+
+        batch["document_count"] += 1
+        batch["main_device_count"] += int(main_count)
+        batch["aux_total_quantity"] += int(aux_qty)
+        batch["pending_total_quantity"] += int(pending_qty)
+        batch["statuses"].append(str(t.approval_status or ""))
+        if str(t.approval_status or "") == "rejected":
+            reason = str(t.approval_comments or "").strip()
+            if reason:
+                batch["reject_reasons"].append(reason)
+
+        batch["documents"].append(
+            {
+                "id": t.id,
+                "document_number": t.document_number,
+                "status": t.approval_status,
+                "warehouse_id": t.warehouse_id,
+                "warehouse_name": t.warehouse.warehouse_name if t.warehouse else None,
+                "out_transaction_id": t.related_transaction_id,
+                "main_device_count": int(main_count),
+                "aux_total_quantity": int(aux_qty),
+                "pending_total_quantity": int(pending_qty),
+                "approval_comments": t.approval_comments,
+                "created_at": to_utc_iso(t.created_at) if t.created_at else None,
+            }
+        )
+
+    records = []
+    for batch in batch_map.values():
+        statuses = list(batch.get("statuses") or [])
+        agg_status = _aggregate_return_batch_status(statuses)
+        batch["status"] = agg_status
+        # 去重驳回原因
+        reasons = [r for r in dict.fromkeys(batch.get("reject_reasons") or []) if r]
+        batch["reject_reasons"] = reasons
+        batch["latest_created_at"] = (
+            to_utc_iso(batch.get("latest_created_at_raw")) if batch.get("latest_created_at_raw") else batch.get("created_at")
+        )
+        batch.pop("statuses", None)
+        batch.pop("created_at_raw", None)
+        batch.pop("latest_created_at_raw", None)
+        records.append(batch)
+
+    records.sort(key=lambda x: x.get("latest_created_at") or "", reverse=True)
+
+    if status_filter and status_filter != "all":
+        records = [r for r in records if str(r.get("status") or "") == str(status_filter)]
+
+    total = len(records)
+    offset = (page - 1) * page_size
+    paged = records[offset : offset + page_size]
+    has_more = offset + len(paged) < total
+    return {
+        "records": paged,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "has_more": has_more,
     }
 
 
@@ -8730,6 +9848,235 @@ async def list_return_workbench(
     rows = query.order_by(desc(StockTransaction.created_at)).offset(skip).limit(limit).all()
 
     return {"records": [_serialize_return_transaction(db, t) for t in rows], "total": total}
+
+
+@router.get("/returns/workbench-batches")
+async def list_return_workbench_batches(
+    status_filter: str = "pending_receive",
+    warehouse_ids: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
+    sn: Optional[str] = None,
+    keyword: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """仓库侧退库批次工作台（批次维度展示，单据维度操作）。"""
+    _ensure_stock_operator(current_user)
+
+    try:
+        skip = int(skip or 0)
+    except Exception:
+        skip = 0
+    skip = max(0, skip)
+
+    try:
+        limit = int(limit or 20)
+    except Exception:
+        limit = 20
+    limit = max(1, min(limit, 100))
+
+    query = db.query(StockTransaction).options(
+        joinedload(StockTransaction.warehouse),
+        joinedload(StockTransaction.operator),
+        joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment),
+        joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment_instance),
+    ).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+    )
+
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids is not None:
+        query = query.filter(StockTransaction.warehouse_id.in_(list(managed_ids)))
+
+    warehouse_id_list = []
+    if warehouse_ids:
+        for part in str(warehouse_ids).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                warehouse_id_list.append(int(part))
+            except Exception:
+                continue
+    if warehouse_id:
+        try:
+            warehouse_id_list.append(int(warehouse_id))
+        except Exception:
+            pass
+    if warehouse_id_list:
+        query = query.filter(StockTransaction.warehouse_id.in_(list(set(warehouse_id_list))))
+
+    rows = query.order_by(desc(StockTransaction.created_at)).all()
+
+    out_ids = [str(t.related_transaction_id) for t in rows if getattr(t, "related_transaction_id", None)]
+    out_meta_map = _build_stock_out_meta_map(db, list(set(out_ids)))
+
+    sn_filter = str(sn or "").strip()
+    kw = str(keyword or "").strip().lower()
+
+    batch_map: Dict[str, dict] = {}
+    for t in rows:
+        loc = t.scan_location if isinstance(t.scan_location, dict) else {}
+        batch_id = str(loc.get("return_batch_id") or "").strip()
+        if not batch_id:
+            batch_id = f"SINGLE-{str(t.id)[:8]}"
+
+        split_hint = None
+        try:
+            raw_split = loc.get("return_batch_split_count")
+            if raw_split is not None and str(raw_split).strip() != "":
+                split_hint = max(1, int(raw_split))
+        except Exception:
+            split_hint = None
+
+        out_meta = out_meta_map.get(str(t.related_transaction_id)) if t.related_transaction_id else {}
+
+        main_count = 0
+        aux_qty = 0
+        pending_qty = 0
+        main_sns = []
+        for it in (t.transaction_items or []):
+            eq = it.equipment
+            cat = _enum_value(eq.category) if eq else None
+            qty = int(it.quantity or 0)
+            rec = int(getattr(it, "received_qty", 0) or 0)
+            pending_qty += max(qty - rec, 0)
+            if cat == EquipmentCategoryEnum.MAIN_DEVICE.value:
+                main_count += 1
+                snv = str(it.equipment_instance.serial_number or "").strip() if it.equipment_instance else ""
+                if snv:
+                    main_sns.append(snv)
+            else:
+                aux_qty += qty
+
+        operator_name = None
+        if t.operator:
+            operator_name = (t.operator.full_name or t.operator.username or "").strip() or None
+
+        doc = {
+            "id": t.id,
+            "document_number": t.document_number,
+            "status": t.approval_status,
+            "warehouse_id": t.warehouse_id,
+            "warehouse_name": t.warehouse.warehouse_name if t.warehouse else None,
+            "operator_id": t.operator_id,
+            "operator_name": operator_name,
+            "out_transaction_id": t.related_transaction_id,
+            "out_document_number": out_meta.get("out_document_number"),
+            "out_warehouse_name": out_meta.get("out_warehouse_name"),
+            "out_operator_name": out_meta.get("out_operator_name"),
+            "main_device_count": int(main_count),
+            "aux_total_quantity": int(aux_qty),
+            "pending_total_quantity": int(pending_qty),
+            "approval_comments": t.approval_comments,
+            "created_at": to_utc_iso(t.created_at) if t.created_at else None,
+            "operation_time": to_utc_iso(t.operation_time) if t.operation_time else None,
+        }
+
+        batch = batch_map.get(batch_id)
+        if not batch:
+            batch = {
+                "batch_id": batch_id,
+                "batch_split_count": split_hint or 1,
+                "created_at_raw": t.created_at,
+                "latest_created_at_raw": t.created_at,
+                "document_count": 0,
+                "main_device_count": 0,
+                "aux_total_quantity": 0,
+                "pending_total_quantity": 0,
+                "reject_reasons": [],
+                "documents": [],
+                "_statuses": [],
+                "_main_sns": set(),
+            }
+            batch_map[batch_id] = batch
+        else:
+            if split_hint:
+                batch["batch_split_count"] = max(int(batch.get("batch_split_count") or 1), int(split_hint))
+            if t.created_at and (batch.get("created_at_raw") is None or t.created_at < batch.get("created_at_raw")):
+                batch["created_at_raw"] = t.created_at
+            if t.created_at and (batch.get("latest_created_at_raw") is None or t.created_at > batch.get("latest_created_at_raw")):
+                batch["latest_created_at_raw"] = t.created_at
+
+        batch["document_count"] += 1
+        batch["main_device_count"] += int(main_count)
+        batch["aux_total_quantity"] += int(aux_qty)
+        batch["pending_total_quantity"] += int(pending_qty)
+        batch["_statuses"].append(str(t.approval_status or ""))
+        if str(t.approval_status or "") == "rejected":
+            reason = str(t.approval_comments or "").strip()
+            if reason:
+                batch["reject_reasons"].append(reason)
+        batch["documents"].append(doc)
+        for snv in main_sns:
+            batch["_main_sns"].add(snv)
+
+    filtered = []
+    for batch in batch_map.values():
+        status_value = _aggregate_return_batch_status(list(batch.get("_statuses") or []))
+
+        if status_filter and status_filter != "all":
+            if status_filter == "pending_receive":
+                if status_value not in {"pending_receive", "partially_received"}:
+                    continue
+            elif status_value != status_filter:
+                continue
+
+        if sn_filter:
+            if sn_filter not in batch.get("_main_sns", set()):
+                continue
+
+        reasons = [r for r in dict.fromkeys(batch.get("reject_reasons") or []) if r]
+
+        batch["documents"].sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+        if kw:
+            hit = kw in str(batch.get("batch_id") or "").lower()
+            if not hit:
+                for doc in (batch.get("documents") or []):
+                    fields = [
+                        doc.get("document_number"),
+                        doc.get("out_document_number"),
+                        doc.get("warehouse_name"),
+                        doc.get("out_warehouse_name"),
+                        doc.get("operator_name"),
+                        doc.get("out_operator_name"),
+                        doc.get("status"),
+                        doc.get("approval_comments"),
+                    ]
+                    if any(kw in str(v).lower() for v in fields if v):
+                        hit = True
+                        break
+            if not hit:
+                for reason in reasons:
+                    if kw in str(reason).lower():
+                        hit = True
+                        break
+            if not hit:
+                continue
+
+        item = {
+            "batch_id": batch.get("batch_id"),
+            "batch_split_count": max(int(batch.get("batch_split_count") or 1), int(batch.get("document_count") or 0)),
+            "status": status_value,
+            "created_at": to_utc_iso(batch.get("created_at_raw")) if batch.get("created_at_raw") else None,
+            "latest_created_at": to_utc_iso(batch.get("latest_created_at_raw")) if batch.get("latest_created_at_raw") else None,
+            "document_count": int(batch.get("document_count") or 0),
+            "main_device_count": int(batch.get("main_device_count") or 0),
+            "aux_total_quantity": int(batch.get("aux_total_quantity") or 0),
+            "pending_total_quantity": int(batch.get("pending_total_quantity") or 0),
+            "reject_reasons": reasons,
+            "documents": batch.get("documents") or [],
+        }
+        filtered.append(item)
+
+    filtered.sort(key=lambda x: x.get("latest_created_at") or "", reverse=True)
+    total = len(filtered)
+    records = filtered[skip : skip + limit]
+    has_more = skip + len(records) < total
+    return {"records": records, "total": total, "skip": skip, "limit": limit, "has_more": has_more}
 
 
 @router.get("/returns/{return_id}")

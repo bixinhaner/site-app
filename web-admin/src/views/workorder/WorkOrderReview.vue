@@ -120,7 +120,7 @@
                   size="small"
                   :disabled="selectedReturnSns.length === 0 || returnSubmitting"
                   :loading="returnSubmitting"
-                  @click="createReturnBySns"
+                  @click="createReturnByActual"
                 >
                   发起退库申请
                 </el-button>
@@ -1319,7 +1319,7 @@ watch(
   }
 )
 
-const createReturnBySns = async () => {
+const createReturnByActual = async () => {
   const id = order.value?.id
   const sns = Array.isArray(selectedReturnSns.value) ? selectedReturnSns.value : []
   const picked = Array.from(new Set(sns.map(s => String(s || '').trim()).filter(Boolean)))
@@ -1328,18 +1328,22 @@ const createReturnBySns = async () => {
 
   try {
     returnSubmitting.value = true
-    const res = await request.post('/api/stock/returns/by-sns', {
-      sns: picked,
+    const res = await request.post('/api/stock/returns/by-actual', {
+      main_sns: picked,
       work_order_id: id,
       notes: '设备更换退库申请',
     })
-    const cnt = res?.created_count
-    ElMessage.success(`已发起退库申请（共 ${typeof cnt === 'number' ? cnt : picked.length} 台）`)
+    const mainCnt = Number(res?.summary?.main_device_count || picked.length)
+    const splitCnt = Number(res?.created_count || 0)
+    ElMessage.success(`已发起退库申请（主设备 ${mainCnt} 台，拆分 ${splitCnt || 1} 单）`)
     selectedReturnSns.value = []
   } catch (e) {
     console.error(e)
     const detail = e?.response?.data?.detail
-    ElMessage.error((typeof detail === 'string' && detail) || detail?.message || '发起退库失败')
+    const msg = typeof detail === 'string'
+      ? detail
+      : detail?.reason || detail?.message || detail?.detail || '发起退库失败'
+    ElMessage.error(msg)
   } finally {
     returnSubmitting.value = false
   }
