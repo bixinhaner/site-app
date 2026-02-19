@@ -429,7 +429,7 @@ const statuses = [
   { label: '已完成', value: 'COMPLETED' }
 ]
 const statusValueSet = new Set(statuses.map(s => s.value))
-const INSTALLED_SITE_PRESET_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'ACTIVATED']
+const INSTALLED_SITE_PRESET_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'ACTIVATED', 'COMPLETED']
 
 const parseCsvQuery = (value) => {
   const raw = String(_firstQueryValue(value) || '').trim()

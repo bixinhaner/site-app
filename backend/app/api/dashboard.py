@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, or_
+from sqlalchemy import func, desc
 from typing import Dict
 
 from app.core.database import get_db
@@ -68,10 +68,9 @@ async def get_dashboard_summary(
     site_status = {str(s or "unknown"): int(c) for s, c in site_rows}
 
     # 安装站点统计（按“相片全部提交”节点）：
-    # 开站工单已提交（含审核中/已通过/已开通），且站点未进入已激活运行。
+    # 开站工单达到已提交及以上阶段（含已完成），按站点去重统计。
     installed_site_count = int(
         db.query(func.count(func.distinct(WorkOrder.site_id)))
-        .join(Site, Site.id == WorkOrder.site_id)
         .filter(
             WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
             WorkOrder.status.in_(
@@ -80,9 +79,9 @@ async def get_dashboard_summary(
                     WorkOrderStatusEnum.UNDER_REVIEW,
                     WorkOrderStatusEnum.APPROVED,
                     WorkOrderStatusEnum.ACTIVATED,
+                    WorkOrderStatusEnum.COMPLETED,
                 ]
             ),
-            or_(Site.status.is_(None), Site.status.notin_(["operational", "maintenance"])),
         )
         .scalar()
         or 0
@@ -138,7 +137,7 @@ async def get_dashboard_summary(
         },
         "installed_sites": {
             "count": installed_site_count,
-            "node": "submitted",
+            "node": "submitted_or_later",
         },
         "sites": {"approx": False, "status": site_status},
         "site_progress": site_progress,

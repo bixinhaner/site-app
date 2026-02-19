@@ -31,7 +31,7 @@ const val = (k) => Number(props.progress?.[k] || 0)
 const cards = computed(() => [
   { key: 'survey', title: '勘察站点', value: `${val('survey_done')}/${total.value}`, desc: '完成勘察 / 总站点', icon: Tickets, type: 'info', route: { name: 'SurveyArchives' } },
   { key: 'planning', title: '规划站点', value: `${val('planning_done')}/${total.value}`, desc: '完成规划 / 总站点', icon: Finished, type: 'primary', route: { name: 'SitePlanningLld' } },
-  { key: 'installed', title: '安装站点', value: `${val('installed')}/${total.value}`, desc: '已安装未激活 / 总站点', icon: OfficeBuilding, type: 'install', route: { name: 'WorkOrderList', query: { preset: 'installed_sites' } } },
+  { key: 'installed', title: '安装站点', value: `${val('installed')}/${total.value}`, desc: '已提交及以上 / 总站点', icon: OfficeBuilding, type: 'install', route: { name: 'WorkOrderList', query: { preset: 'installed_sites' } } },
   { key: 'online', title: '上线站点', value: `${val('online')}/${total.value}`, desc: '上线及以上 / 总站点', icon: Promotion, type: 'success', route: { name: 'SiteList' } },
   { key: 'activated', title: '激活站点', value: `${val('activated')}/${total.value}`, desc: '激活及以上 / 总站点', icon: MagicStick, type: 'warning', route: { name: 'SiteList' } },
   { key: 'ssv', title: 'SSV 站点', value: `${val('ssv_passed')}/${total.value}`, desc: '通过 SSV / 总站点', icon: SuccessFilled, type: 'success', route: { name: 'SiteList' } },
