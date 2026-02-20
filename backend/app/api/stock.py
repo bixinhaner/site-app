@@ -5497,9 +5497,9 @@ async def reject_issue_draft_remaining(
         confirmed_qty = int(getattr(it, "confirmed_qty", 0) or 0)
         if planned_qty > confirmed_qty:
             pending_aux_line_count += 1
-
-    if pending_serial_count <= 0 and pending_aux_line_count <= 0:
-        raise HTTPException(status_code=400, detail="当前无可驳回的剩余项")
+    no_pending_remaining = pending_serial_count <= 0 and pending_aux_line_count <= 0
+    if no_pending_remaining and _enum_value(draft.status) == IssueDraftStatusEnum.CONFIRMED.value:
+        raise HTTPException(status_code=400, detail="当前单据已完成，无需重复收口")
 
     if pending_serial_count > 0:
         db.query(IssueDraftSerial).filter(
@@ -5523,10 +5523,11 @@ async def reject_issue_draft_remaining(
         _maybe_close_material_request(db, draft.request)
     db.commit()
     return {
-        "message": "已驳回剩余项",
+        "message": "已完成收口" if no_pending_remaining else "已驳回剩余项",
         "status": _enum_value(draft.status),
         "cleared_pending_serials": int(pending_serial_count),
         "cleared_pending_aux_lines": int(pending_aux_line_count),
+        "closed_without_remaining": bool(no_pending_remaining),
     }
 
 

@@ -137,7 +137,7 @@ npm run build                  # 生产构建
 - **退库收货（Web 管理端）**: 仓库收货页改为批次维度展示（批次头 + 单据明细），单据超过 8 条默认折叠；收货/拒收仍按单据执行
 - **首页库存入口（移动端）**: 我的设备、物料申请、审批物料申请、出库确认、退库申请、快速出库
 - **出库确认规则**: 主设备 SN 默认全选待确认项，支持手动取消个别 SN 不确认
-- **部分出库后的处理**: 当领料单进入“部分出库（partially_confirmed）”后，仓库可执行“驳回剩余”，系统会清理该单未确认 SN 与未确认辅料数量，避免剩余项长期占用
+- **部分出库后的处理**: 当领料单进入“部分出库（partially_confirmed）”后，仓库可执行“驳回剩余”，系统会清理该单未确认 SN 与未确认辅料数量，避免剩余项长期占用；若该单已无待确认剩余，也可直接收口为已完成（confirmed）
 - **设备状态**: offline → online → activated
 - **物料分类**: 支持多级分类管理
 
@@ -184,7 +184,7 @@ npm run build                  # 生产构建
 - `GET /api/stock/issue-drafts` - 领料单列表（含待出库确认）
 - `POST /api/stock/issue-drafts/{id}/confirm` - 仓库确认出库
 - `POST /api/stock/issue-drafts/{id}/reject` - 仓库驳回整单
-- `POST /api/stock/issue-drafts/{id}/reject-remaining` - 仓库驳回剩余待确认项（仅部分出库状态）
+- `POST /api/stock/issue-drafts/{id}/reject-remaining` - 仓库驳回剩余待确认项并收口（仅部分出库状态；无剩余时也可直接收口）
 - `POST /api/stock/returns/validate-sn` - 退库扫码 SN 可退校验（返回详细原因/建议）
 - `GET /api/stock/returns/actual-candidates` - 获取按实际申请退库候选数据（辅料可退上限等）
 - `POST /api/stock/returns/by-actual` - 按实际申请退库（后台自动关联并拆分单据，提交时做并发防超退校验）
