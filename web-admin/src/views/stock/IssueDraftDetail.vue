@@ -221,7 +221,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { stockApi } from '../../api/stock'
 
 const route = useRoute()
@@ -249,6 +249,11 @@ const rejectMode = ref('all')
 
 const draftId = computed(() => String(route.params.id || '').trim())
 const pendingSerials = computed(() => (draft.value?.serials || []).filter(s => s.status === 'pending'))
+const hasPendingRemaining = computed(() => {
+  const hasPendingSn = pendingSerials.value.length > 0
+  const hasPendingAux = (auxRows.value || []).some(r => Number(r.pending_qty || 0) > 0)
+  return hasPendingSn || hasPendingAux
+})
 const canConfirm = computed(() => ['pending_confirm', 'partially_confirmed'].includes(draft.value?.status))
 const canReject = computed(() => draft.value?.status === 'pending_confirm')
 const canRejectRemaining = computed(() => draft.value?.status === 'partially_confirmed')
@@ -311,9 +316,36 @@ const equipmentNameById = (equipmentId) => {
 
 const extractError = (error) => {
   const detail = error?.response?.data?.detail
-  if (!detail) return { message: error?.message || '操作失败' }
-  if (typeof detail === 'string') return { message: detail }
-  return { message: detail?.message || '操作失败', shortages: detail?.shortages }
+  if (!detail) return { message: error?.message || '操作失败', code: '' }
+  if (typeof detail === 'string') return { message: detail, code: '' }
+  return {
+    message: detail?.message || '操作失败',
+    code: String(detail?.code || '').trim(),
+    shortages: detail?.shortages,
+  }
+}
+
+const AUTO_CLOSE_REASON = '无待确认项，确认按钮触发收口'
+
+const closeDraftWithoutPending = async () => {
+  await stockApi.rejectRemainingIssueDraft(draftId.value, { reason: AUTO_CLOSE_REASON })
+  ElMessage.success('已关闭出库单')
+  selectedSerialIds.clear()
+  await load()
+}
+
+const promptCloseDraftWithoutPending = async () => {
+  try {
+    await ElMessageBox.confirm('已无可出库物料，是否关闭该出库单？', '提示', {
+      confirmButtonText: '关闭该单',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return false
+  }
+  await closeDraftWithoutPending()
+  return true
 }
 
 const load = async () => {
@@ -396,6 +428,11 @@ const onScanEnter = () => {
 const confirm = async () => {
   try {
     confirming.value = true
+    if (draft.value?.status === 'partially_confirmed' && !hasPendingRemaining.value) {
+      await promptCloseDraftWithoutPending()
+      return
+    }
+
     const serial_ids = Array.from(selectedSerialIds)
     const aux_items = auxRows.value
       .map(r => ({ equipment_id: r.equipment_id, quantity: Number(r._confirm_qty || 0) }))
@@ -412,6 +449,10 @@ const confirm = async () => {
   } catch (error) {
     console.error('确认出库失败:', error)
     const parsed = extractError(error)
+    if (parsed.code === 'no_pending_items' && draft.value?.status === 'partially_confirmed') {
+      await promptCloseDraftWithoutPending()
+      return
+    }
     if (parsed?.shortages && Array.isArray(parsed.shortages)) {
       shortages.value = parsed.shortages
       shortagesVisible.value = true

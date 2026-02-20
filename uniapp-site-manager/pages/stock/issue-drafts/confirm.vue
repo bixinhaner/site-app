@@ -205,11 +205,11 @@
 				<button class="u-btn u-btn-danger u-pressable" v-if="canReject || canRejectRemaining" :disabled="acting" @click="rejectCurrent">
 					{{ canRejectRemaining ? $t('stock.issueConfirmRejectRemainingAction') : $t('stock.issueConfirmRejectAction') }}
 				</button>
-			<button class="u-btn u-btn-primary u-pressable" v-if="canConfirm" :disabled="acting || !canSubmit" @click="submitConfirm">
-				{{ acting ? $t('common.loading') : $t('stock.issueConfirmSubmit') }}
-			</button>
+				<button class="u-btn u-btn-primary u-pressable" v-if="canConfirm" :disabled="acting || !canSubmitOrClose" @click="submitConfirm">
+					{{ acting ? $t('common.loading') : $t('stock.issueConfirmSubmit') }}
+				</button>
+			</view>
 		</view>
-	</view>
 </template>
 
 <script setup>
@@ -266,8 +266,14 @@
 	const auxConfirmTotal = computed(() => {
 		return (auxConfirmRows.value || []).reduce((sum, row) => sum + Number(row.quantity || 0), 0)
 	})
+	const hasPendingRemaining = computed(() => {
+		const hasPendingSn = pendingSerials.value.length > 0
+		const hasPendingAux = (auxConfirmRows.value || []).some(row => Number(row.pending_qty || 0) > 0)
+		return hasPendingSn || hasPendingAux
+	})
 
 	const canSubmit = computed(() => selectedSerials.value.length > 0 || auxConfirmTotal.value > 0)
+	const canSubmitOrClose = computed(() => canSubmit.value || !hasPendingRemaining.value)
 
 	const tipText = computed(() => {
 		const s = statusValue.value
@@ -291,6 +297,11 @@
 		if (typeof detail === 'string') return detail
 		return detail?.message || fallback || $t('messages.operationFailed')
 	}
+	const isNoPendingConfirmError = (data) => {
+		return String(data?.detail?.code || '') === 'no_pending_items'
+	}
+
+	const AUTO_CLOSE_REASON = '无待确认项，确认按钮触发收口'
 
 	const formatDt = (ts) => {
 		return formatDateTime(ts) || ''
@@ -472,9 +483,52 @@
 		}))
 	}
 
+	const closeDraftWithoutPending = async () => {
+		const res = await uni.request({
+			url: buildApiUrl(API_ENDPOINTS.STOCK.ISSUE_DRAFT_REJECT_REMAINING(draftId.value)),
+			method: 'POST',
+			header: getAuthHeaders(userStore.token),
+			data: { reason: AUTO_CLOSE_REASON },
+		})
+		if (res.statusCode === 200) {
+			uni.showToast({ title: $t('stock.issueConfirmNoPendingCloseSuccess'), icon: 'success' })
+			await load()
+			return true
+		}
+		if (res.statusCode === 401) {
+			userStore.logout()
+			return false
+		}
+		uni.showToast({ title: extractErrorMessage(res.data), icon: 'none' })
+		return false
+	}
+
+	const promptCloseDraftWithoutPending = async () => {
+		uni.showModal({
+			title: $t('common.confirm'),
+			content: $t('stock.issueConfirmNoPendingCloseConfirm'),
+			success: async (mr) => {
+				if (!mr.confirm) return
+				acting.value = true
+				try {
+					await closeDraftWithoutPending()
+				} catch (e) {
+					console.error('收口出库单失败:', e)
+					uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
+				} finally {
+					acting.value = false
+				}
+			},
+		})
+	}
+
 	const submitConfirm = async () => {
 		if (!canConfirm.value) return
 		if (!canSubmit.value) {
+			if (!hasPendingRemaining.value && statusValue.value === 'partially_confirmed') {
+				await promptCloseDraftWithoutPending()
+				return
+			}
 			uni.showToast({ title: $t('stock.issueConfirmNeedItems'), icon: 'none' })
 			return
 		}
@@ -512,6 +566,11 @@
 					}
 					if (res.statusCode === 401) {
 						userStore.logout()
+						return
+					}
+					if (isNoPendingConfirmError(res.data) && statusValue.value === 'partially_confirmed') {
+						acting.value = false
+						await promptCloseDraftWithoutPending()
 						return
 					}
 					uni.showToast({ title: extractErrorMessage(res.data), icon: 'none' })

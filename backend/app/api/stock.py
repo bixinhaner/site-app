@@ -5217,6 +5217,23 @@ async def _confirm_issue_draft_impl(
             continue
         aux_confirm_map[eid] = aux_confirm_map.get(eid, 0) + qty
 
+    has_pending_serial_any = any(
+        _enum_value(s.status) == IssueDraftSerialStatusEnum.PENDING.value for s in (draft.serials or [])
+    )
+    has_pending_aux_any = any(
+        int(getattr(it, "planned_qty", 0) or 0) > int(getattr(it, "confirmed_qty", 0) or 0)
+        for it in (draft.items or [])
+    )
+    if not has_pending_serial_any and not has_pending_aux_any:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "no_pending_items",
+                "message": "已无可出库物料，可直接关闭该出库单",
+                "suggested_action": "close_issue_draft",
+            },
+        )
+
     if not serial_ids_set and not aux_confirm_map:
         raise HTTPException(status_code=400, detail="请至少确认1个SN或辅料数量")
 
