@@ -179,16 +179,21 @@
 				</view>
 			</view>
 
-			<view class="section u-card" v-if="draft && canReject">
-				<view class="u-card-header">
-					<text class="u-card-title">{{ $t('stock.issueConfirmRejectReason') }}</text>
-				</view>
-				<view class="u-card-content">
-					<view class="u-form-item">
-						<textarea class="u-textarea" v-model="rejectReason" :placeholder="$t('stock.issueConfirmRejectReasonPlaceholder')" maxlength="200" />
+				<view class="section u-card" v-if="draft && (canReject || canRejectRemaining)">
+					<view class="u-card-header">
+						<text class="u-card-title">{{ canRejectRemaining ? $t('stock.issueConfirmRejectRemainingReason') : $t('stock.issueConfirmRejectReason') }}</text>
+					</view>
+					<view class="u-card-content">
+						<view class="u-form-item">
+							<textarea
+								class="u-textarea"
+								v-model="rejectReason"
+								:placeholder="canRejectRemaining ? $t('stock.issueConfirmRejectRemainingReasonPlaceholder') : $t('stock.issueConfirmRejectReasonPlaceholder')"
+								maxlength="200"
+							/>
+						</view>
 					</view>
 				</view>
-			</view>
 
 			<view class="bottom-spacer" />
 		</scroll-view>
@@ -197,9 +202,9 @@
 			<button class="u-btn u-btn-secondary u-pressable" @click="goBack">
 				{{ $t('common.back') }}
 			</button>
-			<button class="u-btn u-btn-danger u-pressable" v-if="canReject" :disabled="acting" @click="rejectDraft">
-				{{ $t('stock.issueConfirmRejectAction') }}
-			</button>
+				<button class="u-btn u-btn-danger u-pressable" v-if="canReject || canRejectRemaining" :disabled="acting" @click="rejectCurrent">
+					{{ canRejectRemaining ? $t('stock.issueConfirmRejectRemainingAction') : $t('stock.issueConfirmRejectAction') }}
+				</button>
 			<button class="u-btn u-btn-primary u-pressable" v-if="canConfirm" :disabled="acting || !canSubmit" @click="submitConfirm">
 				{{ acting ? $t('common.loading') : $t('stock.issueConfirmSubmit') }}
 			</button>
@@ -243,6 +248,7 @@
 		return ['pending_confirm', 'partially_confirmed'].includes(statusValue.value)
 	})
 	const canReject = computed(() => statusValue.value === 'pending_confirm')
+	const canRejectRemaining = computed(() => statusValue.value === 'partially_confirmed')
 
 	const pendingSerials = computed(() => {
 		return (draft.value?.serials || []).filter(s => String(s.status) === 'pending')
@@ -274,7 +280,7 @@
 	})
 
 	const bottomBarClass = computed(() => {
-		if (canConfirm.value && canReject.value) return 'triple'
+		if (canConfirm.value && (canReject.value || canRejectRemaining.value)) return 'triple'
 		if (canConfirm.value) return 'double'
 		return 'single'
 	})
@@ -559,6 +565,58 @@
 				}
 			},
 		})
+	}
+
+	const rejectRemainingDraft = async () => {
+		if (!canRejectRemaining.value) return
+		const reason = String(rejectReason.value || '').trim()
+		if (!reason) {
+			uni.showToast({ title: $t('stock.issueConfirmRejectRemainingReasonRequired'), icon: 'none' })
+			return
+		}
+
+		uni.showModal({
+			title: $t('common.confirm'),
+			content: $t('stock.issueConfirmRejectRemainingConfirm'),
+			success: async (mr) => {
+				if (!mr.confirm) return
+				acting.value = true
+				try {
+					const res = await uni.request({
+						url: buildApiUrl(API_ENDPOINTS.STOCK.ISSUE_DRAFT_REJECT_REMAINING(draftId.value)),
+						method: 'POST',
+						header: getAuthHeaders(userStore.token),
+						data: { reason },
+					})
+					if (res.statusCode === 200) {
+						uni.showToast({ title: $t('stock.issueConfirmRejectRemainingSuccess'), icon: 'success' })
+						rejectReason.value = ''
+						await load()
+						return
+					}
+					if (res.statusCode === 401) {
+						userStore.logout()
+						return
+					}
+					uni.showToast({ title: extractErrorMessage(res.data), icon: 'none' })
+				} catch (e) {
+					console.error('驳回剩余待确认项失败:', e)
+					uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
+				} finally {
+					acting.value = false
+				}
+			},
+		})
+	}
+
+	const rejectCurrent = async () => {
+		if (canRejectRemaining.value) {
+			await rejectRemainingDraft()
+			return
+		}
+		if (canReject.value) {
+			await rejectDraft()
+		}
 	}
 
 	const goBack = () => {

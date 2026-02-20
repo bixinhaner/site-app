@@ -157,6 +157,9 @@ export const stockApi = {
   rejectIssueDraft: (id, data) =>
     request.post(`/api/stock/issue-drafts/${id}/reject`, data),
 
+  rejectRemainingIssueDraft: (id, data) =>
+    request.post(`/api/stock/issue-drafts/${id}/reject-remaining`, data),
+
   // ===== 快速出库（无申请）=====
   manualStockOut: (data) =>
     request.post('/api/stock/manual-stock-out', data),

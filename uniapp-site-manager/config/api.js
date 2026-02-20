@@ -254,6 +254,7 @@ export const API_ENDPOINTS = {
     ISSUE_DRAFT_CANCEL: (id) => `/api/stock/issue-drafts/${id}/cancel`,
     ISSUE_DRAFT_CONFIRM: (id) => `/api/stock/issue-drafts/${id}/confirm`,
     ISSUE_DRAFT_REJECT: (id) => `/api/stock/issue-drafts/${id}/reject`,
+    ISSUE_DRAFT_REJECT_REMAINING: (id) => `/api/stock/issue-drafts/${id}/reject-remaining`,
     MANUAL_STOCK_OUT: '/api/stock/manual-stock-out',
     MY_STOCK_OUTS: '/api/stock/my-stock-outs',
     CREATE_RETURN: '/api/stock/returns',

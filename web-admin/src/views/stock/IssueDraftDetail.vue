@@ -90,6 +90,7 @@
 
           <div class="actions">
             <el-button v-if="canReject" type="danger" plain @click="openReject">驳回整单</el-button>
+            <el-button v-if="canRejectRemaining" type="danger" plain @click="openRejectRemaining">驳回剩余</el-button>
             <el-button
               v-if="canConfirm"
               type="primary"
@@ -203,7 +204,7 @@
     </el-dialog>
 
     <!-- 驳回对话框 -->
-    <el-dialog v-model="rejectVisible" title="驳回待确认出库单" width="520px">
+    <el-dialog v-model="rejectVisible" :title="rejectMode === 'remaining' ? '驳回剩余待确认项' : '驳回待确认出库单'" width="520px">
       <el-form label-width="90px">
         <el-form-item label="原因" required>
           <el-input v-model="rejectReason" type="textarea" :rows="3" placeholder="请输入驳回原因" />
@@ -211,7 +212,7 @@
       </el-form>
       <template #footer>
         <el-button @click="rejectVisible = false">取消</el-button>
-        <el-button type="danger" :loading="rejecting" @click="reject">确认驳回</el-button>
+        <el-button type="danger" :loading="rejecting" @click="reject">{{ rejectMode === 'remaining' ? '确认驳回剩余' : '确认驳回' }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -244,11 +245,13 @@ const shortages = ref([])
 
 const rejectVisible = ref(false)
 const rejectReason = ref('')
+const rejectMode = ref('all')
 
 const draftId = computed(() => String(route.params.id || '').trim())
 const pendingSerials = computed(() => (draft.value?.serials || []).filter(s => s.status === 'pending'))
 const canConfirm = computed(() => ['pending_confirm', 'partially_confirmed'].includes(draft.value?.status))
 const canReject = computed(() => draft.value?.status === 'pending_confirm')
+const canRejectRemaining = computed(() => draft.value?.status === 'partially_confirmed')
 
 const serialRows = computed(() => {
   const rows = (draft.value?.serials || []).map((s) => ({
@@ -420,6 +423,13 @@ const confirm = async () => {
 }
 
 const openReject = () => {
+  rejectMode.value = 'all'
+  rejectReason.value = ''
+  rejectVisible.value = true
+}
+
+const openRejectRemaining = () => {
+  rejectMode.value = 'remaining'
   rejectReason.value = ''
   rejectVisible.value = true
 }
@@ -427,8 +437,18 @@ const openReject = () => {
 const reject = async () => {
   try {
     rejecting.value = true
-    await stockApi.rejectIssueDraft(draftId.value, { reason: (rejectReason.value || '').trim() })
-    ElMessage.success('已驳回')
+    const reason = (rejectReason.value || '').trim()
+    if (!reason) {
+      ElMessage.warning('请填写驳回原因')
+      return
+    }
+    if (rejectMode.value === 'remaining') {
+      await stockApi.rejectRemainingIssueDraft(draftId.value, { reason })
+      ElMessage.success('已驳回剩余项')
+    } else {
+      await stockApi.rejectIssueDraft(draftId.value, { reason })
+      ElMessage.success('已驳回')
+    }
     rejectVisible.value = false
     selectedSerialIds.clear()
     await load()
@@ -679,4 +699,3 @@ onMounted(async () => {
   }
 }
 </style>
-

@@ -4481,7 +4481,7 @@ def _ensure_issue_draft_access(
     draft: IssueDraft,
     current_user: User,
 ) -> None:
-    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
+    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager", "manager"}
     if is_warehouse_side:
         managed_ids = _get_managed_warehouse_ids(db, current_user)
         if managed_ids is not None and draft.warehouse_id not in managed_ids:
@@ -5451,6 +5451,83 @@ async def reject_issue_draft(
     draft.reject_reason = reason
     db.commit()
     return {"message": "已驳回", "status": _enum_value(draft.status)}
+
+
+@router.post("/issue-drafts/{draft_id}/reject-remaining")
+async def reject_issue_draft_remaining(
+    draft_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_material_request_enabled(db)
+    _ensure_stock_operator(current_user)
+
+    reason = (payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写驳回原因")
+
+    draft = (
+        db.query(IssueDraft)
+        .options(
+            joinedload(IssueDraft.request).joinedload(MaterialRequest.items),
+            joinedload(IssueDraft.items),
+        )
+        .filter(IssueDraft.id == draft_id)
+        .first()
+    )
+    if not draft:
+        raise HTTPException(status_code=404, detail="领料单不存在")
+
+    _ensure_issue_draft_access(db, draft, current_user)
+    if _enum_value(draft.status) != IssueDraftStatusEnum.PARTIALLY_CONFIRMED.value:
+        raise HTTPException(status_code=400, detail="仅部分确认状态可驳回剩余项")
+
+    pending_serial_count = (
+        db.query(IssueDraftSerial.id)
+        .filter(
+            IssueDraftSerial.draft_id == draft.id,
+            IssueDraftSerial.status == IssueDraftSerialStatusEnum.PENDING,
+        )
+        .count()
+    )
+    pending_aux_line_count = 0
+    for it in draft.items or []:
+        planned_qty = int(getattr(it, "planned_qty", 0) or 0)
+        confirmed_qty = int(getattr(it, "confirmed_qty", 0) or 0)
+        if planned_qty > confirmed_qty:
+            pending_aux_line_count += 1
+
+    if pending_serial_count <= 0 and pending_aux_line_count <= 0:
+        raise HTTPException(status_code=400, detail="当前无可驳回的剩余项")
+
+    if pending_serial_count > 0:
+        db.query(IssueDraftSerial).filter(
+            IssueDraftSerial.draft_id == draft.id,
+            IssueDraftSerial.status == IssueDraftSerialStatusEnum.PENDING,
+        ).delete(synchronize_session=False)
+
+    for it in draft.items or []:
+        confirmed_qty = int(getattr(it, "confirmed_qty", 0) or 0)
+        if int(getattr(it, "planned_qty", 0) or 0) > confirmed_qty:
+            it.planned_qty = confirmed_qty
+
+    now = datetime.now()
+    draft.status = IssueDraftStatusEnum.CONFIRMED
+    draft.reject_reason = reason
+    draft.confirmed_by = current_user.id
+    draft.confirmed_at = now
+
+    db.flush()
+    if draft.request:
+        _maybe_close_material_request(db, draft.request)
+    db.commit()
+    return {
+        "message": "已驳回剩余项",
+        "status": _enum_value(draft.status),
+        "cleared_pending_serials": int(pending_serial_count),
+        "cleared_pending_aux_lines": int(pending_aux_line_count),
+    }
 
 
 @router.post("/manual-stock-out")
