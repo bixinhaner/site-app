@@ -8,6 +8,7 @@ import {
 	setEnablePhotoLocationDistanceCheck,
 	setDistanceExceedBlockUpload,
 	setPhotoLocationDistanceThresholdM,
+	setPhotoWatermarkEffective,
 } from '@/utils/locationStrategy.js'
 import { flush, startMobileLogReporter, stopMobileLogReporter } from '@/utils/mobileLogReporter.js'
 
@@ -130,6 +131,11 @@ export const useUserStore = defineStore('user', () => {
 							} else {
 								legacyScanPickupEnabled.value = false
 							}
+							if (settingsRes.data.photo_watermark_effective && typeof settingsRes.data.photo_watermark_effective === 'object') {
+								setPhotoWatermarkEffective(settingsRes.data.photo_watermark_effective)
+							} else {
+								setPhotoWatermarkEffective(null)
+							}
 						}
 					} catch (e) {
 						console.warn('刷新移动端配置失败（登录后）:', e)
@@ -177,6 +183,8 @@ export const useUserStore = defineStore('user', () => {
 		token.value = ''
 		refreshToken.value = ''
 		userInfo.value = null
+		legacyScanPickupEnabled.value = false
+		setPhotoWatermarkEffective(null)
 		uni.removeStorageSync('token')
 		uni.removeStorageSync('refreshToken')
 		uni.removeStorageSync('userInfo')
@@ -325,6 +333,11 @@ export const useUserStore = defineStore('user', () => {
 							} else {
 								legacyScanPickupEnabled.value = false
 							}
+							if (settingsRes.data.photo_watermark_effective && typeof settingsRes.data.photo_watermark_effective === 'object') {
+								setPhotoWatermarkEffective(settingsRes.data.photo_watermark_effective)
+							} else {
+								setPhotoWatermarkEffective(null)
+							}
 						}
 					} catch (e) {
 						console.warn('刷新移动端配置失败（validateToken）:', e)
@@ -335,6 +348,8 @@ export const useUserStore = defineStore('user', () => {
 				// Token无效，清除存储
 				token.value = ''
 				userInfo.value = null
+				legacyScanPickupEnabled.value = false
+				setPhotoWatermarkEffective(null)
 				uni.removeStorageSync('token')
 				uni.removeStorageSync('userInfo')
 				return false
@@ -348,6 +363,7 @@ export const useUserStore = defineStore('user', () => {
 			refreshToken.value = ''
 			userInfo.value = null
 			legacyScanPickupEnabled.value = false
+			setPhotoWatermarkEffective(null)
 			uni.removeStorageSync('token')
 			uni.removeStorageSync('refreshToken')
 			uni.removeStorageSync('userInfo')

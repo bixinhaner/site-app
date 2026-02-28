@@ -189,7 +189,7 @@ export default {
 	import { useLanguageStore } from '@/stores/language'
 	import { watermarkTool } from '@/utils/watermark.js'
 	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
-	import { getLocationMode, getLocationWithAddressStrategy } from '@/utils/locationStrategy.js'
+	import { getLocationMode, getLocationWithAddressStrategy, getPhotoWatermarkEffective } from '@/utils/locationStrategy.js'
 	
 	const userStore = useUserStore()
 	const inspectionStore = useInspectionStore()
@@ -861,6 +861,7 @@ export default {
 			const originWidth = imageInfo.width
 			const originHeight = imageInfo.height
 			const originLongEdge = Math.max(originWidth, originHeight)
+			const photoWatermarkEffective = getPhotoWatermarkEffective()
 			
 			// 优先用定位策略取一次（含地址）；失败则使用页面实时GPS（只带坐标），避免多次重试时重复走网络
 			let gpsOverride = null
@@ -925,16 +926,18 @@ export default {
 				await new Promise(resolve => setTimeout(resolve, 120))
 
 				try {
-					const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
-						inspector: userStore.userInfo?.username || t('messages.unknownInspector'),
-						checkItem: checkItem.value?.item_name || t('inspection.checkItem'),
-						siteName: currentSite.value?.site_name || t('site.unknownSite')
-					}, {
-						showAddressDetails: true,  // 显示详细地址信息
-						showPOI: false,           // 不显示POI信息
-						canvasId: canvasId.value,  // 使用页面中的canvas
-						gpsOverride,
-						renderWidth: target.width,
+						const watermarkedPath = await watermarkTool.addWatermarkWithGPS(imagePath, {
+							inspector: userStore.userInfo?.username || t('messages.unknownInspector'),
+							checkItem: checkItem.value?.item_name || t('inspection.checkItem'),
+							siteName: currentSite.value?.site_name || t('site.unknownSite')
+						}, {
+							showAddressDetails: true,  // 显示详细地址信息
+							showPOI: false,           // 不显示POI信息
+							canvasId: canvasId.value,  // 使用页面中的canvas
+							templateConfig: photoWatermarkEffective,
+							scene: 'camera',
+							gpsOverride,
+							renderWidth: target.width,
 						renderHeight: target.height,
 						maxEdge: target.maxEdge,
 						validateRender: true,

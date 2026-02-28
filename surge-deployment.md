@@ -66,14 +66,48 @@ systemctl stop caddy || true
 systemctl disable caddy || true
 ```
 
-### 2.3 拉代码到 `/usr/local/site-app`
+### 2.3 拉代码到 `/usr/local/site-app`（个人账号 SSH keys）
+
+> 说明：此方式使用 GitHub 个人账号 `Settings -> SSH and GPG keys`，不是 Deploy Key。
 
 ```bash
+# 1) 准备 SSH key（已存在可跳过）
+mkdir -p /root/.ssh && chmod 700 /root/.ssh
+test -f /root/.ssh/id_ed25519 || ssh-keygen -t ed25519 -C "你的GitHub邮箱" -f /root/.ssh/id_ed25519 -N ""
+
+# 2) 启动 agent 并加载 key
+eval "$(ssh-agent -s)"
+ssh-add /root/.ssh/id_ed25519
+
+# 3) 复制公钥，到 GitHub -> Settings -> SSH and GPG keys -> New SSH key
+cat /root/.ssh/id_ed25519.pub
+```
+
+在 GitHub 页面添加完成后继续执行：
+
+```bash
+# 4) 推荐写 SSH 配置，固定使用这把 key
+cat > /root/.ssh/config <<'EOF'
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile /root/.ssh/id_ed25519
+  IdentitiesOnly yes
+EOF
+chmod 600 /root/.ssh/config
+
+# 5) 验证 SSH 登录（首次会提示 yes/no）
+ssh -T git@github.com
+
+# 6) 通过 SSH 拉代码
 cd /usr/local
-git clone <你的仓库地址> site-app
+git clone git@github.com:bixinhaner/site-app.git site-app
 
 cd /usr/local/site-app
 ```
+
+> 若目录已存在且远程仍是 HTTPS，可改成 SSH：
+> `git remote set-url origin git@github.com:bixinhaner/site-app.git`
 
 ### 2.4 后端：创建 venv + 安装依赖 + 写 `.env`
 

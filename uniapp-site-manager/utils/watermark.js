@@ -42,7 +42,98 @@ export class WatermarkTool {
       lineHeight: 35, // 行高
       borderRadius: 8, // 圆角
       maxWidth: 0.9, // 水印最大宽度比例
-      position: 'bottomLeft' // 水印位置: bottomLeft, bottomRight, topLeft, topRight
+      areaRatio: 0.08, // 水印区域占图片面积比例
+      position: 'bottomLeft', // 水印位置: bottomLeft, bottomRight, topLeft, topRight, center
+      content: {
+        showIcon: true,
+        showLocalUploadNote: true,
+        showGPS: true,
+        showAccuracy: true,
+        showAddress: true,
+        showTimestamp: true,
+        showInspector: true,
+        showCheckItem: true,
+        showSiteName: true,
+        coordinatePrecision: 6,
+        customPrefix: '',
+        customSuffix: '',
+      },
+    }
+  }
+
+  _hexToRgba(hex, opacity = 1) {
+    const text = String(hex || '').trim()
+    const matched = /^#([0-9a-fA-F]{6})$/.exec(text)
+    const alpha = Number.isFinite(Number(opacity)) ? Math.max(0, Math.min(1, Number(opacity))) : 1
+    if (!matched) return `rgba(0, 0, 0, ${alpha})`
+    const color = matched[1]
+    const r = parseInt(color.slice(0, 2), 16)
+    const g = parseInt(color.slice(2, 4), 16)
+    const b = parseInt(color.slice(4, 6), 16)
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+  }
+
+  _resolveRenderConfig(options = {}) {
+    const base = this.config
+    const incoming = options?.templateConfig
+    if (!incoming || typeof incoming !== 'object') {
+      return base
+    }
+
+    const scene = String(options?.scene || '').trim()
+    const scenePolicy = incoming.scene_policy || {}
+    if (scene === 'camera' && scenePolicy.apply_for_camera === false) {
+      return base
+    }
+    if (scene === 'album' && scenePolicy.apply_for_album === false) {
+      return base
+    }
+
+    const template = incoming.template || {}
+    const style = template.style || {}
+    const content = template.content || {}
+
+    const position = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight', 'center'].includes(style.position)
+      ? style.position
+      : base.position
+
+    const textColor = /^#([0-9a-fA-F]{6})$/.test(String(style.text_color || '').trim())
+      ? String(style.text_color).toUpperCase()
+      : base.watermarkColor
+    const backgroundColor = /^#([0-9a-fA-F]{6})$/.test(String(style.background_color || '').trim())
+      ? String(style.background_color).toUpperCase()
+      : '#000000'
+
+    const numberOr = (value, fallback) => {
+      const num = Number(value)
+      return Number.isFinite(num) ? num : fallback
+    }
+
+    return {
+      watermarkColor: textColor,
+      backgroundColor: this._hexToRgba(backgroundColor, numberOr(style.background_opacity, 0.7)),
+      fontSize: Math.max(12, Math.min(96, Math.round(numberOr(style.font_size, base.fontSize)))),
+      padding: Math.max(0, Math.min(120, Math.round(numberOr(style.padding, base.padding)))),
+      margin: Math.max(0, Math.min(120, Math.round(numberOr(style.margin, base.margin)))),
+      lineHeight: Math.max(16, Math.min(140, Math.round(numberOr(style.line_height, base.lineHeight)))),
+      borderRadius: Math.max(0, Math.min(80, Math.round(numberOr(style.border_radius, base.borderRadius)))),
+      maxWidth: Math.max(0.3, Math.min(1, numberOr(style.max_width_ratio, base.maxWidth))),
+      areaRatio: Math.max(0.01, Math.min(0.4, numberOr(style.area_ratio, base.areaRatio))),
+      position,
+      content: {
+        showIcon: content.show_icon !== false,
+        showLocalUploadNote: content.show_local_upload_note !== false,
+        showGPS: content.show_gps !== false,
+        showAccuracy: content.show_accuracy !== false,
+        showAddress: content.show_address !== false,
+        showTimestamp: content.show_timestamp !== false,
+        showInspector: content.show_inspector !== false,
+        showCheckItem: content.show_check_item !== false,
+        showSiteName: content.show_site_name !== false,
+        coordinatePrecision: Math.max(2, Math.min(8, Math.round(numberOr(content.coordinate_precision, 6)))),
+        customPrefix: String(content.custom_prefix || '').slice(0, 80),
+        customSuffix: String(content.custom_suffix || '').slice(0, 80),
+      },
     }
   }
 
@@ -377,6 +468,7 @@ export class WatermarkTool {
         originalHeight: originImageInfo.height,
         scale: render.scale,
       }
+      const renderConfig = this._resolveRenderConfig(options)
       console.log('图片信息:', { ...imageInfo, origin: { width: originImageInfo.width, height: originImageInfo.height } })
       
       let canvas
@@ -411,7 +503,7 @@ export class WatermarkTool {
           await this.drawImage(canvas, drawSourcePath, imageInfo)
 
           // 绘制水印
-          await this.drawWatermark(canvas, watermarkData, imageInfo)
+          await this.drawWatermark(canvas, watermarkData, imageInfo, renderConfig)
 
           // 某些 Android 机型大图绘制存在“回调已触发但底部未渲染”的偶发现象，做轻量校验 + 可选延迟
           await this._sleep(options.postDrawDelayMs || 0)
@@ -503,27 +595,29 @@ export class WatermarkTool {
   /**
    * 绘制水印
    */
-  async drawWatermark(canvas, watermarkData, imageInfo) {
+  async drawWatermark(canvas, watermarkData, imageInfo, renderConfig = this.config) {
     const ctx = canvas.context
-    const config = this.config
+    const config = renderConfig || this.config
     
     // 准备水印文本
-    const watermarkLines = this.prepareWatermarkText(watermarkData)
+    const watermarkLines = this.prepareWatermarkText(watermarkData, imageInfo, config)
 
     // 基于图片尺寸计算动态样式（短边约 2.5% 作为字号基准）
-    const style = this.getScaledStyle(imageInfo)
-    
-    // 计算水印尺寸
-    const watermarkSize = this.calculateWatermarkSize(ctx, watermarkLines, style, imageInfo)
+    let style = this.getScaledStyle(imageInfo, config)
+
+    // 先根据基础样式估算尺寸，再按“水印区域占比”做动态缩放
+    let watermarkSize = this.calculateWatermarkSize(ctx, watermarkLines, style, imageInfo, config)
+    style = this.adjustStyleByAreaRatio(style, watermarkSize, imageInfo, config)
+    watermarkSize = this.calculateWatermarkSize(ctx, watermarkLines, style, imageInfo, config)
     
     // 计算水印位置
-    const position = this.calculateWatermarkPosition(imageInfo, watermarkSize, style)
+    const position = this.calculateWatermarkPosition(imageInfo, watermarkSize, style, config)
     
     // 绘制水印背景
-    this.drawWatermarkBackground(ctx, position, watermarkSize, style)
+    this.drawWatermarkBackground(ctx, position, watermarkSize, style, config)
     
     // 绘制水印文本
-    this.drawWatermarkText(ctx, watermarkLines, position, style)
+    this.drawWatermarkText(ctx, watermarkLines, position, style, config)
     
     // 绘制到canvas
     return new Promise((resolve) => {
@@ -536,11 +630,43 @@ export class WatermarkTool {
   /**
    * 准备水印文本内容
    */
-  prepareWatermarkText(watermarkData) {
+  prepareWatermarkText(watermarkData, imageInfo = null, renderConfig = this.config) {
+    const contentConfig = renderConfig?.content || {}
+    const showIcon = contentConfig.showIcon !== false
+    const showLocalUploadNote = contentConfig.showLocalUploadNote !== false
+    const showGPS = contentConfig.showGPS !== false
+    const showAccuracy = contentConfig.showAccuracy !== false
+    const showAddress = contentConfig.showAddress !== false
+    const showTimestamp = contentConfig.showTimestamp !== false
+    const showInspector = contentConfig.showInspector !== false
+    const showCheckItem = contentConfig.showCheckItem !== false
+    const showSiteName = contentConfig.showSiteName !== false
+    const coordinatePrecision = Math.max(2, Math.min(8, Number(contentConfig.coordinatePrecision || 6)))
+
     const lines = []
+    const buildLine = (icon, text) => {
+      const raw = String(text || '').trim()
+      if (!raw) return ''
+      return showIcon ? `${icon} ${raw}` : raw
+    }
+    const stripKnownIconPrefix = (text) => {
+      const value = String(text || '').trim()
+      if (!value) return ''
+      const prefixes = ['📍 ', '📊 ', '🏠 ', '🏪 ', '🕐 ', '👤 ', '📋 ', '🏗️ ', '🛣️ ']
+      for (const prefix of prefixes) {
+        if (value.startsWith(prefix)) {
+          return value.slice(prefix.length).trimStart()
+        }
+      }
+      return value
+    }
+
+    if (contentConfig.customPrefix) {
+      lines.push(String(contentConfig.customPrefix))
+    }
 
     // 本地上传提示（用于“不携带经纬度/地址”的场景）
-    if (watermarkData && watermarkData.localUploadNote) {
+    if (showLocalUploadNote && watermarkData && watermarkData.localUploadNote) {
       const note = String(watermarkData.localUploadNote || '').trim()
       if (note) {
         lines.push(note)
@@ -548,7 +674,7 @@ export class WatermarkTool {
     }
     
     // GPS坐标和地址信息（尽量使用“图标 + 数据”，减少语言依赖）
-    if (watermarkData.gps) {
+    if (showGPS && watermarkData.gps) {
       const gps = watermarkData.gps || {}
       const latitude = Number(gps.latitude)
       const longitude = Number(gps.longitude)
@@ -569,46 +695,54 @@ export class WatermarkTool {
         if (hasPlannedCoords) {
           const distanceText = hasDistanceToPlan ? ` | 距离:${distanceToPlan.toFixed(1)}m` : ''
           lines.push(
-            `📍 实拍:${latitude.toFixed(6)},${longitude.toFixed(6)} | 规划:${plannedLatitude.toFixed(6)},${plannedLongitude.toFixed(6)}${distanceText}`,
+            buildLine(
+              '📍',
+              `实拍:${latitude.toFixed(coordinatePrecision)},${longitude.toFixed(coordinatePrecision)} | 规划:${plannedLatitude.toFixed(coordinatePrecision)},${plannedLongitude.toFixed(coordinatePrecision)}${distanceText}`,
+            ),
           )
         } else if (planCoordinateMissing) {
-          lines.push(`📍 实拍:${latitude.toFixed(6)},${longitude.toFixed(6)} | 规划坐标缺失`)
+          lines.push(
+            buildLine(
+              '📍',
+              `实拍:${latitude.toFixed(coordinatePrecision)},${longitude.toFixed(coordinatePrecision)} | 规划坐标缺失`,
+            ),
+          )
         } else {
-          lines.push(`📍 ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
+          lines.push(buildLine('📍', `${latitude.toFixed(coordinatePrecision)}, ${longitude.toFixed(coordinatePrecision)}`))
         }
 
         const accuracy = Number(gps.accuracy || 0)
-        if (isFinite(accuracy) && accuracy > 0) {
-          lines.push(`📊 ${accuracy.toFixed(1)}m`)
+        if (showAccuracy && isFinite(accuracy) && accuracy > 0) {
+          lines.push(buildLine('📊', `${accuracy.toFixed(1)}m`))
         }
 
         // 地址信息（可选）
-        const showAddressDetails = watermarkData.options?.showAddressDetails !== false
+        const showAddressDetails = showAddress && watermarkData.options?.showAddressDetails !== false
         if (showAddressDetails) {
           if (Array.isArray(gps.watermarkAddress) && gps.watermarkAddress.length > 0) {
             gps.watermarkAddress
               .map(line => String(line || '').trim())
               .filter(Boolean)
-              .forEach(line => lines.push(line))
+              .forEach((line) => lines.push(showIcon ? line : stripKnownIconPrefix(line)))
           } else {
             const address = String(gps.address || '').trim()
-            if (address) lines.push(`🏠 ${address}`)
+            if (address) lines.push(buildLine('🏠', address))
           }
 
           // POI 信息（可选）
           if (gps.addressInfo && watermarkData.options?.showPOI) {
             const poi = String(gps.addressInfo.poi_name || '').trim()
-            if (poi) lines.push(`🏪 ${poi}`)
+            if (poi) lines.push(buildLine('🏪', poi))
           }
         }
       } else {
         // 无有效坐标（例如定位失败）：仅输出可国际化的短提示
-        lines.push(`📍 ${t('messages.gpsNotObtained')}`)
+        lines.push(buildLine('📍', t('messages.gpsNotObtained')))
       }
     }
     
     // 时间信息（固定格式：YYYY-MM-DD HH:mm:ss）
-    if (watermarkData.timestamp) {
+    if (showTimestamp && watermarkData.timestamp) {
       const raw = watermarkData.timestamp
       let ts = ''
       if (raw instanceof Date) {
@@ -624,34 +758,68 @@ export class WatermarkTool {
           }
         }
       }
-      if (ts) lines.push(`🕐 ${ts}`)
+      if (ts) lines.push(buildLine('🕐', ts))
     }
-    
+
     // 检查员信息
-    if (watermarkData.inspector) {
-      lines.push(`👤 ${watermarkData.inspector}`)
+    if (showInspector && watermarkData.inspector) {
+      lines.push(buildLine('👤', watermarkData.inspector))
     }
     
     // 检查项信息
-    if (watermarkData.checkItem) {
-      lines.push(`📋 ${watermarkData.checkItem}`)
+    if (showCheckItem && watermarkData.checkItem) {
+      lines.push(buildLine('📋', watermarkData.checkItem))
     }
     
     // 站点信息
-    if (watermarkData.siteName) {
-      lines.push(`🏗️ ${watermarkData.siteName}`)
+    if (showSiteName && watermarkData.siteName) {
+      lines.push(buildLine('🏗️', watermarkData.siteName))
+    }
+
+    if (contentConfig.customSuffix) {
+      lines.push(String(contentConfig.customSuffix))
+    }
+
+    if (!lines.length) {
+      lines.push(buildLine('🕐', formatWatermarkTimestamp()))
     }
     
     return lines
+  }
+
+  adjustStyleByAreaRatio(style, watermarkSize, imageInfo, renderConfig = this.config) {
+    const config = renderConfig || this.config
+    const areaRatio = Number(config.areaRatio || 0)
+    const imageArea = Number(imageInfo?.width || 0) * Number(imageInfo?.height || 0)
+    const watermarkArea = Number(watermarkSize?.width || 0) * Number(watermarkSize?.height || 0)
+    if (!isFinite(areaRatio) || areaRatio <= 0 || !isFinite(imageArea) || imageArea <= 0 || !isFinite(watermarkArea) || watermarkArea <= 0) {
+      return style
+    }
+
+    const targetAreaRatio = Math.max(0.01, Math.min(0.4, areaRatio))
+    const targetArea = imageArea * targetAreaRatio
+    let scale = Math.sqrt(targetArea / watermarkArea)
+    if (!isFinite(scale) || scale <= 0) {
+      return style
+    }
+    scale = Math.max(0.35, Math.min(4.0, scale))
+
+    return {
+      fontSize: Math.max(12, style.fontSize * scale),
+      padding: Math.max(0, style.padding * scale),
+      margin: style.margin,
+      lineHeight: Math.max(16, style.lineHeight * scale),
+      borderRadius: Math.max(0, style.borderRadius * scale),
+    }
   }
 
   /**
    * 根据图片尺寸计算缩放后的样式
    * 使用图片短边约 2.5% 作为目标字号，并对缩放比例做上下限约束
    */
-  getScaledStyle(imageInfo) {
+  getScaledStyle(imageInfo, renderConfig = this.config) {
     const base = Math.min(imageInfo.width, imageInfo.height) || 0
-    const config = this.config
+    const config = renderConfig || this.config
 
     // 目标字号：短边的 2.5%
     const targetFontSize = base * 0.025
@@ -676,8 +844,8 @@ export class WatermarkTool {
   /**
    * 计算水印尺寸
    */
-  calculateWatermarkSize(ctx, lines, style, imageInfo) {
-    const config = this.config
+  calculateWatermarkSize(ctx, lines, style, imageInfo, renderConfig = this.config) {
+    const config = renderConfig || this.config
 
     // 设置字体
     ctx.setFontSize(style.fontSize)
@@ -708,8 +876,8 @@ export class WatermarkTool {
   /**
    * 计算水印位置
    */
-  calculateWatermarkPosition(imageInfo, watermarkSize, style) {
-    const config = this.config
+  calculateWatermarkPosition(imageInfo, watermarkSize, style, renderConfig = this.config) {
+    const config = renderConfig || this.config
     const margin = style.margin
     
     let x, y
@@ -727,6 +895,10 @@ export class WatermarkTool {
         x = imageInfo.width - watermarkSize.width - margin
         y = imageInfo.height - watermarkSize.height - margin
         break
+      case 'center':
+        x = (imageInfo.width - watermarkSize.width) / 2
+        y = (imageInfo.height - watermarkSize.height) / 2
+        break
       case 'bottomLeft':
       default:
         x = margin
@@ -740,8 +912,8 @@ export class WatermarkTool {
   /**
    * 绘制水印背景
    */
-  drawWatermarkBackground(ctx, position, size, style) {
-    const config = this.config
+  drawWatermarkBackground(ctx, position, size, style, renderConfig = this.config) {
+    const config = renderConfig || this.config
     
     // 设置背景样式
     ctx.setFillStyle(config.backgroundColor)
@@ -754,8 +926,8 @@ export class WatermarkTool {
   /**
    * 绘制水印文本
    */
-  drawWatermarkText(ctx, lines, position, style) {
-    const config = this.config
+  drawWatermarkText(ctx, lines, position, style, renderConfig = this.config) {
+    const config = renderConfig || this.config
     
     // 设置文本样式
     ctx.setFillStyle(config.watermarkColor)

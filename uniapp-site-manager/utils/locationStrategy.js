@@ -34,6 +34,47 @@ let enablePhotoLocationDistanceCheck = true
 let distanceExceedBlockUpload = false
 // 超距阈值（米）
 let photoLocationDistanceThresholdM = 100
+// 当前用户生效的照片水印配置（模板+场景策略）
+const buildDefaultPhotoWatermarkEffective = () => ({
+  template_id: 'default',
+  template: {
+    name: '默认模板',
+    version: 1,
+    style: {
+      position: 'bottomLeft',
+      text_color: '#FF6600',
+      background_color: '#000000',
+      background_opacity: 0.7,
+      font_size: 28,
+      padding: 15,
+      margin: 20,
+      line_height: 35,
+      border_radius: 8,
+      max_width_ratio: 0.9,
+      area_ratio: 0.08,
+    },
+    content: {
+      show_icon: true,
+      show_local_upload_note: true,
+      show_gps: true,
+      show_accuracy: true,
+      show_address: true,
+      show_timestamp: true,
+      show_inspector: true,
+      show_check_item: true,
+      show_site_name: true,
+      coordinate_precision: 6,
+      custom_prefix: '',
+      custom_suffix: '',
+    },
+  },
+  scene_policy: {
+    apply_for_camera: true,
+    apply_for_album: true,
+    force_local_upload_note_when_geo_disabled: true,
+  },
+})
+let photoWatermarkEffective = buildDefaultPhotoWatermarkEffective()
 
 export const getLocationMode = () => locationMode
 
@@ -82,6 +123,87 @@ export const setPhotoLocationDistanceThresholdM = (value) => {
   }
   const rounded = Math.round(parsed)
   photoLocationDistanceThresholdM = Math.max(1, Math.min(10000, rounded))
+}
+
+export const getPhotoWatermarkEffective = () => photoWatermarkEffective
+
+export const setPhotoWatermarkEffective = (config) => {
+  if (!config || typeof config !== 'object') {
+    photoWatermarkEffective = buildDefaultPhotoWatermarkEffective()
+    return
+  }
+
+  const defaults = buildDefaultPhotoWatermarkEffective()
+  const inputTemplate = config.template || {}
+  const inputStyle = inputTemplate.style || {}
+  const inputContent = inputTemplate.content || {}
+  const inputPolicy = config.scene_policy || {}
+
+  photoWatermarkEffective = {
+    template_id: String(config.template_id || defaults.template_id).trim() || defaults.template_id,
+    template: {
+      name: String(inputTemplate.name || defaults.template.name).trim() || defaults.template.name,
+      version: Number.isFinite(Number(inputTemplate.version))
+        ? Math.max(1, Math.round(Number(inputTemplate.version)))
+        : defaults.template.version,
+      style: {
+        position: ['topLeft', 'topRight', 'bottomLeft', 'bottomRight', 'center'].includes(inputStyle.position)
+          ? inputStyle.position
+          : defaults.template.style.position,
+        text_color: /^#([0-9a-fA-F]{6})$/.test(String(inputStyle.text_color || '').trim())
+          ? String(inputStyle.text_color).toUpperCase()
+          : defaults.template.style.text_color,
+        background_color: /^#([0-9a-fA-F]{6})$/.test(String(inputStyle.background_color || '').trim())
+          ? String(inputStyle.background_color).toUpperCase()
+          : defaults.template.style.background_color,
+        background_opacity: Number.isFinite(Number(inputStyle.background_opacity))
+          ? Math.max(0, Math.min(1, Number(inputStyle.background_opacity)))
+          : defaults.template.style.background_opacity,
+        font_size: Number.isFinite(Number(inputStyle.font_size))
+          ? Math.max(12, Math.min(96, Math.round(Number(inputStyle.font_size))))
+          : defaults.template.style.font_size,
+        padding: Number.isFinite(Number(inputStyle.padding))
+          ? Math.max(0, Math.min(120, Math.round(Number(inputStyle.padding))))
+          : defaults.template.style.padding,
+        margin: Number.isFinite(Number(inputStyle.margin))
+          ? Math.max(0, Math.min(120, Math.round(Number(inputStyle.margin))))
+          : defaults.template.style.margin,
+        line_height: Number.isFinite(Number(inputStyle.line_height))
+          ? Math.max(16, Math.min(140, Math.round(Number(inputStyle.line_height))))
+          : defaults.template.style.line_height,
+        border_radius: Number.isFinite(Number(inputStyle.border_radius))
+          ? Math.max(0, Math.min(80, Math.round(Number(inputStyle.border_radius))))
+          : defaults.template.style.border_radius,
+        max_width_ratio: Number.isFinite(Number(inputStyle.max_width_ratio))
+          ? Math.max(0.3, Math.min(1, Number(inputStyle.max_width_ratio)))
+          : defaults.template.style.max_width_ratio,
+        area_ratio: Number.isFinite(Number(inputStyle.area_ratio))
+          ? Math.max(0.01, Math.min(0.4, Number(inputStyle.area_ratio)))
+          : defaults.template.style.area_ratio,
+      },
+      content: {
+        show_icon: inputContent.show_icon !== false,
+        show_local_upload_note: inputContent.show_local_upload_note !== false,
+        show_gps: inputContent.show_gps !== false,
+        show_accuracy: inputContent.show_accuracy !== false,
+        show_address: inputContent.show_address !== false,
+        show_timestamp: inputContent.show_timestamp !== false,
+        show_inspector: inputContent.show_inspector !== false,
+        show_check_item: inputContent.show_check_item !== false,
+        show_site_name: inputContent.show_site_name !== false,
+        coordinate_precision: Number.isFinite(Number(inputContent.coordinate_precision))
+          ? Math.max(2, Math.min(8, Math.round(Number(inputContent.coordinate_precision))))
+          : defaults.template.content.coordinate_precision,
+        custom_prefix: String(inputContent.custom_prefix || '').slice(0, 80),
+        custom_suffix: String(inputContent.custom_suffix || '').slice(0, 80),
+      },
+    },
+    scene_policy: {
+      apply_for_camera: inputPolicy.apply_for_camera !== false,
+      apply_for_album: inputPolicy.apply_for_album !== false,
+      force_local_upload_note_when_geo_disabled: inputPolicy.force_local_upload_note_when_geo_disabled !== false,
+    },
+  }
 }
 
 /**

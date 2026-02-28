@@ -1939,13 +1939,15 @@
 			getLocalUploadWatermarkWithGeo,
 			getEnablePhotoLocationDistanceCheck,
 			getDistanceExceedBlockUpload,
-			getPhotoLocationDistanceThresholdM
+			getPhotoLocationDistanceThresholdM,
+			getPhotoWatermarkEffective,
 		} = await import('@/utils/locationStrategy.js')
 		const allowAlbum = getAllowLocalPhotoUpload()
 		const localUploadWatermarkWithGeo = getLocalUploadWatermarkWithGeo()
 		const enableLocationDistanceCompare = getEnablePhotoLocationDistanceCheck()
 		const distanceExceedBlockUpload = getDistanceExceedBlockUpload()
 		const distanceThresholdM = getPhotoLocationDistanceThresholdM()
+		const photoWatermarkEffective = getPhotoWatermarkEffective()
 
 		const itemList = allowAlbum
 			? [$t('common.takePhoto'), $t('common.selectFromAlbum')]
@@ -2092,18 +2094,26 @@
 										const wmItemName = wmFieldLabel
 											? `${currentItem.value.item_name || $t('inspection.checkItem')} - ${wmFieldLabel}`
 											: (currentItem.value.item_name || $t('inspection.checkItem'))
-										finalImagePath = await watermarkTool.addWatermark(
-											finalImagePath,
-											gpsForWatermark.latitude,
-											gpsForWatermark.longitude,
+											finalImagePath = await watermarkTool.addWatermark(
+												finalImagePath,
+												gpsForWatermark.latitude,
+												gpsForWatermark.longitude,
 											gpsForWatermark.address,
 											userStore.userInfo?.username || $t('messages.unknownInspector'),
 											wmItemName,
-											gpsForWatermark,
-											(!isCamera && !localUploadWatermarkWithGeo)
-												? { skipLocation: true, localUploadNote: $t('messages.localUploadPhotoWatermark') }
-												: {}
-										)
+												gpsForWatermark,
+												(!isCamera && !localUploadWatermarkWithGeo)
+													? {
+														skipLocation: true,
+														localUploadNote: $t('messages.localUploadPhotoWatermark'),
+														templateConfig: photoWatermarkEffective,
+														scene: isCamera ? 'camera' : 'album',
+													}
+													: {
+														templateConfig: photoWatermarkEffective,
+														scene: isCamera ? 'camera' : 'album',
+													}
+											)
 										usedWatermark = true
 											console.log('水印添加成功，最终图片路径:', finalImagePath)
 										} catch (watermarkError) {
@@ -2424,6 +2434,16 @@
 						console.log('使用增强GPS地址水印功能')
 						const skipLocation = watermarkOptions && watermarkOptions.skipLocation === true
 						const localUploadNote = watermarkOptions && watermarkOptions.localUploadNote
+						const templateConfig = watermarkOptions && watermarkOptions.templateConfig
+						const watermarkScene = String((watermarkOptions && watermarkOptions.scene) || '').trim()
+						const scenePolicy = templateConfig && templateConfig.scene_policy ? templateConfig.scene_policy : {}
+						const applyTemplate = (
+							!watermarkScene ||
+							(watermarkScene === 'camera' && scenePolicy.apply_for_camera !== false) ||
+							(watermarkScene === 'album' && scenePolicy.apply_for_album !== false)
+						)
+						const effectiveTemplateConfig = applyTemplate ? templateConfig : null
+						const forceLocalUploadNote = scenePolicy.force_local_upload_note_when_geo_disabled !== false
 					
 					// 先获取图片信息
 					const imageInfo = await new Promise((resolve, reject) => {
@@ -2510,9 +2530,13 @@
 								// 本地/相册上传且不携带定位信息：不调用定位与逆地理，仅添加标注水印
 								watermarkedPath = await watermarkTool.addWatermark(imagePath, {
 									...watermarkData,
-									localUploadNote: localUploadNote || $t('messages.localUploadPhotoWatermark'),
+									localUploadNote: forceLocalUploadNote
+										? (localUploadNote || $t('messages.localUploadPhotoWatermark'))
+										: '',
 									timestamp: fixedTimestamp
 								}, 'watermarkCanvas', {
+									templateConfig: effectiveTemplateConfig,
+									scene: watermarkScene,
 									renderWidth: target.width,
 									renderHeight: target.height,
 									maxEdge: target.maxEdge,
@@ -2527,6 +2551,8 @@
 									showAddressDetails: true,
 									showPOI: false,
 									canvasId: 'watermarkCanvas',  // 使用页面中已有的canvas
+									templateConfig: effectiveTemplateConfig,
+									scene: watermarkScene,
 									gpsOverride: gpsExtra,
 									renderWidth: target.width,
 									renderHeight: target.height,
@@ -2556,6 +2582,10 @@
 					console.error('增强水印失败，使用原方案:', error)
 					const skipLocation = watermarkOptions && watermarkOptions.skipLocation === true
 					const localUploadNote = watermarkOptions && watermarkOptions.localUploadNote
+					const templateConfig = watermarkOptions && watermarkOptions.templateConfig
+					const fallbackTemplate = templateConfig && templateConfig.template ? templateConfig.template : {}
+					const fallbackStyle = fallbackTemplate.style || {}
+					const fallbackContent = fallbackTemplate.content || {}
 					
 					// 兜底方案：使用原有的canvas水印方法
 					return new Promise((resolve, reject) => {
@@ -2591,11 +2621,33 @@
 								
 								// 添加水印文字
 								const ts = formatWatermarkTimestamp()
+								const precision = Number.isFinite(Number(fallbackContent.coordinate_precision))
+									? Math.max(2, Math.min(8, Math.round(Number(fallbackContent.coordinate_precision))))
+									: 6
+								const showIcon = fallbackContent.show_icon !== false
+								const showLocalUploadNote = fallbackContent.show_local_upload_note !== false
+								const showGps = fallbackContent.show_gps !== false
+								const showAddress = fallbackContent.show_address !== false
+								const showTimestamp = fallbackContent.show_timestamp !== false
+								const showInspector = fallbackContent.show_inspector !== false
+								const showCheckItem = fallbackContent.show_check_item !== false
+								const showSiteName = fallbackContent.show_site_name !== false
+								const customPrefix = String(fallbackContent.custom_prefix || '').trim()
+								const customSuffix = String(fallbackContent.custom_suffix || '').trim()
+								const buildLine = (icon, text) => {
+									const raw = String(text || '').trim()
+									if (!raw) return ''
+									return showIcon ? `${icon} ${raw}` : raw
+								}
+								const siteName = inspectionData.value?.site_name ||
+									inspectionData.value?.site?.site_name ||
+									inspectionData.value?.work_order?.site_name ||
+									$t('site.unknownSite')
 								const compareCoordLine = (() => {
 									const shotLat = Number(latitude)
 									const shotLon = Number(longitude)
 									const hasShotCoords = isValidCoordinatePair(shotLat, shotLon)
-									if (!hasShotCoords) return `📍 ${t('messages.gpsNotObtained')}`
+									if (!hasShotCoords) return t('messages.gpsNotObtained')
 
 									const planLat = Number(gpsExtra?.plannedLatitude)
 									const planLon = Number(gpsExtra?.plannedLongitude)
@@ -2605,45 +2657,146 @@
 
 									if (hasPlanCoords) {
 										const distanceText = hasDistanceToPlan ? ` | 距离:${distanceToPlan.toFixed(1)}m` : ''
-										return `📍 实拍:${shotLat.toFixed(6)},${shotLon.toFixed(6)} | 规划:${planLat.toFixed(6)},${planLon.toFixed(6)}${distanceText}`
+										return `实拍:${shotLat.toFixed(precision)},${shotLon.toFixed(precision)} | 规划:${planLat.toFixed(precision)},${planLon.toFixed(precision)}${distanceText}`
 									}
 
 									if (gpsExtra?.planCoordinateMissing === true) {
-										return `📍 实拍:${shotLat.toFixed(6)},${shotLon.toFixed(6)} | 规划坐标缺失`
+										return `实拍:${shotLat.toFixed(precision)},${shotLon.toFixed(precision)} | 规划坐标缺失`
 									}
 
-									return `📍 ${shotLat.toFixed(6)}, ${shotLon.toFixed(6)}`
+									return `${shotLat.toFixed(precision)}, ${shotLon.toFixed(precision)}`
 								})()
-								const watermarkText = skipLocation
-									? [
-										`🕐 ${ts}`,
-										(localUploadNote || $t('messages.localUploadPhotoWatermark')),
-										`👤 ${inspector}`,
-										`📋 ${itemName}`
-									]
-									: [
-										`🕐 ${ts}`,
-										compareCoordLine,
-										...(address ? [`🏠 ${address}`] : []),
-										`👤 ${inspector}`,
-										`📋 ${itemName}`
-									]
+								const watermarkText = []
+								if (customPrefix) watermarkText.push(customPrefix)
+								if (showTimestamp) {
+									const timeLine = buildLine('🕐', ts)
+									if (timeLine) watermarkText.push(timeLine)
+								}
+								if (skipLocation) {
+									if (showLocalUploadNote) {
+										watermarkText.push(localUploadNote || $t('messages.localUploadPhotoWatermark'))
+									}
+								} else {
+									if (showGps) {
+										const gpsLine = buildLine('📍', compareCoordLine)
+										if (gpsLine) watermarkText.push(gpsLine)
+									}
+									if (showAddress && address) {
+										const addrLine = buildLine('🏠', address)
+										if (addrLine) watermarkText.push(addrLine)
+									}
+								}
+								if (showInspector && inspector) {
+									const inspectorLine = buildLine('👤', inspector)
+									if (inspectorLine) watermarkText.push(inspectorLine)
+								}
+								if (showCheckItem && itemName) {
+									const checkItemLine = buildLine('📋', itemName)
+									if (checkItemLine) watermarkText.push(checkItemLine)
+								}
+								if (showSiteName && siteName) {
+									const siteLine = buildLine('🏗️', siteName)
+									if (siteLine) watermarkText.push(siteLine)
+								}
+								if (customSuffix) watermarkText.push(customSuffix)
+								if (!watermarkText.length) {
+									const fallbackTimeLine = buildLine('🕐', ts)
+									if (fallbackTimeLine) watermarkText.push(fallbackTimeLine)
+								}
 								
 									// 设置水印样式
-									ctx.setFillStyle('rgba(0, 0, 0, 0.7)')
-									const lineHeight = 25
-									const boxPaddingTop = 18
-									const boxPaddingBottom = 18
-									const boxHeight = watermarkText.length * lineHeight + boxPaddingTop + boxPaddingBottom
-									const boxY = Math.max(10, outH - boxHeight - 10)
-									ctx.fillRect(10, boxY, outW - 20, boxHeight)
+									const validHex = (val) => /^#([0-9a-fA-F]{6})$/.test(String(val || '').trim())
+									const hexToRgba = (hex, opacity) => {
+										if (!validHex(hex)) return `rgba(0, 0, 0, ${opacity})`
+										const text = String(hex).trim().slice(1)
+										const r = parseInt(text.slice(0, 2), 16)
+										const g = parseInt(text.slice(2, 4), 16)
+										const b = parseInt(text.slice(4, 6), 16)
+										return `rgba(${r}, ${g}, ${b}, ${opacity})`
+									}
+									const clampInt = (value, minVal, maxVal, fallback) => {
+										const num = Number(value)
+										if (!Number.isFinite(num)) return fallback
+										return Math.max(minVal, Math.min(maxVal, Math.round(num)))
+									}
+									const clampFloat = (value, minVal, maxVal, fallback) => {
+										const num = Number(value)
+										if (!Number.isFinite(num)) return fallback
+										return Math.max(minVal, Math.min(maxVal, num))
+									}
+									const position = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight', 'center'].includes(fallbackStyle.position)
+										? fallbackStyle.position
+										: 'bottomLeft'
+									const fontSize = clampInt(fallbackStyle.font_size, 12, 96, 18)
+									const lineHeight = clampInt(fallbackStyle.line_height, 16, 140, 25)
+									const boxPadding = clampInt(fallbackStyle.padding, 0, 120, 14)
+									const margin = clampInt(fallbackStyle.margin, 0, 120, 10)
+									const maxWidthRatio = clampFloat(fallbackStyle.max_width_ratio, 0.3, 1, 0.9)
+									const areaRatio = clampFloat(fallbackStyle.area_ratio, 0.01, 0.4, 0.08)
+									const textColor = validHex(fallbackStyle.text_color) ? String(fallbackStyle.text_color) : '#FFFFFF'
+									const bgColor = validHex(fallbackStyle.background_color) ? String(fallbackStyle.background_color) : '#000000'
+									const bgOpacity = clampFloat(fallbackStyle.background_opacity, 0, 1, 0.7)
+									const computeBoxMetrics = (currentFontSize, currentLineHeight, currentPadding) => {
+										ctx.setFontSize(currentFontSize)
+										let maxTextWidth = 0
+										watermarkText.forEach((text) => {
+											maxTextWidth = Math.max(maxTextWidth, ctx.measureText(text).width)
+										})
+										const maxAllowedWidth = Math.max(120, Math.floor(outW * maxWidthRatio))
+										return {
+											boxWidth: Math.min(maxAllowedWidth, Math.max(120, Math.ceil(maxTextWidth + currentPadding * 2))),
+											boxHeight: watermarkText.length * currentLineHeight + currentPadding * 2,
+										}
+									}
+
+									let scaledFontSize = fontSize
+									let scaledLineHeight = lineHeight
+									let scaledPadding = boxPadding
+									let metrics = computeBoxMetrics(scaledFontSize, scaledLineHeight, scaledPadding)
+									const currentArea = metrics.boxWidth * metrics.boxHeight
+									const targetArea = Math.max(1, outW * outH * areaRatio)
+									if (Number.isFinite(currentArea) && currentArea > 0 && Number.isFinite(targetArea) && targetArea > 0) {
+										let areaScale = Math.sqrt(targetArea / currentArea)
+										if (Number.isFinite(areaScale) && areaScale > 0) {
+											areaScale = Math.max(0.35, Math.min(4, areaScale))
+											scaledFontSize = clampInt(fontSize * areaScale, 12, 160, fontSize)
+											scaledLineHeight = clampInt(lineHeight * areaScale, 16, 220, lineHeight)
+											scaledPadding = clampInt(boxPadding * areaScale, 0, 200, boxPadding)
+											metrics = computeBoxMetrics(scaledFontSize, scaledLineHeight, scaledPadding)
+										}
+									}
+
+									const boxWidth = metrics.boxWidth
+									const boxHeight = metrics.boxHeight
+									let boxX = margin
+									let boxY = Math.max(margin, outH - boxHeight - margin)
+									if (position === 'topLeft') {
+										boxX = margin
+										boxY = margin
+									} else if (position === 'topRight') {
+										boxX = Math.max(margin, outW - boxWidth - margin)
+										boxY = margin
+									} else if (position === 'bottomRight') {
+										boxX = Math.max(margin, outW - boxWidth - margin)
+										boxY = Math.max(margin, outH - boxHeight - margin)
+									} else if (position === 'center') {
+										boxX = Math.max(margin, Math.round((outW - boxWidth) / 2))
+										boxY = Math.max(margin, Math.round((outH - boxHeight) / 2))
+									}
+
+									ctx.setFillStyle(hexToRgba(bgColor, bgOpacity))
+									ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 									
-									ctx.setFillStyle('#ffffff')
-									ctx.setFontSize(18)
+									ctx.setFillStyle(textColor)
+									ctx.setFontSize(scaledFontSize)
 									
 									// 绘制水印文字
 									watermarkText.forEach((text, index) => {
-										ctx.fillText(text, 20, boxY + boxPaddingTop + (index + 1) * lineHeight - 8)
+										ctx.fillText(
+											text,
+											boxX + scaledPadding,
+											boxY + scaledPadding + (index + 1) * scaledLineHeight - 8,
+										)
 									})
 								
 									// 导出处理后的图片

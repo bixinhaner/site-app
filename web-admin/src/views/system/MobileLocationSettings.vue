@@ -1211,6 +1211,412 @@
       </el-collapse>
     </el-card>
 
+    <!-- 卡片 8：照片水印模板 -->
+    <el-card class="mb16" v-loading="loading">
+      <template #header>
+        <div class="card-header">
+          <span>照片水印模板</span>
+        </div>
+      </template>
+
+      <el-form :model="form" label-width="200px" :disabled="!canEdit">
+        <el-form-item label="场景策略">
+          <div class="watermark-scene-policy">
+            <el-switch
+              v-model="form.photo_watermark_scene_policy.apply_for_camera"
+              active-text="拍照场景启用模板"
+              inactive-text="拍照场景不启用模板"
+            />
+            <el-switch
+              v-model="form.photo_watermark_scene_policy.apply_for_album"
+              active-text="相册场景启用模板"
+              inactive-text="相册场景不启用模板"
+            />
+            <el-switch
+              v-model="form.photo_watermark_scene_policy.force_local_upload_note_when_geo_disabled"
+              active-text="本地上传无定位时强制本地标注"
+              inactive-text="本地上传无定位时不强制本地标注"
+            />
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <div class="watermark-template-toolbar">
+        <el-button type="primary" size="small" :disabled="!canEdit" @click="addWatermarkTemplate">
+          新增模板
+        </el-button>
+        <el-button size="small" :disabled="!canEdit || !currentWatermarkTemplate" @click="copyCurrentWatermarkTemplate">
+          复制当前模板
+        </el-button>
+        <el-button
+          size="small"
+          type="danger"
+          :disabled="!canEdit || !currentWatermarkTemplate || form.photo_watermark_templates.length <= 1"
+          @click="removeCurrentWatermarkTemplate"
+        >
+          删除当前模板
+        </el-button>
+      </div>
+
+      <el-table :data="form.photo_watermark_templates" size="small" border style="width: 100%; margin-top: 8px">
+        <el-table-column label="模板ID" width="180">
+          <template #default="{ row }">
+            <code>{{ row.id }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column label="模板名称" min-width="180">
+          <template #default="{ row }">
+            <span>{{ row.name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="版本" width="90">
+          <template #default="{ row }">
+            <span>{{ row.version }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="默认模板" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="form.photo_watermark_template_rule.default === row.id" size="small" type="success">
+              默认
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" :disabled="!canEdit" @click="selectWatermarkTemplate(row.id)">
+              编辑
+            </el-button>
+            <el-button
+              type="success"
+              link
+              size="small"
+              :disabled="!canEdit || form.photo_watermark_template_rule.default === row.id"
+              @click="setDefaultWatermarkTemplate(row.id)"
+            >
+              设为默认
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="currentWatermarkTemplate" class="watermark-template-detail mt12">
+        <el-form :model="currentWatermarkTemplate" label-width="180px" :disabled="!canEdit">
+          <el-form-item label="当前编辑模板ID">
+            <code>{{ currentWatermarkTemplate.id }}</code>
+          </el-form-item>
+          <el-form-item label="模板名称">
+            <el-input
+              v-model="currentWatermarkTemplate.name"
+              maxlength="40"
+              show-word-limit
+              placeholder="例如：施工现场标准模板"
+              style="max-width: 420px"
+            />
+          </el-form-item>
+          <el-form-item label="模板版本">
+            <el-input-number
+              v-model="currentWatermarkTemplate.version"
+              :min="1"
+              :max="999999"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+
+          <el-divider content-position="left">样式</el-divider>
+          <el-form-item label="水印位置">
+            <el-select v-model="currentWatermarkTemplate.style.position" style="width: 220px">
+              <el-option label="左上角" value="topLeft" />
+              <el-option label="右上角" value="topRight" />
+              <el-option label="左下角" value="bottomLeft" />
+              <el-option label="右下角" value="bottomRight" />
+              <el-option label="居中" value="center" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="文字颜色">
+            <el-color-picker v-model="currentWatermarkTemplate.style.text_color" />
+          </el-form-item>
+          <el-form-item label="背景颜色">
+            <el-color-picker v-model="currentWatermarkTemplate.style.background_color" />
+          </el-form-item>
+          <el-form-item label="背景透明度">
+            <el-slider
+              v-model="currentWatermarkTemplate.style.background_opacity"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              style="max-width: 360px"
+            />
+          </el-form-item>
+          <el-form-item label="字体大小">
+            <el-input-number
+              v-model="currentWatermarkTemplate.style.font_size"
+              :min="12"
+              :max="96"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="行高">
+            <el-input-number
+              v-model="currentWatermarkTemplate.style.line_height"
+              :min="16"
+              :max="140"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="内边距">
+            <el-input-number
+              v-model="currentWatermarkTemplate.style.padding"
+              :min="0"
+              :max="120"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="外边距">
+            <el-input-number
+              v-model="currentWatermarkTemplate.style.margin"
+              :min="0"
+              :max="120"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="圆角">
+            <el-input-number
+              v-model="currentWatermarkTemplate.style.border_radius"
+              :min="0"
+              :max="80"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="最大宽度比例">
+            <el-slider
+              v-model="currentWatermarkTemplate.style.max_width_ratio"
+              :min="0.3"
+              :max="1"
+              :step="0.01"
+              style="max-width: 360px"
+            />
+          </el-form-item>
+          <el-form-item label="水印区域占比">
+            <el-slider
+              v-model="currentWatermarkTemplate.style.area_ratio"
+              :min="0.01"
+              :max="0.4"
+              :step="0.005"
+              style="max-width: 360px"
+            />
+            <span class="hint" style="margin-left: 10px">
+              {{ (currentWatermarkTemplate.style.area_ratio * 100).toFixed(1) }}%
+            </span>
+          </el-form-item>
+
+          <el-divider content-position="left">内容</el-divider>
+          <el-form-item label="显示项">
+            <div class="watermark-content-switches">
+              <el-switch v-model="currentWatermarkTemplate.content.show_icon" active-text="图标" />
+              <el-switch v-model="currentWatermarkTemplate.content.show_local_upload_note" active-text="本地上传标注" />
+              <el-switch v-model="currentWatermarkTemplate.content.show_gps" active-text="GPS坐标" />
+              <el-switch v-model="currentWatermarkTemplate.content.show_accuracy" active-text="定位精度" />
+              <el-switch v-model="currentWatermarkTemplate.content.show_address" active-text="地址" />
+              <el-switch v-model="currentWatermarkTemplate.content.show_timestamp" active-text="时间" />
+              <el-switch v-model="currentWatermarkTemplate.content.show_inspector" active-text="检查员" />
+              <el-switch v-model="currentWatermarkTemplate.content.show_check_item" active-text="检查项" />
+              <el-switch v-model="currentWatermarkTemplate.content.show_site_name" active-text="站点名" />
+            </div>
+          </el-form-item>
+          <el-form-item label="坐标精度">
+            <el-input-number
+              v-model="currentWatermarkTemplate.content.coordinate_precision"
+              :min="2"
+              :max="8"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="前缀文本">
+            <el-input
+              v-model="currentWatermarkTemplate.content.custom_prefix"
+              maxlength="80"
+              show-word-limit
+              placeholder="可选，例如：现场作业留痕"
+              style="max-width: 420px"
+            />
+          </el-form-item>
+          <el-form-item label="后缀文本">
+            <el-input
+              v-model="currentWatermarkTemplate.content.custom_suffix"
+              maxlength="80"
+              show-word-limit
+              placeholder="可选，例如：未经许可不得传播"
+              style="max-width: 420px"
+            />
+          </el-form-item>
+        </el-form>
+
+        <div class="watermark-preview">
+          <div class="watermark-preview__title">实时预览</div>
+          <el-tabs v-model="activeWatermarkPreviewTab" class="watermark-preview-tabs">
+            <el-tab-pane
+              v-for="preview in watermarkPreviewPanels"
+              :key="preview.key"
+              :label="preview.tabLabel"
+              :name="preview.key"
+            >
+              <div class="watermark-preview__actions">
+                <el-button size="small" :disabled="!currentWatermarkTemplate" @click="openWatermarkPreviewDialog(preview.key)">
+                  查看原始分辨率效果
+                </el-button>
+                <span class="hint">
+                  缩略预览比例：{{ (preview.previewScale * 100).toFixed(1) }}%
+                </span>
+              </div>
+              <div class="watermark-preview__panel">
+                <div class="watermark-preview__panel-title">{{ preview.label }}</div>
+                <div class="watermark-preview__canvas" :style="preview.canvasStyle">
+                  <div class="watermark-preview__box" :style="preview.boxStyle">
+                    <div v-for="(line, idx) in preview.lines" :key="`${preview.key}-${idx}`">{{ line }}</div>
+                  </div>
+                </div>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </div>
+      </div>
+
+      <el-divider content-position="left">模板分配规则</el-divider>
+      <el-form :model="form" label-width="200px" :disabled="!canEdit">
+        <el-form-item label="全局默认模板">
+          <el-select v-model="form.photo_watermark_template_rule.default" style="width: 260px" :disabled="!canEdit">
+            <el-option
+              v-for="opt in watermarkTemplateOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <el-collapse class="mt8">
+        <el-collapse-item name="role-watermark-template">
+          <template #title>
+            <span>按角色覆盖（水印模板）</span>
+          </template>
+          <el-table :data="roleRows" size="small" border style="width: 100%">
+            <el-table-column prop="label" label="角色" width="140" />
+            <el-table-column label="模板">
+              <template #default="{ row }">
+                <el-select
+                  v-model="form.photo_watermark_template_rule.per_role[row.key]"
+                  placeholder="跟随全局默认模板"
+                  clearable
+                  style="width: 320px"
+                  :disabled="!canEdit"
+                >
+                  <el-option label="跟随全局默认模板" :value="''" />
+                  <el-option
+                    v-for="opt in watermarkTemplateOptions"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-collapse-item>
+
+        <el-collapse-item name="user-watermark-template">
+          <template #title>
+            <span>按用户覆盖（水印模板）</span>
+          </template>
+          <div class="user-rules">
+            <div class="user-rule-form">
+              <el-select
+                v-model="newWatermarkTemplateUserRule.user_id"
+                filterable
+                remote
+                reserve-keyword
+                placeholder="搜索用户名/姓名/邮箱"
+                :remote-method="searchUsers"
+                :loading="userSelectLoading"
+                style="width: 260px"
+                :disabled="!canEdit"
+              >
+                <el-option
+                  v-for="opt in userOptions"
+                  :key="opt.id"
+                  :label="opt.label"
+                  :value="String(opt.id)"
+                />
+              </el-select>
+              <el-select
+                v-model="newWatermarkTemplateUserRule.template_id"
+                placeholder="模板"
+                style="width: 280px; margin-left: 8px"
+                :disabled="!canEdit"
+              >
+                <el-option
+                  v-for="opt in watermarkTemplateOptions"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-select>
+              <el-button
+                type="primary"
+                size="small"
+                style="margin-left: 8px"
+                :disabled="!canEdit"
+                @click="addWatermarkTemplateUserRule"
+              >
+                添加
+              </el-button>
+            </div>
+
+            <el-table
+              v-if="form.photo_watermark_template_rule.per_user.length"
+              :data="form.photo_watermark_template_rule.per_user"
+              size="small"
+              border
+              style="width: 100%; margin-top: 8px"
+            >
+              <el-table-column prop="user_id" label="用户ID" width="120" />
+              <el-table-column prop="template_id" label="模板ID" width="160" />
+              <el-table-column label="模板名称" min-width="180">
+                <template #default="{ row }">
+                  <span>
+                    {{
+                      (form.photo_watermark_templates.find(t => t.id === row.template_id)?.name || '未知模板')
+                    }}
+                  </span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="80">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    text
+                    size="small"
+                    :disabled="!canEdit"
+                    @click="removeWatermarkTemplateUserRule($index)"
+                  >
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
     <el-card>
       <template #header>
         <div class="card-header">
@@ -1221,11 +1627,51 @@
         此区域预留给未来更多移动端行为开关和选项（例如：是否强制 GPS、水印样式模板选择、离线缓存策略等），当前版本暂未启用。
       </p>
     </el-card>
+
+    <el-dialog
+      v-model="watermarkPreviewDialogVisible"
+      :title="watermarkPreviewDialogTitle"
+      width="92%"
+      top="4vh"
+      destroy-on-close
+    >
+      <div v-if="watermarkPreviewDialogPanel" class="watermark-preview-dialog">
+        <div class="watermark-preview-dialog__toolbar">
+          <div class="watermark-preview-dialog__zoom">
+            <span class="hint">缩放：</span>
+            <el-radio-group v-model="watermarkPreviewDialogZoom" size="small">
+              <el-radio-button
+                v-for="zoom in watermarkPreviewDialogZoomOptions"
+                :key="zoom"
+                :label="zoom"
+              >
+                {{ zoom === 'fit' ? '自适应' : `${zoom}%` }}
+              </el-radio-button>
+            </el-radio-group>
+          </div>
+          <span class="hint">
+            原始分辨率：{{ watermarkPreviewDialogPanel.width }} x {{ watermarkPreviewDialogPanel.height }}
+          </span>
+        </div>
+        <div class="watermark-preview-dialog__viewport">
+          <div class="watermark-preview__canvas watermark-preview-dialog__canvas" :style="watermarkPreviewDialogPanel.canvasStyle">
+            <div class="watermark-preview__box" :style="watermarkPreviewDialogPanel.boxStyle">
+              <div
+                v-for="(line, idx) in watermarkPreviewDialogPanel.lines"
+                :key="`dialog-${watermarkPreviewDialogPanel.key}-${idx}`"
+              >
+                {{ line }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Document } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
@@ -1408,6 +1854,56 @@ const form = ref({
     },
     per_user: [],
   },
+  photo_watermark_templates: [
+    {
+      id: 'default',
+      name: '默认模板',
+      version: 1,
+      style: {
+        position: 'bottomLeft',
+        text_color: '#FF6600',
+        background_color: '#000000',
+        background_opacity: 0.7,
+        font_size: 28,
+        padding: 15,
+        margin: 20,
+        line_height: 35,
+        border_radius: 8,
+        max_width_ratio: 0.9,
+        area_ratio: 0.08,
+      },
+      content: {
+        show_icon: true,
+        show_local_upload_note: true,
+        show_gps: true,
+        show_accuracy: true,
+        show_address: true,
+        show_timestamp: true,
+        show_inspector: true,
+        show_check_item: true,
+        show_site_name: true,
+        coordinate_precision: 6,
+        custom_prefix: '',
+        custom_suffix: '',
+      },
+    },
+  ],
+  photo_watermark_template_rule: {
+    default: 'default',
+    per_role: {
+      admin: '',
+      manager: '',
+      inspector: '',
+      surveyor: '',
+      user: '',
+    },
+    per_user: [],
+  },
+  photo_watermark_scene_policy: {
+    apply_for_camera: true,
+    apply_for_album: true,
+    force_local_upload_note_when_geo_disabled: true,
+  },
 })
 
 const newLocationUserRule = ref({
@@ -1450,6 +1946,22 @@ const newDistanceThresholdUserRule = ref({
   value: 100,
 })
 
+const newWatermarkTemplateUserRule = ref({
+  user_id: '',
+  template_id: 'default',
+})
+
+const selectedWatermarkTemplateId = ref('default')
+const activeWatermarkPreviewTab = ref('720')
+const watermarkPreviewDialogVisible = ref(false)
+const watermarkPreviewDialogResolutionKey = ref('720')
+const watermarkPreviewDialogZoom = ref('fit')
+const watermarkPreviewDialogZoomOptions = ['fit', 25, 50, 100, 200]
+const watermarkPreviewViewport = ref({
+  width: typeof window !== 'undefined' ? window.innerWidth : 1440,
+  height: typeof window !== 'undefined' ? window.innerHeight : 900,
+})
+
 // 高级配置折叠面板（默认全部收起，减少页面占用）
 const activeAdvancedLocation = ref([])
 const activeAdvancedUpload = ref([])
@@ -1478,6 +1990,453 @@ const roleRows = [
 ]
 
 const roleKeys = roleRows.map(r => r.key)
+
+const createWatermarkTemplate = (id = 'default') => ({
+  id,
+  name: id === 'default' ? '默认模板' : `模板-${id}`,
+  version: 1,
+  style: {
+    position: 'bottomLeft',
+    text_color: '#FF6600',
+    background_color: '#000000',
+    background_opacity: 0.7,
+    font_size: 28,
+    padding: 15,
+    margin: 20,
+    line_height: 35,
+    border_radius: 8,
+    max_width_ratio: 0.9,
+    area_ratio: 0.08,
+  },
+  content: {
+    show_icon: true,
+    show_local_upload_note: true,
+    show_gps: true,
+    show_accuracy: true,
+    show_address: true,
+    show_timestamp: true,
+    show_inspector: true,
+    show_check_item: true,
+    show_site_name: true,
+    coordinate_precision: 6,
+    custom_prefix: '',
+    custom_suffix: '',
+  },
+})
+
+const normalizeTemplateId = (value) => {
+  const cleaned = String(value || '').trim().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64)
+  return cleaned || 'tpl'
+}
+
+const toRgba = (hex, opacity = 1) => {
+  const text = String(hex || '').trim()
+  const matched = /^#([0-9a-fA-F]{6})$/.exec(text)
+  const alpha = clampFloat(opacity, 0, 1, 3, 1)
+  if (!matched) {
+    return `rgba(0, 0, 0, ${alpha})`
+  }
+  const color = matched[1]
+  const r = parseInt(color.slice(0, 2), 16)
+  const g = parseInt(color.slice(2, 4), 16)
+  const b = parseInt(color.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+const normalizeWatermarkTemplateForForm = (id, rawTemplate = {}) => {
+  const template = rawTemplate || {}
+  const style = template.style || {}
+  const content = template.content || {}
+  return {
+    id: normalizeTemplateId(id),
+    name: String(template.name || '').trim() || '未命名模板',
+    version: clampInt(template.version, 1, 999999, 1),
+    style: {
+      position: ['topLeft', 'topRight', 'bottomLeft', 'bottomRight', 'center'].includes(style.position)
+        ? style.position
+        : 'bottomLeft',
+      text_color: /^#([0-9a-fA-F]{6})$/.test(String(style.text_color || '').trim())
+        ? String(style.text_color || '').trim()
+        : '#FF6600',
+      background_color: /^#([0-9a-fA-F]{6})$/.test(String(style.background_color || '').trim())
+        ? String(style.background_color || '').trim()
+        : '#000000',
+      background_opacity: clampFloat(style.background_opacity, 0, 1, 3, 0.7),
+      font_size: clampInt(style.font_size, 12, 96, 28),
+      padding: clampInt(style.padding, 0, 120, 15),
+      margin: clampInt(style.margin, 0, 120, 20),
+      line_height: clampInt(style.line_height, 16, 140, 35),
+      border_radius: clampInt(style.border_radius, 0, 80, 8),
+      max_width_ratio: clampFloat(style.max_width_ratio, 0.3, 1, 3, 0.9),
+      area_ratio: clampFloat(style.area_ratio, 0.01, 0.4, 3, 0.08),
+    },
+    content: {
+      show_icon: content.show_icon !== false,
+      show_local_upload_note: content.show_local_upload_note !== false,
+      show_gps: content.show_gps !== false,
+      show_accuracy: content.show_accuracy !== false,
+      show_address: content.show_address !== false,
+      show_timestamp: content.show_timestamp !== false,
+      show_inspector: content.show_inspector !== false,
+      show_check_item: content.show_check_item !== false,
+      show_site_name: content.show_site_name !== false,
+      coordinate_precision: clampInt(content.coordinate_precision, 2, 8, 6),
+      custom_prefix: String(content.custom_prefix || '').slice(0, 80),
+      custom_suffix: String(content.custom_suffix || '').slice(0, 80),
+    },
+  }
+}
+
+const ensureWatermarkTemplateRuleIntegrity = () => {
+  const templates = form.value.photo_watermark_templates || []
+  if (!templates.length) {
+    form.value.photo_watermark_templates = [createWatermarkTemplate('default')]
+  }
+  const existingIds = new Set((form.value.photo_watermark_templates || []).map(t => String(t.id)))
+
+  let defaultId = String(form.value.photo_watermark_template_rule.default || '').trim()
+  if (!defaultId || !existingIds.has(defaultId)) {
+    defaultId = existingIds.has('default')
+      ? 'default'
+      : String(form.value.photo_watermark_templates[0]?.id || 'default')
+  }
+  form.value.photo_watermark_template_rule.default = defaultId
+
+  const safePerRole = {}
+  roleKeys.forEach((role) => {
+    const current = String(form.value.photo_watermark_template_rule.per_role?.[role] || '').trim()
+    safePerRole[role] = current && existingIds.has(current) ? current : ''
+  })
+  form.value.photo_watermark_template_rule.per_role = safePerRole
+
+  form.value.photo_watermark_template_rule.per_user =
+    (form.value.photo_watermark_template_rule.per_user || []).filter((rule) => {
+      const uid = String(rule.user_id || '').trim()
+      const tid = String(rule.template_id || '').trim()
+      return uid && tid && existingIds.has(tid)
+    })
+
+  if (!existingIds.has(selectedWatermarkTemplateId.value)) {
+    selectedWatermarkTemplateId.value = defaultId
+  }
+}
+
+const currentWatermarkTemplate = computed(() => {
+  const currentId = String(selectedWatermarkTemplateId.value || '').trim()
+  return (form.value.photo_watermark_templates || []).find(t => String(t.id) === currentId) || null
+})
+
+const watermarkTemplateOptions = computed(() =>
+  (form.value.photo_watermark_templates || []).map(t => ({
+    label: `${t.name} (${t.id})`,
+    value: t.id,
+  })),
+)
+
+const watermarkPreviewResolutions = [
+  { key: '720', tabLabel: '720p', label: '720p (1280 x 720)', width: 1280, height: 720 },
+  { key: '1080', tabLabel: '1080p', label: '1080p (1920 x 1080)', width: 1920, height: 1080 },
+  { key: '2k', tabLabel: '2k', label: '2k (2560 x 1440)', width: 2560, height: 1440 },
+  { key: '4k', tabLabel: '4k', label: '4k (3840 x 2160)', width: 3840, height: 2160 },
+]
+const WATERMARK_PREVIEW_THUMB_SCALE = 0.16
+
+const buildPreviewLine = (icon, text, showIcon) => {
+  const raw = String(text || '').trim()
+  if (!raw) return ''
+  return showIcon ? `${icon} ${raw}` : raw
+}
+
+const buildWatermarkPreviewLines = (content) => {
+  const c = content || {}
+  const showIcon = c.show_icon !== false
+  const lines = []
+  if (c.custom_prefix) lines.push(String(c.custom_prefix))
+  if (c.show_local_upload_note) lines.push('本图片为本地上传照片')
+  if (c.show_gps) lines.push(buildPreviewLine('📍', '31.245678, 121.473701', showIcon))
+  if (c.show_accuracy) lines.push(buildPreviewLine('📊', '4.5m', showIcon))
+  if (c.show_address) lines.push(buildPreviewLine('🏠', '上海市浦东新区张江路', showIcon))
+  if (c.show_timestamp) lines.push(buildPreviewLine('🕐', '2026-02-28 10:30:15', showIcon))
+  if (c.show_inspector) lines.push(buildPreviewLine('👤', 'demo_user', showIcon))
+  if (c.show_check_item) lines.push(buildPreviewLine('📋', '站点围栏检查', showIcon))
+  if (c.show_site_name) lines.push(buildPreviewLine('🏗️', 'SITE-DEMO-001', showIcon))
+  if (c.custom_suffix) lines.push(String(c.custom_suffix))
+  const filtered = lines.map(line => String(line || '').trim()).filter(Boolean)
+  if (!filtered.length) {
+    filtered.push(buildPreviewLine('🕐', '2026-02-28 10:30:15', showIcon))
+  }
+  return filtered
+}
+
+const estimatePreviewTextWidth = (text, fontSize) => {
+  const chars = Array.from(String(text || ''))
+  let weight = 0
+  chars.forEach((ch) => {
+    weight += /[^\x00-\xff]/.test(ch) ? 1 : 0.56
+  })
+  return Math.max(0, weight * fontSize)
+}
+
+const computePreviewBoxMetrics = (lines, fontSize, lineHeight, padding, maxWidthPx) => {
+  let maxTextWidth = 0
+  ;(lines || []).forEach((line) => {
+    maxTextWidth = Math.max(maxTextWidth, estimatePreviewTextWidth(line, fontSize))
+  })
+  const width = Math.min(maxWidthPx, Math.max(120, Math.ceil(maxTextWidth + padding * 2)))
+  const height = Math.max(48, Math.ceil((lines || []).length * lineHeight + padding * 2))
+  return { width, height }
+}
+
+const resolveWatermarkBoxPosition = (position, canvasWidth, canvasHeight, boxWidth, boxHeight, margin) => {
+  let x = margin
+  let y = Math.max(margin, canvasHeight - boxHeight - margin)
+
+  if (position === 'topLeft') {
+    x = margin
+    y = margin
+  } else if (position === 'topRight') {
+    x = Math.max(margin, canvasWidth - boxWidth - margin)
+    y = margin
+  } else if (position === 'bottomRight') {
+    x = Math.max(margin, canvasWidth - boxWidth - margin)
+    y = Math.max(margin, canvasHeight - boxHeight - margin)
+  } else if (position === 'center') {
+    x = Math.max(margin, Math.round((canvasWidth - boxWidth) / 2))
+    y = Math.max(margin, Math.round((canvasHeight - boxHeight) / 2))
+  }
+
+  const maxX = Math.max(0, canvasWidth - boxWidth)
+  const maxY = Math.max(0, canvasHeight - boxHeight)
+  return {
+    x: Math.max(0, Math.min(maxX, x)),
+    y: Math.max(0, Math.min(maxY, y)),
+  }
+}
+
+const buildWatermarkLayoutAtOriginal = (template, resolution) => {
+  const tpl = template || {}
+  const styleSource = tpl.style || {}
+  const contentSource = tpl.content || {}
+  const imageWidth = Number(resolution.width || 0)
+  const imageHeight = Number(resolution.height || 0)
+  if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) || imageWidth <= 0 || imageHeight <= 0) {
+    return null
+  }
+
+  const lines = buildWatermarkPreviewLines(contentSource)
+  const position = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight', 'center'].includes(styleSource.position)
+    ? styleSource.position
+    : 'bottomLeft'
+  const maxWidthRatio = clampFloat(styleSource.max_width_ratio, 0.3, 1, 3, 0.9)
+  const areaRatio = clampFloat(styleSource.area_ratio, 0.01, 0.4, 3, 0.08)
+  const textColor = /^#([0-9a-fA-F]{6})$/.test(String(styleSource.text_color || '').trim())
+    ? String(styleSource.text_color).toUpperCase()
+    : '#FF6600'
+  const backgroundColor = /^#([0-9a-fA-F]{6})$/.test(String(styleSource.background_color || '').trim())
+    ? String(styleSource.background_color).toUpperCase()
+    : '#000000'
+  const backgroundOpacity = clampFloat(styleSource.background_opacity, 0, 1, 3, 0.7)
+
+  const baseFontSize = clampInt(styleSource.font_size, 12, 96, 28)
+  const basePadding = clampInt(styleSource.padding, 0, 120, 15)
+  const baseMargin = clampInt(styleSource.margin, 0, 120, 20)
+  const baseLineHeight = clampInt(styleSource.line_height, 16, 140, 35)
+  const baseBorderRadius = clampInt(styleSource.border_radius, 0, 80, 8)
+
+  const shortEdge = Math.min(imageWidth, imageHeight)
+  let initialScale = baseFontSize > 0 ? ((shortEdge * 0.025) / baseFontSize) : 1
+  if (!Number.isFinite(initialScale) || initialScale <= 0) initialScale = 1
+  initialScale = Math.max(0.8, Math.min(3, initialScale))
+
+  const styleState = {
+    fontSize: baseFontSize * initialScale,
+    padding: basePadding * initialScale,
+    margin: baseMargin * initialScale,
+    lineHeight: baseLineHeight * initialScale,
+    borderRadius: baseBorderRadius * initialScale,
+  }
+
+  const maxWidthPx = Math.max(120, Math.floor(imageWidth * maxWidthRatio))
+  const computeMetrics = (inputStyle) => {
+    const fontSize = Math.max(10, inputStyle.fontSize)
+    const lineHeight = Math.max(fontSize + 2, inputStyle.lineHeight)
+    const padding = Math.max(0, inputStyle.padding)
+    return computePreviewBoxMetrics(lines, fontSize, lineHeight, padding, maxWidthPx)
+  }
+
+  let metrics = computeMetrics(styleState)
+  const imageArea = imageWidth * imageHeight
+  const currentArea = metrics.width * metrics.height
+  const targetArea = imageArea * areaRatio
+  if (Number.isFinite(imageArea) && imageArea > 0 && Number.isFinite(currentArea) && currentArea > 0 && Number.isFinite(targetArea) && targetArea > 0) {
+    let areaScale = Math.sqrt(targetArea / currentArea)
+    if (Number.isFinite(areaScale) && areaScale > 0) {
+      areaScale = Math.max(0.35, Math.min(4, areaScale))
+      styleState.fontSize = Math.max(12, styleState.fontSize * areaScale)
+      styleState.padding = Math.max(0, styleState.padding * areaScale)
+      styleState.lineHeight = Math.max(16, styleState.lineHeight * areaScale)
+      styleState.borderRadius = Math.max(0, styleState.borderRadius * areaScale)
+      metrics = computeMetrics(styleState)
+    }
+  }
+
+  const margin = Math.max(0, styleState.margin)
+  const boxPosition = resolveWatermarkBoxPosition(
+    position,
+    imageWidth,
+    imageHeight,
+    metrics.width,
+    metrics.height,
+    margin,
+  )
+
+  return {
+    ...resolution,
+    lines,
+    imageWidth,
+    imageHeight,
+    textColor,
+    backgroundColor,
+    backgroundOpacity,
+    box: {
+      x: boxPosition.x,
+      y: boxPosition.y,
+      width: metrics.width,
+      height: metrics.height,
+      fontSize: styleState.fontSize,
+      lineHeight: Math.max(styleState.fontSize + 2, styleState.lineHeight),
+      padding: styleState.padding,
+      borderRadius: styleState.borderRadius,
+    },
+  }
+}
+
+const getWatermarkPreviewFitScale = (resolution) => {
+  const viewportWidth = Math.max(320, Number(watermarkPreviewViewport.value.width || 0))
+  const viewportHeight = Math.max(260, Number(watermarkPreviewViewport.value.height || 0))
+  const maxWidth = Math.max(260, viewportWidth * 0.82)
+  const maxHeight = Math.max(220, viewportHeight * 0.62)
+  const scaleX = maxWidth / Number(resolution.width || 1)
+  const scaleY = maxHeight / Number(resolution.height || 1)
+  const scale = Math.min(scaleX, scaleY, 1)
+  if (!Number.isFinite(scale) || scale <= 0) return 1
+  return scale
+}
+
+const resolveWatermarkPreviewScale = (resolution, options = {}) => {
+  const mode = options.mode === 'original' ? 'original' : 'thumb'
+  if (mode === 'thumb') return WATERMARK_PREVIEW_THUMB_SCALE
+
+  if (options.zoom === 'fit') {
+    return getWatermarkPreviewFitScale(resolution)
+  }
+  const zoomPercent = clampInt(options.zoom, 25, 200, 100)
+  return zoomPercent / 100
+}
+
+const buildWatermarkPreviewPanel = (template, resolution, options = {}) => {
+  const layout = buildWatermarkLayoutAtOriginal(template, resolution)
+  if (!layout) return null
+  const previewScale = resolveWatermarkPreviewScale(resolution, options)
+  const imageWidth = Math.max(1, Math.round(layout.imageWidth * previewScale))
+  const imageHeight = Math.max(1, Math.round(layout.imageHeight * previewScale))
+
+  const scaledX = Math.round(layout.box.x * previewScale)
+  const scaledY = Math.round(layout.box.y * previewScale)
+  const scaledWidth = Math.max(1, Math.round(layout.box.width * previewScale))
+  const scaledHeight = Math.max(1, Math.round(layout.box.height * previewScale))
+
+  const boxStyle = {
+    color: layout.textColor,
+    backgroundColor: toRgba(layout.backgroundColor, layout.backgroundOpacity),
+    borderRadius: `${Math.max(1, Math.round(layout.box.borderRadius * previewScale))}px`,
+    padding: `${Math.max(1, Math.round(layout.box.padding * previewScale))}px`,
+    lineHeight: `${Math.max(1, Math.round(layout.box.lineHeight * previewScale))}px`,
+    fontSize: `${Math.max(1, Math.round(layout.box.fontSize * previewScale))}px`,
+    width: `${scaledWidth}px`,
+    minHeight: `${scaledHeight}px`,
+    position: 'absolute',
+    boxSizing: 'border-box',
+    wordBreak: 'break-word',
+    top: `${scaledY}px`,
+    left: `${scaledX}px`,
+  }
+
+  return {
+    ...layout,
+    previewScale,
+    lines: layout.lines,
+    tabLabel: resolution.tabLabel || resolution.key,
+    canvasStyle: {
+      width: `${imageWidth}px`,
+      height: `${imageHeight}px`,
+    },
+    boxStyle,
+  }
+}
+
+const watermarkPreviewPanels = computed(() => {
+  const tpl = currentWatermarkTemplate.value
+  if (!tpl) return []
+  return watermarkPreviewResolutions
+    .map((resolution) => buildWatermarkPreviewPanel(tpl, resolution, { mode: 'thumb' }))
+    .filter(Boolean)
+})
+
+const watermarkPreviewDialogPanel = computed(() => {
+  const tpl = currentWatermarkTemplate.value
+  if (!tpl) return null
+  const resolution = watermarkPreviewResolutions.find(
+    item => item.key === watermarkPreviewDialogResolutionKey.value,
+  ) || watermarkPreviewResolutions[0]
+  return buildWatermarkPreviewPanel(tpl, resolution, {
+    mode: 'original',
+    zoom: watermarkPreviewDialogZoom.value,
+  })
+})
+
+const watermarkPreviewDialogTitle = computed(() => {
+  if (!watermarkPreviewDialogPanel.value) return '水印原始分辨率预览'
+  return `水印原始分辨率预览 - ${watermarkPreviewDialogPanel.value.label}`
+})
+
+const openWatermarkPreviewDialog = (resolutionKey) => {
+  const key = String(resolutionKey || '').trim()
+  watermarkPreviewDialogResolutionKey.value = key || activeWatermarkPreviewTab.value || '720'
+  watermarkPreviewDialogZoom.value = 'fit'
+  watermarkPreviewDialogVisible.value = true
+}
+
+watch(
+  watermarkPreviewPanels,
+  (panels) => {
+    if (!panels.length) return
+    const exists = panels.some(item => item.key === activeWatermarkPreviewTab.value)
+    if (!exists) {
+      activeWatermarkPreviewTab.value = panels[0].key
+    }
+  },
+  { immediate: true },
+)
+
+const syncWatermarkPreviewViewport = () => {
+  if (typeof window === 'undefined') return
+  watermarkPreviewViewport.value = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }
+}
+
+const pickNextTemplateId = (seed = 'tpl') => {
+  const base = normalizeTemplateId(seed)
+  const existing = new Set((form.value.photo_watermark_templates || []).map(t => String(t.id)))
+  if (!existing.has(base)) return base
+  for (let i = 1; i <= 9999; i += 1) {
+    const candidate = normalizeTemplateId(`${base}_${i}`)
+    if (!existing.has(candidate)) return candidate
+  }
+  return normalizeTemplateId(`tpl_${Date.now()}`)
+}
 
 // 通用布尔规则：后端 -> 表单
 const fillBoolRuleToForm = (formRule, serverRule, roles, defaultValue = true) => {
@@ -1536,13 +2495,13 @@ const buildBoolRulePayload = (formRule) => {
   return payload
 }
 
-const clampInt = (value, minValue, maxValue, fallbackValue) => {
+function clampInt(value, minValue, maxValue, fallbackValue) {
   const num = Number(value)
   if (!Number.isFinite(num)) return fallbackValue
   return Math.max(minValue, Math.min(maxValue, Math.round(num)))
 }
 
-const clampFloat = (value, minValue, maxValue, precision, fallbackValue) => {
+function clampFloat(value, minValue, maxValue, precision, fallbackValue) {
   const num = Number(value)
   if (!Number.isFinite(num)) return fallbackValue
   const clamped = Math.max(minValue, Math.min(maxValue, num))
@@ -1696,6 +2655,9 @@ const loadConfig = async () => {
     const locationDistanceCheckRule = raw.enable_photo_location_distance_check || {}
     const distanceBlockUploadRule = raw.distance_exceed_block_upload || {}
     const distanceThresholdRule = raw.photo_location_distance_threshold_m || {}
+    const watermarkTemplatesRaw = raw.photo_watermark_templates || {}
+    const watermarkTemplateRuleRaw = raw.photo_watermark_template_rule || {}
+    const watermarkScenePolicyRaw = raw.photo_watermark_scene_policy || {}
 
     form.value.location_mode.default =
       (lm.default && lm.default.toLowerCase()) === 'native' ? 'native' : 'baidu'
@@ -1800,6 +2762,45 @@ const loadConfig = async () => {
       10000,
     )
 
+    const templateEntries = Object.entries(watermarkTemplatesRaw || {})
+    form.value.photo_watermark_templates = templateEntries.length
+      ? templateEntries.map(([id, tpl]) => normalizeWatermarkTemplateForForm(id, tpl))
+      : [createWatermarkTemplate('default')]
+
+    const templateIdSet = new Set((form.value.photo_watermark_templates || []).map(t => String(t.id)))
+    const defaultTemplateIdRaw = String(watermarkTemplateRuleRaw.default || '').trim()
+    form.value.photo_watermark_template_rule.default = templateIdSet.has(defaultTemplateIdRaw)
+      ? defaultTemplateIdRaw
+      : (templateIdSet.has('default')
+        ? 'default'
+        : String(form.value.photo_watermark_templates[0]?.id || 'default'))
+
+    const templatePerRoleRaw = watermarkTemplateRuleRaw.per_role || {}
+    form.value.photo_watermark_template_rule.per_role = roleKeys.reduce((acc, role) => {
+      const val = String(templatePerRoleRaw[role] || '').trim()
+      acc[role] = val && templateIdSet.has(val) ? val : ''
+      return acc
+    }, {})
+
+    form.value.photo_watermark_template_rule.per_user = Object.entries(
+      watermarkTemplateRuleRaw.per_user || {},
+    )
+      .map(([uid, templateId]) => ({
+        user_id: String(uid || '').trim(),
+        template_id: String(templateId || '').trim(),
+      }))
+      .filter(rule => rule.user_id && templateIdSet.has(rule.template_id))
+
+    form.value.photo_watermark_scene_policy = {
+      apply_for_camera: watermarkScenePolicyRaw.apply_for_camera !== false,
+      apply_for_album: watermarkScenePolicyRaw.apply_for_album !== false,
+      force_local_upload_note_when_geo_disabled:
+        watermarkScenePolicyRaw.force_local_upload_note_when_geo_disabled !== false,
+    }
+
+    ensureWatermarkTemplateRuleIntegrity()
+    selectedWatermarkTemplateId.value = form.value.photo_watermark_template_rule.default
+
   } catch (e) {
     console.error(e)
     const detail = e?.response?.data?.detail
@@ -1833,6 +2834,9 @@ const save = async () => {
       enable_photo_location_distance_check: {},
       distance_exceed_block_upload: {},
       photo_location_distance_threshold_m: {},
+      photo_watermark_templates: {},
+      photo_watermark_template_rule: {},
+      photo_watermark_scene_policy: {},
     }
 
     // 构建 per_role：仅提交明确选择的模式
@@ -1910,6 +2914,103 @@ const save = async () => {
       10000,
     )
 
+    ensureWatermarkTemplateRuleIntegrity()
+    const templates = form.value.photo_watermark_templates || []
+    const templateMap = {}
+    templates.forEach((tpl) => {
+      const id = normalizeTemplateId(tpl.id)
+      if (!id) return
+      templateMap[id] = {
+        name: String(tpl.name || '').trim() || '未命名模板',
+        version: clampInt(tpl.version, 1, 999999, 1),
+        style: {
+          position: ['topLeft', 'topRight', 'bottomLeft', 'bottomRight', 'center'].includes(tpl.style?.position)
+            ? tpl.style.position
+            : 'bottomLeft',
+          text_color: /^#([0-9a-fA-F]{6})$/.test(String(tpl.style?.text_color || '').trim())
+            ? String(tpl.style.text_color).toUpperCase()
+            : '#FF6600',
+          background_color: /^#([0-9a-fA-F]{6})$/.test(String(tpl.style?.background_color || '').trim())
+            ? String(tpl.style.background_color).toUpperCase()
+            : '#000000',
+          background_opacity: clampFloat(tpl.style?.background_opacity, 0, 1, 3, 0.7),
+          font_size: clampInt(tpl.style?.font_size, 12, 96, 28),
+          padding: clampInt(tpl.style?.padding, 0, 120, 15),
+          margin: clampInt(tpl.style?.margin, 0, 120, 20),
+          line_height: clampInt(tpl.style?.line_height, 16, 140, 35),
+          border_radius: clampInt(tpl.style?.border_radius, 0, 80, 8),
+          max_width_ratio: clampFloat(tpl.style?.max_width_ratio, 0.3, 1, 3, 0.9),
+          area_ratio: clampFloat(tpl.style?.area_ratio, 0.01, 0.4, 3, 0.08),
+        },
+        content: {
+          show_icon: tpl.content?.show_icon !== false,
+          show_local_upload_note: tpl.content?.show_local_upload_note !== false,
+          show_gps: tpl.content?.show_gps !== false,
+          show_accuracy: tpl.content?.show_accuracy !== false,
+          show_address: tpl.content?.show_address !== false,
+          show_timestamp: tpl.content?.show_timestamp !== false,
+          show_inspector: tpl.content?.show_inspector !== false,
+          show_check_item: tpl.content?.show_check_item !== false,
+          show_site_name: tpl.content?.show_site_name !== false,
+          coordinate_precision: clampInt(tpl.content?.coordinate_precision, 2, 8, 6),
+          custom_prefix: String(tpl.content?.custom_prefix || '').slice(0, 80),
+          custom_suffix: String(tpl.content?.custom_suffix || '').slice(0, 80),
+        },
+      }
+    })
+
+    if (!Object.keys(templateMap).length) {
+      const fallback = createWatermarkTemplate('default')
+      templateMap.default = {
+        name: fallback.name,
+        version: fallback.version,
+        style: fallback.style,
+        content: fallback.content,
+      }
+    }
+
+    if (!templateMap.default) {
+      const firstId = Object.keys(templateMap)[0]
+      templateMap.default = {
+        ...templateMap[firstId],
+        name: templateMap[firstId]?.name || '默认模板',
+      }
+    }
+    payload.photo_watermark_templates = templateMap
+
+    const availableTemplateIds = new Set(Object.keys(templateMap))
+    const defaultTemplateId = availableTemplateIds.has(form.value.photo_watermark_template_rule.default)
+      ? form.value.photo_watermark_template_rule.default
+      : (availableTemplateIds.has('default') ? 'default' : Object.keys(templateMap)[0])
+    const templateRulePayload = {
+      default: defaultTemplateId,
+      per_role: {},
+      per_user: {},
+    }
+
+    Object.entries(form.value.photo_watermark_template_rule.per_role || {}).forEach(([role, templateId]) => {
+      const tid = String(templateId || '').trim()
+      if (tid && availableTemplateIds.has(tid)) {
+        templateRulePayload.per_role[role] = tid
+      }
+    })
+
+    ;(form.value.photo_watermark_template_rule.per_user || []).forEach((rule) => {
+      const uid = String(rule.user_id || '').trim()
+      const tid = String(rule.template_id || '').trim()
+      if (!uid || !tid) return
+      if (!availableTemplateIds.has(tid)) return
+      templateRulePayload.per_user[uid] = tid
+    })
+    payload.photo_watermark_template_rule = templateRulePayload
+
+    payload.photo_watermark_scene_policy = {
+      apply_for_camera: form.value.photo_watermark_scene_policy.apply_for_camera !== false,
+      apply_for_album: form.value.photo_watermark_scene_policy.apply_for_album !== false,
+      force_local_upload_note_when_geo_disabled:
+        form.value.photo_watermark_scene_policy.force_local_upload_note_when_geo_disabled !== false,
+    }
+
     await mobileSettingsApi.updateMobileSettings(payload)
 
     ElMessage.success('保存成功')
@@ -1929,7 +3030,17 @@ const save = async () => {
 }
 
 onMounted(() => {
+  syncWatermarkPreviewViewport()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', syncWatermarkPreviewViewport)
+  }
   loadConfig()
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', syncWatermarkPreviewViewport)
+  }
 })
 
 const addUserRule = () => {
@@ -2173,6 +3284,86 @@ const removeDistanceThresholdUserRule = (index) => {
   form.value.photo_location_distance_threshold_m.per_user.splice(index, 1)
 }
 
+const selectWatermarkTemplate = (templateId) => {
+  selectedWatermarkTemplateId.value = String(templateId || '').trim()
+}
+
+const addWatermarkTemplate = () => {
+  const id = pickNextTemplateId('tpl')
+  form.value.photo_watermark_templates.push(createWatermarkTemplate(id))
+  selectedWatermarkTemplateId.value = id
+  ensureWatermarkTemplateRuleIntegrity()
+}
+
+const copyCurrentWatermarkTemplate = () => {
+  const current = currentWatermarkTemplate.value
+  if (!current) {
+    ElMessage.warning('请先选择一个模板')
+    return
+  }
+  const id = pickNextTemplateId(`${current.id}_copy`)
+  const copied = normalizeWatermarkTemplateForForm(id, {
+    ...current,
+    name: `${current.name}-副本`,
+  })
+  form.value.photo_watermark_templates.push(copied)
+  selectedWatermarkTemplateId.value = id
+  ensureWatermarkTemplateRuleIntegrity()
+}
+
+const removeCurrentWatermarkTemplate = () => {
+  const current = currentWatermarkTemplate.value
+  if (!current) {
+    ElMessage.warning('请先选择一个模板')
+    return
+  }
+  if ((form.value.photo_watermark_templates || []).length <= 1) {
+    ElMessage.warning('至少保留一个模板')
+    return
+  }
+  form.value.photo_watermark_templates = (form.value.photo_watermark_templates || []).filter(
+    (tpl) => String(tpl.id) !== String(current.id),
+  )
+  ensureWatermarkTemplateRuleIntegrity()
+}
+
+const setDefaultWatermarkTemplate = (templateId) => {
+  const id = String(templateId || '').trim()
+  if (!id) return
+  form.value.photo_watermark_template_rule.default = id
+  ensureWatermarkTemplateRuleIntegrity()
+}
+
+const addWatermarkTemplateUserRule = () => {
+  const id = String(newWatermarkTemplateUserRule.value.user_id || '').trim()
+  const templateId = String(newWatermarkTemplateUserRule.value.template_id || '').trim()
+  if (!id) {
+    ElMessage.warning('请选择用户')
+    return
+  }
+  if (!templateId) {
+    ElMessage.warning('请选择模板')
+    return
+  }
+  const exists = (form.value.photo_watermark_template_rule.per_user || []).some(
+    (r) => String(r.user_id) === id,
+  )
+  if (exists) {
+    ElMessage.warning('该用户已存在模板覆盖规则')
+    return
+  }
+  form.value.photo_watermark_template_rule.per_user.push({
+    user_id: id,
+    template_id: templateId,
+  })
+  newWatermarkTemplateUserRule.value.user_id = ''
+  newWatermarkTemplateUserRule.value.template_id = form.value.photo_watermark_template_rule.default || 'default'
+}
+
+const removeWatermarkTemplateUserRule = (index) => {
+  form.value.photo_watermark_template_rule.per_user.splice(index, 1)
+}
+
 // 远程搜索用户（用于按用户覆盖的选择器）
 const searchUsers = async (query) => {
   const keyword = (query || '').trim()
@@ -2287,5 +3478,142 @@ const searchUsers = async (query) => {
   font-weight: 600;
   color: #303133;
   margin-bottom: 6px;
+}
+
+.watermark-scene-policy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.watermark-template-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.watermark-template-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.watermark-content-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.watermark-preview {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.watermark-preview__title {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
+.watermark-preview-tabs :deep(.el-tabs__header) {
+  margin-bottom: 8px;
+}
+
+.watermark-preview-tabs :deep(.el-tabs__nav) {
+  width: 100%;
+}
+
+.watermark-preview-tabs :deep(.el-tabs__item) {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 8px;
+  text-align: center;
+}
+
+.watermark-preview__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.watermark-preview__panel {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fafbfd;
+  display: inline-block;
+}
+
+.watermark-preview__panel-title {
+  font-size: 12px;
+  color: #606266;
+  margin-bottom: 6px;
+}
+
+.watermark-preview__canvas {
+  position: relative;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f7f8fb 0%, #e9edf5 100%);
+  overflow: hidden;
+}
+
+.watermark-preview__box {
+  box-sizing: border-box;
+  word-break: break-word;
+}
+
+.watermark-preview-dialog__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.watermark-preview-dialog__zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.watermark-preview-dialog__viewport {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f5f7fa;
+}
+
+.watermark-preview-dialog__canvas {
+  flex-shrink: 0;
+  margin: 0;
+  border: 1px solid #d4d7de;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 1200px) {
+  .watermark-template-detail {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .watermark-preview__actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .watermark-preview-dialog__toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

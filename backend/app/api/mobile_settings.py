@@ -1,3 +1,4 @@
+import re
 from typing import Any, Callable, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,6 +13,11 @@ from app.models.system_config import SystemConfig
 
 
 router = APIRouter()
+
+
+_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_HEX_COLOR_PATTERN = re.compile(r"^#([0-9A-Fa-f]{6})$")
+_WATERMARK_POSITION_OPTIONS = ("topLeft", "topRight", "bottomLeft", "bottomRight", "center")
 
 
 class LocationModeResponse(BaseModel):
@@ -82,6 +88,78 @@ class FloatRule(BaseModel):
   per_user: Dict[str, float] = {}
 
 
+class WatermarkTemplateStyle(BaseModel):
+  """照片水印样式配置。"""
+
+  position: str = "bottomLeft"
+  text_color: str = "#FF6600"
+  background_color: str = "#000000"
+  background_opacity: float = 0.7
+  font_size: int = 28
+  padding: int = 15
+  margin: int = 20
+  line_height: int = 35
+  border_radius: int = 8
+  max_width_ratio: float = 0.9
+  area_ratio: float = 0.08
+
+
+class WatermarkTemplateContent(BaseModel):
+  """照片水印内容配置。"""
+
+  show_icon: bool = True
+  show_local_upload_note: bool = True
+  show_gps: bool = True
+  show_accuracy: bool = True
+  show_address: bool = True
+  show_timestamp: bool = True
+  show_inspector: bool = True
+  show_check_item: bool = True
+  show_site_name: bool = True
+  coordinate_precision: int = 6
+  custom_prefix: str = ""
+  custom_suffix: str = ""
+
+
+class WatermarkTemplate(BaseModel):
+  """单个照片水印模板。"""
+
+  name: str = "默认模板"
+  version: int = 1
+  style: WatermarkTemplateStyle = WatermarkTemplateStyle()
+  content: WatermarkTemplateContent = WatermarkTemplateContent()
+
+
+class WatermarkTemplateRule(BaseModel):
+  """
+  水印模板分配规则：
+
+  - default: 全局默认模板ID
+  - per_role: 按角色覆盖模板ID
+  - per_user: 按用户覆盖模板ID（key 为用户ID字符串）
+  """
+
+  default: str = "default"
+  per_role: Dict[str, str] = {}
+  per_user: Dict[str, str] = {}
+
+
+class WatermarkScenePolicy(BaseModel):
+  """照片水印场景策略。"""
+
+  apply_for_camera: bool = True
+  apply_for_album: bool = True
+  force_local_upload_note_when_geo_disabled: bool = True
+
+
+class EffectivePhotoWatermarkConfig(BaseModel):
+  """当前用户生效的照片水印配置。"""
+
+  template_id: str = "default"
+  template: WatermarkTemplate = WatermarkTemplate()
+  scene_policy: WatermarkScenePolicy = WatermarkScenePolicy()
+
+
 class MobileSettingsPayload(BaseModel):
   """
   移动端配置载荷。
@@ -97,6 +175,9 @@ class MobileSettingsPayload(BaseModel):
   - check_item_photo_similarity_window_days: 相似度匹配窗口（天）
   - check_item_photo_similarity_phash_threshold: 相似度粗筛阈值（0~64）
   - check_item_photo_similarity_vector_threshold: 相似度精筛阈值（0~1）
+  - photo_watermark_templates: 照片水印模板集合（key 为模板ID）
+  - photo_watermark_template_rule: 照片水印模板分配规则（default/per_role/per_user）
+  - photo_watermark_scene_policy: 照片水印场景策略（拍照/相册）
 
   未来可在此处继续新增更多配置项，
   每个配置项都采用类似 *Rule 的结构。
@@ -114,6 +195,9 @@ class MobileSettingsPayload(BaseModel):
   check_item_photo_similarity_phash_threshold: Optional[IntRule] = None
   check_item_photo_similarity_vector_threshold: Optional[FloatRule] = None
   photo_location_distance_threshold_m: Optional[IntRule] = None
+  photo_watermark_templates: Optional[Dict[str, WatermarkTemplate]] = None
+  photo_watermark_template_rule: Optional[WatermarkTemplateRule] = None
+  photo_watermark_scene_policy: Optional[WatermarkScenePolicy] = None
 
 
 class EffectiveMobileSettingsResponse(BaseModel):
@@ -131,6 +215,7 @@ class EffectiveMobileSettingsResponse(BaseModel):
   check_item_photo_similarity_phash_threshold: int = 8
   check_item_photo_similarity_vector_threshold: float = 0.975
   photo_location_distance_threshold_m: int = 100
+  photo_watermark_effective: EffectivePhotoWatermarkConfig = EffectivePhotoWatermarkConfig()
 
 
 def _normalize_mode(mode: str) -> str:
@@ -330,6 +415,374 @@ def _normalize_float_rule(
     "default": default_val,
     "per_role": per_role,
     "per_user": per_user,
+  }
+
+
+def _normalize_template_id(value: Any, field_name: str = "template_id") -> str:
+  text = str(value or "").strip()
+  if not text:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"{field_name} 不能为空",
+    )
+  if not _TEMPLATE_ID_PATTERN.match(text):
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"{field_name} 仅支持字母、数字、下划线和中划线，长度 1~64",
+    )
+  return text
+
+
+def _normalize_hex_color(value: Any, field_name: str) -> str:
+  text = str(value or "").strip()
+  if not _HEX_COLOR_PATTERN.match(text):
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"{field_name} 必须是 #RRGGBB 格式",
+    )
+  return text.upper()
+
+
+def _normalize_short_text(value: Any, field_name: str, max_len: int, default: str = "") -> str:
+  text = str(value if value is not None else default).strip()
+  if len(text) > max_len:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"{field_name} 长度不能超过 {max_len}",
+    )
+  return text
+
+
+def _normalize_int_range(value: Any, field_name: str, min_value: int, max_value: int) -> int:
+  try:
+    ivalue = int(value)
+  except Exception:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"{field_name} 必须是整数",
+    )
+  if ivalue < min_value or ivalue > max_value:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"{field_name} 范围必须在 {min_value}~{max_value}",
+    )
+  return ivalue
+
+
+def _normalize_float_range(value: Any, field_name: str, min_value: float, max_value: float) -> float:
+  try:
+    fvalue = float(value)
+  except Exception:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"{field_name} 必须是数字",
+    )
+  if fvalue < min_value or fvalue > max_value:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"{field_name} 范围必须在 {min_value}~{max_value}",
+    )
+  return round(fvalue, 6)
+
+
+def _build_default_watermark_template() -> Dict[str, Any]:
+  return {
+    "name": "默认模板",
+    "version": 1,
+    "style": {
+      "position": "bottomLeft",
+      "text_color": "#FF6600",
+      "background_color": "#000000",
+      "background_opacity": 0.7,
+      "font_size": 28,
+      "padding": 15,
+      "margin": 20,
+      "line_height": 35,
+      "border_radius": 8,
+      "max_width_ratio": 0.9,
+      "area_ratio": 0.08,
+    },
+    "content": {
+      "show_icon": True,
+      "show_local_upload_note": True,
+      "show_gps": True,
+      "show_accuracy": True,
+      "show_address": True,
+      "show_timestamp": True,
+      "show_inspector": True,
+      "show_check_item": True,
+      "show_site_name": True,
+      "coordinate_precision": 6,
+      "custom_prefix": "",
+      "custom_suffix": "",
+    },
+  }
+
+
+def _build_default_watermark_templates() -> Dict[str, Any]:
+  return {"default": _build_default_watermark_template()}
+
+
+def _build_default_watermark_scene_policy() -> Dict[str, Any]:
+  return {
+    "apply_for_camera": True,
+    "apply_for_album": True,
+    "force_local_upload_note_when_geo_disabled": True,
+  }
+
+
+def _normalize_watermark_template_style(style: WatermarkTemplateStyle) -> Dict[str, Any]:
+  position = str(style.position or "").strip()
+  if position not in _WATERMARK_POSITION_OPTIONS:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"水印位置仅支持: {', '.join(_WATERMARK_POSITION_OPTIONS)}",
+    )
+
+  return {
+    "position": position,
+    "text_color": _normalize_hex_color(style.text_color, "文字颜色"),
+    "background_color": _normalize_hex_color(style.background_color, "背景颜色"),
+    "background_opacity": _normalize_float_range(style.background_opacity, "背景透明度", 0.0, 1.0),
+    "font_size": _normalize_int_range(style.font_size, "字体大小", 12, 96),
+    "padding": _normalize_int_range(style.padding, "内边距", 0, 120),
+    "margin": _normalize_int_range(style.margin, "外边距", 0, 120),
+    "line_height": _normalize_int_range(style.line_height, "行高", 16, 140),
+    "border_radius": _normalize_int_range(style.border_radius, "圆角", 0, 80),
+    "max_width_ratio": _normalize_float_range(style.max_width_ratio, "最大宽度比例", 0.3, 1.0),
+    "area_ratio": _normalize_float_range(style.area_ratio, "水印区域占比", 0.01, 0.4),
+  }
+
+
+def _normalize_watermark_template_content(content: WatermarkTemplateContent) -> Dict[str, Any]:
+  return {
+    "show_icon": bool(content.show_icon),
+    "show_local_upload_note": bool(content.show_local_upload_note),
+    "show_gps": bool(content.show_gps),
+    "show_accuracy": bool(content.show_accuracy),
+    "show_address": bool(content.show_address),
+    "show_timestamp": bool(content.show_timestamp),
+    "show_inspector": bool(content.show_inspector),
+    "show_check_item": bool(content.show_check_item),
+    "show_site_name": bool(content.show_site_name),
+    "coordinate_precision": _normalize_int_range(content.coordinate_precision, "坐标精度", 2, 8),
+    "custom_prefix": _normalize_short_text(content.custom_prefix, "前缀文本", 80, ""),
+    "custom_suffix": _normalize_short_text(content.custom_suffix, "后缀文本", 80, ""),
+  }
+
+
+def _normalize_watermark_template(template: WatermarkTemplate) -> Dict[str, Any]:
+  name = _normalize_short_text(template.name, "模板名称", 40, "未命名模板") or "未命名模板"
+  version = _normalize_int_range(template.version, "模板版本号", 1, 999999)
+  return {
+    "name": name,
+    "version": version,
+    "style": _normalize_watermark_template_style(template.style),
+    "content": _normalize_watermark_template_content(template.content),
+  }
+
+
+def _sanitize_watermark_templates_map(raw_templates: Any) -> Dict[str, Any]:
+  if not isinstance(raw_templates, dict):
+    return _build_default_watermark_templates()
+
+  normalized: Dict[str, Any] = {}
+  for raw_id, raw_tpl in raw_templates.items():
+    try:
+      tid = _normalize_template_id(raw_id, "模板ID")
+      tpl_model = raw_tpl if isinstance(raw_tpl, WatermarkTemplate) else WatermarkTemplate(**(raw_tpl or {}))
+      normalized[tid] = _normalize_watermark_template(tpl_model)
+    except Exception:
+      continue
+
+  if not normalized:
+    return _build_default_watermark_templates()
+
+  if "default" not in normalized:
+    normalized["default"] = _build_default_watermark_template()
+
+  return normalized
+
+
+def _normalize_watermark_templates_map(templates: Dict[str, WatermarkTemplate]) -> Dict[str, Any]:
+  if not isinstance(templates, dict):
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="photo_watermark_templates 必须是对象",
+    )
+  if len(templates) > 50:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="水印模板数量不能超过 50",
+    )
+
+  normalized: Dict[str, Any] = {}
+  for template_id, template in templates.items():
+    tid = _normalize_template_id(template_id, "模板ID")
+    normalized[tid] = _normalize_watermark_template(template)
+
+  if not normalized:
+    normalized = _build_default_watermark_templates()
+
+  if "default" not in normalized:
+    normalized["default"] = _build_default_watermark_template()
+
+  return normalized
+
+
+def _sanitize_watermark_template_rule(rule: Any, templates_map: Dict[str, Any]) -> Dict[str, Any]:
+  allowed = set((templates_map or {}).keys())
+  if not allowed:
+    allowed = {"default"}
+
+  raw_rule = rule if isinstance(rule, dict) else {}
+  raw_default = str(raw_rule.get("default") or "").strip()
+  default_template_id = raw_default if raw_default in allowed else ("default" if "default" in allowed else next(iter(allowed)))
+
+  per_role: Dict[str, str] = {}
+  for role, template_id in (raw_rule.get("per_role") or {}).items():
+    role_key = str(role or "").strip()
+    tid = str(template_id or "").strip()
+    if not role_key or not tid:
+      continue
+    if tid in allowed:
+      per_role[role_key] = tid
+
+  per_user: Dict[str, str] = {}
+  for user_id, template_id in (raw_rule.get("per_user") or {}).items():
+    uid = str(user_id or "").strip()
+    tid = str(template_id or "").strip()
+    if not uid or not tid:
+      continue
+    if tid in allowed:
+      per_user[uid] = tid
+
+  return {
+    "default": default_template_id,
+    "per_role": per_role,
+    "per_user": per_user,
+  }
+
+
+def _normalize_watermark_template_rule(rule: WatermarkTemplateRule, templates_map: Dict[str, Any]) -> Dict[str, Any]:
+  allowed = set((templates_map or {}).keys())
+  if not allowed:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="缺少可用的水印模板",
+    )
+
+  default_template_id = _normalize_template_id(rule.default, "默认模板ID")
+  if default_template_id not in allowed:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"默认模板ID不存在: {default_template_id}",
+    )
+
+  per_role: Dict[str, str] = {}
+  for role, template_id in (rule.per_role or {}).items():
+    role_key = str(role or "").strip()
+    tid = str(template_id or "").strip()
+    if not role_key or not tid:
+      continue
+    normalized_tid = _normalize_template_id(tid, f"角色 {role_key} 的模板ID")
+    if normalized_tid not in allowed:
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"角色 {role_key} 的模板ID不存在: {normalized_tid}",
+      )
+    per_role[role_key] = normalized_tid
+
+  per_user: Dict[str, str] = {}
+  for user_id, template_id in (rule.per_user or {}).items():
+    uid = str(user_id or "").strip()
+    tid = str(template_id or "").strip()
+    if not uid or not tid:
+      continue
+    normalized_tid = _normalize_template_id(tid, f"用户 {uid} 的模板ID")
+    if normalized_tid not in allowed:
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"用户 {uid} 的模板ID不存在: {normalized_tid}",
+      )
+    per_user[uid] = normalized_tid
+
+  return {
+    "default": default_template_id,
+    "per_role": per_role,
+    "per_user": per_user,
+  }
+
+
+def _sanitize_watermark_scene_policy(raw_policy: Any) -> Dict[str, Any]:
+  raw = raw_policy if isinstance(raw_policy, dict) else {}
+  defaults = _build_default_watermark_scene_policy()
+  return {
+    "apply_for_camera": bool(raw.get("apply_for_camera")) if "apply_for_camera" in raw else defaults["apply_for_camera"],
+    "apply_for_album": bool(raw.get("apply_for_album")) if "apply_for_album" in raw else defaults["apply_for_album"],
+    "force_local_upload_note_when_geo_disabled": (
+      bool(raw.get("force_local_upload_note_when_geo_disabled"))
+      if "force_local_upload_note_when_geo_disabled" in raw
+      else defaults["force_local_upload_note_when_geo_disabled"]
+    ),
+  }
+
+
+def _normalize_watermark_scene_policy(policy: WatermarkScenePolicy) -> Dict[str, Any]:
+  return {
+    "apply_for_camera": bool(policy.apply_for_camera),
+    "apply_for_album": bool(policy.apply_for_album),
+    "force_local_upload_note_when_geo_disabled": bool(policy.force_local_upload_note_when_geo_disabled),
+  }
+
+
+def _resolve_watermark_template_id_for_user(
+  settings: Dict[str, Any],
+  user: Optional[User],
+  templates_map: Dict[str, Any],
+) -> str:
+  rule = _sanitize_watermark_template_rule(
+    (settings or {}).get("photo_watermark_template_rule") or {},
+    templates_map,
+  )
+
+  per_user = rule.get("per_user") or {}
+  per_role = rule.get("per_role") or {}
+  default_template_id = str(rule.get("default") or "").strip()
+
+  if user is not None and getattr(user, "id", None) is not None:
+    uid = str(user.id)
+    if uid in per_user:
+      return per_user[uid]
+
+  if user is not None and getattr(user, "role", None):
+    role_key = str(user.role or "").strip()
+    if role_key in per_role:
+      return per_role[role_key]
+
+  if default_template_id and default_template_id in templates_map:
+    return default_template_id
+  if "default" in templates_map:
+    return "default"
+  return next(iter(templates_map.keys()))
+
+
+def _build_effective_photo_watermark(
+  settings: Dict[str, Any],
+  user: Optional[User],
+) -> Dict[str, Any]:
+  templates_map = _sanitize_watermark_templates_map(
+    (settings or {}).get("photo_watermark_templates") or {},
+  )
+  scene_policy = _sanitize_watermark_scene_policy(
+    (settings or {}).get("photo_watermark_scene_policy") or {},
+  )
+  template_id = _resolve_watermark_template_id_for_user(settings, user, templates_map)
+  template = templates_map.get(template_id) or templates_map.get("default") or _build_default_watermark_template()
+  return {
+    "template_id": template_id,
+    "template": template,
+    "scene_policy": scene_policy,
   }
 
 
@@ -560,6 +1013,143 @@ def _require_admin_or_manager(user: User) -> None:
     )
 
 
+def _build_mobile_settings_payload_from_raw(raw: Dict[str, Any]) -> MobileSettingsPayload:
+  safe_raw = raw if isinstance(raw, dict) else {}
+
+  location_rule = safe_raw.get("location_mode") or {}
+  allow_upload_rule = safe_raw.get("allow_local_photo_upload") or {}
+  local_upload_watermark_rule = safe_raw.get("local_upload_watermark_with_geo") or {}
+  legacy_scan_pickup_rule = safe_raw.get("enable_legacy_scan_pickup") or {}
+  location_distance_check_rule = safe_raw.get("enable_photo_location_distance_check") or {}
+  distance_block_upload_rule = safe_raw.get("distance_exceed_block_upload") or {}
+  duplicate_check_item_photo_rule = safe_raw.get("block_duplicate_check_item_photo_upload") or {}
+  similarity_alert_rule = safe_raw.get("enable_check_item_photo_similarity_alert") or {}
+  similarity_window_days_rule = safe_raw.get("check_item_photo_similarity_window_days") or {}
+  similarity_phash_threshold_rule = safe_raw.get("check_item_photo_similarity_phash_threshold") or {}
+  similarity_vector_threshold_rule = safe_raw.get("check_item_photo_similarity_vector_threshold") or {}
+  distance_threshold_rule = safe_raw.get("photo_location_distance_threshold_m") or {}
+
+  templates_map = _sanitize_watermark_templates_map(
+    safe_raw.get("photo_watermark_templates") or {},
+  )
+  template_rule = _sanitize_watermark_template_rule(
+    safe_raw.get("photo_watermark_template_rule") or {},
+    templates_map,
+  )
+  scene_policy = _sanitize_watermark_scene_policy(
+    safe_raw.get("photo_watermark_scene_policy") or {},
+  )
+
+  return MobileSettingsPayload(
+    location_mode=LocationModeRule(
+      default=location_rule.get("default") or "baidu",
+      per_role=location_rule.get("per_role") or {},
+      per_user=location_rule.get("per_user") or {},
+    ),
+    allow_local_photo_upload=BoolRule(
+      default=allow_upload_rule.get("default") if isinstance(allow_upload_rule.get("default"), bool) else True,
+      per_role=allow_upload_rule.get("per_role") or {},
+      per_user=allow_upload_rule.get("per_user") or {},
+    ),
+    local_upload_watermark_with_geo=BoolRule(
+      default=local_upload_watermark_rule.get("default") if isinstance(local_upload_watermark_rule.get("default"), bool) else True,
+      per_role=local_upload_watermark_rule.get("per_role") or {},
+      per_user=local_upload_watermark_rule.get("per_user") or {},
+    ),
+    enable_legacy_scan_pickup=BoolRule(
+      default=legacy_scan_pickup_rule.get("default") if isinstance(legacy_scan_pickup_rule.get("default"), bool) else False,
+      per_role=legacy_scan_pickup_rule.get("per_role") or {},
+      per_user=legacy_scan_pickup_rule.get("per_user") or {},
+    ),
+    enable_photo_location_distance_check=BoolRule(
+      default=location_distance_check_rule.get("default") if isinstance(location_distance_check_rule.get("default"), bool) else True,
+      per_role=location_distance_check_rule.get("per_role") or {},
+      per_user=location_distance_check_rule.get("per_user") or {},
+    ),
+    distance_exceed_block_upload=BoolRule(
+      default=distance_block_upload_rule.get("default") if isinstance(distance_block_upload_rule.get("default"), bool) else False,
+      per_role=distance_block_upload_rule.get("per_role") or {},
+      per_user=distance_block_upload_rule.get("per_user") or {},
+    ),
+    block_duplicate_check_item_photo_upload=BoolRule(
+      default=duplicate_check_item_photo_rule.get("default") if isinstance(duplicate_check_item_photo_rule.get("default"), bool) else True,
+      per_role=duplicate_check_item_photo_rule.get("per_role") or {},
+      per_user=duplicate_check_item_photo_rule.get("per_user") or {},
+    ),
+    enable_check_item_photo_similarity_alert=BoolRule(
+      default=similarity_alert_rule.get("default") if isinstance(similarity_alert_rule.get("default"), bool) else True,
+      per_role=similarity_alert_rule.get("per_role") or {},
+      per_user=similarity_alert_rule.get("per_user") or {},
+    ),
+    check_item_photo_similarity_window_days=IntRule(
+      default=_normalize_similarity_window_days(similarity_window_days_rule.get("default")) if similarity_window_days_rule.get("default") is not None else 180,
+      per_role={
+        str(k): _normalize_similarity_window_days(v)
+        for k, v in (similarity_window_days_rule.get("per_role") or {}).items()
+        if str(k).strip() != ""
+      },
+      per_user={
+        str(k): _normalize_similarity_window_days(v)
+        for k, v in (similarity_window_days_rule.get("per_user") or {}).items()
+        if str(k).strip() != ""
+      },
+    ),
+    check_item_photo_similarity_phash_threshold=IntRule(
+      default=_normalize_similarity_phash_threshold(similarity_phash_threshold_rule.get("default")) if similarity_phash_threshold_rule.get("default") is not None else 8,
+      per_role={
+        str(k): _normalize_similarity_phash_threshold(v)
+        for k, v in (similarity_phash_threshold_rule.get("per_role") or {}).items()
+        if str(k).strip() != ""
+      },
+      per_user={
+        str(k): _normalize_similarity_phash_threshold(v)
+        for k, v in (similarity_phash_threshold_rule.get("per_user") or {}).items()
+        if str(k).strip() != ""
+      },
+    ),
+    check_item_photo_similarity_vector_threshold=FloatRule(
+      default=_normalize_similarity_vector_threshold(similarity_vector_threshold_rule.get("default")) if similarity_vector_threshold_rule.get("default") is not None else 0.975,
+      per_role={
+        str(k): _normalize_similarity_vector_threshold(v)
+        for k, v in (similarity_vector_threshold_rule.get("per_role") or {}).items()
+        if str(k).strip() != ""
+      },
+      per_user={
+        str(k): _normalize_similarity_vector_threshold(v)
+        for k, v in (similarity_vector_threshold_rule.get("per_user") or {}).items()
+        if str(k).strip() != ""
+      },
+    ),
+    photo_location_distance_threshold_m=IntRule(
+      default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
+      per_role={
+        str(k): _normalize_distance_threshold(v)
+        for k, v in (distance_threshold_rule.get("per_role") or {}).items()
+        if str(k).strip() != ""
+      },
+      per_user={
+        str(k): _normalize_distance_threshold(v)
+        for k, v in (distance_threshold_rule.get("per_user") or {}).items()
+        if str(k).strip() != ""
+      },
+    ),
+    photo_watermark_templates={
+      template_id: WatermarkTemplate(**template_value)
+      for template_id, template_value in templates_map.items()
+    },
+    photo_watermark_template_rule=WatermarkTemplateRule(
+      default=template_rule.get("default") or "default",
+      per_role=template_rule.get("per_role") or {},
+      per_user=template_rule.get("per_user") or {},
+    ),
+    photo_watermark_scene_policy=WatermarkScenePolicy(
+      apply_for_camera=scene_policy.get("apply_for_camera", True),
+      apply_for_album=scene_policy.get("apply_for_album", True),
+      force_local_upload_note_when_geo_disabled=scene_policy.get("force_local_upload_note_when_geo_disabled", True),
+    ),
+  )
+
+
 @router.get("/mobile-settings", response_model=MobileSettingsPayload)
 async def get_mobile_settings(
   db: Session = Depends(get_db),
@@ -568,143 +1158,13 @@ async def get_mobile_settings(
   """
   获取完整的移动端配置（仅管理员/项目经理可见）。
 
-  - 目前包含 location_mode / 本地上传 / 水印定位信息 / 旧流程扫码领货等配置项
+  - 目前包含 location_mode / 本地上传 / 水印定位信息 / 旧流程扫码领货 / 照片水印模板等配置项
   - 返回原始配置结构（包含 default/per_role/per_user）
   """
   _require_admin_or_manager(current_user)
 
   raw = _load_mobile_settings(db)
-  location_rule = raw.get("location_mode") or {}
-  # allow_local_photo_upload 若不存在，则使用默认结构
-  allow_upload_rule = raw.get("allow_local_photo_upload") or {}
-  local_upload_watermark_rule = raw.get("local_upload_watermark_with_geo") or {}
-  legacy_scan_pickup_rule = raw.get("enable_legacy_scan_pickup") or {}
-  location_distance_check_rule = raw.get("enable_photo_location_distance_check") or {}
-  distance_block_upload_rule = raw.get("distance_exceed_block_upload") or {}
-  duplicate_check_item_photo_rule = raw.get("block_duplicate_check_item_photo_upload") or {}
-  similarity_alert_rule = raw.get("enable_check_item_photo_similarity_alert") or {}
-  similarity_window_days_rule = raw.get("check_item_photo_similarity_window_days") or {}
-  similarity_phash_threshold_rule = raw.get("check_item_photo_similarity_phash_threshold") or {}
-  similarity_vector_threshold_rule = raw.get("check_item_photo_similarity_vector_threshold") or {}
-  distance_threshold_rule = raw.get("photo_location_distance_threshold_m") or {}
-
-  # 构造 LocationModeRule，保证字段存在
-  lm = LocationModeRule(
-    default=location_rule.get("default") or "baidu",
-    per_role=location_rule.get("per_role") or {},
-    per_user=location_rule.get("per_user") or {},
-  )
-
-  allow_upload = BoolRule(
-    default=allow_upload_rule.get("default") if isinstance(allow_upload_rule.get("default"), bool) else True,
-    per_role=allow_upload_rule.get("per_role") or {},
-    per_user=allow_upload_rule.get("per_user") or {},
-  )
-
-  local_upload_watermark = BoolRule(
-    default=local_upload_watermark_rule.get("default") if isinstance(local_upload_watermark_rule.get("default"), bool) else True,
-    per_role=local_upload_watermark_rule.get("per_role") or {},
-    per_user=local_upload_watermark_rule.get("per_user") or {},
-  )
-
-  location_distance_check = BoolRule(
-    default=location_distance_check_rule.get("default") if isinstance(location_distance_check_rule.get("default"), bool) else True,
-    per_role=location_distance_check_rule.get("per_role") or {},
-    per_user=location_distance_check_rule.get("per_user") or {},
-  )
-
-  distance_block_upload = BoolRule(
-    default=distance_block_upload_rule.get("default") if isinstance(distance_block_upload_rule.get("default"), bool) else False,
-    per_role=distance_block_upload_rule.get("per_role") or {},
-    per_user=distance_block_upload_rule.get("per_user") or {},
-  )
-
-  duplicate_check_item_photo_upload = BoolRule(
-    default=duplicate_check_item_photo_rule.get("default") if isinstance(duplicate_check_item_photo_rule.get("default"), bool) else True,
-    per_role=duplicate_check_item_photo_rule.get("per_role") or {},
-    per_user=duplicate_check_item_photo_rule.get("per_user") or {},
-  )
-
-  similarity_alert = BoolRule(
-    default=similarity_alert_rule.get("default") if isinstance(similarity_alert_rule.get("default"), bool) else True,
-    per_role=similarity_alert_rule.get("per_role") or {},
-    per_user=similarity_alert_rule.get("per_user") or {},
-  )
-
-  similarity_window_days = IntRule(
-    default=_normalize_similarity_window_days(similarity_window_days_rule.get("default")) if similarity_window_days_rule.get("default") is not None else 180,
-    per_role={
-      str(k): _normalize_similarity_window_days(v)
-      for k, v in (similarity_window_days_rule.get("per_role") or {}).items()
-      if str(k).strip() != ""
-    },
-    per_user={
-      str(k): _normalize_similarity_window_days(v)
-      for k, v in (similarity_window_days_rule.get("per_user") or {}).items()
-      if str(k).strip() != ""
-    },
-  )
-
-  similarity_phash_threshold = IntRule(
-    default=_normalize_similarity_phash_threshold(similarity_phash_threshold_rule.get("default")) if similarity_phash_threshold_rule.get("default") is not None else 8,
-    per_role={
-      str(k): _normalize_similarity_phash_threshold(v)
-      for k, v in (similarity_phash_threshold_rule.get("per_role") or {}).items()
-      if str(k).strip() != ""
-    },
-    per_user={
-      str(k): _normalize_similarity_phash_threshold(v)
-      for k, v in (similarity_phash_threshold_rule.get("per_user") or {}).items()
-      if str(k).strip() != ""
-    },
-  )
-
-  similarity_vector_threshold = FloatRule(
-    default=_normalize_similarity_vector_threshold(similarity_vector_threshold_rule.get("default")) if similarity_vector_threshold_rule.get("default") is not None else 0.975,
-    per_role={
-      str(k): _normalize_similarity_vector_threshold(v)
-      for k, v in (similarity_vector_threshold_rule.get("per_role") or {}).items()
-      if str(k).strip() != ""
-    },
-    per_user={
-      str(k): _normalize_similarity_vector_threshold(v)
-      for k, v in (similarity_vector_threshold_rule.get("per_user") or {}).items()
-      if str(k).strip() != ""
-    },
-  )
-
-  distance_threshold = IntRule(
-    default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
-    per_role={
-      str(k): _normalize_distance_threshold(v)
-      for k, v in (distance_threshold_rule.get("per_role") or {}).items()
-      if str(k).strip() != ""
-    },
-    per_user={
-      str(k): _normalize_distance_threshold(v)
-      for k, v in (distance_threshold_rule.get("per_user") or {}).items()
-      if str(k).strip() != ""
-    },
-  )
-
-  return MobileSettingsPayload(
-    location_mode=lm,
-    allow_local_photo_upload=allow_upload,
-    local_upload_watermark_with_geo=local_upload_watermark,
-    enable_legacy_scan_pickup=BoolRule(
-      default=legacy_scan_pickup_rule.get("default") if isinstance(legacy_scan_pickup_rule.get("default"), bool) else False,
-      per_role=legacy_scan_pickup_rule.get("per_role") or {},
-      per_user=legacy_scan_pickup_rule.get("per_user") or {},
-    ),
-    enable_photo_location_distance_check=location_distance_check,
-    distance_exceed_block_upload=distance_block_upload,
-    block_duplicate_check_item_photo_upload=duplicate_check_item_photo_upload,
-    enable_check_item_photo_similarity_alert=similarity_alert,
-    check_item_photo_similarity_window_days=similarity_window_days,
-    check_item_photo_similarity_phash_threshold=similarity_phash_threshold,
-    check_item_photo_similarity_vector_threshold=similarity_vector_threshold,
-    photo_location_distance_threshold_m=distance_threshold,
-  )
+  return _build_mobile_settings_payload_from_raw(raw)
 
 
 @router.put("/mobile-settings", response_model=MobileSettingsPayload)
@@ -780,139 +1240,42 @@ async def update_mobile_settings(
   if payload.photo_location_distance_threshold_m is not None:
     settings["photo_location_distance_threshold_m"] = _normalize_int_rule(payload.photo_location_distance_threshold_m)
 
+  templates_changed = False
+  if payload.photo_watermark_templates is not None:
+    settings["photo_watermark_templates"] = _normalize_watermark_templates_map(payload.photo_watermark_templates)
+    templates_changed = True
+
+  if payload.photo_watermark_scene_policy is not None:
+    settings["photo_watermark_scene_policy"] = _normalize_watermark_scene_policy(payload.photo_watermark_scene_policy)
+
+  current_templates = _sanitize_watermark_templates_map(
+    settings.get("photo_watermark_templates") or {},
+  )
+  settings["photo_watermark_templates"] = current_templates
+
+  if payload.photo_watermark_template_rule is not None:
+    settings["photo_watermark_template_rule"] = _normalize_watermark_template_rule(
+      payload.photo_watermark_template_rule,
+      current_templates,
+    )
+  elif templates_changed:
+    # 模板集发生变化时，自动清理失效引用并回退到可用默认模板
+    settings["photo_watermark_template_rule"] = _sanitize_watermark_template_rule(
+      settings.get("photo_watermark_template_rule") or {},
+      current_templates,
+    )
+  else:
+    settings["photo_watermark_template_rule"] = _sanitize_watermark_template_rule(
+      settings.get("photo_watermark_template_rule") or {},
+      current_templates,
+    )
+
+  settings["photo_watermark_scene_policy"] = _sanitize_watermark_scene_policy(
+    settings.get("photo_watermark_scene_policy") or {},
+  )
+
   _save_mobile_settings(db, settings)
-
-  # 返回最新配置
-  location_rule = settings.get("location_mode") or {}
-  lm = LocationModeRule(
-    default=location_rule.get("default") or "baidu",
-    per_role=location_rule.get("per_role") or {},
-    per_user=location_rule.get("per_user") or {},
-  )
-
-  allow_upload_rule = settings.get("allow_local_photo_upload") or {}
-  allow_upload = BoolRule(
-    default=allow_upload_rule.get("default") if isinstance(allow_upload_rule.get("default"), bool) else True,
-    per_role=allow_upload_rule.get("per_role") or {},
-    per_user=allow_upload_rule.get("per_user") or {},
-  )
-
-  local_upload_watermark_rule = settings.get("local_upload_watermark_with_geo") or {}
-  local_upload_watermark = BoolRule(
-    default=local_upload_watermark_rule.get("default") if isinstance(local_upload_watermark_rule.get("default"), bool) else True,
-    per_role=local_upload_watermark_rule.get("per_role") or {},
-    per_user=local_upload_watermark_rule.get("per_user") or {},
-  )
-
-  legacy_scan_pickup_rule = settings.get("enable_legacy_scan_pickup") or {}
-  legacy_scan_pickup = BoolRule(
-    default=legacy_scan_pickup_rule.get("default") if isinstance(legacy_scan_pickup_rule.get("default"), bool) else False,
-    per_role=legacy_scan_pickup_rule.get("per_role") or {},
-    per_user=legacy_scan_pickup_rule.get("per_user") or {},
-  )
-
-  location_distance_check_rule = settings.get("enable_photo_location_distance_check") or {}
-  location_distance_check = BoolRule(
-    default=location_distance_check_rule.get("default") if isinstance(location_distance_check_rule.get("default"), bool) else True,
-    per_role=location_distance_check_rule.get("per_role") or {},
-    per_user=location_distance_check_rule.get("per_user") or {},
-  )
-
-  distance_block_upload_rule = settings.get("distance_exceed_block_upload") or {}
-  distance_block_upload = BoolRule(
-    default=distance_block_upload_rule.get("default") if isinstance(distance_block_upload_rule.get("default"), bool) else False,
-    per_role=distance_block_upload_rule.get("per_role") or {},
-    per_user=distance_block_upload_rule.get("per_user") or {},
-  )
-
-  duplicate_check_item_photo_rule = settings.get("block_duplicate_check_item_photo_upload") or {}
-  duplicate_check_item_photo_upload = BoolRule(
-    default=duplicate_check_item_photo_rule.get("default") if isinstance(duplicate_check_item_photo_rule.get("default"), bool) else True,
-    per_role=duplicate_check_item_photo_rule.get("per_role") or {},
-    per_user=duplicate_check_item_photo_rule.get("per_user") or {},
-  )
-
-  similarity_alert_rule = settings.get("enable_check_item_photo_similarity_alert") or {}
-  similarity_alert = BoolRule(
-    default=similarity_alert_rule.get("default") if isinstance(similarity_alert_rule.get("default"), bool) else True,
-    per_role=similarity_alert_rule.get("per_role") or {},
-    per_user=similarity_alert_rule.get("per_user") or {},
-  )
-
-  similarity_window_days_rule = settings.get("check_item_photo_similarity_window_days") or {}
-  similarity_window_days = IntRule(
-    default=_normalize_similarity_window_days(similarity_window_days_rule.get("default")) if similarity_window_days_rule.get("default") is not None else 180,
-    per_role={
-      str(k): _normalize_similarity_window_days(v)
-      for k, v in (similarity_window_days_rule.get("per_role") or {}).items()
-      if str(k).strip() != ""
-    },
-    per_user={
-      str(k): _normalize_similarity_window_days(v)
-      for k, v in (similarity_window_days_rule.get("per_user") or {}).items()
-      if str(k).strip() != ""
-    },
-  )
-
-  similarity_phash_threshold_rule = settings.get("check_item_photo_similarity_phash_threshold") or {}
-  similarity_phash_threshold = IntRule(
-    default=_normalize_similarity_phash_threshold(similarity_phash_threshold_rule.get("default")) if similarity_phash_threshold_rule.get("default") is not None else 8,
-    per_role={
-      str(k): _normalize_similarity_phash_threshold(v)
-      for k, v in (similarity_phash_threshold_rule.get("per_role") or {}).items()
-      if str(k).strip() != ""
-    },
-    per_user={
-      str(k): _normalize_similarity_phash_threshold(v)
-      for k, v in (similarity_phash_threshold_rule.get("per_user") or {}).items()
-      if str(k).strip() != ""
-    },
-  )
-
-  similarity_vector_threshold_rule = settings.get("check_item_photo_similarity_vector_threshold") or {}
-  similarity_vector_threshold = FloatRule(
-    default=_normalize_similarity_vector_threshold(similarity_vector_threshold_rule.get("default")) if similarity_vector_threshold_rule.get("default") is not None else 0.975,
-    per_role={
-      str(k): _normalize_similarity_vector_threshold(v)
-      for k, v in (similarity_vector_threshold_rule.get("per_role") or {}).items()
-      if str(k).strip() != ""
-    },
-    per_user={
-      str(k): _normalize_similarity_vector_threshold(v)
-      for k, v in (similarity_vector_threshold_rule.get("per_user") or {}).items()
-      if str(k).strip() != ""
-    },
-  )
-
-  distance_threshold_rule = settings.get("photo_location_distance_threshold_m") or {}
-  distance_threshold = IntRule(
-    default=_normalize_distance_threshold(distance_threshold_rule.get("default")) if distance_threshold_rule.get("default") is not None else 100,
-    per_role={
-      str(k): _normalize_distance_threshold(v)
-      for k, v in (distance_threshold_rule.get("per_role") or {}).items()
-      if str(k).strip() != ""
-    },
-    per_user={
-      str(k): _normalize_distance_threshold(v)
-      for k, v in (distance_threshold_rule.get("per_user") or {}).items()
-      if str(k).strip() != ""
-    },
-  )
-
-  return MobileSettingsPayload(
-    location_mode=lm,
-    allow_local_photo_upload=allow_upload,
-    local_upload_watermark_with_geo=local_upload_watermark,
-    enable_legacy_scan_pickup=legacy_scan_pickup,
-    enable_photo_location_distance_check=location_distance_check,
-    distance_exceed_block_upload=distance_block_upload,
-    block_duplicate_check_item_photo_upload=duplicate_check_item_photo_upload,
-    enable_check_item_photo_similarity_alert=similarity_alert,
-    check_item_photo_similarity_window_days=similarity_window_days,
-    check_item_photo_similarity_phash_threshold=similarity_phash_threshold,
-    check_item_photo_similarity_vector_threshold=similarity_vector_threshold,
-    photo_location_distance_threshold_m=distance_threshold,
-  )
+  return _build_mobile_settings_payload_from_raw(settings)
 
 
 @router.get("/mobile-settings/effective", response_model=EffectiveMobileSettingsResponse)
@@ -925,6 +1288,7 @@ async def get_effective_mobile_settings(
 
   - APP 侧应优先调用本接口，以便支持按用户/角色的覆盖配置
   - 若未配置，则自动回退到全局默认或旧配置
+  - 返回字段包含当前用户生效的照片水印模板（photo_watermark_effective）
   """
   settings = _load_mobile_settings(db)
   location_mode = _resolve_location_mode_for_user(settings, current_user, db=db)
@@ -998,6 +1362,10 @@ async def get_effective_mobile_settings(
     default=100,
     value_normalizer=_normalize_distance_threshold,
   )
+  photo_watermark_effective = _build_effective_photo_watermark(
+    settings,
+    current_user,
+  )
   return EffectiveMobileSettingsResponse(
     location_mode=location_mode,
     allow_local_photo_upload=allow_local_photo_upload,
@@ -1011,6 +1379,11 @@ async def get_effective_mobile_settings(
     check_item_photo_similarity_phash_threshold=check_item_photo_similarity_phash_threshold,
     check_item_photo_similarity_vector_threshold=check_item_photo_similarity_vector_threshold,
     photo_location_distance_threshold_m=photo_location_distance_threshold_m,
+    photo_watermark_effective=EffectivePhotoWatermarkConfig(
+      template_id=photo_watermark_effective.get("template_id") or "default",
+      template=WatermarkTemplate(**(photo_watermark_effective.get("template") or _build_default_watermark_template())),
+      scene_policy=WatermarkScenePolicy(**(photo_watermark_effective.get("scene_policy") or _build_default_watermark_scene_policy())),
+    ),
   )
 
 
