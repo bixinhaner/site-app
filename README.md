@@ -79,6 +79,11 @@ npm run dev                    # 开发模式
 npm run build:h5:prod         # 构建 H5 版本
 npm run build:prod            # 构建 App 版本
 ```
+- **CLI 构建兼容说明（2026-03）**
+- `scripts/build.js` 会自动把 `UNI_INPUT_DIR` 指向 `uniapp-site-manager` 根目录，兼容当前“源码不在 src/”的目录结构（避免 CLI 误找 `src/manifest.json`）。
+- 执行 `npm run build:dev / build:prod / build:h5:dev / build:h5:prod` 时，统一走 `npm run build -- --platform <platform>`，不再依赖额外的 `build:h5` 等子脚本。
+- 若本地未安装 `sass`，CLI 会临时复用同仓库 `web-admin/node_modules/sass` 并在构建结束后清理临时链接，不影响 HBuilderX 正常编包流程。
+- 仅 CLI 构建时启用 `UNI_CLI_VUE_BRIDGE`，为 `@dcloudio/uni-app` 需要的私有导出做兼容桥接；HBuilderX 默认流程不启用该桥接。
 
 #### Web 管理端
 ```bash
