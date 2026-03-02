@@ -124,7 +124,7 @@
 									<text class="code mono">{{ a.equipment_code }}</text>
 								</view>
 								<view class="right">
-									<view class="u-tag u-tag-info">{{ a.unit || '-' }}</view>
+									<view class="u-tag u-tag-info">{{ displayUnit(a.unit) || '-' }}</view>
 								</view>
 							</view>
 
@@ -275,11 +275,13 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { parseBarcode } from '@/utils/barcode-parser.js'
+	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const displayUnit = (unit) => getLocalizedStockUnit(unit, $t)
 
 	const refreshing = ref(false)
 	const submitting = ref(false)

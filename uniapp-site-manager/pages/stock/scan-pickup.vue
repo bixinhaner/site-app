@@ -123,7 +123,7 @@
               <view class="item-header">
                 <text class="item-name">{{ item.equipment_name }}</text>
                 <view class="item-quantity">
-                  <text class="quantity-text">{{ item.quantity }} {{ item.unit }}</text>
+                  <text class="quantity-text">{{ item.quantity }} {{ displayUnit(item.unit) }}</text>
                   <text v-if="item.is_required" class="required-tag">{{ $t('stock.requiredTag') }}</text>
                 </view>
               </view>
@@ -214,7 +214,7 @@
 	          <view class="history-header">
               <view class="history-left">
                 <text class="history-sn">{{ recordPrimaryText(record) }}</text>
-                <text v-if="record.item_type === 'aux'" class="history-qty">{{ record.quantity }} {{ record.unit || '' }}</text>
+                <text v-if="record.item_type === 'aux'" class="history-qty">{{ record.quantity }} {{ displayUnit(record.unit) || '' }}</text>
               </view>
 	            <text class="history-time">{{ formatTime(record.operation_time) }}</text>
 	          </view>
@@ -354,7 +354,7 @@
                   <view class="out-item-meta">
                     <text class="out-item-code mono">{{ it.equipment_code || '-' }}</text>
                     <text v-if="it.is_main_device" class="out-item-qty mono">{{ it.serial_number || '-' }}</text>
-                    <text v-else class="out-item-qty">{{ it.quantity }} {{ it.unit || '' }}</text>
+                    <text v-else class="out-item-qty">{{ it.quantity }} {{ displayUnit(it.unit) || '' }}</text>
                   </view>
                 </view>
               </view>
@@ -511,7 +511,7 @@
                   <view class="out-item-meta">
                     <text class="out-item-code mono">{{ it.equipment_code || '-' }}</text>
                     <text v-if="it.is_main_device" class="out-item-qty mono">{{ it.serial_number || '-' }}</text>
-                    <text v-else class="out-item-qty">{{ it.quantity }} {{ it.unit || '' }}</text>
+                    <text v-else class="out-item-qty">{{ it.quantity }} {{ displayUnit(it.unit) || '' }}</text>
                   </view>
                 </view>
               </view>
@@ -537,6 +537,7 @@
 	import { parseBarcode, formatMacAddress, getParseResultSummary, isValidParseResult } from '@/utils/barcode-parser.js'
 	import { scanDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { getCurrentInstance, watch, onMounted } from 'vue'
@@ -794,6 +795,10 @@ export default {
         return `${record.equipment_code || '-'}${warehouse}`
       }
       return `${record.equipment_name || record.equipment_code || '-'}${warehouse}`
+    },
+
+    displayUnit(unit) {
+      return getLocalizedStockUnit(unit, this.$t)
     },
 
     openIssuedDetail(record) {

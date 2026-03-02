@@ -75,7 +75,7 @@
 							<view v-for="it in auxItems" :key="it.equipment_id" class="aux-row">
 								<view class="aux-left">
 									<text class="aux-name">{{ it.equipment_name }}</text>
-									<text class="aux-meta">{{ $t('stock.returnMaxLabel') }} {{ it.max_returnable || 0 }} {{ it.unit || '' }}</text>
+									<text class="aux-meta">{{ $t('stock.returnMaxLabel') }} {{ it.max_returnable || 0 }} {{ displayUnit(it.unit) || '' }}</text>
 								</view>
 								<view class="stepper">
 									<view class="step u-pressable" @click="decAux(it)">−</view>
@@ -160,6 +160,7 @@
 	import { onLoad } from '@dcloudio/uni-app'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { parseBarcode } from '@/utils/barcode-parser.js'
+	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 
@@ -167,6 +168,7 @@
 	const languageStore = useLanguageStore()
 	const { appContext } = getCurrentInstance()
 	const { $t } = appContext.config.globalProperties
+	const displayUnit = (unit) => getLocalizedStockUnit(unit, $t)
 
 	const warehouses = ref([])
 	const warehouseIndex = ref(0)
@@ -474,7 +476,7 @@
 			? mainList.map((sn, idx) => `${idx + 1}. ${sn}`).join('\n')
 			: $t('stock.returnSubmitConfirmNone')
 		const auxLines = auxRows.length
-			? auxRows.map((row, idx) => `${idx + 1}. ${row.equipment_name} x ${row.quantity}${row.unit ? ` ${row.unit}` : ''}`).join('\n')
+			? auxRows.map((row, idx) => `${idx + 1}. ${row.equipment_name} x ${row.quantity}${row.unit ? ` ${displayUnit(row.unit)}` : ''}`).join('\n')
 			: $t('stock.returnSubmitConfirmNone')
 		return [
 			`${$t('stock.returnSubmitConfirmWarehouse')}: ${selectedWarehouse.value?.warehouse_name || '-'}`,

@@ -116,7 +116,7 @@
 									<text class="code mono">{{ row.equipment_code }}</text>
 								</view>
 								<view class="right">
-									<view class="u-tag u-tag-info">{{ row.unit || '-' }}</view>
+									<view class="u-tag u-tag-info">{{ displayUnit(row.unit) || '-' }}</view>
 								</view>
 							</view>
 
@@ -177,12 +177,14 @@
 		import { parseBarcode } from '@/utils/barcode-parser.js'
 		import { scanDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
 		import { formatDateTime } from '@/utils/time.js'
+		import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 		import CustomNavbar from '@/components/CustomNavbar.vue'
 		import SkeletonCard from '@/components/SkeletonCard.vue'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const displayUnit = (unit) => getLocalizedStockUnit(unit, $t)
 
 	const draftId = ref('')
 	const draft = ref(null)

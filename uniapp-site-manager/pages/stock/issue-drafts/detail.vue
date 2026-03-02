@@ -104,7 +104,7 @@
 									<text class="code mono">{{ a.equipment_code }}</text>
 								</view>
 								<view class="right">
-									<view class="u-tag u-tag-info">{{ a.unit || '-' }}</view>
+									<view class="u-tag u-tag-info">{{ displayUnit(a.unit) || '-' }}</view>
 								</view>
 							</view>
 							<view class="nums">
@@ -147,12 +147,14 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 	import { formatDateTime } from '@/utils/time.js'
+	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const displayUnit = (unit) => getLocalizedStockUnit(unit, $t)
 
 	const draftId = ref('')
 	const draft = ref(null)
@@ -394,4 +396,3 @@
 		gap: 12px;
 	}
 </style>
-
