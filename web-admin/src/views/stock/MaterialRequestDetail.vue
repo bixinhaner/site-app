@@ -26,6 +26,14 @@
           刷新
         </el-button>
         <el-button
+          v-if="canAbandon"
+          type="warning"
+          plain
+          @click="openAbandon"
+        >
+          放弃领货
+        </el-button>
+        <el-button
           v-if="canCancel"
           type="danger"
           plain
@@ -55,6 +63,11 @@
           <div v-if="requestData?.notes" class="notes">
             <div class="label">备注</div>
             <div class="value">{{ requestData.notes }}</div>
+          </div>
+
+          <div v-if="showReason" class="reason-block">
+            <div class="label">{{ requestData?.status === 'abandoned' ? '放弃原因' : '原因' }}</div>
+            <div class="value">{{ requestData?.approval_comments }}</div>
           </div>
         </div>
 
@@ -283,6 +296,19 @@
         <el-button type="danger" :loading="canceling" @click="cancel">确认取消</el-button>
       </template>
     </el-dialog>
+
+    <!-- 放弃领货对话框 -->
+    <el-dialog v-model="abandonVisible" title="放弃领货" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="原因" required>
+          <el-input v-model="abandonReason" type="textarea" :rows="3" placeholder="必填：请填写放弃原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="abandonVisible = false">返回</el-button>
+        <el-button type="warning" :loading="abandoning" @click="abandon">确认放弃</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -307,12 +333,15 @@ const saving = ref(false)
 const approving = ref(false)
 const rejecting = ref(false)
 const canceling = ref(false)
+const abandoning = ref(false)
 
 const rejectVisible = ref(false)
 const rejectReason = ref('')
 
 const cancelVisible = ref(false)
 const cancelReason = ref('')
+const abandonVisible = ref(false)
+const abandonReason = ref('')
 
 const draftWarehouseId = ref(undefined)
 const draftNotes = ref('')
@@ -323,9 +352,26 @@ const approveComments = ref('')
 
 const requestId = computed(() => String(route.params.id || '').trim())
 const isWarehouseOperator = computed(() => ['admin', 'manager', 'warehouse_manager'].includes(userStore.user?.role))
+const currentUserId = computed(() => Number(userStore.user?.id || 0))
 const isDraft = computed(() => requestData.value?.status === 'draft')
 const canApprove = computed(() => isWarehouseOperator.value && requestData.value?.status === 'submitted')
 const canCancel = computed(() => isWarehouseOperator.value && ['draft', 'submitted'].includes(requestData.value?.status))
+const issuedTotal = computed(() => {
+  const items = requestData.value?.items || []
+  return items.reduce((s, i) => s + Number(i.issued_qty || 0), 0)
+})
+const canAbandon = computed(() => {
+  const status = String(requestData.value?.status || '')
+  if (!['approved', 'partially_approved'].includes(status)) return false
+  if (issuedTotal.value > 0) return false
+  if (isWarehouseOperator.value) return true
+  return currentUserId.value > 0 && currentUserId.value === Number(requestData.value?.requester_id || 0)
+})
+const showReason = computed(() => {
+  const status = String(requestData.value?.status || '')
+  if (!['rejected', 'canceled', 'abandoned'].includes(status)) return false
+  return Boolean((requestData.value?.approval_comments || '').trim())
+})
 
 const formatDateTime = (dateString) => {
   if (!dateString) return '-'
@@ -338,6 +384,7 @@ const statusText = (status) => {
     submitted: '待审批',
     approved: '已批准',
     partially_approved: '部分批准',
+    abandoned: '已放弃',
     rejected: '已驳回',
     canceled: '已取消',
     closed: '已关闭',
@@ -351,6 +398,7 @@ const statusTagType = (status) => {
     submitted: 'warning',
     approved: 'success',
     partially_approved: 'warning',
+    abandoned: 'danger',
     rejected: 'danger',
     canceled: 'info',
     closed: 'success',
@@ -370,6 +418,7 @@ const flowActive = computed(() => {
   if (status === 'draft') return 0
   if (status === 'submitted') return 1
   if (status === 'approved' || status === 'partially_approved') return 2
+  if (status === 'abandoned') return 2
   if (status === 'closed') return 3
   return 0
 })
@@ -562,6 +611,32 @@ const cancel = async () => {
   }
 }
 
+const openAbandon = () => {
+  abandonReason.value = ''
+  abandonVisible.value = true
+}
+
+const abandon = async () => {
+  const reason = (abandonReason.value || '').trim()
+  if (!reason) {
+    ElMessage.warning('请填写放弃原因')
+    return
+  }
+  try {
+    abandoning.value = true
+    const res = await stockApi.abandonMaterialRequest(requestId.value, { reason })
+    const canceledCount = Number(res?.canceled_issue_draft_count || 0)
+    ElMessage.success(canceledCount > 0 ? `已放弃领货，已取消${canceledCount}个未完成领料单` : '已放弃领货')
+    abandonVisible.value = false
+    await load()
+  } catch (error) {
+    console.error('放弃领货失败:', error)
+    ElMessage.error(extractError(error))
+  } finally {
+    abandoning.value = false
+  }
+}
+
 watch(
   () => requestId.value,
   async () => {
@@ -660,6 +735,27 @@ onMounted(async () => {
 
 .notes .value {
   color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.reason-block {
+  margin-top: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(239, 68, 68, 0.24);
+  background: rgba(254, 242, 242, 0.78);
+  padding: 12px 14px;
+}
+
+.reason-block .label {
+  font-size: 12px;
+  color: #b91c1c;
+  margin-bottom: 6px;
+}
+
+.reason-block .value {
+  color: #7f1d1d;
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;

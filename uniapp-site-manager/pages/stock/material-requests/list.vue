@@ -183,6 +183,7 @@
 			submitted: $t('stock.statusSubmitted'),
 			approved: $t('stock.statusApproved'),
 			partially_approved: $t('stock.statusPartiallyApproved'),
+			abandoned: $t('stock.statusAbandoned'),
 			rejected: $t('stock.statusRejected'),
 			canceled: $t('stock.statusCanceled'),
 			closed: $t('stock.statusClosed'),
@@ -197,6 +198,7 @@
 		if (s === 'approved') return 'u-tag-success'
 		if (s === 'partially_approved') return 'u-tag-primary'
 		if (s === 'closed') return 'u-tag-success'
+		if (s === 'abandoned') return 'u-tag-error'
 		if (s === 'canceled') return 'u-tag-error'
 		if (s === 'rejected') return 'u-tag-error'
 		return 'u-tag-info'
@@ -317,6 +319,7 @@
 			{ key: 'submitted', label: statusLabel('submitted') },
 			{ key: 'approved', label: statusLabel('approved') },
 			{ key: 'partially_approved', label: statusLabel('partially_approved') },
+			{ key: 'abandoned', label: statusLabel('abandoned') },
 			{ key: 'rejected', label: statusLabel('rejected') },
 			{ key: 'canceled', label: statusLabel('canceled') },
 			{ key: 'closed', label: statusLabel('closed') },
@@ -480,4 +483,3 @@
 	.load-more { display: flex; justify-content: center; padding: 8px 0 14px; }
 	.bottom-spacer { height: 18px; }
 </style>
-

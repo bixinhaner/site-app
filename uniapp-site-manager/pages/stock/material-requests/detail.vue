@@ -114,7 +114,7 @@
 						</view>
 					</view>
 
-					<view v-if="request.approval_comments && (request.status === 'rejected' || request.status === 'canceled')" class="reason">
+					<view v-if="request.approval_comments && (request.status === 'rejected' || request.status === 'canceled' || request.status === 'abandoned')" class="reason">
 						<text class="reason-k">{{ $t('stock.materialRequestReason') }}</text>
 						<text class="reason-v">{{ request.approval_comments }}</text>
 					</view>
@@ -137,8 +137,11 @@
 				</button>
 			</template>
 
-			<template v-else-if="canStartPick">
-				<button class="u-btn u-btn-primary u-pressable" :disabled="acting" @click="startPick">
+			<template v-else-if="canStartPick || canAbandon">
+				<button class="u-btn u-btn-danger u-pressable" v-if="canAbandon" :disabled="acting" @click="abandonRequest">
+					{{ $t('stock.materialRequestAbandon') }}
+				</button>
+				<button class="u-btn u-btn-primary u-pressable" v-if="canStartPick" :disabled="acting" @click="startPick">
 					{{ $t('stock.materialRequestStartPick') }}
 				</button>
 			</template>
@@ -184,6 +187,7 @@
 			submitted: $t('stock.statusSubmitted'),
 			approved: $t('stock.statusApproved'),
 			partially_approved: $t('stock.statusPartiallyApproved'),
+			abandoned: $t('stock.statusAbandoned'),
 			rejected: $t('stock.statusRejected'),
 			canceled: $t('stock.statusCanceled'),
 			closed: $t('stock.statusClosed'),
@@ -198,6 +202,7 @@
 		if (s === 'approved') return 'u-tag-success'
 		if (s === 'partially_approved') return 'u-tag-primary'
 		if (s === 'closed') return 'u-tag-success'
+		if (s === 'abandoned') return 'u-tag-error'
 		if (s === 'canceled') return 'u-tag-error'
 		if (s === 'rejected') return 'u-tag-error'
 		return 'u-tag-info'
@@ -215,10 +220,18 @@
 		const items = request.value?.items || []
 		return items.reduce((s, it) => s + Number(it.remaining_qty || 0), 0)
 	})
+	const issuedTotal = computed(() => {
+		const items = request.value?.items || []
+		return items.reduce((s, it) => s + Number(it.issued_qty || 0), 0)
+	})
 
 	const canStartPick = computed(() => {
 		const s = String(request.value?.status || '')
 		return (s === 'approved' || s === 'partially_approved') && remainingTotal.value > 0
+	})
+	const canAbandon = computed(() => {
+		const s = String(request.value?.status || '')
+		return (s === 'approved' || s === 'partially_approved') && issuedTotal.value <= 0
 	})
 
 	const stepActive = computed(() => {
@@ -226,6 +239,7 @@
 		if (s === 'draft') return 1
 		if (s === 'submitted') return 2
 		if (s === 'approved' || s === 'partially_approved') return 3
+		if (s === 'abandoned') return 3
 		if (s === 'closed') return 4
 		return 2
 	})
@@ -234,6 +248,7 @@
 		const s = String(request.value?.status || '')
 		if (s === 'submitted') return $t('stock.materialRequestTipSubmitted')
 		if (s === 'approved' || s === 'partially_approved') return $t('stock.materialRequestTipApproved')
+		if (s === 'abandoned') return $t('stock.materialRequestTipAbandoned')
 		if (s === 'closed') return $t('stock.materialRequestTipClosed')
 		if (s === 'rejected') return $t('stock.materialRequestTipRejected')
 		if (s === 'canceled') return $t('stock.materialRequestTipCanceled')
@@ -352,6 +367,49 @@
 					uni.showToast({ title: extractErrorMessage(res.data), icon: 'none' })
 				} catch (e) {
 					console.error('取消申请失败:', e)
+					uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
+				} finally {
+					acting.value = false
+				}
+			}
+		})
+	}
+
+	const abandonRequest = async () => {
+		if (!request.value) return
+		if (!canAbandon.value) return
+		uni.showModal({
+			title: $t('common.confirm'),
+			content: $t('stock.materialRequestAbandonConfirm'),
+			editable: true,
+			placeholderText: $t('stock.materialRequestAbandonReasonPlaceholder'),
+			success: async (r) => {
+				if (!r.confirm) return
+				const reason = String(r.content || '').trim()
+				if (!reason) {
+					uni.showToast({ title: $t('stock.materialRequestAbandonReasonRequired'), icon: 'none' })
+					return
+				}
+				acting.value = true
+				try {
+					const res = await uni.request({
+						url: buildApiUrl(API_ENDPOINTS.STOCK.MATERIAL_REQUEST_ABANDON(id.value)),
+						method: 'POST',
+						header: getAuthHeaders(userStore.token),
+						data: { reason },
+					})
+					if (res.statusCode === 200) {
+						uni.showToast({ title: $t('stock.materialRequestAbandoned'), icon: 'success' })
+						await load()
+						return
+					}
+					if (res.statusCode === 401) {
+						userStore.logout()
+						return
+					}
+					uni.showToast({ title: extractErrorMessage(res.data), icon: 'none' })
+				} catch (e) {
+					console.error('放弃领货失败:', e)
 					uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
 				} finally {
 					acting.value = false
@@ -542,4 +600,3 @@
 	}
 	.bottom-bar :deep(.u-btn) { flex: 1; height: 48px; }
 </style>
-

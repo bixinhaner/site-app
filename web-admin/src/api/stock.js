@@ -138,6 +138,9 @@ export const stockApi = {
   cancelMaterialRequest: (id, data) =>
     request.post(`/api/stock/material-requests/${id}/cancel`, data),
 
+  abandonMaterialRequest: (id, data) =>
+    request.post(`/api/stock/material-requests/${id}/abandon`, data),
+
   approveMaterialRequest: (id, data) =>
     request.post(`/api/stock/material-requests/${id}/approve`, data),
 

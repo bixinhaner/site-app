@@ -243,6 +243,7 @@ export const API_ENDPOINTS = {
     MATERIAL_REQUEST_DETAIL: (id) => `/api/stock/material-requests/${id}`,
     MATERIAL_REQUEST_SUBMIT: (id) => `/api/stock/material-requests/${id}/submit`,
     MATERIAL_REQUEST_CANCEL: (id) => `/api/stock/material-requests/${id}/cancel`,
+    MATERIAL_REQUEST_ABANDON: (id) => `/api/stock/material-requests/${id}/abandon`,
     MATERIAL_REQUEST_APPROVE: (id) => `/api/stock/material-requests/${id}/approve`,
     MATERIAL_REQUEST_REJECT: (id) => `/api/stock/material-requests/${id}/reject`,
     ISSUE_DRAFTS: '/api/stock/issue-drafts',

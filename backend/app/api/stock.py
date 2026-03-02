@@ -4295,6 +4295,116 @@ async def cancel_material_request(
     return {"message": "已取消", "status": _enum_value(req.status)}
 
 
+@router.post("/material-requests/{request_id}/abandon")
+async def abandon_material_request(
+    request_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_material_request_enabled(db)
+    _ensure_not_surveyor(current_user)
+
+    reason = (payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写放弃原因")
+
+    req = (
+        db.query(MaterialRequest)
+        .options(joinedload(MaterialRequest.items))
+        .filter(MaterialRequest.id == request_id)
+        .first()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="申请单不存在")
+
+    from_status = _enum_value(req.status)
+    if from_status not in {
+        MaterialRequestStatusEnum.APPROVED.value,
+        MaterialRequestStatusEnum.PARTIALLY_APPROVED.value,
+    }:
+        raise HTTPException(status_code=400, detail="当前状态不可放弃领货")
+
+    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
+    if not is_warehouse_side and req.requester_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限放弃该申请单")
+    if is_warehouse_side and req.requester_id != current_user.id:
+        managed_ids = _get_managed_warehouse_ids(db, current_user)
+        if managed_ids is not None and req.warehouse_id not in managed_ids:
+            raise HTTPException(status_code=403, detail="无权限放弃该仓库的申请单")
+
+    has_issued = any(int(getattr(it, "issued_qty", 0) or 0) > 0 for it in (req.items or []))
+    if has_issued:
+        raise HTTPException(status_code=400, detail="该申请单已发生出库，不能放弃领货，请改走退库流程")
+
+    active_draft_statuses = [
+        IssueDraftStatusEnum.DRAFT,
+        IssueDraftStatusEnum.PENDING_CONFIRM,
+        IssueDraftStatusEnum.PARTIALLY_CONFIRMED,
+    ]
+    active_drafts = (
+        db.query(IssueDraft)
+        .filter(
+            IssueDraft.request_id == req.id,
+            IssueDraft.status.in_(active_draft_statuses),
+        )
+        .all()
+    )
+
+    canceled_draft_ids: List[str] = []
+    for draft in active_drafts:
+        confirmed_sn_exists = (
+            db.query(IssueDraftSerial.id)
+            .filter(
+                IssueDraftSerial.draft_id == draft.id,
+                IssueDraftSerial.status == IssueDraftSerialStatusEnum.CONFIRMED,
+            )
+            .first()
+            is not None
+        )
+        confirmed_aux_exists = (
+            db.query(IssueDraftItem.id)
+            .filter(
+                IssueDraftItem.draft_id == draft.id,
+                IssueDraftItem.confirmed_qty > 0,
+            )
+            .first()
+            is not None
+        )
+        if confirmed_sn_exists or confirmed_aux_exists:
+            raise HTTPException(status_code=400, detail="存在已确认出库的领料单，当前申请单不可放弃领货")
+
+        draft.status = IssueDraftStatusEnum.CANCELED
+        if not getattr(draft, "reject_reason", None):
+            draft.reject_reason = f"申请单已放弃领货：{reason}"
+        canceled_draft_ids.append(str(draft.id))
+
+    req.status = MaterialRequestStatusEnum.ABANDONED
+    req.approval_comments = reason
+
+    _add_audit_event(
+        db,
+        resource_type="material_request",
+        resource_id=req.id,
+        action="abandon_material_request",
+        operator_id=current_user.id,
+        comments=reason,
+        details={
+            "canceled_issue_draft_count": len(canceled_draft_ids),
+            "canceled_issue_draft_ids": canceled_draft_ids,
+        },
+        from_status=from_status,
+        to_status=MaterialRequestStatusEnum.ABANDONED.value,
+    )
+
+    db.commit()
+    return {
+        "message": "已放弃领货",
+        "status": _enum_value(req.status),
+        "canceled_issue_draft_count": len(canceled_draft_ids),
+    }
+
+
 @router.post("/material-requests/{request_id}/approve")
 async def approve_material_request(
     request_id: str,

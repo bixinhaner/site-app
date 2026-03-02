@@ -14,6 +14,7 @@ class MaterialRequestStatusEnum(str, enum.Enum):
     SUBMITTED = "submitted"
     APPROVED = "approved"
     PARTIALLY_APPROVED = "partially_approved"
+    ABANDONED = "abandoned"
     REJECTED = "rejected"
     CANCELED = "canceled"
     CLOSED = "closed"
@@ -75,4 +76,3 @@ class MaterialRequestItem(Base):
 
     request = relationship("MaterialRequest", back_populates="items")
     equipment = relationship("Equipment")
-

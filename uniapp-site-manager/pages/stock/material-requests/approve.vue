@@ -182,6 +182,7 @@
 		const s = String(request.value?.status || '')
 		if (s === 'submitted') return $t('stock.materialApprovalTipSubmitted')
 		if (s === 'approved' || s === 'partially_approved') return $t('stock.materialApprovalTipApproved')
+		if (s === 'abandoned') return $t('stock.materialRequestTipAbandoned')
 		if (s === 'rejected') return $t('stock.materialRequestTipRejected')
 		if (s === 'canceled') return $t('stock.materialRequestTipCanceled')
 		if (s === 'closed') return $t('stock.materialRequestTipClosed')
@@ -201,6 +202,7 @@
 			submitted: $t('stock.statusSubmitted'),
 			approved: $t('stock.statusApproved'),
 			partially_approved: $t('stock.statusPartiallyApproved'),
+			abandoned: $t('stock.statusAbandoned'),
 			rejected: $t('stock.statusRejected'),
 			canceled: $t('stock.statusCanceled'),
 			closed: $t('stock.statusClosed'),
@@ -214,7 +216,7 @@
 		if (s === 'approved') return 'u-tag-success'
 		if (s === 'partially_approved') return 'u-tag-primary'
 		if (s === 'closed') return 'u-tag-success'
-		if (s === 'rejected' || s === 'canceled') return 'u-tag-error'
+		if (s === 'abandoned' || s === 'rejected' || s === 'canceled') return 'u-tag-error'
 		return 'u-tag-info'
 	}
 

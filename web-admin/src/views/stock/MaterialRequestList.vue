@@ -22,6 +22,7 @@
             <el-option label="待审批" value="submitted" />
             <el-option label="已批准" value="approved" />
             <el-option label="部分批准" value="partially_approved" />
+            <el-option label="已放弃" value="abandoned" />
             <el-option label="已驳回" value="rejected" />
             <el-option label="已取消" value="canceled" />
             <el-option label="已关闭" value="closed" />
@@ -302,6 +303,7 @@ const statusText = (status) => {
     submitted: '待审批',
     approved: '已批准',
     partially_approved: '部分批准',
+    abandoned: '已放弃',
     rejected: '已驳回',
     canceled: '已取消',
     closed: '已关闭',
@@ -315,6 +317,7 @@ const statusTagType = (status) => {
     submitted: 'warning',
     approved: 'success',
     partially_approved: 'warning',
+    abandoned: 'danger',
     rejected: 'danger',
     canceled: 'info',
     closed: 'success',
