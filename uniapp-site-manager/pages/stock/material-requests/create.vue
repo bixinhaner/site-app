@@ -104,25 +104,25 @@
 
 					<view v-else class="items">
 						<view class="item" v-for="(it, idx) in items" :key="it.equipment_id">
-							<view class="row">
+							<view class="item-main">
 								<view class="info">
-									<view class="name-line">
-										<text class="name">{{ it.equipment_name }}</text>
+									<text class="name">{{ it.equipment_name || '-' }}</text>
+									<text class="code mono">{{ it.equipment_code || '-' }}</text>
+									<view class="type-row">
 										<view class="u-tag" :class="it.equipment_category === 'main_device' ? 'u-tag-warning' : 'u-tag-info'">
 											{{ it.equipment_category === 'main_device' ? $t('stock.mainDevice') : $t('stock.auxMaterial') }}
 										</view>
 									</view>
-									<text class="code mono">{{ it.equipment_code }}</text>
 								</view>
-								<view class="actions">
-									<view class="qty">
-										<view class="qbtn u-pressable" @click="decQty(idx)">−</view>
-										<input class="qinput mono" type="number" v-model="it.requested_qty" @blur="normalizeQty(idx)" />
-										<view class="qbtn u-pressable" @click="incQty(idx)">＋</view>
-									</view>
-									<view class="remove u-pressable" @click="removeItem(idx)">
-										<uni-icons type="trash" size="18" color="#ef4444" />
-									</view>
+							</view>
+							<view class="actions">
+								<view class="qty">
+									<view class="qbtn u-pressable" @click="decQty(idx)">−</view>
+									<input class="qinput mono" type="number" v-model="it.requested_qty" @blur="normalizeQty(idx)" />
+									<view class="qbtn u-pressable" @click="incQty(idx)">＋</view>
+								</view>
+								<view class="remove u-pressable" @click="removeItem(idx)">
+									<uni-icons type="trash" size="18" color="#ef4444" />
 								</view>
 							</view>
 						</view>
@@ -203,7 +203,7 @@
 </template>
 
 <script setup>
-	import { computed, getCurrentInstance, onMounted, reactive, ref } from 'vue'
+	import { computed, getCurrentInstance, onMounted, ref } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
@@ -751,27 +751,32 @@
 		background: #fff;
 		border-radius: 14px;
 		padding: 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
 	}
-	.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-	.info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-	.name-line { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+	.item-main { min-width: 0; }
+	.info { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 	.name {
-		flex: 1;
-		min-width: 0;
 		font-size: 14px;
 		font-weight: 700;
 		color: #111827;
-		display: -webkit-box;
-		-webkit-box-orient: vertical;
-		-webkit-line-clamp: 2;
-		overflow: hidden;
-		line-height: 1.35;
+		line-height: 1.45;
+		white-space: normal;
 		word-break: break-all;
 	}
-	.code { font-size: 12px; color: #9ca3af; }
+	.code {
+		font-size: 12px;
+		color: #6b7280;
+		line-height: 1.4;
+		word-break: break-all;
+	}
+	.type-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-	.actions { display: flex; align-items: center; gap: 10px; }
+	.actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 	.qty {
+		flex: 1;
+		max-width: 220px;
 		display: flex;
 		align-items: center;
 		border: 1px solid rgba(229, 231, 235, 0.9);
@@ -798,7 +803,29 @@
 		font-weight: 800;
 		color: #111827;
 	}
-	.remove { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: rgba(239, 68, 68, 0.10); }
+	.remove {
+		flex-shrink: 0;
+		width: 38px;
+		height: 38px;
+		border-radius: 12px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(239, 68, 68, 0.10);
+	}
+
+	@media screen and (max-width: 360px) {
+		.qty { max-width: none; }
+		.qbtn,
+		.remove {
+			width: 34px;
+			height: 34px;
+		}
+		.qinput {
+			width: 56px;
+			height: 34px;
+		}
+	}
 
 	.bottom-spacer { height: 92px; }
 	.bottom-bar {
