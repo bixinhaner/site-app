@@ -16,6 +16,12 @@ export const API_SERVERS = [
     flagIcon: '/static/flags/id.svg',
   },
   {
+    key: 'ug',
+    name: 'Uganda',
+    baseUrl: 'https://siteapp.savannafibre.com',
+    flagIcon: '/static/flags/ug.svg',
+  },
+  {
     key: 'cn',
     name: 'China',
     baseUrl: 'http://113.45.25.135/api',

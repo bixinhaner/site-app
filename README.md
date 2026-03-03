@@ -99,6 +99,11 @@ npm run build                  # 生产构建
 - **Web 管理端**: http://localhost:5173
 - **健康检查**: http://localhost:8000/health
 
+### 移动端登录可选服务器（右上角国旗切换）
+- **Indonesia（默认）**: `https://siteapp.indonesiacentral.cloudapp.azure.com`
+- **Uganda**: `https://siteapp.savannafibre.com`
+- **China**: `http://113.45.25.135/api`
+
 ## 👥 用户系统
 
 ### 默认账户
