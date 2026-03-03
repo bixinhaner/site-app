@@ -3,26 +3,46 @@
 适用场景：
 - 服务器：Ubuntu 22.04，root 用户
 - 目录：项目代码位于 `/usr/local/site-app`
-- 对外端口：只开放 `80/443`（HTTP 自动跳转到 HTTPS）
-- 反向代理：使用 **Caddy + Let’s Encrypt** 自动签发与续期证书
+- 对外端口：只开放 `80/443`
+- 反向代理：使用 **Caddy**（可选由 Caddy 终止 HTTPS，或由前置防火墙终止 HTTPS）
 - 进程管理：使用 **pm2** 托管 `backend` 与 `caddy`
 - 数据库：SQLite（全新库，不迁移历史数据）
 - 同域名：`/` 为 WebAdmin；`/api/*` 反代到后端
+- 本文包含两种组网：
+  - 标准模式：公网直达 Caddy，Caddy 自动签发证书
+  - Savanna 模式：防火墙终止 HTTPS，Caddy 仅接收 HTTP 回源
 
 ---
 
-## 1. 架构与端口说明
+## 1. 架构与端口说明（先选模式）
+
+### 模式 A：标准模式（Caddy 终止 HTTPS，默认）
 
 - 公网仅暴露：
-  - `80`：仅用于跳转到 `443` + Let’s Encrypt 校验（建议保留）
+  - `80`：Let’s Encrypt `http-01` 校验 + HTTP 跳转 HTTPS
   - `443`：对外提供 WebAdmin + API
 - 后端 uvicorn：
   - **只监听本机**：`127.0.0.1:8000`（不对公网开放）
 - Caddy：
   - 监听 `:80`、`:443`
+  - 自动申请/续期证书（Let’s Encrypt）
   - 路由：
-    - `/api/*`、`/uploads/*`、`/health` 等转发到后端 `127.0.0.1:8000`
-    - 其余路径由静态站点 `/usr/local/site-app/web-admin/dist` 提供（SPA 回退 `index.html`）
+    - `/api/*`、`/uploads/*`、`/health` 转发到 `127.0.0.1:8000`
+    - 其余路径由 `/usr/local/site-app/web-admin/dist` 提供（SPA 回退 `index.html`）
+
+### 模式 B：Savanna 模式（防火墙终止 HTTPS）
+
+- 公网入口（防火墙/网关）：
+  - `443`：绑定证书（例如 `*.savannafibre.com`），终止 HTTPS
+  - `80`：按防火墙策略决定是否跳转到 `443`
+- 防火墙回源：
+  - 将请求转发到应用服务器 `http://<server-ip>:80`
+- 应用服务器：
+  - 后端 uvicorn 仍只监听 `127.0.0.1:8000`
+  - Caddy **仅监听 HTTP**（不申请证书、不做 HTTPS 跳转）
+- 适用场景：
+  - 证书统一由网络团队在防火墙侧维护
+  - 需要复用既有证书与公网入口策略
 
 ---
 
@@ -33,14 +53,16 @@
 ### 2.1 前置检查
 
 ```bash
-# 1) 域名是否解析到本机公网 IP（应返回你的公网 IP）
-dig +short siteapp.indonesiacentral.cloudapp.azure.com
+# 1) 域名是否解析到预期公网入口 IP（将域名替换为你的实际域名）
+dig +short siteapp.example.com
 
 # 2) 80/443/8000 是否被占用（有占用先停掉对应服务）
 ss -lntp | egrep ':(80|443|8000)\b' || true
 ```
 
-> 注意：Azure 防火墙 / NSG 需要放行 `80/443` 入站，否则 Let’s Encrypt 可能签发失败。
+> 注意：
+> - 标准模式：云防火墙 / NSG 需放行 `80/443` 到 Caddy，否则 Let’s Encrypt 可能签发失败。
+> - Savanna 模式：需确认防火墙可回源到应用服务器 `80`，并保留 `Host` 头。
 
 ### 2.2 安装依赖（Node + pm2 + Caddy）
 
@@ -154,7 +176,9 @@ npm run build
 ls -la /usr/local/site-app/web-admin/dist | head
 ```
 
-### 2.6 写 Caddyfile（同域：前端 `/`，后端 `/api`）
+### 2.6 写 Caddyfile（按组网选择）
+
+#### 2.6.1 标准模式（Caddy 自动 HTTPS）
 
 ```bash
 cat > /usr/local/site-app/Caddyfile <<'EOF'
@@ -186,9 +210,52 @@ siteapp.indonesiacentral.cloudapp.azure.com {
 EOF
 ```
 
-> 关键点：必须使用 `handle @backend` 单独处理后端路径，避免被 `try_files ... /index.html` 重写，从而出现 `POST /api/auth/login -> 405` 的问题。
+#### 2.6.2 Savanna 模式（防火墙终止 HTTPS，Caddy 仅 HTTP）
 
-### 2.7 pm2 启动后端（仅本机监听）+ 启动 Caddy（对外 80/443）
+```bash
+cat > /usr/local/site-app/Caddyfile <<'EOF'
+{
+  auto_https off
+}
+
+http://siteapp.savannafibre.com, http://102.209.110.241 {
+  encode zstd gzip
+
+  # 安全建议：对公网隐藏 API 文档（需要时可临时注释）
+  @apidocs path /docs* /redoc* /openapi.json
+  handle @apidocs {
+    respond 404
+  }
+
+  @backend path /api/* /uploads/* /health
+  handle @backend {
+    reverse_proxy 127.0.0.1:8000
+  }
+
+  handle {
+    root * /usr/local/site-app/web-admin/dist
+    try_files {path} /index.html
+    file_server
+  }
+}
+EOF
+```
+
+> 将 `siteapp.savannafibre.com` 和 `102.209.110.241` 替换为你的实际域名与公网入口 IP。
+
+组网与配置差异（重点）：
+
+| 项 | 标准模式（Caddy HTTPS） | Savanna 模式（防火墙 HTTPS） |
+| --- | --- | --- |
+| TLS 终止位置 | Caddy | 防火墙/网关 |
+| 证书签发/续期 | Caddy + Let’s Encrypt | 防火墙统一维护 |
+| Caddy 配置 | `domain { ... }` | `auto_https off` + `http://... { ... }` |
+| 对 Caddy 的回源协议 | HTTPS/HTTP（本机） | HTTP（通常 `:80`） |
+| 常见故障 | LE challenge 失败 | 证书不匹配、HTTPS 循环重定向 |
+
+> 共同关键点：必须使用 `handle @backend` 单独处理后端路径，避免被 `try_files ... /index.html` 重写，从而出现 `POST /api/auth/login -> 405`。
+
+### 2.7 pm2 启动后端（仅本机监听）+ 启动 Caddy（端口随模式）
 
 ```bash
 # 后端（127.0.0.1:8000）
@@ -199,7 +266,7 @@ pm2 start /usr/local/site-app/backend/venv/bin/python \
   --interpreter none \
   -- -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-# Caddy（80/443）
+# Caddy（标准模式通常监听 80/443；Savanna 模式通常仅监听 80）
 pm2 delete site-caddy || true
 pm2 start /usr/bin/caddy \
   --name site-caddy \
@@ -215,7 +282,9 @@ pm2 startup systemd -u root --hp /root
 pm2 save
 ```
 
-### 2.9 验收（HTTP 跳 HTTPS / 后端健康 / 文档 / 登录）
+### 2.9 验收（按组网选择）
+
+#### 标准模式验收
 
 ```bash
 # 1) HTTP 是否跳转到 HTTPS
@@ -228,6 +297,23 @@ curl -I https://siteapp.indonesiacentral.cloudapp.azure.com
 curl -sS https://siteapp.indonesiacentral.cloudapp.azure.com/health
 
 # 4) 查看服务状态/日志
+pm2 status
+pm2 logs site-backend --lines 80
+pm2 logs site-caddy --lines 120
+```
+
+#### Savanna 模式验收
+
+```bash
+# 1) 本机检查 Caddy 回源（HTTP）
+curl -I http://127.0.0.1/ -H 'Host: siteapp.savannafibre.com'
+curl -sS http://127.0.0.1/health -H 'Host: siteapp.savannafibre.com'
+
+# 2) 外网检查入口 HTTPS（由防火墙证书终止）
+curl -I https://siteapp.savannafibre.com
+curl -sS https://siteapp.savannafibre.com/health
+
+# 3) 查看服务状态/日志
 pm2 status
 pm2 logs site-backend --lines 80
 pm2 logs site-caddy --lines 120

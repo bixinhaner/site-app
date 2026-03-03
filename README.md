@@ -99,6 +99,12 @@ npm run build                  # 生产构建
 - **Web 管理端**: http://localhost:5173
 - **健康检查**: http://localhost:8000/health
 
+### 生产部署组网差异（Indonesia / Savanna）
+- **标准模式（Indonesia）**：公网 `80/443` 直达 Caddy，由 Caddy 自动申请和续期 HTTPS 证书（Let’s Encrypt）。
+- **Savanna 模式（Uganda）**：HTTPS 证书和 TLS 终止放在防火墙/网关，Caddy 仅接收 HTTP 回源（通常 `:80`），不做证书签发和 HTTPS 跳转。
+- **域名要求**：域名必须与入口证书匹配；例如证书是 `*.savannafibre.com` 时，应使用 `siteapp.savannafibre.com`，不要使用 `siteapp.savannafibre.co.ug`。
+- **详细操作**：见 `surge-deployment.md` 第 `2.6` 节（两套 Caddyfile 模板）。
+
 ### 移动端登录可选服务器（右上角国旗切换）
 - **Indonesia（默认）**: `https://siteapp.indonesiacentral.cloudapp.azure.com`
 - **Uganda**: `https://siteapp.savannafibre.com`
