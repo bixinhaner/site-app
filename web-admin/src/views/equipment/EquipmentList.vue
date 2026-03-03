@@ -122,38 +122,40 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button
-              type="primary"
-              size="small"
-              @click="handleEdit(row)"
-              link
-            >
-              <el-icon><Edit /></el-icon>
-              编辑
-            </el-button>
-            
-            <el-button
-              :type="row.status === 'active' ? 'warning' : 'success'"
-              size="small"
-              @click="toggleStatus(row)"
-              link
-            >
-              <el-icon v-if="row.status === 'active'"><CircleClose /></el-icon>
-              <el-icon v-else><CircleCheck /></el-icon>
-              {{ row.status === 'active' ? '停用' : '启用' }}
-            </el-button>
-            
-            <el-button
-              type="danger"
-              size="small"
-              @click="handleDelete(row)"
-              link
-            >
-              <el-icon><Delete /></el-icon>
-              删除
-            </el-button>
+            <div class="en-op-actions">
+              <el-button
+                type="primary"
+                size="small"
+                @click="handleEdit(row)"
+                link
+              >
+                <el-icon><Edit /></el-icon>
+                编辑
+              </el-button>
+              
+              <el-button
+                :type="row.status === 'active' ? 'warning' : 'success'"
+                size="small"
+                @click="toggleStatus(row)"
+                link
+              >
+                <el-icon v-if="row.status === 'active'"><CircleClose /></el-icon>
+                <el-icon v-else><CircleCheck /></el-icon>
+                {{ row.status === 'active' ? '停用' : '启用' }}
+              </el-button>
+              
+              <el-button
+                type="danger"
+                size="small"
+                @click="handleDelete(row)"
+                link
+              >
+                <el-icon><Delete /></el-icon>
+                删除
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>

@@ -157,9 +157,14 @@ onMounted(loadAll)
     gap: 16px;
 
     .el-button {
-      height: 44px;
+      min-height: 44px;
+      height: auto;
       font-weight: 500;
       border-radius: 8px;
+      white-space: normal;
+      line-height: 1.2;
+      text-align: center;
+      padding: 10px 12px;
 
       .el-icon { margin-right: 8px; }
     }

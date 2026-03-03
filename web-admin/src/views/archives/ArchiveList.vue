@@ -21,9 +21,8 @@
         <el-table-column prop="site_name" label="站点名称" min-width="180" />
         <el-table-column label="勘察轮次" width="200">
           <template #default="{ row }">
-            <el-tag :type="(row.survey_round || 1) === 1 ? 'success' : 'warning'">
-              <span v-if="(row.survey_round || 1) === 1">初勘（第1次勘察）</span>
-              <span v-else>复勘（第{{ row.survey_round }}次勘察）</span>
+            <el-tag class="en-table-compact-tag" :type="(row.survey_round || 1) === 1 ? 'success' : 'warning'">
+              <span>{{ surveyRoundText(row.survey_round) }}</span>
             </el-tag>
           </template>
         </el-table-column>
@@ -58,12 +57,15 @@
  </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { surveyArchivesApi } from '@/api/surveyArchives'
 
 const router = useRouter()
+const { locale } = useI18n()
+const isEnglish = computed(() => locale.value === 'en-US')
 const loading = ref(false)
 const items = ref([])
 const total = ref(0)
@@ -92,6 +94,13 @@ const reload = async () => {
 }
 
 const formatDate = (v) => v ? new Date(v).toLocaleString() : '-'
+const surveyRoundText = (round) => {
+  const value = Number(round || 1)
+  if (isEnglish.value) {
+    return value === 1 ? 'Preliminary Survey (Round 1)' : `Re-survey (Round ${value})`
+  }
+  return value === 1 ? '初勘（第1次勘察）' : `复勘（第${value}次勘察）`
+}
 const viewDetail = (row) => router.push({ name: 'SurveyArchiveDetail', params: { id: row.id } })
 
 onMounted(reload)

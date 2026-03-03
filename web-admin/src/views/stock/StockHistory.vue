@@ -11,14 +11,14 @@
     <!-- 筛选条件 -->
     <div class="card filters-card">
       <el-row :gutter="16">
-        <el-col :span="4">
+        <el-col :xs="24" :sm="12" :md="4">
           <el-select v-model="recordTypeFilter" placeholder="记录类型" clearable>
             <el-option label="全部" value="all" />
             <el-option label="出入库记录" value="transaction" />
             <el-option label="SN 导入记录" value="import" />
           </el-select>
         </el-col>
-        <el-col :span="4">
+        <el-col :xs="24" :sm="12" :md="4">
           <el-select v-model="filters.transaction_type" placeholder="操作类型" clearable>
             <el-option label="入库" value="stock_in" />
             <el-option label="出库" value="stock_out" />
@@ -27,7 +27,7 @@
             <el-option label="调整" value="adjustment" />
           </el-select>
         </el-col>
-        <el-col :span="8">
+        <el-col :xs="24" :sm="24" :md="8">
           <el-date-picker
             v-model="dateRange"
             type="daterange"
@@ -39,7 +39,7 @@
             @change="onDateRangeChange"
           />
         </el-col>
-        <el-col :span="8">
+        <el-col :xs="24" :sm="24" :md="8">
           <div class="keyword-search">
             <el-input v-model="keyword" class="keyword-input" placeholder="搜索单据/设备/SN" clearable>
               <template #prefix>
@@ -64,30 +64,35 @@
     <div class="card">
       <el-table
         :data="pagedRecords"
+        :fit="false"
         style="width: 100%"
         v-loading="loading"
       >
-        <el-table-column prop="recordType" label="类型" width="90">
+        <el-table-column prop="recordType" :label="tableI18n.typeLabel" :width="isCompactTable ? 92 : 130">
           <template #default="{ row }">
-            <el-tag :type="row.recordType === 'import' ? 'info' : 'primary'">
-              {{ row.recordType === 'import' ? 'SN导入' : '出入库' }}
+            <el-tag class="en-table-compact-tag" :type="row.recordType === 'import' ? 'info' : 'primary'">
+              {{ recordTypeText(row.recordType) }}
             </el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column prop="documentLabel" label="单据/文件" min-width="260" show-overflow-tooltip />
+        <el-table-column prop="documentLabel" :label="tableI18n.documentLabel" :min-width="isCompactTable ? 180 : 280" show-overflow-tooltip />
 
-        <el-table-column prop="direction" label="方向" width="70">
+        <el-table-column v-if="!isCompactTable" prop="direction" :label="tableI18n.directionLabel" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.direction === 'in' ? 'success' : (row.direction === 'out' ? 'warning' : 'info')" size="small">
+            <el-tag
+              class="en-table-compact-tag"
+              :type="row.direction === 'in' ? 'success' : (row.direction === 'out' ? 'warning' : 'info')"
+              size="small"
+            >
               {{ directionText(row) }}
             </el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column prop="warehouseName" label="仓库" min-width="200" show-overflow-tooltip />
+        <el-table-column v-if="!isCompactTable" prop="warehouseName" :label="tableI18n.warehouseLabel" min-width="200" show-overflow-tooltip />
 
-        <el-table-column label="数量" width="120">
+        <el-table-column v-if="!isCompactTable" :label="tableI18n.quantityLabel" width="140">
           <template #default="{ row }">
             <div v-if="row.recordType === 'import'" class="counts">
               <el-tag size="small">总 {{ row.totalQuantity }}</el-tag>
@@ -99,8 +104,8 @@
           </template>
 	        </el-table-column>
 
-	        <el-table-column prop="operatorName" label="操作人" width="110" show-overflow-tooltip />
-	        <el-table-column prop="receiverName" label="领取人" width="150" show-overflow-tooltip>
+	        <el-table-column v-if="!isCompactTable" prop="operatorName" :label="tableI18n.operatorLabel" width="120" show-overflow-tooltip />
+	        <el-table-column v-if="!isCompactTable" prop="receiverName" :label="tableI18n.receiverLabel" width="160" show-overflow-tooltip>
 	          <template #default="{ row }">
 	            <span v-if="row.recordType === 'transaction' && row.transactionType === 'stock_out'">
 	              <span class="cell-ellipsis">{{ row.receiverName || '-' }}</span>
@@ -109,37 +114,39 @@
 	          </template>
 	        </el-table-column>
 
-	        <el-table-column prop="operationTime" label="操作时间" width="160">
+	        <el-table-column v-if="!isCompactTable" prop="operationTime" :label="tableI18n.timeLabel" width="180">
 	          <template #default="{ row }">
 	            {{ formatDateTime(row.operationTime) }}
 	          </template>
         </el-table-column>
 
-        <el-table-column prop="notes" label="备注" min-width="200" v-if="showNotesColumn" show-overflow-tooltip>
+        <el-table-column prop="notes" :label="tableI18n.notesLabel" min-width="220" v-if="showNotesColumn" show-overflow-tooltip>
           <template #default="{ row }">
             <span>{{ row.notes || '-' }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column :label="tableI18n.actionsLabel" :width="isCompactTable ? 96 : 120" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-if="row.recordType === 'import'"
-              size="small"
-              type="primary"
-              link
-              @click="openImportDetails(row)"
-            >
-              SN 明细
-            </el-button>
-            <el-button
-              v-else
-              size="small"
-              text
-              @click="viewTransaction(row)"
-            >
-              详情
-            </el-button>
+            <div class="en-op-actions en-op-actions--stack">
+              <el-button
+                v-if="row.recordType === 'import'"
+                size="small"
+                type="primary"
+                link
+                @click="openImportDetails(row)"
+              >
+                {{ tableI18n.snDetailsLabel }}
+              </el-button>
+              <el-button
+                v-else
+                size="small"
+                text
+                @click="viewTransaction(row)"
+              >
+                {{ tableI18n.detailsLabel }}
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -503,19 +510,52 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search, Close } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { stockApi } from '../../api/stock'
 
 const route = useRoute()
+const { locale } = useI18n()
+const isEnglish = computed(() => locale.value === 'en-US')
+const tableI18n = computed(() => (isEnglish.value
+  ? {
+      typeLabel: 'Type',
+      documentLabel: 'Document / File',
+      directionLabel: 'Direction',
+      warehouseLabel: 'Warehouse',
+      quantityLabel: 'Quantity',
+      operatorLabel: 'Operator',
+      receiverLabel: 'Receiver',
+      timeLabel: 'Operation time',
+      notesLabel: 'Notes',
+      actionsLabel: 'Actions',
+      detailsLabel: 'Details',
+      snDetailsLabel: 'SN details',
+    }
+  : {
+      typeLabel: '类型',
+      documentLabel: '单据/文件',
+      directionLabel: '方向',
+      warehouseLabel: '仓库',
+      quantityLabel: '数量',
+      operatorLabel: '操作人',
+      receiverLabel: '领取人',
+      timeLabel: '操作时间',
+      notesLabel: '备注',
+      actionsLabel: '操作',
+      detailsLabel: '详情',
+      snDetailsLabel: 'SN 明细',
+    }))
 
 const loading = ref(false)
 const rawTransactions = ref([])
 const rawImports = ref([])
 const warehouses = ref([])
 const warehouseMap = ref({})
+const isCompactTable = ref(typeof window !== 'undefined' ? window.innerWidth <= 980 : false)
 
 const recordTypeFilter = ref('all') // all / transaction / import
 const keyword = ref('')
@@ -526,6 +566,11 @@ const filters = ref({
   end_date: '',
   search: ''
 })
+
+const syncCompactTable = () => {
+  if (typeof window === 'undefined') return
+  isCompactTable.value = window.innerWidth <= 980
+}
 
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -545,7 +590,7 @@ const batchVoidForm = ref({ reason: '' })
 const transactionDetailsVisible = ref(false)
 const currentTransactionRecord = ref(null)
 
-const showNotesColumn = computed(() => recordTypeFilter.value !== 'import')
+const showNotesColumn = computed(() => recordTypeFilter.value !== 'import' && !isCompactTable.value)
 const canEditCurrentTransaction = computed(() => currentTransactionRecord.value?.transaction_type === 'stock_in')
 
 // ===== 编辑/更正/撤销相关状态 =====
@@ -588,17 +633,30 @@ const currentTransactionWarehouseName = computed(() => {
   return warehouseMap.value[rec.warehouse_id] || '-'
 })
 
+const recordTypeText = (recordType) => {
+  if (!isEnglish.value) return recordType === 'import' ? 'SN导入' : '出入库'
+  return recordType === 'import' ? 'SN import' : 'In/Out'
+}
+
 const directionText = (row) => {
-  if (row.recordType === 'import') return '入库'
+  if (row.recordType === 'import') return isEnglish.value ? 'Inbound' : '入库'
   const type = row.transactionType
-  const map = {
-    stock_in: '入库',
-    stock_out: '出库',
-    transfer: '调拨',
-    return: '退库',
-    adjustment: '调整'
-  }
-  return map[type] || '未知'
+  const map = isEnglish.value
+    ? {
+        stock_in: 'Inbound',
+        stock_out: 'Outbound',
+        transfer: 'Transfer',
+        return: 'Return',
+        adjustment: 'Adjust',
+      }
+    : {
+        stock_in: '入库',
+        stock_out: '出库',
+        transfer: '调拨',
+        return: '退库',
+        adjustment: '调整',
+      }
+  return map[type] || (isEnglish.value ? 'Unknown' : '未知')
 }
 
 const importStatusText = (s) =>
@@ -1095,6 +1153,11 @@ const submitVoid = async () => {
 }
 
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', syncCompactTable, { passive: true })
+    syncCompactTable()
+  }
+
   // 如果通过 /import-history 跳转，默认只看 SN 导入记录
   if (route.query.type === 'import') {
     recordTypeFilter.value = 'import'
@@ -1121,6 +1184,12 @@ onMounted(async () => {
         status: rec.status
       })
     }
+  }
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', syncCompactTable)
   }
 })
 </script>
@@ -1257,5 +1326,40 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+@media (max-width: 980px) {
+  .page-container {
+    padding: 16px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .filters-card :deep(.el-row) {
+    row-gap: 10px;
+  }
+
+  .keyword-search {
+    flex-wrap: wrap;
+  }
+
+  .keyword-input {
+    width: 100%;
+  }
+
+  .details-card .table-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .details-card .table-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
 }
 </style>

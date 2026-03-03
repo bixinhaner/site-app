@@ -660,8 +660,10 @@
 	
 	.actions-grid {
 		display: grid;
-		grid-template-columns: 1fr 1fr 1fr 1fr;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 16px;
+		width: 100%;
+		box-sizing: border-box;
 	}
 	
 	.action-item {
@@ -673,17 +675,27 @@
 		align-items: center;
 		gap: 8px;
 		box-shadow: var(--shadow-card);
+		width: 100%;
+		min-width: 0;
+		box-sizing: border-box;
 	}
 	
 	.action-icon {
 		font-size: 28px;
 		margin-bottom: 4px;
+		flex-shrink: 0;
 	}
 	
 	.action-label {
+		display: block;
+		width: 100%;
 		font-size: 12px;
 		color: #374151;
 		text-align: center;
+		line-height: 1.35;
+		white-space: normal;
+		overflow-wrap: anywhere;
+		word-break: break-word;
 	}
 	
 	// 最近活动

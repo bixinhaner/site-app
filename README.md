@@ -35,6 +35,8 @@ site-app/
 │   │   ├── views/             # 页面组件
 │   │   ├── api/               # API 服务
 │   │   ├── stores/            # 状态管理
+│   │   ├── i18n/              # 国际化配置与词库
+│   │   ├── components/common/ # 通用组件（含语言切换器）
 │   │   └── router/            # 路由配置
 │   └── package.json
 └── start_backend.py           # 项目一键启动脚本
@@ -92,6 +94,11 @@ npm install
 npm run dev                    # 默认运行在 5173 端口
 npm run build                  # 生产构建
 ```
+- **中英文切换（2026-03）**：
+- 登录页右上角提供语言切换器；进入后台后，语言切换器在顶部导航栏（用户信息左侧）。
+- 语言菜单固定英文文案：`Language / Chinese / English`。
+- 默认语言优先级：用户上次选择 > 浏览器语言（`en*` 自动英文，其它默认中文）。
+- 切换后即时生效，并持久化到浏览器本地存储。
 
 ### 服务访问地址
 - **后端 API**: http://localhost:8000
@@ -153,6 +160,7 @@ npm run build                  # 生产构建
 - **退库防超退（并发）**: 提交时会做额度锁定与原子状态更新；若并发导致可退额度或SN状态变化，会返回明确提示并要求刷新后重试
 - **退库收货（Web 管理端）**: 仓库收货页改为批次维度展示（批次头 + 单据明细），单据超过 8 条默认折叠；收货/拒收仍按单据执行
 - **首页库存入口（移动端）**: 我的设备、物料申请、审批物料申请、出库确认、退库申请、快速出库
+- **首页工作台按钮布局（移动端）**: 首页工作台入口固定 4 列等宽，英文/印尼语等长文案会自动换行断词，避免右侧溢出；左右边界与页面内容区保持对齐
 - **库存单位国际化（移动端）**: `web-admin` 仍按中文单位值（台/套/个/副/米）配置与存储，`uniapp` 在显示时会自动映射为当前语言文案（中文/英文/印尼语），避免非中文环境直接显示中文单位
 - **申请明细可读性优化（移动端）**: 物料申请创建页的"申请明细"改为上下分区布局（上方完整展示设备名/编码/类型，下方数量操作与删除），避免窄屏下信息被操作按钮挤压成 `...`
 - **放弃领货（移动端）**: 已审批但尚未发生出库的申请单可执行"放弃领货"（需填写原因）；系统会自动取消该申请单下未完成的领料单并释放占用，状态标记为 `abandoned`
@@ -328,6 +336,61 @@ const config = {
 - **开发环境**: 后端服务监听 `0.0.0.0:8000`，支持局域网访问
 - **CORS 配置**: 允许所有来源访问（开发环境）
 - **移动端访问**: 需要使用局域网 IP 地址
+
+## 🌐 WebAdmin 国际化说明（中文/英文）
+
+### 已实现范围
+- `web-admin` 已接入 `vue-i18n`，支持 `zh-CN` 和 `en-US`。
+- 登录页、主框架（顶部标题、菜单、面包屑、路由标题、退出提示）已按 i18n key 驱动。
+- Element Plus 组件内置文案（分页、日期等）会跟随语言切换。
+- 为了兼容历史页面中大量中文硬编码，增加了遗留文案桥接层：切换英文时会自动把页面中的中文文本、placeholder、title 等映射为英文。
+- 为运行时动态文案（含变量拼接）增加了“动态句式翻译规则”，避免英文模式下出现 `确定要删除 XXX 吗` 这类残留中文。
+- 对高频英文文案增加人工校准规则（删除确认、批量提示、导出文件名、状态提示），避免机器翻译生硬。
+- 英文 UI 协调性专项优化（2026-03）：统一 `Actions/Direction/Document` 等关键列名与短语；收敛操作列按钮布局；修复侧栏英文菜单在窄屏下过度省略；优化标签与表格单元格英文换行策略，避免单词被拆字母换行。
+- 英文窄屏可用性专项优化（2026-03-03）：`MaterialRequests/IssueDrafts/ReturnReceiving/StockHistory` 筛选栏改为响应式断点布局，移动端自动分行；列表页增加紧凑列模式（窄屏隐藏次要列）；移动端侧栏默认折叠，避免首屏被菜单覆盖。
+- 新增高优先级短语覆盖（如 `Warehouse (default mine)`、`Awaiting receipt`、`Search doc/device/SN`），降低英文 placeholder 在控件内被截断概率。
+- 菜单精简（2026-03-03）：`Report Center / 报表中心` 菜单入口已从 web-admin 侧栏移除（该页面尚未实现，避免展示空白占位功能）。
+
+### 关键文件
+- `web-admin/src/i18n/index.js`：i18n 初始化与消息注册。
+- `web-admin/src/i18n/messages/zh-CN.js`：中文主词条。
+- `web-admin/src/i18n/messages/en-US.js`：英文主词条。
+- `web-admin/src/i18n/translator.js`：语言切换、路由标题解析、遗留词库懒加载。
+- `web-admin/src/i18n/useLegacyDomI18n.js`：遗留中文 DOM 自动翻译桥接。
+- `web-admin/src/i18n/legacy-en-map.js`：中文短语 -> 英文映射词库（自动生成）。
+- `web-admin/src/i18n/legacy-dynamic-patterns.js`：动态句式自动翻译规则（自动生成）。
+- `web-admin/src/i18n/legacy-dynamic-overrides.js`：人工校准规则（优先级高于自动规则）。
+- `web-admin/src/components/common/LocaleSwitcher.vue`：语言切换组件（登录页右上角 + 后台顶部导航复用）。
+- `temp/generate_webadmin_legacy_i18n_map.mjs`：词库生成脚本（从现有代码提取中文并自动翻译）。
+- `temp/generate_webadmin_dynamic_i18n_patterns.mjs`：动态句式规则生成脚本（提取模板字符串并生成正则翻译规则）。
+- `temp/scan_visible_cjk_routes.sh`：英文模式可见中文巡检（用于定位漏翻译）。
+- `temp/scan_horizontal_overflow_routes.sh`：英文模式水平截断巡检（分别支持 desktop/mobile）。
+- `temp/scan_en_ui_harmony.sh`：英文 UI 协调性巡检（词内断行 + ellipsis 裁剪）。
+- `temp/scan_en_clipped_controls.sh`：英文控件裁切巡检（输入框/下拉/按钮/表头等可见文本裁切检测）。
+- `temp/scan_bad_en_terms.sh`：英文坏味道术语巡检（如 `operate`、`Documents/documents`、`to confirm`）。
+
+### 新增/修改文案时怎么做
+1. 新功能文案优先写到 `messages/zh-CN.js` 与 `messages/en-US.js`，页面里使用 `$t('...')`。
+2. 历史页面若仍有中文硬编码，可先保持不动，桥接层会在英文模式下自动翻译。
+3. 当历史中文变更多、翻译命中下降时，执行：
+```bash
+node temp/generate_webadmin_legacy_i18n_map.mjs
+node temp/generate_webadmin_dynamic_i18n_patterns.mjs
+```
+4. 重新构建验证：
+```bash
+cd web-admin && npm run build
+```
+
+### 排查基线（2026-03）
+- 静态中文词条覆盖：扫描 `2577` 条，除注释外均可翻译。
+- 动态模板句式覆盖：采样 `161` 条，剩余 `3` 条为源码中的模板片段（非真实运行时文案），不影响页面显示。
+- 英文可见中文巡检（40 个主路由，`temp/visible_cjk_scan_run8.txt`）：系统固定文案已清零，剩余中文主要来自业务数据本身（站点名、仓库名、人员名、模板名、地址、版本说明等）。
+- 英文 UI 协调性复检（本轮）：
+  - 水平截断（40 个主路由）：desktop `0` / mobile `0`（`temp/h_overflow_desktop_run5.txt`、`temp/h_overflow_mobile_run5.txt`）
+  - 词内断行与 ellipsis 裁剪：desktop `0` / mobile `0`（`temp/en_ui_harmony_desktop_run3.txt`、`temp/en_ui_harmony_mobile_run3.txt`）
+  - 控件裁切（下拉/输入/按钮/表头）：desktop `0` / mobile `0`（`temp/en_clipped_controls_desktop_run4.txt`、`temp/en_clipped_controls_mobile_run4.txt`）
+  - 英文坏味道术语：仅 `Direction` 命中（`temp/en_bad_terms_run2.txt`，为合法术语，非问题）。
 
 ## 🧪 测试和调试
 

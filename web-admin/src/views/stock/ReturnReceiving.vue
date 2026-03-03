@@ -12,7 +12,7 @@
 
     <el-card class="toolbar-card">
       <el-row :gutter="16">
-        <el-col :span="7">
+        <el-col :xs="24" :sm="12" :md="8">
           <el-select
             v-model="selectedWarehouseIds"
             multiple
@@ -31,7 +31,7 @@
           </el-select>
         </el-col>
 
-        <el-col :span="5">
+        <el-col :xs="24" :sm="12" :md="6">
           <el-select v-model="statusFilter" placeholder="状态" style="width: 100%" @change="resetAndLoad">
             <el-option label="待收货（含部分）" value="pending_receive" />
             <el-option label="部分收货" value="partially_received" />
@@ -42,7 +42,7 @@
           </el-select>
         </el-col>
 
-        <el-col :span="10">
+        <el-col :xs="24" :sm="24" :md="10">
           <el-input
             v-model="keyword"
             placeholder="搜索：批次号 / 退库单号 / 出库单号 / 申请人"
@@ -138,25 +138,27 @@
               <el-table-column label="申请时间" width="170">
                 <template #default="{ row }">{{ formatDateTime(row.created_at || row.operation_time) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="200" fixed="right">
+              <el-table-column label="操作" width="230" fixed="right">
                 <template #default="{ row }">
-                  <el-button
-                    size="small"
-                    type="success"
-                    @click="openReceive(row)"
-                    :disabled="!canReceiveRow(row)"
-                  >
-                    收货确认
-                  </el-button>
-                  <el-button
-                    size="small"
-                    type="danger"
-                    plain
-                    @click="openReject(row)"
-                    :disabled="!canRejectRow(row)"
-                  >
-                    拒收
-                  </el-button>
+                  <div class="en-op-actions en-op-actions--stack return-op-actions">
+                    <el-button
+                      size="small"
+                      type="success"
+                      @click="openReceive(row)"
+                      :disabled="!canReceiveRow(row)"
+                    >
+                      收货确认
+                    </el-button>
+                    <el-button
+                      size="small"
+                      type="danger"
+                      plain
+                      @click="openReject(row)"
+                      :disabled="!canRejectRow(row)"
+                    >
+                      拒收
+                    </el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -857,5 +859,30 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+html[lang='en-US'] .return-op-actions :deep(.el-button) {
+  min-width: 132px;
+  justify-content: center;
+}
+
+@media (max-width: 980px) {
+  .toolbar-card :deep(.el-row) {
+    row-gap: 10px;
+  }
+
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .batch-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .chips {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>

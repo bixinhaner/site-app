@@ -142,8 +142,131 @@ body {
   }
 }
 
+// English locale readability and overflow improvements.
+html[lang='en-US'] {
+  .el-table {
+    .cell {
+      white-space: normal !important;
+      overflow-wrap: break-word;
+      word-break: normal;
+      hyphens: auto;
+      line-height: 1.35;
+    }
+
+    .el-table__header .cell {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    td .cell {
+      padding-top: 8px;
+      padding-bottom: 8px;
+    }
+  }
+
+  .el-button {
+    min-height: 32px;
+    height: auto;
+    line-height: 1.25;
+  }
+
+  .el-button > span {
+    white-space: normal;
+    text-align: center;
+  }
+
+  .el-form-item__label,
+  .el-descriptions__label,
+  .el-descriptions__content,
+  .el-tabs__item,
+  .el-alert__description,
+  .el-message-box__message,
+  .el-message-box__title,
+  .el-dialog__title,
+  .el-dialog__body,
+  .el-radio__label,
+  .el-checkbox__label {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .el-tag,
+  .en-table-compact-tag {
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: keep-all;
+    line-height: 1.2;
+    height: auto;
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+
+  .en-op-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+
+  .en-op-actions .el-button {
+    margin-left: 0 !important;
+    min-height: 28px;
+    line-height: 1.2;
+  }
+
+  .en-op-actions--stack {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .el-pagination {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .el-dialog {
+    max-width: min(960px, calc(100vw - 32px));
+  }
+
+  .el-card__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+
+  .el-card__header > * {
+    min-width: 0;
+  }
+
+  .page-header {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+}
+
 // 响应式设计
 @media (max-width: 768px) {
+  html[lang='en-US'] {
+    .el-dialog {
+      width: calc(100vw - 20px) !important;
+      margin-top: 5vh !important;
+    }
+
+    .el-form--inline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+    }
+
+    .el-form--inline .el-form-item {
+      margin-right: 0;
+    }
+  }
+
   .page-container {
     padding: 16px;
   }

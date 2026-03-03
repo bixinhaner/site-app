@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory, RouterView } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { buildRouteSnapshot, trackOperation } from '../utils/operationTrack'
+import i18n from '../i18n'
+import { resolveRouteTitle } from '../i18n/translator'
 
 const routes = [
   {
@@ -279,13 +281,7 @@ const routes = [
       { path: 'packages', redirect: { name: 'Packages' }, meta: { hidden: true } },
       { path: 'stock-in', redirect: { name: 'StockIn' }, meta: { hidden: true } },
       { path: 'stock-history', redirect: { name: 'StockHistory' }, meta: { hidden: true } },
-      { path: 'import-history', redirect: { name: 'StockHistory', query: { type: 'import' } }, meta: { hidden: true } },
-      {
-        path: 'reports',
-        name: 'Reports',
-        component: () => import('../views/report/Reports.vue'),
-        meta: { title: '报表中心', icon: 'PieChart' }
-      }
+      { path: 'import-history', redirect: { name: 'StockHistory', query: { type: 'import' } }, meta: { hidden: true } }
     ]
   }
 ]
@@ -317,18 +313,26 @@ router.beforeEach((to, from, next) => {
 })
 
 router.afterEach((to, from) => {
+  if (typeof document !== 'undefined' && to?.name === 'Login') {
+    document.title = `${i18n.global.t('route.Login')} - ${i18n.global.t('app.pageSuffix')}`
+  }
+
   const userStore = useUserStore()
   if (!userStore.isLoggedIn) return
   if (to?.path === '/login') return
 
-  const titles = (to.matched || []).map(r => r?.meta?.title).filter(Boolean)
-  const pageTitle = titles[titles.length - 1] || to?.meta?.title || String(to?.name || to?.path || '页面')
-  const moduleTitle = titles.length >= 2 ? titles[titles.length - 2] : (titles[0] || '系统')
+  const titles = (to.matched || []).map(r => resolveRouteTitle(r)).filter(Boolean)
+  const pageTitle = titles[titles.length - 1] || resolveRouteTitle(to, i18n.global.t('operation.pageDefault'))
+  const moduleTitle = titles.length >= 2 ? titles[titles.length - 2] : (titles[0] || i18n.global.t('operation.moduleDefault'))
+
+  if (typeof document !== 'undefined') {
+    document.title = `${pageTitle} - ${i18n.global.t('app.pageSuffix')}`
+  }
 
   trackOperation({
     module: moduleTitle,
-    action: '打开页面',
-    object_type: '页面',
+    action: i18n.global.t('operation.actionOpenPage'),
+    object_type: i18n.global.t('operation.objectTypePage'),
     object_name: pageTitle,
     data: {
       route: buildRouteSnapshot(to, from),

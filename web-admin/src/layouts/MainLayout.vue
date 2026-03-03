@@ -7,23 +7,24 @@
           <el-icon @click="toggleSidebar" class="menu-toggle">
             <Menu />
           </el-icon>
-          <h1 class="system-title">站点信息管理系统</h1>
+          <h1 class="system-title">{{ t('app.systemName') }}</h1>
         </div>
         
         <div class="header-right">
+          <LocaleSwitcher />
           <el-dropdown trigger="click">
             <div class="user-info">
               <el-avatar :size="32" :src="userStore.user?.avatar">
-                {{ userStore.user?.full_name?.slice(0, 1) || 'U' }}
+                {{ displayUserName.slice(0, 1) || t('common.userFallback').slice(0, 1) }}
               </el-avatar>
-              <span class="username">{{ userStore.user?.full_name || userStore.user?.username }}</span>
+              <span class="username">{{ displayUserName }}</span>
               <el-icon><ArrowDown /></el-icon>
             </div>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item @click="handleLogout">
                   <el-icon><SwitchButton /></el-icon>
-                  退出登录
+                  {{ t('common.logout') }}
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -46,7 +47,7 @@
             <el-sub-menu v-if="route.children && visibleChildren(route).length" :index="route.name">
               <template #title>
                 <el-icon><component :is="route.meta.icon" /></el-icon>
-                <span>{{ route.meta.title }}</span>
+                <span class="menu-label" :title="getRouteTitle(route)">{{ getRouteTitle(route) }}</span>
               </template>
               <!-- 库存管理菜单：按 group 分组展示（默认全部展开）；侧边栏折叠时回退为普通列表 -->
               <template v-if="isInventoryRoute(route) && !sidebarCollapsed">
@@ -65,7 +66,7 @@
                     :route="{ name: child.name }"
                   >
                     <el-icon><component :is="child.meta?.icon || route.meta.icon" /></el-icon>
-                    <span>{{ child.meta?.title || child.name }}</span>
+                    <span class="menu-label" :title="getRouteTitle(child)">{{ getRouteTitle(child) }}</span>
                   </el-menu-item>
                 </el-menu-item-group>
               </template>
@@ -78,7 +79,7 @@
                   :route="{ name: child.name }"
                 >
                   <el-icon><component :is="child.meta?.icon || route.meta.icon" /></el-icon>
-                  <span>{{ child.meta?.title || child.name }}</span>
+                  <span class="menu-label" :title="getRouteTitle(child)">{{ getRouteTitle(child) }}</span>
                 </el-menu-item>
               </template>
             </el-sub-menu>
@@ -86,7 +87,7 @@
             <!-- 一级菜单：无children或children都隐藏 -->
             <el-menu-item v-else :index="route.name" :route="{ name: route.name }">
               <el-icon><component :is="route.meta.icon" /></el-icon>
-              <span>{{ route.meta.title }}</span>
+              <span class="menu-label" :title="getRouteTitle(route)">{{ getRouteTitle(route) }}</span>
             </el-menu-item>
           </template>
         </el-menu>
@@ -97,9 +98,9 @@
         <!-- 面包屑导航 -->
         <div class="breadcrumb-container">
           <el-breadcrumb separator="/">
-            <el-breadcrumb-item :to="{ name: 'Dashboard' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item v-if="currentRoute?.meta?.title">
-              {{ currentRoute.meta.title }}
+            <el-breadcrumb-item :to="{ name: 'Dashboard' }">{{ t('common.home') }}</el-breadcrumb-item>
+            <el-breadcrumb-item v-if="getRouteTitle(currentRoute)">
+              {{ getRouteTitle(currentRoute) }}
             </el-breadcrumb-item>
           </el-breadcrumb>
         </div>
@@ -116,16 +117,40 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
+import { containsCJK, resolveRouteTitle } from '../i18n/translator'
+import LocaleSwitcher from '../components/common/LocaleSwitcher.vue'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const { t, locale } = useI18n()
 
-const sidebarCollapsed = ref(false)
+const isNarrowViewport = () =>
+  typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+
+const sidebarCollapsed = ref(isNarrowViewport())
+const wasNarrowViewport = ref(isNarrowViewport())
+
+const syncSidebarByViewport = () => {
+  const nowNarrow = isNarrowViewport()
+  if (nowNarrow !== wasNarrowViewport.value) {
+    sidebarCollapsed.value = nowNarrow
+    wasNarrowViewport.value = nowNarrow
+  }
+}
+const displayUserName = computed(() => {
+  const fullName = userStore.user?.full_name
+  const username = userStore.user?.username
+  if (locale.value === 'en-US' && fullName && containsCJK(fullName) && username) {
+    return username
+  }
+  return fullName || username || t('common.userFallback')
+})
 
 const hasRoleAccess = (r) => {
   const roles = r?.meta?.roles
@@ -134,13 +159,17 @@ const hasRoleAccess = (r) => {
   return !!role && roles.includes(role)
 }
 
+const getRouteTitle = (routeLike) => {
+  return resolveRouteTitle(routeLike, String(routeLike?.name || ''))
+}
+
 // 菜单路由配置
 const menuRoutes = computed(() => {
   return router.options.routes
     .find(route => route.path === '/')
     ?.children
     // 仅展示带有标题的菜单项
-    .filter(r => r.meta && r.meta.title && !r.meta.hidden && hasRoleAccess(r)) || []
+    .filter(r => r.meta && (r.meta.titleKey || r.meta.title) && !r.meta.hidden && hasRoleAccess(r)) || []
 })
 
 const currentRoute = computed(() => route)
@@ -148,22 +177,22 @@ const currentRoute = computed(() => route)
 // 过滤可见子菜单
 const visibleChildren = (route) => {
   if (!route.children) return []
-  return route.children.filter(c => !c.meta?.hidden && c.meta?.title && hasRoleAccess(c))
+  return route.children.filter(c => !c.meta?.hidden && (c.meta?.titleKey || c.meta?.title) && hasRoleAccess(c))
 }
 
 const isInventoryRoute = (r) => r?.name === 'InventoryMgmt'
 
 const INVENTORY_GROUP_META = [
-  { key: 'flow', title: '出入库流程', order: 1 },
-  { key: 'asset', title: '资产配置', order: 2 },
-  { key: 'ledger', title: '台账记录', order: 3 },
-  { key: 'other', title: '其他', order: 99 },
+  { key: 'flow', titleKey: 'inventory.groups.flow', order: 1 },
+  { key: 'asset', titleKey: 'inventory.groups.asset', order: 2 },
+  { key: 'ledger', titleKey: 'inventory.groups.ledger', order: 3 },
+  { key: 'other', titleKey: 'inventory.groups.other', order: 99 },
 ]
 
 const inventoryChildGroups = (route) => {
   const children = visibleChildren(route)
   const groupOrderMap = new Map(INVENTORY_GROUP_META.map((g) => [g.key, g.order]))
-  const groupTitleMap = new Map(INVENTORY_GROUP_META.map((g) => [g.key, g.title]))
+  const groupTitleMap = new Map(INVENTORY_GROUP_META.map((g) => [g.key, t(g.titleKey)]))
 
   const groups = new Map()
   for (const child of children) {
@@ -178,7 +207,9 @@ const inventoryChildGroups = (route) => {
         const ao = Number(a?.meta?.order ?? 9999)
         const bo = Number(b?.meta?.order ?? 9999)
         if (ao !== bo) return ao - bo
-        return String(a?.meta?.title || a?.name || '').localeCompare(String(b?.meta?.title || b?.name || ''), 'zh-CN')
+        const aTitle = getRouteTitle(a)
+        const bTitle = getRouteTitle(b)
+        return String(aTitle || a?.name || '').localeCompare(String(bTitle || b?.name || ''), locale.value)
       })
       return {
         key,
@@ -206,16 +237,20 @@ const toggleSidebar = () => {
 const handleLogout = async () => {
   try {
     userStore.logout()
-    ElMessage.success('已退出登录')
+    ElMessage.success(t('common.logoutSuccess'))
     router.push('/login')
   } catch (error) {
     console.error('退出登录失败:', error)
-    ElMessage.error('退出登录失败')
+    ElMessage.error(t('common.logoutFailed'))
   }
 }
 
 // 初始化用户信息
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', syncSidebarByViewport, { passive: true })
+  }
+
   if (!userStore.user && userStore.token) {
     try {
       await userStore.initialize()
@@ -223,6 +258,12 @@ onMounted(async () => {
       console.error('初始化用户信息失败:', error)
       router.push('/login')
     }
+  }
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', syncSidebarByViewport)
   }
 })
 </script>
@@ -272,10 +313,18 @@ onMounted(async () => {
       font-size: 20px;
       font-weight: 600;
       margin: 0;
+      max-width: min(48vw, 620px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
   }
 
   .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
     .user-info {
       display: flex;
       align-items: center;
@@ -332,6 +381,15 @@ onMounted(async () => {
         margin-right: 8px;
         font-size: 16px;
       }
+
+      .menu-label {
+        display: inline-block;
+        max-width: 158px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: middle;
+      }
     }
 
     :deep(.el-menu-item-group__title) {
@@ -375,6 +433,39 @@ onMounted(async () => {
 
     .menu-group-text {
       font-weight: 650;
+    }
+  }
+}
+
+html[lang='en-US'] {
+  .layout-sidebar {
+    .sidebar-menu {
+      .el-menu-item {
+        min-height: 48px;
+        height: auto;
+        line-height: 1.25;
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+
+      :deep(.el-sub-menu__title) {
+        min-height: 48px;
+        height: auto;
+        line-height: 1.25;
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+
+      .menu-label {
+        max-width: 176px;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        line-height: 1.25;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
     }
   }
 }
@@ -437,6 +528,16 @@ onMounted(async () => {
     z-index: 1000;
     transform: translateX(var(--sidebar-transform));
     transition: transform 0.3s ease;
+  }
+
+  .layout-header {
+    .header-right {
+      gap: 8px;
+
+      .username {
+        display: none;
+      }
+    }
   }
   
   .breadcrumb-container {

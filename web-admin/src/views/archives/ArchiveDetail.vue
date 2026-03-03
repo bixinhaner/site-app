@@ -35,8 +35,7 @@
         <div>站点：{{ content.meta?.site_name }}（{{ content.meta?.site_code }}）</div>
         <div>
           勘察轮次：
-          <span v-if="(archive?.survey_round || 1) === 1">初勘（第1次勘察）</span>
-          <span v-else>复勘（第{{ archive?.survey_round }}次勘察）</span>
+          <span>{{ surveyRoundText(archive?.survey_round) }}</span>
         </div>
         <div>工单：{{ content.meta?.work_order_id }}</div>
         <div>检查：{{ content.meta?.inspection_id }}</div>
@@ -133,16 +132,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-	import { ElMessage, ElMessageBox } from 'element-plus'
-	import { surveyArchivesApi } from '@/api/surveyArchives'
-	import ArchiveFormRenderer from '@/components/archives/ArchiveFormRenderer.vue'
-	import { useUserStore } from '@/stores/user'
-	import { resolveImageUrl } from '@/utils/imageLoader'
+import { useI18n } from 'vue-i18n'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { surveyArchivesApi } from '@/api/surveyArchives'
+import ArchiveFormRenderer from '@/components/archives/ArchiveFormRenderer.vue'
+import { useUserStore } from '@/stores/user'
+import { resolveImageUrl } from '@/utils/imageLoader'
 
 const route = useRoute()
 const router = useRouter()
+const { locale } = useI18n()
 const userStore = useUserStore()
 const id = route.params.id
 
@@ -151,20 +152,28 @@ const saving = ref(false)
 const exporting = ref(false)
 const editing = ref(false)
 const isAdmin = userStore.isAdmin
+const isEnglish = computed(() => locale.value === 'en-US')
 const archive = ref(null)
 const origin = ref(null)
 const content = ref(null)
 const edits = reactive(new Map()) // key: json pointer, value: new value
-	// 照片变更在前端暂存，保存时一次性通过 JSON Patch 提交
-	const photoAdds = ref([]) // { categoryId, itemId, level, sectorId?, cellId?, photo }
-	const photoDeletes = ref([]) // { categoryId, itemId, level, sectorId?, cellId?, photoId }
-	// 附件变更：编辑态先预上传，保存时再写入 content.attachments[]
-	const attachmentAdds = ref([]) // { attachment }
-	const attachmentDeletes = ref([]) // { attachmentId }
+// 照片变更在前端暂存，保存时一次性通过 JSON Patch 提交
+const photoAdds = ref([]) // { categoryId, itemId, level, sectorId?, cellId?, photo }
+const photoDeletes = ref([]) // { categoryId, itemId, level, sectorId?, cellId?, photoId }
+// 附件变更：编辑态先预上传，保存时再写入 content.attachments[]
+const attachmentAdds = ref([]) // { attachment }
+const attachmentDeletes = ref([]) // { attachmentId }
 
 const history = ref([])
 const historyLoading = ref(false)
 const historyVisible = ref(false)
+const surveyRoundText = (round) => {
+  const value = Number(round || 1)
+  if (isEnglish.value) {
+    return value === 1 ? 'Preliminary Survey (Round 1)' : `Re-survey (Round ${value})`
+  }
+  return value === 1 ? '初勘（第1次勘察）' : `复勘（第${value}次勘察）`
+}
 
 const safeClone = (obj) => {
   // 优先使用 JSON 深拷贝，避免 structuredClone 在含有不可克隆对象时报错

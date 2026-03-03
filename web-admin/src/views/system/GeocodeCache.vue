@@ -583,6 +583,8 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .mb16 {
   margin-bottom: 16px;
@@ -675,5 +677,41 @@ onMounted(async () => {
   padding: 12px;
   border-radius: 6px;
   overflow: auto;
+}
+
+@media (max-width: 768px) {
+  .page {
+    padding: 16px;
+  }
+
+  .page-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .header-actions :deep(.el-input) {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .test-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .test-form :deep(.el-form-item) {
+    margin-right: 0;
+  }
+
+  .test-form :deep(.el-input) {
+    width: 100% !important;
+    max-width: 100%;
+  }
 }
 </style>

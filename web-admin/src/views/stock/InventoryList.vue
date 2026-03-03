@@ -61,7 +61,7 @@
           <el-select
             v-model="filterStockStatus"
             placeholder="库存状态"
-            style="width: 120px"
+            style="width: 136px"
             clearable
             @change="handleSearch"
           >
@@ -107,17 +107,19 @@
                 </span>
               </template>
             </el-table-column>
-            <el-table-column prop="available_stock" label="可用库存" width="100" />
-            <el-table-column prop="allocated_stock" label="已分配" width="100" />
-            <el-table-column prop="unit" label="单位" width="80" />
-            <el-table-column label="操作" width="200">
+            <el-table-column prop="available_stock" label="可用库存" width="130" />
+            <el-table-column prop="allocated_stock" label="已分配" width="120" />
+            <el-table-column prop="unit" label="单位" width="90" />
+            <el-table-column label="操作" width="240">
               <template #default="{ row }">
-                <el-button size="small" type="primary" @click="viewDeviceInstances(row)" link>
-                  查看实例 ({{ row.current_stock }})
-                </el-button>
-                <el-button size="small" @click="viewStockHistory(row)" link>
-                  出入库记录
-                </el-button>
+                <div class="en-op-actions en-op-actions--stack">
+                  <el-button size="small" type="primary" @click="viewDeviceInstances(row)" link>
+                    查看实例 ({{ row.current_stock }})
+                  </el-button>
+                  <el-button size="small" @click="viewStockHistory(row)" link>
+                    出入库记录
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -146,9 +148,9 @@
                 </span>
               </template>
             </el-table-column>
-            <el-table-column prop="available_stock" label="可用库存" width="100" />
-            <el-table-column prop="allocated_stock" label="已分配" width="100" />
-            <el-table-column prop="unit" label="单位" width="80" />
+            <el-table-column prop="available_stock" label="可用库存" width="130" />
+            <el-table-column prop="allocated_stock" label="已分配" width="120" />
+            <el-table-column prop="unit" label="单位" width="90" />
             <el-table-column prop="min_stock" label="最低库存" width="100" />
             <el-table-column label="库存状态" width="100">
               <template #default="{ row }">
@@ -157,11 +159,13 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="120">
+            <el-table-column label="操作" width="150">
               <template #default="{ row }">
-                <el-button size="small" @click="viewStockHistory(row)" link>
-                  出入库记录
-                </el-button>
+                <div class="en-op-actions">
+                  <el-button size="small" @click="viewStockHistory(row)" link>
+                    出入库记录
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>

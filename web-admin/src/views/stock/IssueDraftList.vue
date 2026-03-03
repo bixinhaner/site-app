@@ -15,7 +15,7 @@
 
     <div class="card filters-card">
       <el-row :gutter="16">
-        <el-col :span="4">
+        <el-col :xs="24" :sm="12" :md="4">
           <el-select v-model="filters.status_filter" placeholder="状态" @change="resetAndLoad">
             <el-option label="待确认" value="pending_confirm" />
             <el-option label="部分确认" value="partially_confirmed" />
@@ -25,12 +25,12 @@
             <el-option label="全部" value="all" />
           </el-select>
         </el-col>
-        <el-col :span="5">
+        <el-col :xs="24" :sm="12" :md="5">
           <el-select v-model="filters.warehouse_id" placeholder="仓库" clearable filterable @change="resetAndLoad">
             <el-option v-for="w in warehouses" :key="w.id" :label="w.warehouse_name" :value="w.id" />
           </el-select>
         </el-col>
-        <el-col :span="9">
+        <el-col :xs="24" :sm="24" :md="9">
           <el-input v-model="filters.keyword" placeholder="搜索领料单号/申请单号" clearable @keyup.enter="resetAndLoad">
             <template #prefix>
               <el-icon><Search /></el-icon>
@@ -40,7 +40,7 @@
             </template>
           </el-input>
         </el-col>
-        <el-col :span="6" class="hint">
+        <el-col :xs="24" :sm="24" :md="6" class="hint">
           <div class="hint-chip">
             <span class="dot" />
             <span>先勾选SN与辅料数量，再确认出库</span>
@@ -51,35 +51,37 @@
 
     <div class="card">
       <el-table :data="records" v-loading="loading" style="width: 100%" @row-dblclick="goDetail">
-        <el-table-column prop="draft_no" label="领料单号" width="230" />
-        <el-table-column prop="request_no" label="申请单号" width="230">
+        <el-table-column prop="draft_no" label="领料单号" :width="isCompactTable ? 200 : 230" />
+        <el-table-column v-if="!isCompactTable" prop="request_no" label="申请单号" width="230">
           <template #default="{ row }">
             <span class="mono">{{ row.request_no || row.request_id }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="warehouse_name" label="仓库" width="160" />
-        <el-table-column prop="requester_name" label="申请人" width="140" />
-        <el-table-column prop="status" label="状态" width="140">
+        <el-table-column prop="warehouse_name" label="仓库" :width="isCompactTable ? 140 : 160" />
+        <el-table-column v-if="!isCompactTable" prop="requester_name" label="申请人" width="140" />
+        <el-table-column prop="status" label="状态" :width="isCompactTable ? 120 : 140">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="submitted_at" label="提交时间" width="180">
+        <el-table-column v-if="!isCompactTable" prop="submitted_at" label="提交时间" width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.submitted_at || row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" :width="isCompactTable ? 140 : 180" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link @click="goDetail(row)">详情</el-button>
-            <el-button
-              v-if="['pending_confirm', 'partially_confirmed'].includes(row.status)"
-              type="success"
-              link
-              @click="goDetail(row)"
-            >
-              去确认
-            </el-button>
+            <div class="en-op-actions en-op-actions--stack">
+              <el-button type="primary" link @click="goDetail(row)">详情</el-button>
+              <el-button
+                v-if="['pending_confirm', 'partially_confirmed'].includes(row.status)"
+                type="success"
+                link
+                @click="goDetail(row)"
+              >
+                去确认
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -100,7 +102,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { stockApi } from '../../api/stock'
@@ -119,6 +121,12 @@ const filters = ref({
   warehouse_id: undefined,
   keyword: '',
 })
+
+const isCompactTable = ref(typeof window !== 'undefined' ? window.innerWidth <= 980 : false)
+const syncCompactTable = () => {
+  if (typeof window === 'undefined') return
+  isCompactTable.value = window.innerWidth <= 980
+}
 
 const formatDateTime = (dateString) => {
   if (!dateString) return '-'
@@ -199,8 +207,18 @@ const goDetail = (row) => {
 }
 
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', syncCompactTable, { passive: true })
+    syncCompactTable()
+  }
   await loadWarehouses()
   await load()
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', syncCompactTable)
+  }
 })
 </script>
 
@@ -270,5 +288,19 @@ onMounted(async () => {
   justify-content: flex-end;
   margin-top: 16px;
 }
-</style>
 
+@media (max-width: 980px) {
+  .filters-card :deep(.el-row) {
+    row-gap: 10px;
+  }
+
+  .hint {
+    justify-content: flex-start;
+  }
+
+  .hint-chip {
+    width: 100%;
+    border-radius: 12px;
+  }
+}
+</style>

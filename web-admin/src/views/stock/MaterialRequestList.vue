@@ -16,7 +16,7 @@
 
     <div class="card filters-card">
       <el-row :gutter="16">
-        <el-col :span="4">
+        <el-col :xs="24" :sm="12" :md="4">
           <el-select v-model="filters.status_filter" placeholder="状态" clearable @change="resetAndLoad">
             <el-option label="草稿" value="draft" />
             <el-option label="待审批" value="submitted" />
@@ -28,12 +28,12 @@
             <el-option label="已关闭" value="closed" />
           </el-select>
         </el-col>
-        <el-col :span="5">
+        <el-col :xs="24" :sm="12" :md="5">
           <el-select v-model="filters.warehouse_id" placeholder="仓库" clearable filterable @change="resetAndLoad">
             <el-option v-for="w in warehouses" :key="w.id" :label="w.warehouse_name" :value="w.id" />
           </el-select>
         </el-col>
-        <el-col :span="9">
+        <el-col :xs="24" :sm="24" :md="9">
           <el-input v-model="filters.keyword" placeholder="搜索申请单号/备注" clearable @keyup.enter="resetAndLoad">
             <template #prefix>
               <el-icon><Search /></el-icon>
@@ -43,7 +43,7 @@
             </template>
           </el-input>
         </el-col>
-        <el-col :span="6" class="quick-hint">
+        <el-col :xs="24" :sm="24" :md="6" class="quick-hint">
           <div class="hint-chip">
             <span class="dot" />
             <span>仓库可部分批准；出库可部分确认</span>
@@ -54,21 +54,21 @@
 
     <div class="card">
       <el-table :data="records" v-loading="loading" style="width: 100%" @row-dblclick="goDetail">
-        <el-table-column prop="request_no" label="申请单号" width="230" />
-        <el-table-column prop="warehouse_name" label="仓库" width="160" />
-        <el-table-column prop="requester_name" label="申请人" width="140" />
-        <el-table-column prop="main_summary" label="主设备摘要" min-width="240" />
-        <el-table-column prop="status" label="状态" width="130">
+        <el-table-column prop="request_no" label="申请单号" :width="isCompactTable ? 210 : 230" />
+        <el-table-column prop="warehouse_name" label="仓库" :width="isCompactTable ? 140 : 160" />
+        <el-table-column v-if="!isCompactTable" prop="requester_name" label="申请人" width="140" />
+        <el-table-column v-if="!isCompactTable" prop="main_summary" label="主设备摘要" min-width="240" />
+        <el-table-column prop="status" label="状态" :width="isCompactTable ? 120 : 130">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="submitted_at" label="提交时间" width="180">
+        <el-table-column v-if="!isCompactTable" prop="submitted_at" label="提交时间" width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.submitted_at || row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" :width="isCompactTable ? 140 : 160" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="goDetail(row)">详情</el-button>
             <el-button
@@ -249,7 +249,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../../stores/user'
@@ -277,6 +277,12 @@ const packages = ref([])
 
 const createVisible = ref(false)
 const creating = ref(false)
+
+const isCompactTable = ref(typeof window !== 'undefined' ? window.innerWidth <= 980 : false)
+const syncCompactTable = () => {
+  if (typeof window === 'undefined') return
+  isCompactTable.value = window.innerWidth <= 980
+}
 const createForm = ref({
   requester: null,
   warehouse_id: undefined,
@@ -522,8 +528,18 @@ const create = async (submitAfterCreate) => {
 }
 
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', syncCompactTable, { passive: true })
+    syncCompactTable()
+  }
   await loadBaseOptions()
   await load()
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', syncCompactTable)
+  }
 })
 </script>
 
@@ -558,6 +574,7 @@ onMounted(async () => {
 .quick-hint {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .hint-chip {
@@ -712,6 +729,19 @@ onMounted(async () => {
 }
 
 @media (max-width: 980px) {
+  .filters-card :deep(.el-row) {
+    row-gap: 10px;
+  }
+
+  .quick-hint {
+    justify-content: flex-start;
+  }
+
+  .hint-chip {
+    width: 100%;
+    border-radius: 12px;
+  }
+
   .grid {
     grid-template-columns: 1fr;
   }

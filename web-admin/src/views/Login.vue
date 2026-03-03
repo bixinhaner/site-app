@@ -1,5 +1,8 @@
 <template>
   <div class="login-page">
+    <div class="login-locale-switcher">
+      <LocaleSwitcher />
+    </div>
     <div class="login-container">
       <div class="login-card">
         <!-- 登录头部 -->
@@ -32,9 +35,9 @@
                 </g>
               </svg>
             </div>
-            <h1 class="system-title">站点信息管理系统</h1>
+            <h1 class="system-title">{{ t('app.systemName') }}</h1>
           </div>
-          <p class="login-subtitle">通信基站设备管理平台</p>
+          <p class="login-subtitle">{{ t('app.systemSubtitle') }}</p>
         </div>
 
         <!-- 登录表单 -->
@@ -48,7 +51,7 @@
           <el-form-item prop="username">
             <el-input
               v-model="loginForm.username"
-              placeholder="用户名"
+              :placeholder="t('login.username')"
               :prefix-icon="User"
               clearable
               autocomplete="username"
@@ -60,7 +63,7 @@
             <el-input
               v-model="loginForm.password"
               type="password"
-              placeholder="密码"
+              :placeholder="t('login.password')"
               :prefix-icon="Lock"
               show-password
               @keyup.enter="handleLogin"
@@ -77,7 +80,7 @@
               @click="handleLogin"
               class="login-button"
             >
-              {{ loading ? '登录中...' : '登录' }}
+              {{ loading ? t('login.submitting') : t('login.submit') }}
             </el-button>
           </el-form-item>
         </el-form>
@@ -92,14 +95,17 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { computed, ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
+import LocaleSwitcher from '../components/common/LocaleSwitcher.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
+const { t } = useI18n()
 
 const loginFormRef = ref()
 const loading = ref(false)
@@ -110,16 +116,16 @@ const loginForm = reactive({
   password: ''
 })
 
-const loginRules = {
+const loginRules = computed(() => ({
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 2, max: 50, message: '用户名长度在2到50个字符', trigger: 'blur' }
+    { required: true, message: t('login.usernameRequired'), trigger: 'blur' },
+    { min: 2, max: 50, message: t('login.usernameLength'), trigger: 'blur' }
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码长度至少6个字符', trigger: 'blur' }
+    { required: true, message: t('login.passwordRequired'), trigger: 'blur' },
+    { min: 6, message: t('login.passwordLength'), trigger: 'blur' }
   ]
-}
+}))
 
 // 处理登录
 const handleLogin = async () => {
@@ -137,14 +143,14 @@ const handleLogin = async () => {
     const result = await userStore.login(credentials)
     
     if (result.success) {
-      ElMessage.success('登录成功！')
+      ElMessage.success(t('login.success'))
       router.push('/dashboard')
     } else {
-      ElMessage.error(result.error || '登录失败')
+      ElMessage.error(result.error || t('login.failed'))
     }
   } catch (error) {
     console.error('登录错误:', error)
-    ElMessage.error('登录失败，请稍后重试')
+    ElMessage.error(t('login.failedRetry'))
   } finally {
     loading.value = false
   }
@@ -162,6 +168,7 @@ const handleLogin = async () => {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  position: relative;
   
   &::before {
     content: '';
@@ -175,6 +182,13 @@ const handleLogin = async () => {
     opacity: 0.35;
     pointer-events: none;
   }
+}
+
+.login-locale-switcher {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 2;
 }
 
 .login-container {
@@ -290,6 +304,11 @@ const handleLogin = async () => {
 @media (max-width: 768px) {
   .login-page {
     padding: 16px;
+  }
+
+  .login-locale-switcher {
+    top: 12px;
+    right: 12px;
   }
   
   .login-card {
