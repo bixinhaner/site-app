@@ -535,7 +535,7 @@
 
 	<script>
 	import { parseBarcode, formatMacAddress, getParseResultSummary } from '@/utils/barcode-parser.js'
-	import { scanAndParseDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
+	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { useUserStore } from '@/stores/user'
@@ -1042,6 +1042,7 @@ export default {
 	            uni.showToast({ title: scanned?.parsed?.error || this.$t('stock.invalidBarcode'), icon: 'none' })
 	            return
 	          }
+	          if (scanned.error === ScanDeviceCodeError.SCAN_FAILED && isScanCanceled(scanned)) return
 	          uni.showToast({ title: this.$t('stock.scanFailed'), icon: 'none' })
 	          return
 	        }

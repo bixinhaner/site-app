@@ -175,7 +175,7 @@
 		import { useLanguageStore } from '@/stores/language'
 		import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 		import { parseBarcode } from '@/utils/barcode-parser.js'
-		import { scanAndParseDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
+		import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 		import { formatDateTime } from '@/utils/time.js'
 		import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 		import CustomNavbar from '@/components/CustomNavbar.vue'
@@ -336,6 +336,7 @@
 					uni.showToast({ title: scanned?.parsed?.error || $t('stock.invalidBarcode'), icon: 'none' })
 					return
 				}
+				if (scanned.error === ScanDeviceCodeError.SCAN_FAILED && isScanCanceled(scanned)) return
 				uni.showToast({ title: $t('stock.scanFailed'), icon: 'none' })
 				return
 			}
