@@ -112,23 +112,17 @@ export function parseBarcode(scanResult) {
       debugLog('🔍 [parseBarcode] 分割结果:', parts)
       debugLog('🔍 [parseBarcode] 分割数量:', parts.length)
       
-      if (parts.length === 2) {
+      if (parts.length >= 2 && parts.length <= 5) {
         result.sn = parts[0]
-        result.mac1 = parts[1]
-        result.format = 'sn_mac_comma'
-        debugLog('✅ [parseBarcode] 格式1解析成功:', result)
-        return result
-      } else if (parts.length === 5) {
-        result.sn = parts[0]
-        result.mac1 = parts[1]
-        result.mac2 = parts[2]
-        result.mac3 = parts[3]
-        result.mac4 = parts[4]
-        result.format = 'sn_mac4_comma'
-        debugLog('✅ [parseBarcode] 格式1(5段)解析成功:', result)
+        result.mac1 = parts[1] || null
+        result.mac2 = parts[2] || null
+        result.mac3 = parts[3] || null
+        result.mac4 = parts[4] || null
+        result.format = parts.length === 2 ? 'sn_mac_comma' : 'sn_mac4_comma'
+        debugLog(`✅ [parseBarcode] 格式1(${parts.length}段)解析成功:`, result)
         return result
       } else {
-        debugLog('❌ [parseBarcode] 格式1分割数量不正确（期望2或5）')
+        debugLog('❌ [parseBarcode] 格式1分割数量不正确（期望2-5）')
       }
     }
 

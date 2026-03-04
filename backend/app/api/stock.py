@@ -1031,7 +1031,29 @@ def _extract_sn_from_scan(barcode: str, parsed_barcode: Optional[dict]) -> str:
         sn = (parsed_barcode.get("sn") or "").strip()
         if sn:
             return sn
-    return (barcode or "").strip()
+    raw = (barcode or "").strip()
+    if not raw:
+        return ""
+
+    # 兼容键值对格式：MAC1:xxx,MAC2:xxx,SN:yyy
+    if ":" in raw and "," in raw:
+        for pair in raw.split(","):
+            segment = pair.strip()
+            if not segment or ":" not in segment:
+                continue
+            key, value = segment.split(":", 1)
+            if key.strip().upper() == "SN":
+                sn = value.strip()
+                if sn:
+                    return sn
+
+    # 兼容复合逗号格式：SN,MAC 或 SN,MAC1,MAC2,MAC3,MAC4
+    if "," in raw:
+        first_part = raw.split(",", 1)[0].strip()
+        if first_part:
+            return first_part
+
+    return raw
 
 
 def _is_device_level_check_item(item: InspectionCheckItem) -> bool:
