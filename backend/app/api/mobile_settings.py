@@ -1,5 +1,5 @@
 import re
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -18,6 +18,36 @@ router = APIRouter()
 _TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _HEX_COLOR_PATTERN = re.compile(r"^#([0-9A-Fa-f]{6})$")
 _WATERMARK_POSITION_OPTIONS = ("topLeft", "topRight", "bottomLeft", "bottomRight", "center")
+_LEGACY_TEMPLATE_ID_PREFIX = "legacy_tpl"
+_LEGACY_TEMPLATE_STYLE_ALIASES = {
+  "textColor": "text_color",
+  "backgroundColor": "background_color",
+  "backgroundOpacity": "background_opacity",
+  "fontSize": "font_size",
+  "lineHeight": "line_height",
+  "borderRadius": "border_radius",
+  "maxWidthRatio": "max_width_ratio",
+  "areaRatio": "area_ratio",
+}
+_LEGACY_TEMPLATE_CONTENT_ALIASES = {
+  "showIcon": "show_icon",
+  "showLocalUploadNote": "show_local_upload_note",
+  "showGPS": "show_gps",
+  "showAccuracy": "show_accuracy",
+  "showAddress": "show_address",
+  "showTimestamp": "show_timestamp",
+  "showInspector": "show_inspector",
+  "showCheckItem": "show_check_item",
+  "showSiteName": "show_site_name",
+  "coordinatePrecision": "coordinate_precision",
+  "customPrefix": "custom_prefix",
+  "customSuffix": "custom_suffix",
+}
+_LEGACY_TEMPLATE_SCENE_POLICY_ALIASES = {
+  "applyForCamera": "apply_for_camera",
+  "applyForAlbum": "apply_for_album",
+  "forceLocalUploadNoteWhenGeoDisabled": "force_local_upload_note_when_geo_disabled",
+}
 
 
 class LocationModeResponse(BaseModel):
@@ -485,6 +515,99 @@ def _normalize_float_range(value: Any, field_name: str, min_value: float, max_va
   return round(fvalue, 6)
 
 
+def _normalize_legacy_object_keys(raw: Any, aliases: Dict[str, str]) -> Dict[str, Any]:
+  if not isinstance(raw, dict):
+    return {}
+  normalized: Dict[str, Any] = {}
+  for key, value in raw.items():
+    mapped_key = aliases.get(key, key)
+    normalized[mapped_key] = value
+  return normalized
+
+
+def _coerce_legacy_template_id(raw_id: Any, fallback_index: int = 1) -> str:
+  raw_text = str(raw_id or "").strip()
+  cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", raw_text).strip("_-")
+  if not cleaned:
+    cleaned = f"{_LEGACY_TEMPLATE_ID_PREFIX}_{fallback_index}"
+  cleaned = cleaned[:64]
+  if not cleaned:
+    cleaned = f"{_LEGACY_TEMPLATE_ID_PREFIX}_{fallback_index}"
+  return cleaned
+
+
+def _make_unique_template_id(template_id: str, used_ids: Set[str]) -> str:
+  base = str(template_id or "").strip()[:64] or _LEGACY_TEMPLATE_ID_PREFIX
+  candidate = base
+  suffix_index = 2
+
+  while not _TEMPLATE_ID_PATTERN.match(candidate) or candidate in used_ids:
+    suffix = f"_{suffix_index}"
+    suffix_index += 1
+    max_prefix_len = max(1, 64 - len(suffix))
+    candidate = f"{base[:max_prefix_len]}{suffix}"
+
+  return candidate
+
+
+def _iter_legacy_template_entries(raw_templates: Any) -> Iterable[Tuple[Any, Any]]:
+  if isinstance(raw_templates, dict):
+    for raw_id, raw_tpl in raw_templates.items():
+      yield raw_id, raw_tpl
+    return
+
+  if isinstance(raw_templates, list):
+    for index, item in enumerate(raw_templates, start=1):
+      if isinstance(item, dict):
+        raw_id = (
+          item.get("id")
+          or item.get("template_id")
+          or item.get("templateId")
+          or item.get("key")
+          or f"{_LEGACY_TEMPLATE_ID_PREFIX}_{index}"
+        )
+        payload = dict(item)
+        payload.pop("id", None)
+        payload.pop("template_id", None)
+        payload.pop("templateId", None)
+        payload.pop("key", None)
+        yield raw_id, payload
+      else:
+        yield f"{_LEGACY_TEMPLATE_ID_PREFIX}_{index}", {}
+
+
+def _coerce_legacy_watermark_template_payload(raw_tpl: Any) -> Dict[str, Any]:
+  if not isinstance(raw_tpl, dict):
+    return {}
+
+  payload = dict(raw_tpl)
+  style = _normalize_legacy_object_keys(payload.get("style"), _LEGACY_TEMPLATE_STYLE_ALIASES)
+  content = _normalize_legacy_object_keys(payload.get("content"), _LEGACY_TEMPLATE_CONTENT_ALIASES)
+
+  if not style:
+    style = _normalize_legacy_object_keys(
+      {k: v for k, v in payload.items() if k in WatermarkTemplateStyle.model_fields or k in _LEGACY_TEMPLATE_STYLE_ALIASES},
+      _LEGACY_TEMPLATE_STYLE_ALIASES,
+    )
+
+  if not content:
+    content = _normalize_legacy_object_keys(
+      {k: v for k, v in payload.items() if k in WatermarkTemplateContent.model_fields or k in _LEGACY_TEMPLATE_CONTENT_ALIASES},
+      _LEGACY_TEMPLATE_CONTENT_ALIASES,
+    )
+
+  normalized_payload: Dict[str, Any] = {}
+  if "name" in payload:
+    normalized_payload["name"] = payload.get("name")
+  if "version" in payload:
+    normalized_payload["version"] = payload.get("version")
+  if style:
+    normalized_payload["style"] = {k: v for k, v in style.items() if v is not None}
+  if content:
+    normalized_payload["content"] = {k: v for k, v in content.items() if v is not None}
+  return normalized_payload
+
+
 def _build_default_watermark_template() -> Dict[str, Any]:
   return {
     "name": "默认模板",
@@ -582,25 +705,50 @@ def _normalize_watermark_template(template: WatermarkTemplate) -> Dict[str, Any]
   }
 
 
-def _sanitize_watermark_templates_map(raw_templates: Any) -> Dict[str, Any]:
-  if not isinstance(raw_templates, dict):
-    return _build_default_watermark_templates()
+def _sanitize_watermark_templates_map_with_aliases(raw_templates: Any) -> Tuple[Dict[str, Any], Dict[str, str]]:
+  if not isinstance(raw_templates, (dict, list)):
+    return _build_default_watermark_templates(), {}
 
   normalized: Dict[str, Any] = {}
-  for raw_id, raw_tpl in raw_templates.items():
+  aliases: Dict[str, str] = {}
+  used_ids: Set[str] = set()
+
+  for index, (raw_id, raw_tpl) in enumerate(_iter_legacy_template_entries(raw_templates), start=1):
+    raw_id_text = str(raw_id or "").strip()
+    if not raw_id_text:
+      raw_id_text = f"{_LEGACY_TEMPLATE_ID_PREFIX}_{index}"
+
     try:
-      tid = _normalize_template_id(raw_id, "模板ID")
-      tpl_model = raw_tpl if isinstance(raw_tpl, WatermarkTemplate) else WatermarkTemplate(**(raw_tpl or {}))
+      candidate_tid = _normalize_template_id(raw_id_text, "模板ID")
+    except Exception:
+      candidate_tid = _coerce_legacy_template_id(raw_id_text, fallback_index=index)
+
+    tid = _make_unique_template_id(candidate_tid, used_ids)
+
+    try:
+      payload = _coerce_legacy_watermark_template_payload(raw_tpl)
+      tpl_model = raw_tpl if isinstance(raw_tpl, WatermarkTemplate) else WatermarkTemplate(**payload)
       normalized[tid] = _normalize_watermark_template(tpl_model)
+      used_ids.add(tid)
+
+      aliases[raw_id_text] = tid
+      aliases[tid] = tid
+      legacy_candidate = _coerce_legacy_template_id(raw_id_text, fallback_index=index)
+      aliases[legacy_candidate] = tid
     except Exception:
       continue
 
   if not normalized:
-    return _build_default_watermark_templates()
+    return _build_default_watermark_templates(), aliases
 
   if "default" not in normalized:
     normalized["default"] = _build_default_watermark_template()
 
+  return normalized, aliases
+
+
+def _sanitize_watermark_templates_map(raw_templates: Any) -> Dict[str, Any]:
+  normalized, _ = _sanitize_watermark_templates_map_with_aliases(raw_templates)
   return normalized
 
 
@@ -630,31 +778,70 @@ def _normalize_watermark_templates_map(templates: Dict[str, WatermarkTemplate]) 
   return normalized
 
 
-def _sanitize_watermark_template_rule(rule: Any, templates_map: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_template_id_from_allowed(
+  template_id: Any,
+  allowed: Set[str],
+  legacy_id_aliases: Optional[Dict[str, str]] = None,
+  fallback_index: int = 1,
+) -> Optional[str]:
+  tid = str(template_id or "").strip()
+  if not tid:
+    return None
+
+  if tid in allowed:
+    return tid
+
+  mapped = (legacy_id_aliases or {}).get(tid)
+  if mapped and mapped in allowed:
+    return mapped
+
+  legacy_tid = _coerce_legacy_template_id(tid, fallback_index=fallback_index)
+  if legacy_tid in allowed:
+    return legacy_tid
+
+  mapped_legacy = (legacy_id_aliases or {}).get(legacy_tid)
+  if mapped_legacy and mapped_legacy in allowed:
+    return mapped_legacy
+
+  return None
+
+
+def _sanitize_watermark_template_rule(
+  rule: Any,
+  templates_map: Dict[str, Any],
+  legacy_id_aliases: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
   allowed = set((templates_map or {}).keys())
   if not allowed:
     allowed = {"default"}
 
   raw_rule = rule if isinstance(rule, dict) else {}
-  raw_default = str(raw_rule.get("default") or "").strip()
-  default_template_id = raw_default if raw_default in allowed else ("default" if "default" in allowed else next(iter(allowed)))
+  raw_default = raw_rule.get("default")
+  default_template_id = _resolve_template_id_from_allowed(
+    raw_default,
+    allowed,
+    legacy_id_aliases=legacy_id_aliases,
+    fallback_index=0,
+  )
+  if not default_template_id:
+    default_template_id = "default" if "default" in allowed else next(iter(allowed))
 
   per_role: Dict[str, str] = {}
   for role, template_id in (raw_rule.get("per_role") or {}).items():
     role_key = str(role or "").strip()
-    tid = str(template_id or "").strip()
-    if not role_key or not tid:
+    if not role_key:
       continue
-    if tid in allowed:
+    tid = _resolve_template_id_from_allowed(template_id, allowed, legacy_id_aliases=legacy_id_aliases)
+    if tid:
       per_role[role_key] = tid
 
   per_user: Dict[str, str] = {}
   for user_id, template_id in (raw_rule.get("per_user") or {}).items():
     uid = str(user_id or "").strip()
-    tid = str(template_id or "").strip()
-    if not uid or not tid:
+    if not uid:
       continue
-    if tid in allowed:
+    tid = _resolve_template_id_from_allowed(template_id, allowed, legacy_id_aliases=legacy_id_aliases)
+    if tid:
       per_user[uid] = tid
 
   return {
@@ -715,7 +902,7 @@ def _normalize_watermark_template_rule(rule: WatermarkTemplateRule, templates_ma
 
 
 def _sanitize_watermark_scene_policy(raw_policy: Any) -> Dict[str, Any]:
-  raw = raw_policy if isinstance(raw_policy, dict) else {}
+  raw = _normalize_legacy_object_keys(raw_policy, _LEGACY_TEMPLATE_SCENE_POLICY_ALIASES)
   defaults = _build_default_watermark_scene_policy()
   return {
     "apply_for_camera": bool(raw.get("apply_for_camera")) if "apply_for_camera" in raw else defaults["apply_for_camera"],
@@ -740,10 +927,12 @@ def _resolve_watermark_template_id_for_user(
   settings: Dict[str, Any],
   user: Optional[User],
   templates_map: Dict[str, Any],
+  template_id_aliases: Optional[Dict[str, str]] = None,
 ) -> str:
   rule = _sanitize_watermark_template_rule(
     (settings or {}).get("photo_watermark_template_rule") or {},
     templates_map,
+    legacy_id_aliases=template_id_aliases,
   )
 
   per_user = rule.get("per_user") or {}
@@ -771,13 +960,18 @@ def _build_effective_photo_watermark(
   settings: Dict[str, Any],
   user: Optional[User],
 ) -> Dict[str, Any]:
-  templates_map = _sanitize_watermark_templates_map(
+  templates_map, template_id_aliases = _sanitize_watermark_templates_map_with_aliases(
     (settings or {}).get("photo_watermark_templates") or {},
   )
   scene_policy = _sanitize_watermark_scene_policy(
     (settings or {}).get("photo_watermark_scene_policy") or {},
   )
-  template_id = _resolve_watermark_template_id_for_user(settings, user, templates_map)
+  template_id = _resolve_watermark_template_id_for_user(
+    settings,
+    user,
+    templates_map,
+    template_id_aliases=template_id_aliases,
+  )
   template = templates_map.get(template_id) or templates_map.get("default") or _build_default_watermark_template()
   return {
     "template_id": template_id,
@@ -1029,12 +1223,13 @@ def _build_mobile_settings_payload_from_raw(raw: Dict[str, Any]) -> MobileSettin
   similarity_vector_threshold_rule = safe_raw.get("check_item_photo_similarity_vector_threshold") or {}
   distance_threshold_rule = safe_raw.get("photo_location_distance_threshold_m") or {}
 
-  templates_map = _sanitize_watermark_templates_map(
+  templates_map, template_id_aliases = _sanitize_watermark_templates_map_with_aliases(
     safe_raw.get("photo_watermark_templates") or {},
   )
   template_rule = _sanitize_watermark_template_rule(
     safe_raw.get("photo_watermark_template_rule") or {},
     templates_map,
+    legacy_id_aliases=template_id_aliases,
   )
   scene_policy = _sanitize_watermark_scene_policy(
     safe_raw.get("photo_watermark_scene_policy") or {},
@@ -1248,7 +1443,7 @@ async def update_mobile_settings(
   if payload.photo_watermark_scene_policy is not None:
     settings["photo_watermark_scene_policy"] = _normalize_watermark_scene_policy(payload.photo_watermark_scene_policy)
 
-  current_templates = _sanitize_watermark_templates_map(
+  current_templates, template_id_aliases = _sanitize_watermark_templates_map_with_aliases(
     settings.get("photo_watermark_templates") or {},
   )
   settings["photo_watermark_templates"] = current_templates
@@ -1263,11 +1458,13 @@ async def update_mobile_settings(
     settings["photo_watermark_template_rule"] = _sanitize_watermark_template_rule(
       settings.get("photo_watermark_template_rule") or {},
       current_templates,
+      legacy_id_aliases=template_id_aliases,
     )
   else:
     settings["photo_watermark_template_rule"] = _sanitize_watermark_template_rule(
       settings.get("photo_watermark_template_rule") or {},
       current_templates,
+      legacy_id_aliases=template_id_aliases,
     )
 
   settings["photo_watermark_scene_policy"] = _sanitize_watermark_scene_policy(
