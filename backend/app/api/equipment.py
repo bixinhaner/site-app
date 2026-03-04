@@ -180,9 +180,15 @@ def _as_int(value, field_name: str) -> int:
         raise HTTPException(status_code=400, detail=f"{field_name} 不合法")
 
 
-def _normalize_package_items(db: Session, *, main_equipment_id, items_data) -> List[dict]:
+def _normalize_package_items(
+    db: Session,
+    *,
+    main_equipment_id,
+    items_data,
+    main_equipment_quantity=None,
+) -> List[dict]:
     """规范化套装明细：
-    - 主设备自动写入明细，数量固定为 1
+    - 主设备自动写入明细，数量可配置（默认 1）
     - 明细不允许重复
     - 除主设备外，仅允许添加辅材类设备
     """
@@ -242,10 +248,22 @@ def _normalize_package_items(db: Session, *, main_equipment_id, items_data) -> L
         if category_map.get(equipment_id) != EquipmentCategoryEnum.AUXILIARY:
             raise HTTPException(status_code=400, detail="套装明细仅允许添加辅材")
 
+    if main_equipment_quantity is not None and str(main_equipment_quantity).strip() != "":
+        main_quantity = _as_int(main_equipment_quantity, "main_equipment_quantity")
+    else:
+        main_quantity = 1
+        for item in parsed_items:
+            if item["equipment_id"] == main_id:
+                main_quantity = int(item["quantity"] or 0)
+                break
+
+    if main_quantity <= 0:
+        raise HTTPException(status_code=400, detail="主设备数量必须大于 0")
+
     normalized = [
         {
             "equipment_id": main_id,
-            "quantity": 1,
+            "quantity": int(main_quantity),
             "is_required": True,
             "notes": None,
         }
@@ -282,7 +300,10 @@ async def get_equipment_packages(
     for package in packages:
         # 获取套装明细
         items = []
+        main_equipment_quantity = 1
         for item in package.package_items:
+            if int(item.equipment_id) == int(package.main_equipment_id):
+                main_equipment_quantity = int(item.quantity or 0) or 1
             items.append({
                 "equipment_id": item.equipment_id,
                 "equipment_name": item.equipment.equipment_name,
@@ -300,6 +321,7 @@ async def get_equipment_packages(
             "package_name": package.package_name,
             "main_equipment_id": package.main_equipment_id,
             "main_equipment_name": package.main_equipment.equipment_name if package.main_equipment else None,
+            "main_equipment_quantity": int(main_equipment_quantity),
             "site_type": package.site_type,
             "description": package.description,
             "status": package.status,  # 添加状态字段
@@ -327,7 +349,10 @@ async def create_equipment_package(
     # 创建套装
     main_equipment_id = _as_int(package_data.get("main_equipment_id"), "main_equipment_id")
     normalized_items = _normalize_package_items(
-        db, main_equipment_id=main_equipment_id, items_data=package_data.get("items", [])
+        db,
+        main_equipment_id=main_equipment_id,
+        items_data=package_data.get("items", []),
+        main_equipment_quantity=package_data.get("main_equipment_quantity"),
     )
 
     package = EquipmentPackage(
@@ -369,7 +394,10 @@ async def get_package_detail(
     
     # 构建套装详情
     items = []
+    main_equipment_quantity = 1
     for item in package.package_items:
+        if int(item.equipment_id) == int(package.main_equipment_id):
+            main_equipment_quantity = int(item.quantity or 0) or 1
         items.append({
             "equipment_id": item.equipment_id,
             "equipment_name": item.equipment.equipment_name,
@@ -390,6 +418,7 @@ async def get_package_detail(
             "name": package.main_equipment.equipment_name,
             "code": package.main_equipment.equipment_code
         } if package.main_equipment else None,
+        "main_equipment_quantity": int(main_equipment_quantity),
         "site_type": package.site_type,
         "description": package.description,
         "items": items,
@@ -426,7 +455,12 @@ async def update_equipment_package(
                 for it in package.package_items
             ]
         main_equipment_id = package_data.get("main_equipment_id", package.main_equipment_id)
-        normalized_items = _normalize_package_items(db, main_equipment_id=main_equipment_id, items_data=items_data)
+        normalized_items = _normalize_package_items(
+            db,
+            main_equipment_id=main_equipment_id,
+            items_data=items_data,
+            main_equipment_quantity=package_data.get("main_equipment_quantity"),
+        )
 
     # 更新基本信息
     for key in ["package_name", "main_equipment_id", "site_type", "description", "status"]:
@@ -554,7 +588,10 @@ async def get_equipment_by_barcode(
     for package in packages:
         print(f"🔍 [后端API] 处理套装: {package.package_name}")
         items = []
+        main_equipment_quantity = 1
         for item in package.package_items:
+            if int(item.equipment_id) == int(package.main_equipment_id):
+                main_equipment_quantity = int(item.quantity or 0) or 1
             items.append({
                 "equipment_name": item.equipment.equipment_name,
                 "equipment_code": item.equipment.equipment_code,
@@ -567,6 +604,8 @@ async def get_equipment_by_barcode(
             "id": package.id,
             "package_code": package.package_code,
             "package_name": package.package_name,
+            "main_equipment_id": package.main_equipment_id,
+            "main_equipment_quantity": int(main_equipment_quantity),
             "site_type": package.site_type,
             "items": items
         }

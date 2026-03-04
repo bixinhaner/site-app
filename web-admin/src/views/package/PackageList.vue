@@ -300,7 +300,6 @@
                   :max="999"
                   style="width: 100%"
                   size="small"
-                  :disabled="isMainEquipmentItem(row)"
                 />
               </template>
             </el-table-column>
@@ -435,6 +434,12 @@ const isMainEquipmentItem = (item) => {
   return item.equipment_id === packageForm.main_equipment_id
 }
 
+const normalizePositiveInteger = (value, fallback = 1) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.floor(parsed)
+}
+
 const syncMainEquipmentItem = (newMainId = null, oldMainId = null) => {
   const mainId = newMainId ?? packageForm.main_equipment_id
   if (!mainId) return
@@ -458,7 +463,7 @@ const syncMainEquipmentItem = (newMainId = null, oldMainId = null) => {
   }
 
   const mainItem = packageForm.items[mainIndex]
-  mainItem.quantity = 1
+  mainItem.quantity = normalizePositiveInteger(mainItem.quantity, 1)
   mainItem.unit = getEquipmentById(mainId)?.unit || mainItem.unit || '台'
 
   if (mainIndex !== 0) {
@@ -607,6 +612,7 @@ const handleSubmit = async () => {
         ElMessage.error('请完善辅材明细：设备不能为空')
         return
       }
+      item.quantity = normalizePositiveInteger(item.quantity, 1)
       if (seen.has(item.equipment_id)) {
         ElMessage.error(`设备明细不允许重复：${getEquipmentDisplayText(item.equipment_id) || item.equipment_id}`)
         return
@@ -614,7 +620,10 @@ const handleSubmit = async () => {
       seen.add(item.equipment_id)
 
       if (item.equipment_id === mainId) {
-        item.quantity = 1
+        if (item.quantity <= 0) {
+          ElMessage.error('主设备数量必须大于 0')
+          return
+        }
       } else {
         const eq = getEquipmentById(item.equipment_id)
         if (eq && eq.category !== 'auxiliary') {

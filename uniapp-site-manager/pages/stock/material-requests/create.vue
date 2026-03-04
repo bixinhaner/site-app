@@ -73,10 +73,10 @@
 						</view>
 					</view>
 
-					<view class="preview" v-if="selectedPackage">
-						<view class="u-chip">{{ $t('stock.materialRequestPackagePreviewMain') }} × {{ packageCount }}</view>
-						<view class="u-chip">{{ $t('stock.materialRequestPackagePreviewAuxLines') }} {{ selectedPackageAuxLines }}</view>
-					</view>
+						<view class="preview" v-if="selectedPackage">
+							<view class="u-chip">{{ $t('stock.materialRequestPackagePreviewMain') }} {{ selectedPackageMainQty }} × {{ packageCount }} = {{ selectedPackageMainTotal }}</view>
+							<view class="u-chip">{{ $t('stock.materialRequestPackagePreviewAuxLines') }} {{ selectedPackageAuxLines }}</view>
+						</view>
 
 					<button class="u-btn u-btn-secondary u-btn-sm u-pressable" :disabled="!selectedPackage" @click="applyPackage">
 						{{ $t('common.apply') }}
@@ -229,23 +229,41 @@
 
 	const notes = ref('')
 
-	const packages = ref([])
-	const packageIndex = ref(0)
-	const packageOptions = computed(() => (packages.value || []).map(p => p.package_name))
-	const selectedPackage = computed(() => packages.value?.[packageIndex.value] || null)
-	const selectedPackageAuxLines = computed(() => {
-		const pkg = selectedPackage.value
-		const items = Array.isArray(pkg?.items) ? pkg.items : []
-		const mainEquipmentId = Number(pkg?.main_equipment_id || 0)
+		const packages = ref([])
+		const packageIndex = ref(0)
+		const packageOptions = computed(() => (packages.value || []).map(p => p.package_name))
+		const selectedPackage = computed(() => packages.value?.[packageIndex.value] || null)
+		const packageCount = ref(1)
+		const selectedPackageAuxLines = computed(() => {
+			const pkg = selectedPackage.value
+			const items = Array.isArray(pkg?.items) ? pkg.items : []
+			const mainEquipmentId = Number(pkg?.main_equipment_id || 0)
 		return items.filter((item) => {
 			const equipmentId = Number(item?.equipment_id || 0)
 			if (mainEquipmentId > 0 && equipmentId > 0 && equipmentId === mainEquipmentId) return false
 			const category = String(item?.category || '').trim()
 			if (category) return category !== 'main_device'
-			return true
-		}).length
-	})
-	const packageCount = ref(1)
+				return true
+			}).length
+		})
+		const selectedPackageMainQty = computed(() => {
+			const pkg = selectedPackage.value
+			if (!pkg) return 0
+
+			const directQty = Number(pkg?.main_equipment_quantity || 0)
+			if (Number.isFinite(directQty) && directQty > 0) return Math.floor(directQty)
+
+			const mainEquipmentId = Number(pkg?.main_equipment_id || 0)
+			if (!mainEquipmentId) return 1
+			const mainItem = (Array.isArray(pkg?.items) ? pkg.items : []).find((item) => Number(item?.equipment_id || 0) === mainEquipmentId)
+			const rowQty = Number(mainItem?.quantity || 0)
+			if (Number.isFinite(rowQty) && rowQty > 0) return Math.floor(rowQty)
+			return 1
+		})
+		const selectedPackageMainTotal = computed(() => {
+			const count = Math.max(1, Number(packageCount.value || 1))
+			return Math.max(0, Number(selectedPackageMainQty.value || 0)) * count
+		})
 
 	const equipments = ref([])
 	const items = ref([])
@@ -468,17 +486,20 @@
 		items.value.splice(idx, 1)
 	}
 
-	const applyPackage = () => {
-		const pkg = selectedPackage.value
-		if (!pkg) return
-		const count = Math.max(1, Number(packageCount.value || 1))
-		const pkgItems = Array.isArray(pkg.items) ? pkg.items : []
+		const applyPackage = () => {
+			const pkg = selectedPackage.value
+			if (!pkg) return
+			const count = Math.max(1, Number(packageCount.value || 1))
+			const pkgItems = Array.isArray(pkg.items) ? pkg.items : []
+			const mainEquipmentId = Number(pkg?.main_equipment_id || 0)
+			let hasMainInItems = false
 
-		for (const pi of pkgItems) {
-			const equipmentId = Number(pi?.equipment_id)
-			if (!equipmentId) continue
-			const addQty = Math.max(0, Number(pi?.quantity || 0)) * count
-			if (addQty <= 0) continue
+			for (const pi of pkgItems) {
+				const equipmentId = Number(pi?.equipment_id)
+				if (!equipmentId) continue
+				if (mainEquipmentId > 0 && equipmentId === mainEquipmentId) hasMainInItems = true
+				const addQty = Math.max(0, Number(pi?.quantity || 0)) * count
+				if (addQty <= 0) continue
 
 			const hitIdx = (items.value || []).findIndex(it => Number(it.equipment_id) === equipmentId)
 			if (hitIdx >= 0) {
@@ -491,12 +512,33 @@
 				equipment_code: pi.equipment_code,
 				equipment_category: pi.category,
 				unit: pi.unit,
-				requested_qty: addQty,
-			})
-		}
+					requested_qty: addQty,
+				})
+			}
 
-		uni.showToast({ title: $t('stock.materialRequestPackageApplied'), icon: 'success' })
-	}
+			// 兼容历史套装：若 items 中缺主设备，按 main_equipment_quantity（缺省 1）补齐
+			if (!hasMainInItems && mainEquipmentId > 0) {
+				const mainEq = (equipments.value || []).find((eq) => Number(eq?.id || 0) === mainEquipmentId)
+				if (mainEq) {
+					const addQty = Math.max(1, Number(pkg?.main_equipment_quantity || 1)) * count
+					const hitIdx = (items.value || []).findIndex(it => Number(it.equipment_id) === mainEquipmentId)
+					if (hitIdx >= 0) {
+						items.value[hitIdx].requested_qty = Number(items.value[hitIdx].requested_qty || 0) + addQty
+					} else {
+						items.value.push({
+							equipment_id: mainEquipmentId,
+							equipment_name: mainEq.equipment_name,
+							equipment_code: mainEq.equipment_code,
+							equipment_category: mainEq.category,
+							unit: mainEq.unit,
+							requested_qty: addQty,
+						})
+					}
+				}
+			}
+
+			uni.showToast({ title: $t('stock.materialRequestPackageApplied'), icon: 'success' })
+		}
 
 	const buildPayloadItems = () => {
 		return (items.value || [])

@@ -174,8 +174,8 @@
             </el-col>
             <el-col :span="6" class="pkg-preview">
               <div class="preview" v-if="selectedPackage">
-                <div class="pill">主设备 1 * {{ packageCount }}</div>
-                <div class="pill">辅料 {{ selectedPackage.items?.length || 0 }} 行</div>
+                <div class="pill">主设备 {{ selectedPackageMainQty }} * {{ packageCount }} = {{ selectedPackageMainTotal }}</div>
+                <div class="pill">辅料 {{ selectedPackageAuxLineCount }} 行</div>
               </div>
               <div class="preview" v-else>
                 <div class="muted">可选</div>
@@ -292,6 +292,40 @@ const createForm = ref({
 
 const selectedPackage = ref(null)
 const packageCount = ref(1)
+const selectedPackageMainQty = computed(() => {
+  const pkg = selectedPackage.value
+  if (!pkg) return 0
+
+  const directQty = Number(pkg.main_equipment_quantity || 0)
+  if (Number.isFinite(directQty) && directQty > 0) {
+    return Math.floor(directQty)
+  }
+
+  const mainId = Number(pkg.main_equipment_id || 0)
+  if (!mainId) return 1
+
+  const mainRow = (pkg.items || []).find((it) => Number(it?.equipment_id || 0) === mainId)
+  const rowQty = Number(mainRow?.quantity || 0)
+  if (Number.isFinite(rowQty) && rowQty > 0) {
+    return Math.floor(rowQty)
+  }
+  return 1
+})
+const selectedPackageMainTotal = computed(() => {
+  const count = Math.max(1, Number(packageCount.value || 1))
+  return Math.max(0, Number(selectedPackageMainQty.value || 0)) * count
+})
+const selectedPackageAuxLineCount = computed(() => {
+  const pkg = selectedPackage.value
+  if (!pkg) return 0
+  const mainId = Number(pkg.main_equipment_id || 0)
+  return (pkg.items || []).filter((it) => {
+    const equipmentId = Number(it?.equipment_id || 0)
+    if (mainId > 0 && equipmentId === mainId) return false
+    if (String(it?.category || '').trim() === 'main_device') return false
+    return true
+  }).length
+})
 
 const userSearching = ref(false)
 const userOptions = ref([])
@@ -462,16 +496,28 @@ const applyPackage = () => {
   if (!pkg) return
   const count = Math.max(1, Number(packageCount.value || 1))
   const incoming = []
-
-  const mainEq = equipmentOptions.value.find((e) => e.id === pkg.main_equipment_id)
-  if (mainEq) incoming.push({ equipment: mainEq, quantity: count })
+  const mainEquipmentId = Number(pkg.main_equipment_id || 0)
+  let hasMainInItems = false
 
   for (const it of pkg.items || []) {
+    const equipmentId = Number(it?.equipment_id || 0)
+    if (mainEquipmentId > 0 && equipmentId === mainEquipmentId) {
+      hasMainInItems = true
+    }
     const eq = equipmentOptions.value.find((e) => e.id === it.equipment_id)
     if (!eq) continue
     const qty = Math.max(0, Number(it.quantity || 0)) * count
     if (qty <= 0) continue
     incoming.push({ equipment: eq, quantity: qty })
+  }
+
+  // 兼容历史套装：若 items 中缺主设备，按 main_equipment_quantity（缺省 1）补齐
+  if (!hasMainInItems && mainEquipmentId > 0) {
+    const mainEq = equipmentOptions.value.find((e) => Number(e.id) === mainEquipmentId)
+    if (mainEq) {
+      const singleMainQty = Math.max(1, Number(pkg.main_equipment_quantity || 1))
+      incoming.push({ equipment: mainEq, quantity: singleMainQty * count })
+    }
   }
 
   _mergeItems(incoming)
