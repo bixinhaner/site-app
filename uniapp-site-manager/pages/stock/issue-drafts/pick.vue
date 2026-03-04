@@ -129,7 +129,7 @@
 									<text class="k">{{ $t('stock.qtyPending') }}</text>
 									<text class="v">{{ auxPendingQty(row) }}</text>
 								</view>
-								<view class="n accent">
+								<view class="n accent planned">
 									<text class="k">{{ $t('stock.issueDraftPlannedThisTime') }}</text>
 									<view class="stepper">
 										<view class="qbtn u-pressable" :class="{ disabled: !canEdit }" @click="decAux(idx)">−</view>
@@ -647,22 +647,64 @@
 	.del { width: 36px; height: 36px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: rgba(239, 68, 68, 0.10); }
 
 	.aux-list { display: flex; flex-direction: column; gap: 12px; }
-	.aux { border: 1px solid rgba(229, 231, 235, 0.9); background: #fff; border-radius: 14px; padding: 12px; }
+	.aux { border: 1px solid rgba(229, 231, 235, 0.9); background: #fff; border-radius: 14px; padding: 10px; }
 	.aux-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-	.aux-head .left { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+	.aux-head .left { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 	.name { font-size: 14px; font-weight: 800; color: #111827; }
 	.code { font-size: 12px; color: #9ca3af; }
 
-	.aux-nums { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-	.n { padding: 10px 10px; border-radius: 12px; background: #f9fafb; border: 1px solid rgba(229, 231, 235, 0.9); }
-	.n .k { font-size: 11px; color: #6b7280; }
-	.n .v { margin-top: 6px; font-size: 16px; font-weight: 900; color: #111827; }
+	.aux-nums {
+		margin-top: 10px;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+		align-items: stretch;
+	}
+	.n {
+		min-width: 0;
+		padding: 8px 9px;
+		border-radius: 12px;
+		background: #f9fafb;
+		border: 1px solid rgba(229, 231, 235, 0.9);
+	}
+	.n .k { display: block; font-size: 11px; line-height: 1.3; color: #6b7280; }
+	.n .v { margin-top: 4px; font-size: 15px; line-height: 1.2; font-weight: 900; color: #111827; }
 	.n.accent { border-color: rgba(var(--color-primary-rgb), 0.28); background: rgba(var(--color-primary-rgb), 0.06); }
+	.n.planned { grid-column: 1 / -1; }
 
-	.stepper { margin-top: 6px; display: flex; align-items: center; border: 1px solid rgba(229, 231, 235, 0.9); border-radius: 12px; overflow: hidden; background: #f9fafb; }
-	.qbtn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; color: #111827; background: #f3f4f6; }
+	.stepper {
+		margin-top: 6px;
+		display: flex;
+		align-items: center;
+		min-width: 0;
+		width: 100%;
+		border: 1px solid rgba(229, 231, 235, 0.9);
+		border-radius: 10px;
+		overflow: hidden;
+		background: #f9fafb;
+	}
+	.qbtn {
+		flex: 0 0 34px;
+		height: 34px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 17px;
+		font-weight: 700;
+		color: #111827;
+		background: #f3f4f6;
+	}
 	.qbtn.disabled { opacity: 0.5; pointer-events: none; }
-	.qinput { width: 64px; height: 36px; text-align: center; font-size: 14px; font-weight: 900; color: #111827; }
+	.qinput {
+		flex: 1;
+		min-width: 0;
+		width: auto;
+		height: 34px;
+		text-align: center;
+		font-size: 14px;
+		font-weight: 900;
+		color: #111827;
+	}
 
 	.aux-total { margin-top: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(229, 231, 235, 0.9); background: rgba(255, 255, 255, 0.72); display: flex; align-items: center; justify-content: space-between; }
 	.aux-total .k { font-size: 12px; color: #6b7280; }
@@ -671,18 +713,36 @@
 	.empty { padding: 10px 0; display: flex; justify-content: center; }
 	.empty-text { color: #9ca3af; font-size: 13px; }
 
-	.bottom-spacer { height: 92px; }
+	.bottom-spacer {
+		height: calc(110px + constant(safe-area-inset-bottom));
+		height: calc(110px + env(safe-area-inset-bottom));
+	}
 	.bottom-bar {
 		position: fixed;
 		left: 0;
 		right: 0;
 		bottom: 0;
-		padding: 10px 16px 16px;
+		padding: 10px 16px calc(16px + constant(safe-area-inset-bottom));
+		padding: 10px 16px calc(16px + env(safe-area-inset-bottom));
 		background: rgba(247, 248, 251, 0.90);
 		backdrop-filter: blur(10px);
 		border-top: 1px solid rgba(229, 231, 235, 0.9);
 		display: grid;
 		grid-template-columns: 1fr 1.2fr;
 		gap: 12px;
+	}
+
+	@media (max-width: 375px) {
+		.n {
+			padding: 8px;
+		}
+		.qbtn {
+			flex-basis: 32px;
+			height: 32px;
+		}
+		.qinput {
+			height: 32px;
+			font-size: 13px;
+		}
 	}
 </style>
