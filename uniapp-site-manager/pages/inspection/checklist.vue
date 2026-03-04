@@ -729,7 +729,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildImageUrl, buildApiUrl, getAuthHeaders, createRequestConfig, API_ENDPOINTS, isLocalImagePath } from '@/config/api.js'
 	import { createPhotoCacheContext, ensurePhotoCached, saveLocalPhotoToCache, removeCachedPhoto } from '@/utils/photoCache.js'
-	import { parseBarcode, formatMacAddress, isValidParseResult } from '@/utils/barcode-parser.js'
+	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { validateField, validateAllFields } from '@/utils/field-validator.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import { 
@@ -4392,79 +4392,60 @@
 			try {
 				console.log('开始扫码绑定设备...')
 				
-				// 执行扫码
-				const result = await new Promise((resolve, reject) => {
-					uni.scanCode({
-						scanType: ['barCode', 'qrCode'],
-						success: resolve,
-						fail: reject
-					})
-				})
-	
-				// 仅允许二维码 / Code128（避免误扫 EAN8/EAN13 等导致随机数字）
-				const normalizeScanType = (value) => String(value || '').trim().toUpperCase().replace(/[-\s]/g, '_')
-				const scanType = normalizeScanType(result?.scanType)
-				const allowedScanTypes = new Set(['QR_CODE', 'QRCODE', 'QR', 'CODE_128', 'CODE128'])
-				if (!scanType || !allowedScanTypes.has(scanType)) {
-					uni.showToast({
-						title: $t('stock.unsupportedScanType', { type: scanType || 'UNKNOWN' }),
-						icon: 'none'
-					})
-					return
-				}
-				
-				const raw = String(result?.result || '').trim()
-				if (!raw) {
-					uni.showToast({
-						title: $t('stock.scanResultEmpty'),
-						icon: 'none'
-					})
-					return
-				}
-				console.log('扫码结果:', raw)
-	
-				// 纯数字码：此入口默认拦截（避免误扫 EAN8/EAN13 或非SN二维码导致随机数字通过）
-				// 若业务确认纯数字为有效SN，可在条码解析规则中放行
-				if (/^\d{8,}$/.test(raw)) {
-					uni.showModal({
-						title: $t('stock.invalidBarcode'),
-						content: `识别到纯数字码：${raw}\n\n工单检查绑定设备只支持设备SN二维码/Code128条形码。\n如确认该码就是设备SN，请联系管理员调整识别规则。`,
-						showCancel: false,
-						confirmText: $t('common.ok')
-					})
-					return
-				}
-				
-				// 解析条码
-				const parsedBarcode = parseBarcode(raw)
-				console.log('解析结果:', parsedBarcode)
-				
-				if (!parsedBarcode.success) {
-					uni.showToast({
-						title: parsedBarcode.error || $t('stock.invalidBarcode'),
-						icon: 'none'
-					})
-					return
-				}
-	
-				// 解析成功但SN不满足校验规则（长度/字符集等）
-				if (!isValidParseResult(parsedBarcode)) {
-					const snText = String(parsedBarcode?.sn || '').trim()
-					if (snText && /^\d{8,}$/.test(snText)) {
-						uni.showModal({
-							title: $t('stock.invalidBarcode'),
-							content: `识别到SN为纯数字：${snText}\n\n为避免误扫，此入口默认不接受纯数字SN。\n如确认该SN合法，请联系管理员调整识别规则。`,
-							showCancel: false,
-							confirmText: $t('common.ok')
+					// 统一扫码策略：类型校验 + 条码解析 + SN合法性校验
+					const scanned = await scanAndParseDeviceCode({ scanType: ['barCode', 'qrCode'] })
+					if (!scanned.ok) {
+						if (scanned.error === ScanDeviceCodeError.UNSUPPORTED_SCAN_TYPE) {
+							uni.showToast({
+								title: $t('stock.unsupportedScanType', { type: scanned.scanType || 'UNKNOWN' }),
+								icon: 'none'
+							})
+							return
+						}
+						if (scanned.error === ScanDeviceCodeError.EMPTY_RESULT) {
+							uni.showToast({
+								title: $t('stock.scanResultEmpty'),
+								icon: 'none'
+							})
+							return
+						}
+						if (scanned.error === ScanDeviceCodeError.INVALID_BARCODE) {
+							const raw = String(scanned?.raw || '').trim()
+							const snText = String(scanned?.parsed?.sn || '').trim()
+							if (/^\d{8,}$/.test(raw)) {
+								uni.showModal({
+									title: $t('stock.invalidBarcode'),
+									content: `识别到纯数字码：${raw}\n\n工单检查绑定设备只支持设备SN二维码/Code128条形码。\n如确认该码就是设备SN，请联系管理员调整识别规则。`,
+									showCancel: false,
+									confirmText: $t('common.ok')
+								})
+								return
+							}
+							if (snText && /^\d{8,}$/.test(snText)) {
+								uni.showModal({
+									title: $t('stock.invalidBarcode'),
+									content: `识别到SN为纯数字：${snText}\n\n为避免误扫，此入口默认不接受纯数字SN。\n如确认该SN合法，请联系管理员调整识别规则。`,
+									showCancel: false,
+									confirmText: $t('common.ok')
+								})
+								return
+							}
+							uni.showToast({
+								title: scanned?.parsed?.error || $t('stock.invalidBarcode'),
+								icon: 'none'
+							})
+							return
+						}
+						if (scanned.error === ScanDeviceCodeError.SCAN_FAILED && isScanCanceled(scanned)) return
+						uni.showToast({
+							title: $t('stock.scanFailed'),
+							icon: 'none'
 						})
 						return
 					}
-					uni.showToast({
-						title: $t('stock.invalidBarcode'),
-						icon: 'none'
-					})
-					return
-				}
+					const parsedBarcode = scanned.parsed
+					console.log('扫码结果:', scanned.raw)
+					console.log('解析结果:', parsedBarcode)
 	
 				// 设备更换工单：允许已绑定情况下直接换绑（先确认再提交）
 				const oldSn = String(targetItem?.equipment_sn || '').trim()

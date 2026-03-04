@@ -159,7 +159,7 @@
 	import { computed, getCurrentInstance, onMounted, ref } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
-	import { parseBarcode } from '@/utils/barcode-parser.js'
+	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
@@ -381,18 +381,28 @@
 
 	const scanAddMain = async () => {
 		try {
-			const res = await uni.scanCode({ scanType: ['qrCode', 'barCode'] })
-			const raw = (res?.result || '').trim()
-			const parsed = parseBarcode(raw)
-			const sn = (parsed?.success ? parsed.sn : raw) || ''
-			const value = String(sn).trim()
-			if (!value) {
-				uni.showToast({ title: $t('stock.scanResultEmpty'), icon: 'none' })
+			const scanned = await scanAndParseDeviceCode()
+			if (!scanned.ok) {
+				if (scanned.error === ScanDeviceCodeError.UNSUPPORTED_SCAN_TYPE) {
+					uni.showToast({ title: $t('stock.unsupportedScanType', { type: scanned.scanType || 'UNKNOWN' }), icon: 'none' })
+					return
+				}
+				if (scanned.error === ScanDeviceCodeError.EMPTY_RESULT) {
+					uni.showToast({ title: $t('stock.scanResultEmpty'), icon: 'none' })
+					return
+				}
+				if (scanned.error === ScanDeviceCodeError.INVALID_BARCODE) {
+					uni.showToast({ title: scanned?.parsed?.error || $t('stock.invalidBarcode'), icon: 'none' })
+					return
+				}
+				if (scanned.error === ScanDeviceCodeError.SCAN_FAILED && isScanCanceled(scanned)) return
+				uni.showToast({ title: $t('stock.scanFailed'), icon: 'none' })
 				return
 			}
-			await validateAndAddSn(value)
+			await validateAndAddSn(scanned.sn)
 		} catch (e) {
-			// 用户取消扫码不提示
+			const msg = String(e?.errMsg || e?.message || '').toLowerCase()
+			if (msg.includes('cancel')) return
 		}
 	}
 

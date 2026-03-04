@@ -534,8 +534,8 @@
 </template>
 
 	<script>
-	import { parseBarcode, formatMacAddress, getParseResultSummary, isValidParseResult } from '@/utils/barcode-parser.js'
-	import { scanDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
+	import { parseBarcode, formatMacAddress, getParseResultSummary } from '@/utils/barcode-parser.js'
+	import { scanAndParseDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { useUserStore } from '@/stores/user'
@@ -1025,7 +1025,7 @@ export default {
 	      try {
 	        this.scanSectionCollapsed = false
 	        console.log('开始扫码...')
-	        const scanned = await scanDeviceCode()
+	        const scanned = await scanAndParseDeviceCode()
 	        if (!scanned.ok) {
 	          if (scanned.error === ScanDeviceCodeError.UNSUPPORTED_SCAN_TYPE) {
 	            uni.showToast({
@@ -1036,6 +1036,10 @@ export default {
 	          }
 	          if (scanned.error === ScanDeviceCodeError.EMPTY_RESULT) {
 	            uni.showToast({ title: this.$t('stock.scanResultEmpty'), icon: 'none' })
+	            return
+	          }
+	          if (scanned.error === ScanDeviceCodeError.INVALID_BARCODE) {
+	            uni.showToast({ title: scanned?.parsed?.error || this.$t('stock.invalidBarcode'), icon: 'none' })
 	            return
 	          }
 	          uni.showToast({ title: this.$t('stock.scanFailed'), icon: 'none' })
@@ -1050,9 +1054,8 @@ export default {
 	        
 	        this.scanResult = scanned.raw
 	        
-	        console.log('=== 开始解析条码 ===')
-	        console.log('调用parseBarcode，输入:', scanned.raw)
-	        this.parsedBarcode = parseBarcode(scanned.raw)
+	        console.log('=== 使用统一扫码策略结果 ===')
+	        this.parsedBarcode = scanned.parsed
         
         console.log('=== 解析结果 ===')
         console.log('parsedBarcode:', JSON.stringify(this.parsedBarcode, null, 2))
@@ -1074,21 +1077,8 @@ export default {
           return
         }
         
-        console.log('=== 验证解析结果 ===')
-        const isValid = isValidParseResult(this.parsedBarcode)
-        console.log('isValidParseResult:', isValid)
-        
-        if (!isValid) {
-          console.log('=== 验证失败 ===')
-          uni.showToast({
-            title: this.$t('stock.invalidBarcode'),
-            icon: 'none'
-          })
-          return
-        }
-        
-        console.log('=== 开始处理扫码数据 ===')
-        this.processScannedCode(this.parsedBarcode)
+	        console.log('=== 开始处理扫码数据 ===')
+	        this.processScannedCode(this.parsedBarcode)
       } catch (error) {
         console.error('扫码失败:', error)
         uni.showToast({

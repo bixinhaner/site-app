@@ -275,6 +275,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { parseBarcode } from '@/utils/barcode-parser.js'
+	import { scanAndParseDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 
@@ -413,22 +414,32 @@
 	}
 
 	const scanByCamera = async () => {
-		try {
-			const res = await uni.scanCode({ scanType: ['qrCode', 'barCode'] })
-			const raw = String(res?.result || '').trim()
-			if (!raw) {
+		const scanned = await scanAndParseDeviceCode()
+		if (!scanned.ok) {
+			if (scanned.error === ScanDeviceCodeError.UNSUPPORTED_SCAN_TYPE) {
+				uni.showToast({ title: $t('stock.unsupportedScanType', { type: scanned.scanType || 'UNKNOWN' }), icon: 'none' })
+				return
+			}
+			if (scanned.error === ScanDeviceCodeError.EMPTY_RESULT) {
 				uni.showToast({ title: $t('stock.scanResultEmpty'), icon: 'none' })
 				return
 			}
-			addSn(raw)
-		} catch (e) {
+			if (scanned.error === ScanDeviceCodeError.INVALID_BARCODE) {
+				uni.showToast({ title: scanned?.parsed?.error || $t('stock.invalidBarcode'), icon: 'none' })
+				return
+			}
 			uni.showToast({ title: $t('stock.scanFailed'), icon: 'none' })
+			return
 		}
+		addSn(scanned.sn, { alreadyNormalized: true })
 	}
 
-	const addSn = (raw) => {
-		const parsed = parseBarcode(String(raw || '').trim())
-		const sn = (parsed?.success && parsed?.sn) ? String(parsed.sn).trim() : String(raw || '').trim()
+	const addSn = (raw, { alreadyNormalized = false } = {}) => {
+		const value = String(raw || '').trim()
+		const parsed = alreadyNormalized ? null : parseBarcode(value)
+		const sn = alreadyNormalized
+			? value
+			: (parsed?.success && parsed?.sn) ? String(parsed.sn).trim() : value
 		if (!sn) return
 		if (snList.value.includes(sn)) return
 		snList.value.push(sn)

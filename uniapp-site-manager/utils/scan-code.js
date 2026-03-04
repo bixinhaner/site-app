@@ -1,6 +1,9 @@
+import { parseBarcode, isValidParseResult } from './barcode-parser.js'
+
 export const ScanDeviceCodeError = {
   UNSUPPORTED_SCAN_TYPE: 'unsupported_scan_type',
   EMPTY_RESULT: 'empty_result',
+  INVALID_BARCODE: 'invalid_barcode',
   SCAN_FAILED: 'scan_failed',
 }
 
@@ -17,6 +20,20 @@ export const DEVICE_ALLOWED_SCAN_TYPES = new Set([
   'QR',
   'CODE_128',
   'CODE128',
+  'CODE_39',
+  'CODE39',
+  'CODE_93',
+  'CODE93',
+  'CODABAR',
+  'ITF',
+  'EAN_13',
+  'EAN13',
+  'EAN_8',
+  'EAN8',
+  'UPC_A',
+  'UPCA',
+  'UPC_E',
+  'UPCE',
 ])
 
 export function isAllowedDeviceScanType(scanType) {
@@ -71,3 +88,41 @@ export async function scanDeviceCode(options = {}) {
   }
 }
 
+export function isScanCanceled(scanResult) {
+  const msg = String(
+    scanResult?.cause?.errMsg ||
+      scanResult?.cause?.message ||
+      scanResult?.errMsg ||
+      scanResult?.message ||
+      '',
+  )
+    .trim()
+    .toLowerCase()
+  return msg.includes('cancel')
+}
+
+export async function scanAndParseDeviceCode(options = {}) {
+  const scanned = await scanDeviceCode(options)
+  if (!scanned.ok) return scanned
+
+  const parsed = parseBarcode(scanned.raw)
+  if (!parsed?.success || !isValidParseResult(parsed)) {
+    return {
+      ok: false,
+      error: ScanDeviceCodeError.INVALID_BARCODE,
+      scanType: scanned.scanType || 'UNKNOWN',
+      raw: scanned.raw,
+      parsed,
+      result: scanned.result,
+    }
+  }
+
+  return {
+    ok: true,
+    raw: scanned.raw,
+    scanType: scanned.scanType || 'UNKNOWN',
+    parsed,
+    sn: String(parsed.sn || '').trim(),
+    result: scanned.result,
+  }
+}

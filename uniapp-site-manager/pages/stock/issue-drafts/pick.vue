@@ -175,7 +175,7 @@
 		import { useLanguageStore } from '@/stores/language'
 		import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 		import { parseBarcode } from '@/utils/barcode-parser.js'
-		import { scanDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
+		import { scanAndParseDeviceCode, ScanDeviceCodeError } from '@/utils/scan-code.js'
 		import { formatDateTime } from '@/utils/time.js'
 		import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 		import CustomNavbar from '@/components/CustomNavbar.vue'
@@ -319,7 +319,7 @@
 
 		const scanByCamera = async () => {
 			if (!canEdit.value) return
-			const scanned = await scanDeviceCode()
+			const scanned = await scanAndParseDeviceCode()
 			if (!scanned.ok) {
 				if (scanned.error === ScanDeviceCodeError.UNSUPPORTED_SCAN_TYPE) {
 					uni.showToast({
@@ -332,10 +332,14 @@
 					uni.showToast({ title: $t('stock.scanResultEmpty'), icon: 'none' })
 					return
 				}
+				if (scanned.error === ScanDeviceCodeError.INVALID_BARCODE) {
+					uni.showToast({ title: scanned?.parsed?.error || $t('stock.invalidBarcode'), icon: 'none' })
+					return
+				}
 				uni.showToast({ title: $t('stock.scanFailed'), icon: 'none' })
 				return
 			}
-			await submitScan(scanned.raw)
+			await submitScan(scanned.raw, scanned.parsed)
 		}
 
 	const addSnFromInput = async () => {
@@ -346,12 +350,12 @@
 		await submitScan(raw)
 	}
 
-	const submitScan = async (barcode) => {
-		if (!draftId.value) return
-		acting.value = true
-		try {
-			const parsed = parseBarcode(barcode)
-			const res = await uni.request({
+		const submitScan = async (barcode, parsedBarcode = null) => {
+			if (!draftId.value) return
+			acting.value = true
+			try {
+				const parsed = parsedBarcode || parseBarcode(barcode)
+				const res = await uni.request({
 				url: buildApiUrl(API_ENDPOINTS.STOCK.ISSUE_DRAFT_SCAN_MAIN(draftId.value)),
 				method: 'POST',
 				header: getAuthHeaders(userStore.token),
