@@ -55,10 +55,6 @@
           <el-icon><TakeawayBox /></el-icon>
           设备库存管理
         </el-button>
-        <el-button @click="$router.push('/inspections/review')">
-          <el-icon><Stamp /></el-icon>
-          检查审核台
-        </el-button>
         <el-button @click="$router.push('/work-orders/list')">
           <el-icon><Tickets /></el-icon>
           工单列表

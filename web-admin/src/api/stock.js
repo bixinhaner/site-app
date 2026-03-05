@@ -39,10 +39,6 @@ export const stockApi = {
   confirmPickup: (data) => 
     request.post('/api/stock/confirm-pickup', data),
   
-  // 获取我的领料记录
-  getMyPickups: (params = {}) => 
-    request.get('/api/stock/my-pickups', { params }),
-  
   // 获取出入库记录
   getStockTransactions: (params = {}) => 
     request.get('/api/stock/transactions', { params }),
