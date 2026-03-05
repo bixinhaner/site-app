@@ -1672,7 +1672,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Document } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { mobileSettingsApi } from '@/api/system'
@@ -1682,6 +1682,7 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const saving = ref(false)
+const configVersion = ref(1)
 const similarityGuideDialogVisible = ref(false)
 const similarityThresholdSuggestionRows = [
   {
@@ -2635,6 +2636,33 @@ const buildFloatRulePayload = (
   return payload
 }
 
+const parseMobileSettingsError = (error) => {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string') {
+    return {
+      code: '',
+      message: detail,
+    }
+  }
+  if (Array.isArray(detail)) {
+    return {
+      code: '',
+      message: detail.map(d => d.msg || JSON.stringify(d)).join('；'),
+    }
+  }
+  if (detail && typeof detail === 'object') {
+    return {
+      code: String(detail.code || ''),
+      message: String(detail.message || detail.detail || '保存失败'),
+      currentConfigVersion: Number(detail.current_config_version || 0),
+    }
+  }
+  return {
+    code: '',
+    message: '保存失败',
+  }
+}
+
 const loadConfig = async () => {
   try {
     loading.value = true
@@ -2657,6 +2685,7 @@ const loadConfig = async () => {
     const watermarkTemplatesRaw = raw.photo_watermark_templates || {}
     const watermarkTemplateRuleRaw = raw.photo_watermark_template_rule || {}
     const watermarkScenePolicyRaw = raw.photo_watermark_scene_policy || {}
+    configVersion.value = clampInt(raw.config_version, 1, 2147483647, 1)
 
     form.value.location_mode.default =
       (lm.default && lm.default.toLowerCase()) === 'native' ? 'native' : 'baidu'
@@ -2802,8 +2831,8 @@ const loadConfig = async () => {
 
   } catch (e) {
     console.error(e)
-    const detail = e?.response?.data?.detail
-    ElMessage.error(detail || '加载移动端配置失败')
+    const parsed = parseMobileSettingsError(e)
+    ElMessage.error(parsed.message || '加载移动端配置失败')
   } finally {
     loading.value = false
   }
@@ -2814,9 +2843,19 @@ const save = async () => {
     ElMessage.error('只有管理员或项目经理可以保存配置')
     return
   }
+  let payload = null
+  const submitSave = async (confirmTemplateReset = false) => {
+    const response = await mobileSettingsApi.updateMobileSettings({
+      ...(payload || {}),
+      confirm_template_reset: confirmTemplateReset,
+    })
+    configVersion.value = clampInt(response?.config_version, 1, 2147483647, configVersion.value + 1)
+    return response
+  }
   try {
     saving.value = true
-    const payload = {
+    payload = {
+      config_version: configVersion.value,
       location_mode: {
         default: form.value.location_mode.default,
         per_role: {},
@@ -3010,19 +3049,49 @@ const save = async () => {
         form.value.photo_watermark_scene_policy.force_local_upload_note_when_geo_disabled !== false,
     }
 
-    await mobileSettingsApi.updateMobileSettings(payload)
+    await submitSave(false)
 
     ElMessage.success('保存成功')
   } catch (e) {
     console.error(e)
-    const detail = e?.response?.data?.detail
-    let msg = '保存失败'
-    if (typeof detail === 'string') {
-      msg = detail
-    } else if (Array.isArray(detail)) {
-      msg = detail.map(d => d.msg || JSON.stringify(d)).join('；')
+    const parsed = parseMobileSettingsError(e)
+
+    if (parsed.code === 'MOBILE_SETTINGS_VERSION_REQUIRED' || parsed.code === 'MOBILE_SETTINGS_VERSION_CONFLICT') {
+      ElMessage.error(parsed.message || '配置已被其他会话更新，请刷新后重试')
+      await loadConfig()
+      return
     }
-    ElMessage.error(msg)
+
+    if (parsed.code === 'MOBILE_SETTINGS_TEMPLATE_RESET_CONFIRM_REQUIRED') {
+      try {
+        await ElMessageBox.confirm(
+          '当前操作会删除全部自定义水印模板，仅保留 default 模板。确认继续保存吗？',
+          '二次确认',
+          {
+            type: 'warning',
+            confirmButtonText: '确认保存',
+            cancelButtonText: '取消',
+          },
+        )
+
+        await submitSave(true)
+        ElMessage.success('保存成功')
+        return
+      } catch (confirmError) {
+        if (confirmError === 'cancel' || confirmError === 'close' || confirmError === 'dismiss') {
+          return
+        }
+        console.error(confirmError)
+        const retryParsed = parseMobileSettingsError(confirmError)
+        ElMessage.error(retryParsed.message || '保存失败')
+        if (retryParsed.code === 'MOBILE_SETTINGS_VERSION_REQUIRED' || retryParsed.code === 'MOBILE_SETTINGS_VERSION_CONFLICT') {
+          await loadConfig()
+        }
+        return
+      }
+    }
+
+    ElMessage.error(parsed.message || '保存失败')
   } finally {
     saving.value = false
   }

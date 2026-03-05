@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import re
 from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple
 
@@ -10,6 +11,7 @@ from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.system_config import SystemConfig
+from app.models.user_log import UserLog
 
 
 router = APIRouter()
@@ -48,6 +50,9 @@ _LEGACY_TEMPLATE_SCENE_POLICY_ALIASES = {
   "applyForAlbum": "apply_for_album",
   "forceLocalUploadNoteWhenGeoDisabled": "force_local_upload_note_when_geo_disabled",
 }
+_MOBILE_SETTINGS_VERSION_REQUIRED_CODE = "MOBILE_SETTINGS_VERSION_REQUIRED"
+_MOBILE_SETTINGS_VERSION_CONFLICT_CODE = "MOBILE_SETTINGS_VERSION_CONFLICT"
+_MOBILE_SETTINGS_TEMPLATE_RESET_CONFIRM_CODE = "MOBILE_SETTINGS_TEMPLATE_RESET_CONFIRM_REQUIRED"
 
 
 class LocationModeResponse(BaseModel):
@@ -205,6 +210,7 @@ class MobileSettingsPayload(BaseModel):
   - check_item_photo_similarity_window_days: 相似度匹配窗口（天）
   - check_item_photo_similarity_phash_threshold: 相似度粗筛阈值（0~64）
   - check_item_photo_similarity_vector_threshold: 相似度精筛阈值（0~1）
+  - config_version: 配置版本号（用于并发保护）
   - photo_watermark_templates: 照片水印模板集合（key 为模板ID）
   - photo_watermark_template_rule: 照片水印模板分配规则（default/per_role/per_user）
   - photo_watermark_scene_policy: 照片水印场景策略（拍照/相册）
@@ -225,9 +231,17 @@ class MobileSettingsPayload(BaseModel):
   check_item_photo_similarity_phash_threshold: Optional[IntRule] = None
   check_item_photo_similarity_vector_threshold: Optional[FloatRule] = None
   photo_location_distance_threshold_m: Optional[IntRule] = None
+  config_version: int = 1
   photo_watermark_templates: Optional[Dict[str, WatermarkTemplate]] = None
   photo_watermark_template_rule: Optional[WatermarkTemplateRule] = None
   photo_watermark_scene_policy: Optional[WatermarkScenePolicy] = None
+
+
+class MobileSettingsUpdatePayload(MobileSettingsPayload):
+  """更新移动端配置的请求载荷（含并发保护字段）。"""
+
+  config_version: Optional[int] = None
+  confirm_template_reset: bool = False
 
 
 class EffectiveMobileSettingsResponse(BaseModel):
@@ -1001,6 +1015,73 @@ def _save_mobile_settings(db: Session, settings: Dict[str, Any]) -> None:
   db.commit()
 
 
+def _get_mobile_settings_version(settings: Dict[str, Any]) -> int:
+  raw_version = (settings or {}).get("config_version")
+  if raw_version is None:
+    return 1
+  try:
+    version = int(raw_version)
+  except (TypeError, ValueError):
+    return 1
+  return version if version >= 1 else 1
+
+
+def _bump_mobile_settings_version(settings: Dict[str, Any]) -> int:
+  next_version = _get_mobile_settings_version(settings) + 1
+  settings["config_version"] = next_version
+  return next_version
+
+
+def _extract_non_default_template_ids(templates_map: Dict[str, Any]) -> Set[str]:
+  return {
+    str(template_id).strip()
+    for template_id in (templates_map or {}).keys()
+    if str(template_id).strip() and str(template_id).strip() != "default"
+  }
+
+
+def _write_mobile_settings_save_log(
+  db: Session,
+  current_user: User,
+  version_before: int,
+  version_after: int,
+  template_ids_before: Iterable[str],
+  template_ids_after: Iterable[str],
+) -> None:
+  before_ids_sorted = sorted({str(v).strip() for v in template_ids_before if str(v).strip()})
+  after_ids_sorted = sorted({str(v).strip() for v in template_ids_after if str(v).strip()})
+  try:
+    log = UserLog(
+      session_id="mobile-settings-save",
+      user_id=getattr(current_user, "id", None),
+      username=getattr(current_user, "username", None),
+      timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+      action="mobile_settings_saved",
+      level="INFO",
+      page_route="web-admin/system/mobile-settings",
+      page_options=None,
+      action_data={
+        "config_version_before": version_before,
+        "config_version_after": version_after,
+        "template_count_before": len(before_ids_sorted),
+        "template_count_after": len(after_ids_sorted),
+        "template_ids_before": before_ids_sorted,
+        "template_ids_after": after_ids_sorted,
+      },
+      device_platform="web-admin",
+      device_model="browser",
+      screen_width=None,
+      screen_height=None,
+      error_message=None,
+      error_stack=None,
+      error_context=None,
+    )
+    db.add(log)
+    db.commit()
+  except Exception:
+    db.rollback()
+
+
 def _get_legacy_location_mode(db: Session) -> str:
   """
   兼容旧版本，仅使用 SystemConfig(key='mobile_location_mode') 里的简单结构。
@@ -1328,6 +1409,7 @@ def _build_mobile_settings_payload_from_raw(raw: Dict[str, Any]) -> MobileSettin
         if str(k).strip() != ""
       },
     ),
+    config_version=_get_mobile_settings_version(safe_raw),
     photo_watermark_templates={
       template_id: WatermarkTemplate(**template_value)
       for template_id, template_value in templates_map.items()
@@ -1364,7 +1446,7 @@ async def get_mobile_settings(
 
 @router.put("/mobile-settings", response_model=MobileSettingsPayload)
 async def update_mobile_settings(
-  payload: MobileSettingsPayload,
+  payload: MobileSettingsUpdatePayload,
   db: Session = Depends(get_db),
   current_user: User = Depends(get_current_user),
 ):
@@ -1377,6 +1459,32 @@ async def update_mobile_settings(
   _require_admin_or_manager(current_user)
 
   settings = _load_mobile_settings(db)
+  current_version = _get_mobile_settings_version(settings)
+  before_templates_map, _ = _sanitize_watermark_templates_map_with_aliases(
+    settings.get("photo_watermark_templates") or {},
+  )
+  before_template_ids = _extract_non_default_template_ids(before_templates_map)
+
+  if payload.config_version is None:
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT,
+      detail={
+        "code": _MOBILE_SETTINGS_VERSION_REQUIRED_CODE,
+        "message": "当前页面配置版本已过期，请刷新页面后重试保存。",
+        "current_config_version": current_version,
+      },
+    )
+
+  if payload.config_version != current_version:
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT,
+      detail={
+        "code": _MOBILE_SETTINGS_VERSION_CONFLICT_CODE,
+        "message": "配置已被其他会话更新，请刷新页面后再保存。",
+        "current_config_version": current_version,
+        "request_config_version": payload.config_version,
+      },
+    )
 
   if payload.location_mode is not None:
     settings["location_mode"] = _normalize_location_mode_rule(payload.location_mode)
@@ -1447,6 +1555,18 @@ async def update_mobile_settings(
     settings.get("photo_watermark_templates") or {},
   )
   settings["photo_watermark_templates"] = current_templates
+  after_template_ids = _extract_non_default_template_ids(current_templates)
+
+  if before_template_ids and not after_template_ids and not payload.confirm_template_reset:
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT,
+      detail={
+        "code": _MOBILE_SETTINGS_TEMPLATE_RESET_CONFIRM_CODE,
+        "message": "检测到将清空全部自定义水印模板（仅保留 default），请二次确认后再保存。",
+        "template_count_before": len(before_template_ids),
+        "template_ids_before": sorted(before_template_ids),
+      },
+    )
 
   if payload.photo_watermark_template_rule is not None:
     settings["photo_watermark_template_rule"] = _normalize_watermark_template_rule(
@@ -1470,8 +1590,17 @@ async def update_mobile_settings(
   settings["photo_watermark_scene_policy"] = _sanitize_watermark_scene_policy(
     settings.get("photo_watermark_scene_policy") or {},
   )
+  new_version = _bump_mobile_settings_version(settings)
 
   _save_mobile_settings(db, settings)
+  _write_mobile_settings_save_log(
+    db=db,
+    current_user=current_user,
+    version_before=current_version,
+    version_after=new_version,
+    template_ids_before=before_template_ids,
+    template_ids_after=after_template_ids,
+  )
   return _build_mobile_settings_payload_from_raw(settings)
 
 
@@ -1623,6 +1752,7 @@ async def update_location_mode(
   rule.setdefault("per_role", {})
   rule.setdefault("per_user", {})
   settings["location_mode"] = rule
+  _bump_mobile_settings_version(settings)
 
   _save_mobile_settings(db, settings)
 

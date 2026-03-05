@@ -267,7 +267,7 @@ npm run build                  # 生产构建
 
 ### 移动端配置
 - `GET /api/system/mobile-settings` - 管理端获取完整移动端配置（管理员/项目经理）
-- `PUT /api/system/mobile-settings` - 管理端更新完整移动端配置（管理员/项目经理）
+- `PUT /api/system/mobile-settings` - 管理端更新完整移动端配置（管理员/项目经理，需携带 `config_version`；若版本冲突返回 `409`，需先刷新再保存）
 - `GET /api/system/mobile-settings/effective` - 移动端获取“当前用户生效”的配置（含定位策略、水印策略、水印模板）
 - `GET /api/system/location-mode` - 获取定位模式全局默认值（兼容旧版）
 - `PUT /api/system/location-mode` - 更新定位模式全局默认值（兼容旧版）
@@ -334,6 +334,10 @@ npm run build                  # 生产构建
 - 升级兼容修复（2026-03-04）：
   - 修复“升级后历史照片水印模板看起来丢失”的问题。后端现在会兼容读取旧版存储结构（模板数组、驼峰字段、旧模板ID字符），自动映射为当前结构，避免被默认模板覆盖。
   - 兼容范围包含模板内容、样式字段、场景策略与模板分配规则（默认/按角色/按用户）。
+- 并发与误清空保护（2026-03-05）：
+  - 新增 `config_version` 乐观锁：管理端保存时必须带当前版本号；若其他会话已改动，接口会返回 `409`，前端提示刷新并重新加载最新配置，避免“后保存覆盖先保存”。
+  - 新增模板清空二次确认：当本次保存会把“自定义模板数量”从 `>0` 变成 `0`（仅保留 `default`）时，后端会先返回 `409` 要求确认；前端弹框确认后才会带 `confirm_template_reset=true` 重试。
+  - 新增后台审计字段：每次成功保存都会记录 `template_count_before/after`、`template_ids_before/after`、`config_version_before/after`，用于排查“模板消失/配置回滚”来源。
 - 支持内容：
   - 模板管理：新增、复制、删除、设置默认模板
   - 模板样式：位置、文字色、背景色与透明度、字号、行高、内外边距、圆角、最大宽度比例、水印区域占比
