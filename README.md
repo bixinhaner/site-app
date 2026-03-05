@@ -22,6 +22,8 @@ site-app/
 │   │   ├── schemas/           # Pydantic 数据验证
 │   │   ├── services/          # 业务逻辑服务
 │   │   └── utils/             # 工具函数
+│   ├── db/                    # 备份元数据库（backup_meta.db）
+│   ├── db-backups/            # 备份压缩包目录（db_backup_*.zip）
 │   ├── requirements.txt       # Python 依赖
 │   └── start_backend.py       # 一键启动脚本
 ├── uniapp-site-manager/       # UniApp 移动端
@@ -246,6 +248,15 @@ npm run build                  # 生产构建
 - `POST /api/stock/returns/by-actual` - 按实际申请退库（后台自动关联并拆分单据，提交时做并发防超退校验）
 - `GET /api/stock/returns/workbench-batches` - 仓库侧退库批次工作台（批次维度，含单据明细）
 - `GET /api/stock/my-return-batches` - 我的退库批次列表（批次维度）
+
+### 系统备份（Web 管理端）
+- `GET /api/system/backup/config` - 获取备份策略配置
+- `PUT /api/system/backup/config` - 更新备份策略配置
+- `POST /api/system/backup/run` - 手动触发备份
+- `GET /api/system/backup/history` - 获取备份历史记录
+- `GET /api/system/backup/{backup_id}/download` - 下载指定备份记录对应的 zip 包
+- `POST /api/system/backup/{backup_id}/restore` - 从指定备份恢复数据库
+- `GET /api/system/backup/restore-history` - 获取恢复操作历史
 
 ### 日志系统
 - `POST /api/logs` - 创建用户日志

@@ -1,7 +1,9 @@
+import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -22,6 +24,27 @@ from app.utils.timezone import to_utc_iso
 
 
 router = APIRouter()
+
+
+def _get_backend_root_dir() -> str:
+    return os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+
+
+def _resolve_backup_file_abs_path(backup_file: str) -> str:
+    backend_root = _get_backend_root_dir()
+    backend_root_real = os.path.realpath(backend_root)
+
+    if os.path.isabs(backup_file):
+        candidate = backup_file
+    else:
+        candidate = os.path.join(backend_root, backup_file)
+
+    resolved = os.path.realpath(candidate)
+    if not (resolved == backend_root_real or resolved.startswith(backend_root_real + os.sep)):
+        raise HTTPException(status_code=400, detail="备份文件路径非法")
+    if not resolved.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="仅支持下载 zip 格式备份文件")
+    return resolved
 
 
 def _require_admin_or_manager(current_user: User) -> None:
@@ -222,6 +245,45 @@ async def restore_from_backup(
             status_code=500,
             detail=f"恢复失败: {exc}",
         )
+
+
+@router.get("/{backup_id}/download")
+async def download_backup_file(
+    backup_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    """下载指定备份记录对应的 zip 文件。"""
+    _require_admin_or_manager(current_user)
+
+    meta_db = MetaSessionLocal()
+    try:
+        record: Optional[BackupMetaRecord] = (
+            meta_db.query(BackupMetaRecord)
+            .filter(
+                BackupMetaRecord.id == backup_id,
+                BackupMetaRecord.kind == "backup",
+            )
+            .first()
+        )
+    finally:
+        meta_db.close()
+
+    if not record:
+        raise HTTPException(status_code=404, detail=f"备份记录不存在: {backup_id}")
+    if record.status != "success":
+        raise HTTPException(status_code=400, detail="仅支持下载状态为 success 的备份记录")
+    if not record.backup_file:
+        raise HTTPException(status_code=404, detail="备份记录缺少文件路径")
+
+    zip_path = _resolve_backup_file_abs_path(record.backup_file)
+    if not os.path.isfile(zip_path):
+        raise HTTPException(status_code=404, detail=f"备份文件不存在: {record.backup_file}")
+
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=os.path.basename(zip_path),
+    )
 
 
 @router.get("/restore-history")

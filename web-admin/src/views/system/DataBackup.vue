@@ -126,8 +126,18 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'success'"
+              link
+              type="primary"
+              size="small"
+              :loading="downloadingId === row.id"
+              @click="downloadBackup(row)"
+            >
+              下载
+            </el-button>
             <el-button
               v-if="row.status === 'success'"
               link
@@ -240,6 +250,7 @@ const historyTotal = ref(0)
 const historyPage = ref(1)
 const historyPageSize = ref(10)
 const restoringId = ref(null)
+const downloadingId = ref(null)
 
 const restoreHistoryItems = ref([])
 const restoreHistoryTotal = ref(0)
@@ -351,6 +362,57 @@ const loadRestoreHistory = async () => {
 const handleRestorePageChange = (page) => {
   restoreHistoryPage.value = page
   loadRestoreHistory()
+}
+
+const getBackupZipName = (row) => {
+  const fallback = `db_backup_${row?.id || Date.now()}.zip`
+  const source = row?.backup_file
+  if (!source) return fallback
+
+  const parts = String(source).split(/[\\/]/)
+  const fileName = parts[parts.length - 1]
+  if (!fileName) return fallback
+  return fileName.endsWith('.zip') ? fileName : fallback
+}
+
+const parseBlobErrorMessage = async (error, fallback = '下载备份失败') => {
+  const payload = error?.response?.data
+  if (payload instanceof Blob) {
+    try {
+      const text = await payload.text()
+      const obj = JSON.parse(text)
+      if (obj?.detail) return obj.detail
+      if (obj?.message) return obj.message
+    } catch {
+      // 忽略 Blob 解析失败
+    }
+  }
+  return error?.response?.data?.detail || error?.message || fallback
+}
+
+const downloadBackup = async (row) => {
+  if (!row || row.status !== 'success') return
+  if (downloadingId.value) return
+
+  downloadingId.value = row.id
+  try {
+    const res = await systemBackupApi.downloadBackup(row.id)
+    const blob = res instanceof Blob ? res : new Blob([res], { type: 'application/zip' })
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = getBackupZipName(row)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(downloadUrl)
+    ElMessage.success('备份文件下载已开始')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(await parseBlobErrorMessage(e))
+  } finally {
+    downloadingId.value = null
+  }
 }
 
 const confirmRestore = (row) => {

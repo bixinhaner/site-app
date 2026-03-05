@@ -32,6 +32,14 @@ export const systemBackupApi = {
   restore(id, confirm) {
     return request.post(`/api/system/backup/${id}/restore`, { confirm })
   },
+
+  // 下载指定备份记录对应的 zip 包
+  downloadBackup(id) {
+    return request.get(`/api/system/backup/${id}/download`, {
+      responseType: 'blob',
+      timeout: config.LONG_REQUEST_TIMEOUT,
+    })
+  },
 }
 
 // 移动端设置相关 API（包含定位模式）
