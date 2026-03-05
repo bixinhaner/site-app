@@ -3203,10 +3203,13 @@ async def get_equipment_instances(
             query = query.filter(EquipmentInstance.warehouse_id == warehouse_id)
     
     instances = query.order_by(desc(EquipmentInstance.created_at)).all()
+    return {"instances": _serialize_equipment_instances(db, instances)}
 
+
+def _serialize_equipment_instances(db: Session, instances: List[EquipmentInstance]) -> List[dict]:
     # warehouse_id 为空即视为已出库（或在库外），需回溯上个仓库信息用于前端展示
     out_instance_ids = [inst.id for inst in instances if inst.warehouse_id is None]
-    last_warehouse_map = {}
+    last_warehouse_map: Dict[str, dict] = {}
     if out_instance_ids:
         latest_out_subq = (
             db.query(
@@ -3245,7 +3248,7 @@ async def get_equipment_instances(
                 "warehouse_id": last_wh_id,
                 "warehouse_name": warehouse_name,
             }
-    
+
     result = []
     for instance in instances:
         current_warehouse_id = instance.warehouse_id
@@ -3289,8 +3292,57 @@ async def get_equipment_instances(
             "last_warehouse_name": last_warehouse_name,
             "created_at": to_utc_iso(instance.created_at) if instance.created_at else None
         })
-    
-    return {"instances": result}
+    return result
+
+
+@router.get("/equipment-instances/search")
+async def search_equipment_instances(
+    sn: str,
+    status: Optional[str] = None,
+    include_voided: bool = False,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """按 SN 全局查询设备实例（用于设备实例清单未选择设备类型时的快速检索）。"""
+    sn_value = str(sn or "").strip()
+    if not sn_value:
+        raise HTTPException(status_code=400, detail="请填写SN")
+
+    try:
+        limit = int(limit or 100)
+    except Exception:
+        limit = 100
+    limit = max(1, min(limit, 200))
+
+    query = db.query(EquipmentInstance).options(joinedload(EquipmentInstance.warehouse))
+    if not include_voided:
+        query = query.filter(or_(EquipmentInstance.is_voided == False, EquipmentInstance.is_voided.is_(None)))
+    if status:
+        query = query.filter(EquipmentInstance.status == status)
+
+    like_prefix = f"{sn_value}%"
+    query = query.filter(
+        or_(
+            EquipmentInstance.serial_number == sn_value,
+            EquipmentInstance.serial_number.like(like_prefix),
+            EquipmentInstance.original_serial_number == sn_value,
+            EquipmentInstance.original_serial_number.like(like_prefix),
+        )
+    )
+
+    exact_rank = case(
+        (EquipmentInstance.serial_number == sn_value, 2),
+        (EquipmentInstance.original_serial_number == sn_value, 1),
+        else_=0,
+    )
+
+    instances = (
+        query.order_by(desc(exact_rank), desc(EquipmentInstance.created_at))
+        .limit(limit)
+        .all()
+    )
+    return {"instances": _serialize_equipment_instances(db, instances)}
 
 
 @router.patch("/transactions/{transaction_id}")

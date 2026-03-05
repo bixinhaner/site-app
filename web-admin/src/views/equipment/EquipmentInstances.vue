@@ -15,7 +15,7 @@
           <el-option label="损坏/报损" value="damaged" />
         </el-select>
         <el-checkbox v-model="includeVoided">显示已撤销</el-checkbox>
-        <el-input v-model="keyword" placeholder="搜索SN/条码/供应商" clearable style="width: 220px" />
+        <el-input v-model="keyword" placeholder="搜索SN/条码/供应商（未选设备类型时按SN查）" clearable style="width: 320px" />
         <el-button type="primary" @click="load"><el-icon><Search /></el-icon>查询</el-button>
       </div>
     </div>
@@ -219,8 +219,9 @@ const historyDialogVisible = ref(false)
 const currentEquipment = ref(null)
 
 const load = async () => {
-  if (!selectedEquipmentId.value) {
-    ElMessage.info('请输入设备类型ID')
+  const snKeyword = String(keyword.value || '').trim()
+  if (!selectedEquipmentId.value && !snKeyword) {
+    ElMessage.info('请输入SN或选择设备类型')
     return
   }
   try {
@@ -228,7 +229,13 @@ const load = async () => {
     const params = {}
     if (status.value) params.status = status.value
     if (includeVoided.value) params.include_voided = true
-    const res = await stockApi.getEquipmentInstances(selectedEquipmentId.value, params)
+    let res = null
+    if (!selectedEquipmentId.value && snKeyword) {
+      params.sn = snKeyword
+      res = await stockApi.searchEquipmentInstancesBySn(params)
+    } else {
+      res = await stockApi.getEquipmentInstances(selectedEquipmentId.value, params)
+    }
     items.value = res?.instances || []
   } catch (e) {
     console.error(e)

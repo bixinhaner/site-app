@@ -74,6 +74,10 @@ export const stockApi = {
   // 获取设备实例列表
   getEquipmentInstances: (equipmentId, params = {}) => 
     request.get(`/api/stock/equipment/${equipmentId}/instances`, { params }),
+
+  // 按 SN 全局搜索设备实例（无需先选设备类型）
+  searchEquipmentInstancesBySn: (params = {}) =>
+    request.get('/api/stock/equipment-instances/search', { params }),
     
   // 批量检查SN是否存在
   checkSNBatch: (snList) => 
