@@ -49,6 +49,10 @@ from app.models.issue_draft import (
 from app.models.work_order import AuditEvent
 from app.models.inspection import InspectionCheckItem, InspectionPhoto, SiteInspection, InspectionStatusEnum, CheckItemStatusEnum
 from app.services.authz_service import user_has_any_role_or_permission
+from app.services.equipment_unbind_service import (
+    is_device_level_check_item,
+    rollback_equipment_status_after_unbind,
+)
 from app.utils.file_handler import save_uploaded_file, validate_image_on_disk, ImageValidationError
 from app.utils.timezone import to_utc_iso
 
@@ -1105,16 +1109,6 @@ def _extract_sn_from_scan(barcode: str, parsed_barcode: Optional[dict]) -> str:
     return raw
 
 
-def _is_device_level_check_item(item: InspectionCheckItem) -> bool:
-    if not item or not item.sector_id or not item.band:
-        return False
-    key = f"{item.sector_id}_{item.band}"
-    # 防御：若 cell_id 缺失，按“设备级”处理（避免误放开绑定要求）
-    if not item.cell_id:
-        return True
-    return str(item.cell_id) == key
-
-
 def _get_active_pickup_by_sn(
     db: Session,
     *,
@@ -1312,7 +1306,7 @@ async def scan_return_unbind(
     )
     items: List[InspectionCheckItem] = q.all()
 
-    device_items = [it for it in items if _is_device_level_check_item(it)]
+    device_items = [it for it in items if is_device_level_check_item(it)]
     if not device_items:
         return {"message": "无可解绑的设备级检查项", "unbind_count": 0}
 
@@ -1367,17 +1361,20 @@ async def scan_return_unbind(
         _clear_check_item_review_fields(it, now)
 
     # 设备实例状态回退：pending_inspection/inspected -> issued
-    equipment_instance = db.query(EquipmentInstance).filter(EquipmentInstance.serial_number == sn).first()
-    if equipment_instance and equipment_instance.status in {
-        InventoryStatusEnum.PENDING_INSPECTION,
-        InventoryStatusEnum.INSPECTED,
-    }:
-        equipment_instance.status = InventoryStatusEnum.ISSUED
-        equipment_instance.updated_at = now
+    reverted_equipment_count = rollback_equipment_status_after_unbind(
+        db,
+        sns=[sn],
+        now=now,
+    )
 
     db.commit()
 
-    return {"message": "解绑成功", "unbind_count": len(device_items), "deleted_photos": len(photos)}
+    return {
+        "message": "解绑成功",
+        "unbind_count": len(device_items),
+        "deleted_photos": len(photos),
+        "reverted_equipment_count": reverted_equipment_count,
+    }
 
 
 @router.post("/scan-return/preview")

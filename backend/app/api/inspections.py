@@ -58,6 +58,10 @@ from app.services.photo_similarity_guard import (
     extract_similarity_features,
 )
 from app.services.authz_service import user_has_any_role_or_permission
+from app.services.equipment_unbind_service import (
+    is_device_level_check_item,
+    rollback_equipment_status_after_unbind,
+)
 from app.utils.timezone import to_utc_iso
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
@@ -3789,9 +3793,11 @@ async def bind_equipment_to_sector(
                 except Exception:
                     pass
 
+        unbound_device_sns = set()
         for item in check_items:
             # 记录之前的设备SN（用于历史记录）
             previous_sn = item.equipment_sn
+            previous_sn_norm = str(previous_sn or "").strip()
 
             # 更新设备绑定
             item.equipment_sn = equipment_sn if not is_unbind else None
@@ -3799,6 +3805,8 @@ async def bind_equipment_to_sector(
 
             # 创建历史记录
             if is_unbind:
+                if previous_sn_norm and is_device_level_check_item(item):
+                    unbound_device_sns.add(previous_sn_norm)
                 if previous_sn:
                     db.add(
                         EquipmentBindingHistory(
@@ -3819,7 +3827,7 @@ async def bind_equipment_to_sector(
                         )
                     )
             else:
-                prev_norm = (previous_sn or "").strip()
+                prev_norm = previous_sn_norm
                 new_norm = (equipment_sn or "").strip()
                 if prev_norm == new_norm:
                     continue
@@ -3848,6 +3856,13 @@ async def bind_equipment_to_sector(
             from app.models.equipment import InventoryStatusEnum
             equipment_instance.status = InventoryStatusEnum.PENDING_INSPECTION
             equipment_instance.updated_at = now
+        reverted_equipment_count = 0
+        if is_unbind and unbound_device_sns:
+            reverted_equipment_count = rollback_equipment_status_after_unbind(
+                db,
+                sns=unbound_device_sns,
+                now=now,
+            )
         
         db.commit()
         
@@ -3859,7 +3874,8 @@ async def bind_equipment_to_sector(
                 "sector_id": sector_id,
                 "band": band,
                 "cell_id": cell_id,
-                "affected_items_count": len(check_items)
+                "affected_items_count": len(check_items),
+                "reverted_equipment_count": reverted_equipment_count,
             }
         else:
             return {

@@ -167,6 +167,7 @@ npm run build                  # 生产构建
 - **退库校验提示（移动端）**: 扫码 SN 会先做可退校验，失败时弹窗展示“原因 + 建议 + 相关人员/单据信息”
 - **退库批次视图（移动端）**: 一次提交记为一个批次，后台可自动拆分多张退库单，列表按批次聚合展示状态、驳回原因与拆分单据
 - **退库防超退（并发）**: 提交时会做额度锁定与原子状态更新；若并发导致可退额度或SN状态变化，会返回明确提示并要求刷新后重试
+- **设备解绑状态回退统一（2026-03-05）**: 无论是检查页解绑（`/api/inspections/detail/{id}/bind-equipment` 传空 `equipment_sn`）还是退库一键解绑（`/api/stock/scan-return/unbind`），都会对“设备级解绑”执行同一状态回退规则：`pending_inspection/inspected -> issued`，避免出现“已解绑但不可退库”
 - **退库收货（Web 管理端）**: 仓库收货页改为批次维度展示（批次头 + 单据明细），单据超过 8 条默认折叠；收货/拒收仍按单据执行
 - **首页库存入口（移动端）**: 我的设备、物料申请、审批物料申请、出库确认、退库申请、快速出库
 - **首页工作台按钮布局（移动端）**: 首页工作台入口固定 4 列等宽，英文/印尼语等长文案会自动换行断词，避免右侧溢出；左右边界与页面内容区保持对齐
@@ -230,6 +231,7 @@ npm run build                  # 生产构建
 - `GET /api/inspections/detail/{id}` - 获取检查详情
 - `POST /api/inspections` - 创建新检查
 - `PUT /api/inspections/{id}` - 更新检查状态
+- `POST /api/inspections/detail/{id}/bind-equipment` - 绑定/解绑设备（`equipment_sn` 为空表示解绑）
 
 ### 设备管理
 - `GET /api/equipment` - 获取设备列表
@@ -244,6 +246,7 @@ npm run build                  # 生产构建
 - `POST /api/stock/issue-drafts/{id}/reject` - 仓库驳回整单
 - `POST /api/stock/issue-drafts/{id}/reject-remaining` - 仓库驳回剩余待确认项并收口（仅部分出库状态；无剩余时也可直接收口）
 - `POST /api/stock/returns/validate-sn` - 退库扫码 SN 可退校验（返回详细原因/建议）
+- `POST /api/stock/scan-return/unbind` - 退库一键解绑（清理设备级检查绑定/照片并回退设备状态）
 - `GET /api/stock/returns/actual-candidates` - 获取按实际申请退库候选数据（辅料可退上限等）
 - `POST /api/stock/returns/by-actual` - 按实际申请退库（后台自动关联并拆分单据，提交时做并发防超退校验）
 - `GET /api/stock/returns/workbench-batches` - 仓库侧退库批次工作台（批次维度，含单据明细）
