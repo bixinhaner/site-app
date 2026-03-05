@@ -125,7 +125,7 @@ const dryRun = ref(true)
 const results = ref([])
 const batchId = ref('')
 const summaryText = ref('')
-const canEdit = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
+const canEdit = computed(() => userStore.hasPermission('sites:create:write'))
 
 const goBack = () => router.back()
 const gotoHistory = () => router.push({ name: 'SiteBasicImportHistory' })

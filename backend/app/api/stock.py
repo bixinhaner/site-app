@@ -48,6 +48,7 @@ from app.models.issue_draft import (
 )
 from app.models.work_order import AuditEvent
 from app.models.inspection import InspectionCheckItem, InspectionPhoto, SiteInspection, InspectionStatusEnum, CheckItemStatusEnum
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.file_handler import save_uploaded_file, validate_image_on_disk, ImageValidationError
 from app.utils.timezone import to_utc_iso
 
@@ -56,21 +57,69 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_stock_operator(current_user: User) -> None:
-    if current_user.role not in ["admin", "warehouse_manager", "manager"]:
+    if user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "warehouse_manager", "manager"],
+        permission_codes=[
+            "inventory:stock-in:write",
+            "inventory:stock-out:write",
+            "inventory:material-request:write",
+            "inventory:issue-draft:write",
+            "inventory:return:write",
+            "inventory:flow-settings:write",
+        ],
+    ):
+        return
+    if user_has_any_role_or_permission(
+        current_user,
+        permission_codes=["inventory:warehouse:write"],
+    ):
+        return
+    else:
         raise HTTPException(status_code=403, detail="权限不足")
 
 def _ensure_warehouse_operator(current_user: User) -> None:
-    # 仓库侧操作：仅仓管/管理员（manager 在 get_current_user 中已被视为 admin）
-    if current_user.role not in ["admin", "warehouse_manager"]:
+    # 仓库侧操作：仅仓管/管理员，或授予仓库写操作权限的自定义角色
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "warehouse_manager"],
+        permission_codes=[
+            "inventory:stock-out:write",
+            "inventory:issue-draft:write",
+            "inventory:return:write",
+            "inventory:warehouse:write",
+        ],
+    ):
         raise HTTPException(status_code=403, detail="权限不足")
 
 
 def _get_managed_warehouse_ids(db: Session, current_user: User) -> Optional[set]:
     """返回当前用户可管理的仓库ID集合；管理员返回 None 表示全部仓库。"""
-    if current_user.role == "admin":
+    if user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["inventory:warehouse:write"],
+    ):
         return None
     ids = db.query(Warehouse.id).filter(Warehouse.manager_id == current_user.id).all()
     return {row[0] for row in ids}
+
+
+def _is_warehouse_side_user(current_user: User, *, include_manager: bool = False) -> bool:
+    role_codes = ["admin", "warehouse_manager"]
+    if include_manager:
+        role_codes.append("manager")
+    return user_has_any_role_or_permission(
+        current_user,
+        role_codes=role_codes,
+        permission_codes=[
+            "inventory:stock-out:write",
+            "inventory:issue-draft:write",
+            "inventory:return:write",
+            "inventory:material-request:write",
+            "inventory:warehouse:write",
+        ],
+    )
 
 
 def _add_audit_event(
@@ -2143,8 +2192,13 @@ async def get_stock_transactions(
             StockTransaction.operation_time <= datetime.fromisoformat(end_date.replace("Z", "+00:00"))
         )
     
-    # 非管理员只能查看自己的记录
-    if current_user.role not in ["admin", "warehouse_manager", "manager"]:
+    # 非仓库管理角色且未授予历史查看权限的用户，仅能查看自己记录
+    can_view_all = user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "warehouse_manager", "manager"],
+        permission_codes=["inventory:history:read"],
+    )
+    if not can_view_all:
         query = query.filter(StockTransaction.operator_id == current_user.id)
     
     transactions = query.order_by(desc(StockTransaction.operation_time)).offset(skip).limit(limit).all()
@@ -2228,7 +2282,15 @@ MAX_OFFLINE_DOCUMENT_PHOTOS = 10
 
 
 def _ensure_can_manage_offline_document(current_user: User, doc: OfflineDocument) -> None:
-    if current_user.role in ["admin", "warehouse_manager", "manager"]:
+    if user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "warehouse_manager", "manager"],
+        permission_codes=[
+            "inventory:stock-out:write",
+            "inventory:issue-draft:write",
+            "inventory:return:write",
+        ],
+    ):
         return
     if doc.created_by == current_user.id:
         return
@@ -2440,7 +2502,15 @@ ALLOWED_STOCK_DOCUMENT_EXTS = {".jpg", ".jpeg", ".png"}
 
 def _ensure_can_manage_transaction_docs(current_user: User, tx: StockTransaction) -> None:
     """仅允许出入库操作人或仓库侧角色管理单据照片。"""
-    if current_user.role in ["admin", "warehouse_manager", "manager"]:
+    if user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "warehouse_manager", "manager"],
+        permission_codes=[
+            "inventory:stock-out:write",
+            "inventory:issue-draft:write",
+            "inventory:return:write",
+        ],
+    ):
         return
     if tx.operator_id == current_user.id:
         return
@@ -2630,7 +2700,11 @@ async def create_warehouse(
     current_user: User = Depends(get_current_user)
 ):
     """创建仓库"""
-    if current_user.role not in ["admin"]:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["inventory:warehouse:write"],
+    ):
         raise HTTPException(status_code=403, detail="权限不足")
     
     # 检查仓库编码是否重复
@@ -2661,7 +2735,11 @@ async def update_warehouse(
     current_user: User = Depends(get_current_user)
 ):
     """更新仓库信息"""
-    if current_user.role not in ["admin"]:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["inventory:warehouse:write"],
+    ):
         raise HTTPException(status_code=403, detail="权限不足")
     
     warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
@@ -4048,7 +4126,7 @@ async def list_material_requests(
         joinedload(MaterialRequest.requester),
     )
 
-    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
+    is_warehouse_side = _is_warehouse_side_user(current_user)
     if is_warehouse_side:
         managed_ids = _get_managed_warehouse_ids(db, current_user)
         if managed_ids is not None:
@@ -4194,7 +4272,7 @@ async def get_material_request_detail(
     if not req:
         raise HTTPException(status_code=404, detail="申请单不存在")
 
-    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
+    is_warehouse_side = _is_warehouse_side_user(current_user)
     if not is_warehouse_side and req.requester_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限查看该申请单")
     if is_warehouse_side:
@@ -4222,7 +4300,7 @@ async def update_material_request(
     if _enum_value(req.status) != MaterialRequestStatusEnum.DRAFT.value:
         raise HTTPException(status_code=400, detail="仅草稿可编辑")
 
-    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
+    is_warehouse_side = _is_warehouse_side_user(current_user)
     if not is_warehouse_side and req.requester_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限编辑该申请单")
 
@@ -4301,7 +4379,7 @@ async def submit_material_request(
         raise HTTPException(status_code=400, detail="当前状态不可提交")
     if req.requester_id != current_user.id:
         # 允许仓库侧代提交（兜底）
-        is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
+        is_warehouse_side = _is_warehouse_side_user(current_user)
         if not is_warehouse_side:
             raise HTTPException(status_code=403, detail="无权限提交该申请单")
         managed_ids = _get_managed_warehouse_ids(db, current_user)
@@ -4354,7 +4432,7 @@ async def cancel_material_request(
     if _enum_value(req.status) not in {MaterialRequestStatusEnum.DRAFT.value, MaterialRequestStatusEnum.SUBMITTED.value}:
         raise HTTPException(status_code=400, detail="当前状态不可取消")
 
-    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
+    is_warehouse_side = _is_warehouse_side_user(current_user)
     if not is_warehouse_side and req.requester_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限取消该申请单")
     if is_warehouse_side and req.requester_id != current_user.id:
@@ -4399,7 +4477,7 @@ async def abandon_material_request(
     }:
         raise HTTPException(status_code=400, detail="当前状态不可放弃领货")
 
-    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager"}
+    is_warehouse_side = _is_warehouse_side_user(current_user)
     if not is_warehouse_side and req.requester_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限放弃该申请单")
     if is_warehouse_side and req.requester_id != current_user.id:
@@ -4665,7 +4743,7 @@ def _ensure_issue_draft_access(
     draft: IssueDraft,
     current_user: User,
 ) -> None:
-    is_warehouse_side = getattr(current_user, "role", None) in {"admin", "warehouse_manager", "manager"}
+    is_warehouse_side = _is_warehouse_side_user(current_user, include_manager=True)
     if is_warehouse_side:
         managed_ids = _get_managed_warehouse_ids(db, current_user)
         if managed_ids is not None and draft.warehouse_id not in managed_ids:

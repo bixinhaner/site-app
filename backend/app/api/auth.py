@@ -9,36 +9,27 @@ from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token, verify_password, get_password_hash
 from app.models.user import User
 from app.schemas.user import UserLogin, Token, UserResponse, UserCreate, UserPasswordChange
-
-
-class _EffectiveRoleUser:
-    """A lightweight proxy that treats 'manager' as 'admin' for permission checks.
-
-    This avoids touching persisted DB state while making admin/manager identical
-    for all `current_user.role` comparisons across the API layer.
-    """
-
-    __slots__ = ("_u",)
-
-    def __init__(self, orm_user: User):
-        object.__setattr__(self, "_u", orm_user)
-
-    def __getattr__(self, name):
-        if name == "role":
-            r = getattr(self._u, "role", None)
-            # Make 'manager' behave exactly like 'admin' at runtime
-            return "admin" if r == "manager" else r
-        return getattr(self._u, name)
-
-    def __setattr__(self, name, value):
-        # Forward any mutation to the underlying ORM instance
-        setattr(self._u, name, value)
+from app.services.authz_service import (
+    get_user_permission_codes,
+    get_user_with_authz,
+    set_user_roles_by_codes,
+)
 
 router = APIRouter()
 security = HTTPBearer()
 
 def get_user_by_username(db: Session, username: str):
-    return db.query(User).filter(User.username == username).first()
+    return get_user_with_authz(db, username)
+
+
+def _attach_authz_payload(user: User) -> User:
+    permissions = get_user_permission_codes(user)
+    try:
+        setattr(user, "permissions", permissions)
+        setattr(user, "permission_codes", permissions)
+    except Exception:
+        pass
+    return user
 
 def authenticate_user(db: Session, username: str, password: str):
     user = get_user_by_username(db, username)
@@ -46,7 +37,7 @@ def authenticate_user(db: Session, username: str, password: str):
         return False
     if not verify_password(password, user.hashed_password):
         return False
-    return user
+    return _attach_authz_payload(user)
 
 def get_current_user(
     request: Request,
@@ -74,15 +65,14 @@ def get_current_user(
     # 用户不存在或已被禁用，都视为凭证无效
     if user is None or not user.is_active:
         raise credentials_exception
-    # Return a proxy so that role checks treat 'manager' the same as 'admin'
-    effective = _EffectiveRoleUser(user)
-    # 供中间件/审计日志使用：保留原始角色与用户信息
+    user = _attach_authz_payload(user)
+    # 供中间件/审计日志使用
     try:
-        request.state.current_user = effective
+        request.state.current_user = user
         request.state.raw_user = user
     except Exception:
         pass
-    return effective
+    return user
 
 @router.post("/login", response_model=Token)
 async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
@@ -140,12 +130,25 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         full_name=user_data.full_name,
         phone=user_data.phone,
         department=user_data.department,
-        position=user_data.position
+        position=user_data.position,
     )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    
+
+    role_codes = sorted(set(user_data.roles or ([] if not user_data.role else [user_data.role]) or ["user"]))
+    try:
+        set_user_roles_by_codes(db, db_user, role_codes)
+    except ValueError as exc:
+        db.delete(db_user)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    db_user = get_user_by_username(db, db_user.username)
+    db_user = _attach_authz_payload(db_user)
     return UserResponse.from_orm(db_user)
 
 @router.get("/me", response_model=UserResponse)
@@ -153,13 +156,12 @@ async def get_current_user_info(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """返回真实存储的用户信息（不对role做admin映射），用于前端展示。
-
-    鉴权依然通过上游的 get_current_user 完成；此处仅为展示一致性，
-    例如让 manager 在UI上仍显示“项目经理”。
-    """
-    raw = get_user_by_username(db, current_user.username)
-    return UserResponse.from_orm(raw)
+    """返回当前用户信息（含 roles/permissions）。"""
+    refreshed = get_user_by_username(db, current_user.username)
+    if not refreshed:
+        raise HTTPException(status_code=404, detail="User not found")
+    refreshed = _attach_authz_payload(refreshed)
+    return UserResponse.from_orm(refreshed)
 
 
 @router.post("/refresh", response_model=Token)

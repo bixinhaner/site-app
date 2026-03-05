@@ -57,6 +57,7 @@ from app.services.photo_similarity_guard import (
     detect_similar_photo_validation,
     extract_similarity_features,
 )
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
@@ -86,6 +87,27 @@ def _ensure_surveyor_inspection_type(db: Session, u, inspection: SiteInspection)
         wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
         if not wo or wo.type != WorkOrderTypeEnum.SITE_SURVEY:
             raise HTTPException(status_code=403, detail="仅可操作勘察检查")
+
+
+def _ensure_review_access(current_user: User, detail: str = "没有权限执行审核操作") -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+def _ensure_stats_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["inspection:template:read", "workorder:list:read"],
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions",
+        )
 
 
 def _normalize_photo_content_hash(raw_hash: Optional[str], *, required: bool = False) -> Optional[str]:
@@ -1290,11 +1312,7 @@ async def update_inspection(
     if "status" in update_fields:
         new_status = update_fields["status"]
         if new_status in [InspectionStatusEnum.APPROVED, InspectionStatusEnum.REJECTED]:
-            if current_user.role not in ["admin", "manager", "reviewer"]:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="没有权限进行审核操作，请使用审核接口"
-                )
+            _ensure_review_access(current_user, detail="没有权限进行审核操作，请使用审核接口")
             if old_status not in [InspectionStatusEnum.SUBMITTED, InspectionStatusEnum.UNDER_REVIEW]:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -3173,9 +3191,7 @@ async def review_inspection(
     current_user: User = Depends(get_current_user)
 ):
     """检查审核：approve/reject，记录审核人与日志"""
-    # 权限：admin/manager/reviewer 才能审核
-    if current_user.role not in ["admin", "manager", "reviewer"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限执行检查审核")
+    _ensure_review_access(current_user, detail="没有权限执行检查审核")
 
     inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
     if not inspection:
@@ -3233,8 +3249,7 @@ async def review_inspection_item(
     current_user: User = Depends(get_current_user)
 ):
     """检查项审核：pass/fail/warning"""
-    if current_user.role not in ["admin", "manager", "reviewer"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限执行检查项审核")
+    _ensure_review_access(current_user, detail="没有权限执行检查项审核")
 
     inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
     if not inspection:
@@ -3295,8 +3310,7 @@ async def review_inspection_photo(
     current_user: User = Depends(get_current_user)
 ):
     """照片审核：approved/rejected"""
-    if current_user.role not in ["admin", "manager", "reviewer"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限执行照片审核")
+    _ensure_review_access(current_user, detail="没有权限执行照片审核")
 
     inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
     if not inspection:
@@ -4109,11 +4123,7 @@ async def get_inspection_stats_summary(
     current_user: User = Depends(get_current_user)
 ):
     """检查记录统计（管理员/经理）"""
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    _ensure_stats_access(current_user)
 
     total = db.query(func.count(SiteInspection.id)).scalar() or 0
 

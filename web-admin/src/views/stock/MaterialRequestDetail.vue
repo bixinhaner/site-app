@@ -351,7 +351,10 @@ const approveRows = ref([])
 const approveComments = ref('')
 
 const requestId = computed(() => String(route.params.id || '').trim())
-const isWarehouseOperator = computed(() => ['admin', 'manager', 'warehouse_manager'].includes(userStore.user?.role))
+const isWarehouseOperator = computed(() =>
+  userStore.hasAnyRole(['admin', 'manager', 'warehouse_manager']) ||
+  userStore.hasPermission('inventory:material-request:write')
+)
 const currentUserId = computed(() => Number(userStore.user?.id || 0))
 const isDraft = computed(() => requestData.value?.status === 'draft')
 const canApprove = computed(() => isWarehouseOperator.value && requestData.value?.status === 'submitted')

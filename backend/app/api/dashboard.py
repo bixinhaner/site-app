@@ -12,6 +12,7 @@ from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
 from app.models.survey_archive import SiteSurveyArchive
 from app.models.equipment import Inventory, Equipment, StockTransaction
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -46,7 +47,11 @@ async def get_dashboard_summary(
     # 用户统计（仅管理员/经理）
     users_total = None
     users_active = None
-    if current_user.role in ["admin", "manager"]:
+    if user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["users:list:read"],
+    ):
         users_total = db.query(func.count(UserModel.id)).scalar() or 0
         users_active = db.query(func.count(UserModel.id)).filter(UserModel.is_active == True).scalar() or 0
 

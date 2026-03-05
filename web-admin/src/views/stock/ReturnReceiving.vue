@@ -312,8 +312,10 @@ const statusFilter = ref('pending_receive')
 const warehouses = ref([])
 const selectableWarehouses = computed(() => {
   const list = warehouses.value || []
-  const role = userStore.user?.role
-  if (['admin', 'manager'].includes(role)) return list
+  const isGlobalManager =
+    userStore.hasAnyRole(['admin', 'manager']) ||
+    userStore.hasPermission('inventory:return:write')
+  if (isGlobalManager) return list
   const uid = userStore.user?.id
   return list.filter((w) => w.manager_id === uid)
 })
@@ -670,8 +672,10 @@ const submitReject = async () => {
 
 onMounted(async () => {
   await loadWarehouses()
-  const role = userStore.user?.role
-  if (!['admin', 'manager'].includes(role)) {
+  const isGlobalManager =
+    userStore.hasAnyRole(['admin', 'manager']) ||
+    userStore.hasPermission('inventory:return:write')
+  if (!isGlobalManager) {
     selectedWarehouseIds.value = (selectableWarehouses.value || []).map((w) => w.id)
     if (selectedWarehouseIds.value.length === 0) {
       ElMessage.warning('当前账号未绑定可管理仓库，无法处理退库收货')

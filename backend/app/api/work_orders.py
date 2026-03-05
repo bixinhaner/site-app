@@ -59,9 +59,35 @@ from app.services.omc_monitor import (
 )
 from app.services.omc_client import get_omc_manual_confirm_enabled
 from app.services.omc_state import get_bound_sns_for_site, upsert_omc_device_state
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
+
+
+def _has_access(
+    user: User,
+    *,
+    role_codes: Optional[List[str]] = None,
+    permission_codes: Optional[List[str]] = None,
+) -> bool:
+    return user_has_any_role_or_permission(
+        user,
+        role_codes=role_codes or [],
+        permission_codes=permission_codes or [],
+    )
+
+
+def _ensure_access(
+    user: User,
+    *,
+    role_codes: Optional[List[str]] = None,
+    permission_codes: Optional[List[str]] = None,
+    detail: str = "权限不足",
+) -> None:
+    if _has_access(user, role_codes=role_codes, permission_codes=permission_codes):
+        return
+    raise HTTPException(status_code=403, detail=detail)
 
 
 # 站点状态自动更新辅助函数
@@ -303,7 +329,11 @@ async def search_work_orders(
     # 权限说明：
     # - 现场人员（inspector/surveyor）仅能查看自己的工单；surveyor 仅能查看勘察工单
     # - 其他角色默认可查看全部（与 /api/work-orders 列表接口保持一致）
-    is_admin_or_manager = current_user.role in ["admin", "manager"]
+    is_admin_or_manager = _has_access(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:dispatch:write", "workorder:review:write", "workorder:batch:write"],
+    )
     is_field_worker = current_user.role in ["inspector", "surveyor"]
 
     query = db.query(WorkOrder).join(Site, WorkOrder.site_id == Site.id, isouter=True)
@@ -506,8 +536,12 @@ async def create_work_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role not in ["admin", "manager", "inspector"]:
-        raise HTTPException(status_code=403, detail="无权限创建工单")
+    _ensure_access(
+        current_user,
+        role_codes=["admin", "manager", "inspector"],
+        permission_codes=["workorder:create:write"],
+        detail="无权限创建工单",
+    )
 
     site = db.query(Site).filter(Site.id == data.site_id).first()
     if not site:
@@ -856,13 +890,24 @@ async def update_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    if current_user.role not in ["admin", "manager"] and current_user.id != wo.assigned_by:
+    if (
+        not _has_access(
+            current_user,
+            role_codes=["admin", "manager"],
+            permission_codes=["workorder:update:write"],
+        )
+        and current_user.id != wo.assigned_by
+    ):
         raise HTTPException(status_code=403, detail="无权限修改工单")
 
     update = data.dict(exclude_unset=True)
 
     if "assigned_to" in update:
-        if current_user.role not in ["admin", "manager"]:
+        if not _has_access(
+            current_user,
+            role_codes=["admin", "manager"],
+            permission_codes=["workorder:dispatch:write"],
+        ):
             raise HTTPException(status_code=403, detail="仅管理员/项目经理可重新分配工单")
 
         if wo.status not in [WorkOrderStatusEnum.PENDING, WorkOrderStatusEnum.ACTIVE]:
@@ -930,7 +975,14 @@ async def delete_work_order(
         raise HTTPException(status_code=404, detail="工单不存在")
     
     # 权限检查：只有管理员或创建者可以删除
-    if current_user.role not in ["admin", "manager"] and current_user.id != wo.assigned_by:
+    if (
+        not _has_access(
+            current_user,
+            role_codes=["admin", "manager"],
+            permission_codes=["workorder:delete:write"],
+        )
+        and current_user.id != wo.assigned_by
+    ):
         raise HTTPException(status_code=403, detail="无权限删除工单")
     
     # 检查工单状态：只能删除待分配或已分配状态的工单
@@ -1449,7 +1501,14 @@ async def complete_work_order(
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
     
-    if wo.assigned_to != current_user.id and current_user.role not in ["admin", "manager"]:
+    if (
+        wo.assigned_to != current_user.id
+        and not _has_access(
+            current_user,
+            role_codes=["admin", "manager"],
+            permission_codes=["workorder:update:write"],
+        )
+    ):
         raise HTTPException(status_code=403, detail="无权限完成此工单")
     _ensure_surveyor_wo_type(wo, current_user)
     
@@ -1720,8 +1779,12 @@ async def start_review(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role not in ["admin", "manager", "reviewer"]:
-        raise HTTPException(status_code=403, detail="没有权限认领审核")
+    _ensure_access(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+        detail="没有权限认领审核",
+    )
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
@@ -1742,8 +1805,12 @@ async def review_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role not in ["admin", "manager", "reviewer"]:
-        raise HTTPException(status_code=403, detail="没有权限执行检查项审核")
+    _ensure_access(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+        detail="没有权限执行检查项审核",
+    )
     
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo or not wo.inspection_id:
@@ -1780,8 +1847,12 @@ async def update_review_comments_i18n(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager", "reviewer"]:
-        raise HTTPException(status_code=403, detail="没有权限更新审核意见多语言")
+    _ensure_access(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+        detail="没有权限更新审核意见多语言",
+    )
 
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
@@ -1874,8 +1945,12 @@ async def final_review(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role not in ["admin", "manager", "reviewer"]:
-        raise HTTPException(status_code=403, detail="没有权限审核工单")
+    _ensure_access(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+        detail="没有权限审核工单",
+    )
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
@@ -2053,8 +2128,12 @@ async def manual_confirm_opening_omc_status(
     - confirm_online: 标注该 SN 已上线
     - confirm_activated: 标注该 SN 已激活（同时隐式标注已上线）
     """
-    if current_user.role not in ["admin", "manager", "reviewer"]:
-        raise HTTPException(status_code=403, detail="没有权限进行手工确认")
+    _ensure_access(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+        detail="没有权限进行手工确认",
+    )
 
     if not get_omc_manual_confirm_enabled(db):
         raise HTTPException(status_code=403, detail="手工确认功能未开启，请在 OMC API 配置中开启")
@@ -2356,8 +2435,14 @@ def recall_work_order(
         raise HTTPException(status_code=404, detail="工单不存在")
 
     # 权限校验：指派人或 admin/manager
-    role = getattr(current_user, 'role', None)
-    if not (wo.assigned_to == current_user.id or role in ("admin", "manager")):
+    if not (
+        wo.assigned_to == current_user.id
+        or _has_access(
+            current_user,
+            role_codes=["admin", "manager"],
+            permission_codes=["workorder:update:write"],
+        )
+    ):
         raise HTTPException(status_code=403, detail="仅指派人或管理员可撤回")
 
     # 状态校验
@@ -2417,8 +2502,14 @@ async def review_work_order(
         raise HTTPException(status_code=404, detail="工单不存在")
     
     # 权限检查：只有管理员、项目经理或指定审核人才能审核
-    if (current_user.role not in ["admin", "manager"] and 
-        wo.reviewer_id != current_user.id):
+    if (
+        not _has_access(
+            current_user,
+            role_codes=["admin", "manager"],
+            permission_codes=["workorder:review:write"],
+        )
+        and wo.reviewer_id != current_user.id
+    ):
         raise HTTPException(status_code=403, detail="无权限审核此工单")
     
     if wo.status != WorkOrderStatusEnum.SUBMITTED:
@@ -2584,7 +2675,11 @@ async def batch_work_order_operation(
 ):
     """批量工单操作"""
     # 只有admin和manager可以批量操作
-    if current_user.role not in ["admin", "manager"]:
+    if not _has_access(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:batch:write"],
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin and manager can perform batch operations"
@@ -2831,7 +2926,11 @@ async def get_work_order_stats(
     current_user: User = Depends(get_current_user)
 ):
     """获取工单统计信息"""
-    if current_user.role not in ["admin", "manager"]:
+    if not _has_access(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:list:read"],
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -2872,7 +2971,11 @@ async def check_equipment_activation(
     current_user: User = Depends(get_current_user)
 ):
     """手动触发设备开通检测"""
-    if current_user.role not in ["admin", "manager"]:
+    if not _has_access(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:review:write"],
+    ):
         raise HTTPException(status_code=403, detail="无权限执行设备开通检测")
     
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
@@ -2926,7 +3029,11 @@ async def mark_work_order_completed(
     current_user: User = Depends(get_current_user)
 ):
     """将已开通的工单标记为完成"""
-    if current_user.role not in ["admin", "manager"]:
+    if not _has_access(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:review:write"],
+    ):
         raise HTTPException(status_code=403, detail="无权限完成工单")
     
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
@@ -2967,7 +3074,11 @@ async def finalize_survey_work_order(
 
     用于老逻辑已将审核通过置为 APPROVED(85%) 的存量工单修正为 100%。
     """
-    if current_user.role not in ["admin", "manager"]:
+    if not _has_access(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:review:write"],
+    ):
         raise HTTPException(status_code=403, detail="无权限执行该操作")
 
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()

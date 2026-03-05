@@ -16,16 +16,16 @@
     </div>
 
     <el-alert
-      v-if="!isAdmin"
+      v-if="!canManageOmc"
       type="error"
-      title="仅管理员(admin)可以查看和修改 OMC 配置"
+      title="当前账号无 OMC 配置管理权限"
       :closable="false"
       show-icon
       class="mb16"
     />
 
     <el-card v-loading="loading">
-      <el-form :model="form" label-width="140px" :disabled="!isAdmin">
+      <el-form :model="form" label-width="140px" :disabled="!canManageOmc">
         <el-form-item label="OMC 基础地址">
           <el-input
             v-model="form.base_url"
@@ -86,7 +86,7 @@ const form = ref({
   manual_confirm_enabled: false,
 })
 
-const isAdmin = computed(() => userStore.user?.role === 'admin')
+const canManageOmc = computed(() => userStore.hasPermission('system:mobile-settings:write'))
 
 const loadConfig = async () => {
   try {
@@ -106,8 +106,8 @@ const loadConfig = async () => {
 }
 
 const save = async () => {
-  if (!isAdmin.value) {
-    ElMessage.error('只有管理员可以保存配置')
+  if (!canManageOmc.value) {
+    ElMessage.error('当前账号无权限保存配置')
     return
   }
   try {
@@ -137,8 +137,8 @@ const save = async () => {
 }
 
 const testConnection = async () => {
-  if (!isAdmin.value) {
-    ElMessage.error('只有管理员可以测试连接')
+  if (!canManageOmc.value) {
+    ElMessage.error('当前账号无权限测试连接')
     return
   }
   try {
@@ -165,7 +165,7 @@ const testConnection = async () => {
 }
 
 onMounted(() => {
-  if (isAdmin.value) {
+  if (canManageOmc.value) {
     loadConfig()
   }
 })

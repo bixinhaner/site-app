@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.user_log import UserLog
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 from app.schemas.user_log import (
     UserLogCreate, 
@@ -24,6 +25,22 @@ from app.schemas.user_log import (
 )
 
 router = APIRouter()
+
+
+def _can_manage_logs(current_user: User) -> bool:
+    return user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["system:logs:read"],
+    )
+
+
+def _is_admin_like(current_user: User) -> bool:
+    return user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["authz:manage:all"],
+    )
 
 
 @router.post("/logs", response_model=dict)
@@ -122,7 +139,7 @@ async def get_logs(
     """查询用户日志"""
     
     # 普通用户只能查看自己的日志
-    if current_user.role not in ['admin', 'manager']:
+    if not _can_manage_logs(current_user):
         user_id = current_user.id
     
     query = db.query(UserLog)
@@ -156,7 +173,7 @@ async def get_log_stats(
 ):
     """获取日志统计信息（仅管理员）"""
     
-    if current_user.role not in ['admin', 'manager']:
+    if not _can_manage_logs(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"
@@ -271,7 +288,7 @@ async def get_user_activity(
     """获取特定用户的活动摘要"""
     
     # 权限检查：用户只能查看自己的活动，管理员可以查看所有人的
-    if current_user.role not in ['admin', 'manager'] and current_user.id != user_id:
+    if not _can_manage_logs(current_user) and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"
@@ -350,7 +367,7 @@ async def cleanup_old_logs(
 ):
     """清理旧日志（仅管理员）"""
     
-    if current_user.role != 'admin':
+    if not _is_admin_like(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="权限不足"

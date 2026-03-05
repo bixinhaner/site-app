@@ -265,6 +265,12 @@ const routes = [
             name: 'AiManagement',
             component: () => import('../views/system/AiManagement.vue'),
             meta: { title: 'AI管理', icon: 'MagicStick', roles: ['admin', 'manager', 'reviewer'] }
+          },
+          {
+            path: 'permissions',
+            name: 'PermissionCenter',
+            component: () => import('../views/system/PermissionCenter.vue'),
+            meta: { title: '角色权限', icon: 'Lock', roles: ['admin'] }
           }
         ]
       },
@@ -278,6 +284,72 @@ const routes = [
   }
 ]
 
+const ROUTE_PERMISSION_MAP = {
+  Dashboard: ['dashboard:view:read'],
+  Equipment: ['inventory:equipment:read'],
+  Packages: ['inventory:package:read'],
+  InventoryList: ['inventory:stock:read'],
+  StockIn: ['inventory:stock-in:write'],
+  MaterialRequestList: ['inventory:material-request:read'],
+  MaterialRequestDetail: ['inventory:material-request:read'],
+  IssueDraftList: ['inventory:issue-draft:read'],
+  IssueDraftDetail: ['inventory:issue-draft:write'],
+  ManualStockOut: ['inventory:stock-out:write'],
+  ReturnReceiving: ['inventory:return:write'],
+  StockFlowSettings: ['inventory:flow-settings:write'],
+  StockHistory: ['inventory:history:read'],
+  UserOwnership: ['inventory:user-ownership:read'],
+  Warehouses: ['inventory:warehouse:read'],
+  EquipmentInstances: ['inventory:stock:read'],
+  EquipmentLifecycle: ['inventory:history:read'],
+  SiteList: ['sites:list:read'],
+  SitePlanningLldGlobal: ['sites:lld:read'],
+  SiteDetail: ['sites:detail:read'],
+  SiteSurveyStageBatch: ['sites:survey-stage:write'],
+  SitePlanningLld: ['sites:lld:write'],
+  SiteBasicBatch: ['sites:create:write'],
+  SitePlanningBatchLld: ['sites:lld:write'],
+  SiteBasicImportHistory: ['sites:list:read'],
+  SurveyArchives: ['sites:detail:read'],
+  SurveyArchiveDetail: ['sites:detail:read'],
+  OpeningArchives: ['sites:detail:read'],
+  OpeningArchiveDetail: ['sites:detail:read'],
+  SSVArchives: ['sites:detail:read'],
+  SSVArchiveDetail: ['sites:detail:read'],
+  InspectionTemplates: ['inspection:template:read'],
+  TemplateEditor: ['inspection:template:write'],
+  WorkOrderList: ['workorder:list:read'],
+  WorkOrderReview: ['workorder:review:write'],
+  UserList: ['users:list:read'],
+  MobileLocationSettings: ['system:mobile-settings:read'],
+  GeocodeCache: ['system:geocode-cache:read'],
+  OmcConfig: ['system:mobile-settings:write'],
+  OmcDeviceStates: ['system:logs:read'],
+  MockOmc: ['system:mobile-settings:write'],
+  DataBackup: ['system:backup:write'],
+  OperationLogs: ['system:logs:read'],
+  MobileClientLogs: ['system:logs:read'],
+  AppVersionManage: ['system:app-version:read'],
+  ReleaseNotesPreview: ['system:app-version:read'],
+  AppVersionStats: ['system:app-version:read'],
+  AiManagement: ['system:ai:read'],
+  PermissionCenter: ['authz:manage:all'],
+}
+
+const applyRoutePermissions = (routeList = []) => {
+  routeList.forEach((route) => {
+    if (!route.meta) route.meta = {}
+    if (route.name && ROUTE_PERMISSION_MAP[route.name]) {
+      route.meta.permissions = ROUTE_PERMISSION_MAP[route.name]
+    }
+    if (Array.isArray(route.children) && route.children.length > 0) {
+      applyRoutePermissions(route.children)
+    }
+  })
+}
+
+applyRoutePermissions(routes)
+
 const router = createRouter({
   history: createWebHistory(),
   routes
@@ -286,16 +358,31 @@ const router = createRouter({
 // 路由守卫
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
+  const permissions = to.meta?.permissions
+  const roles = to.meta?.roles
+
+  const hasPermissionAccess = () => {
+    if (!Array.isArray(permissions) || permissions.length === 0) return true
+    return permissions.some(code => userStore.hasPermission(code))
+  }
+
+  const hasRoleAccess = () => {
+    if (!Array.isArray(roles) || roles.length === 0) return true
+    return roles.some(code => userStore.hasRole(code))
+  }
 
   if (to.meta.requiresAuth && !userStore.isLoggedIn) {
     next('/login')
   } else if (to.path === '/login' && userStore.isLoggedIn) {
     next('/dashboard')
   } else {
-    const roles = to.meta?.roles
-    if (Array.isArray(roles) && roles.length > 0) {
-      const role = userStore.user?.role
-      if (!role || !roles.includes(role)) {
+    if (!hasPermissionAccess()) {
+      next('/dashboard')
+      return
+    }
+    // 若该路由未配置 permissions，继续使用 roles 作为兼容兜底
+    if (!Array.isArray(permissions) || permissions.length === 0) {
+      if (!hasRoleAccess()) {
         next('/dashboard')
         return
       }

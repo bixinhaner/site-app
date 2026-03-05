@@ -13,12 +13,12 @@ from app.models.user import User
 router = APIRouter()
 
 
-def _ensure_admin_or_manager(user: User) -> None:
-    # get_current_user 会将 manager 视为 admin（运行时代理），因此这里只需判断 admin
+def _ensure_admin(user: User) -> None:
+    # 当前仅 admin 可访问（manager 不再自动等同 admin）
     if user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin/manager can access Mock OMC",
+            detail="Only admin can access Mock OMC",
         )
 
 
@@ -77,7 +77,7 @@ async def proxy_mock_omc(
     - 内部转发：settings.MOCK_OMC_BASE_URL（默认 http://127.0.0.1:9000）
     - 权限：仅 admin/manager
     """
-    _ensure_admin_or_manager(current_user)
+    _ensure_admin(current_user)
 
     base = (settings.MOCK_OMC_BASE_URL or "").strip().rstrip("/")
     if not base:

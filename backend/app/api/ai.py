@@ -23,13 +23,18 @@ from app.schemas.ai import (
 from app.services.ai_check_item_service import AiCheckItemService
 from app.services.ai_translate_service import AiTranslateService
 from app.services.ai_call_log_service import create_ai_call_log
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
 
 
 def _ensure_ai_operator(current_user: User) -> None:
-    if current_user.role not in ["admin", "manager", "reviewer"]:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["system:ai:write", "system:ai:read"],
+    ):
         raise HTTPException(status_code=403, detail="权限不足")
 
 

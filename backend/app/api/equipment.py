@@ -27,9 +27,37 @@ from app.models.equipment import EquipmentInstance  # noqa: E402
 from app.models.work_order import AuditEvent
 from app.models.inspection import InspectionCheckItem, CheckItemStatusEnum, SiteInspection
 from app.models.site import Site
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
+
+
+def _ensure_equipment_write_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "warehouse_manager"],
+        permission_codes=["inventory:equipment:write"],
+    ):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+
+def _ensure_package_write_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager", "warehouse_manager"],
+        permission_codes=["inventory:package:write"],
+    ):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+
+def _ensure_package_delete_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["inventory:package:write"],
+    ):
+        raise HTTPException(status_code=403, detail="权限不足")
 
 # ===== 设备型号管理 =====
 
@@ -76,8 +104,7 @@ async def create_equipment(
     current_user: User = Depends(get_current_user)
 ):
     """创建设备型号"""
-    if current_user.role not in ["admin", "warehouse_manager"]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _ensure_equipment_write_access(current_user)
     
     # 检查设备编码是否重复
     existing = db.query(Equipment).filter(Equipment.equipment_code == equipment_data["equipment_code"]).first()
@@ -111,8 +138,7 @@ async def update_equipment(
     current_user: User = Depends(get_current_user)
 ):
     """更新设备型号"""
-    if current_user.role not in ["admin", "warehouse_manager"]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _ensure_equipment_write_access(current_user)
     
     equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
     if not equipment:
@@ -133,8 +159,7 @@ async def delete_equipment(
     current_user: User = Depends(get_current_user)
 ):
     """删除设备型号"""
-    if current_user.role not in ["admin"]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _ensure_equipment_write_access(current_user)
     
     equipment = db.query(Equipment).filter(Equipment.id == equipment_id).first()
     if not equipment:
@@ -338,8 +363,7 @@ async def create_equipment_package(
     current_user: User = Depends(get_current_user)
 ):
     """创建设备套装"""
-    if current_user.role not in ["admin", "manager", "warehouse_manager"]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _ensure_package_write_access(current_user)
     
     # 检查套装编码是否重复
     existing = db.query(EquipmentPackage).filter(EquipmentPackage.package_code == package_data["package_code"]).first()
@@ -433,8 +457,7 @@ async def update_equipment_package(
     current_user: User = Depends(get_current_user)
 ):
     """更新设备套装"""
-    if current_user.role not in ["admin", "manager", "warehouse_manager"]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _ensure_package_write_access(current_user)
     
     package = db.query(EquipmentPackage).filter(EquipmentPackage.id == package_id).first()
     if not package:
@@ -496,8 +519,7 @@ async def delete_equipment_package(
     current_user: User = Depends(get_current_user)
 ):
     """删除设备套装"""
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    _ensure_package_delete_access(current_user)
     
     package = db.query(EquipmentPackage).filter(EquipmentPackage.id == package_id).first()
     if not package:

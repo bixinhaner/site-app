@@ -127,9 +127,7 @@ async def create_survey(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # admin/manager（在鉴权代理下等同admin）
-    if not _can_edit(db, current_user, survey):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限删除该勘察记录")
+    _require_admin(current_user)
 
     site = db.query(Site).filter(Site.id == payload.site_id).first()
     if not site:

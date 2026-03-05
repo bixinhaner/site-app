@@ -330,7 +330,10 @@ const selectedPackageAuxLineCount = computed(() => {
 const userSearching = ref(false)
 const userOptions = ref([])
 
-const isWarehouseOperator = computed(() => ['admin', 'manager', 'warehouse_manager'].includes(userStore.user?.role))
+const isWarehouseOperator = computed(() =>
+  userStore.hasAnyRole(['admin', 'manager', 'warehouse_manager']) ||
+  userStore.hasPermission('inventory:material-request:write')
+)
 
 const formatDateTime = (dateString) => {
   if (!dateString) return '-'

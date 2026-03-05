@@ -23,6 +23,7 @@ from app.schemas.mobile_client_log import (
     MobileClientLogPageResponse,
     MobileClientLogSettings,
 )
+from app.services.authz_service import user_has_any_role_or_permission
 from app.services.mobile_client_log_service import (
     cleanup_mobile_client_logs_by_filters,
     load_mobile_client_log_settings,
@@ -33,10 +34,21 @@ from app.services.mobile_client_log_service import (
 router = APIRouter()
 
 
-def _require_admin(current_user: User) -> None:
-    # get_current_user 会把 manager 映射成 admin，满足“admin/manager可用”的要求
-    if getattr(current_user, "role", None) != "admin":
+def _require_logs_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["system:logs:read"],
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+
+
+def _can_view_all_logs(current_user: User) -> bool:
+    return user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["system:logs:read"],
+    )
 
 
 def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -81,7 +93,7 @@ async def get_mobile_client_log_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
     data = load_mobile_client_log_settings(db)
     return MobileClientLogSettings(**data)
 
@@ -92,7 +104,7 @@ async def update_mobile_client_log_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
     data = load_mobile_client_log_settings(db)
     data["retention_days"] = int(payload.retention_days)
     save_mobile_client_log_settings(db, data)
@@ -170,7 +182,7 @@ async def get_mobile_logs_page(
     current_user: User = Depends(get_current_user),
 ):
     # 普通用户只能查看自己的日志
-    if getattr(current_user, "role", None) != "admin":
+    if not _can_view_all_logs(current_user):
         user_id = getattr(current_user, "id", None)
 
     query = db.query(MobileClientLog)
@@ -247,7 +259,7 @@ async def export_mobile_logs(
     client_tz = _resolve_client_tz(tz, tz_offset)
 
     # 普通用户只能导出自己的日志
-    if getattr(current_user, "role", None) != "admin":
+    if not _can_view_all_logs(current_user):
         user_id = getattr(current_user, "id", None)
 
     query = db.query(MobileClientLog)
@@ -387,7 +399,7 @@ async def cleanup_mobile_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
 
     deleted_count = cleanup_mobile_client_logs_by_filters(
         db,
@@ -419,7 +431,7 @@ async def get_mobile_log_detail(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="日志不存在")
 
-    if getattr(current_user, "role", None) != "admin":
+    if not _can_view_all_logs(current_user):
         if getattr(row, "user_id", None) != getattr(current_user, "id", None):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
 

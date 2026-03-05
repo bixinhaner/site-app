@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.models.operation_log import OperationLog
 from app.models.system_config import SystemConfig
 from app.models.user import User
+from app.services.authz_service import user_has_any_role_or_permission
 from app.schemas.operation_log import (
     OperationLogCleanupPayload,
     OperationLogItem,
@@ -103,9 +104,12 @@ def _build_desc(
     return f"{actor} 在【{mod}】{act}{target} - {result}"
 
 
-def _require_admin(current_user: User) -> None:
-    # get_current_user 会把 manager 映射成 admin，满足“admin/manager可用”的要求
-    if getattr(current_user, "role", None) != "admin":
+def _require_logs_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["system:logs:read"],
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
 
 
@@ -158,7 +162,7 @@ async def get_operation_log_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
     data = _load_settings(db)
     return OperationLogSettings(**data)
 
@@ -169,7 +173,7 @@ async def update_operation_log_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
     data = _load_settings(db)
     data["retention_days"] = int(payload.retention_days)
     _save_settings(db, data)
@@ -253,7 +257,7 @@ async def get_operation_log_options(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     base = db.query(OperationLog).filter(OperationLog.occurred_at >= cutoff)
@@ -315,7 +319,7 @@ async def page_operation_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
 
     query = db.query(OperationLog)
 
@@ -372,7 +376,7 @@ async def cleanup_operation_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
 
     query = db.query(OperationLog)
     filters = []
@@ -451,7 +455,7 @@ async def export_operation_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
     client_tz = _resolve_client_tz(tz, tz_offset)
 
     query = db.query(OperationLog)
@@ -572,7 +576,7 @@ async def get_operation_log_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_admin(current_user)
+    _require_logs_access(current_user)
     row = db.query(OperationLog).filter(OperationLog.id == log_id).first()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="日志不存在")

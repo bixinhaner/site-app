@@ -385,7 +385,7 @@ const loading = ref(false)
 const site = ref(null)
 const userStore = useUserStore()
 const userOptions = ref([])
-const canManageSite = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
+const canManageSite = computed(() => userStore.hasPermission('sites:update:write'))
 const canSkipSurvey = computed(() =>
   canManageSite.value &&
   !!site.value &&

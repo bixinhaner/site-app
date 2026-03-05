@@ -87,7 +87,7 @@ import { useUserStore } from '../../stores/user'
 
 const router = useRouter()
 const userStore = useUserStore()
-const canEdit = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
+const canEdit = computed(() => userStore.hasPermission('sites:survey-stage:write'))
 
 const mode = ref('skip')
 const dryRun = ref(true)
@@ -165,4 +165,3 @@ const onUpload = async (opts) => {
 .import-row { display:flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .import-info { color: var(--text-secondary); }
 </style>
-

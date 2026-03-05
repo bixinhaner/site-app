@@ -39,6 +39,7 @@ from app.services.omc_client import (
     is_success_status_payload,
 )
 from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_state
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 from app.services.omc_monitor import (
     advance_opening_work_orders_by_ever,
@@ -47,11 +48,24 @@ from app.services.omc_monitor import (
 
 router = APIRouter()
 
-SITE_VIEW_ALL_ROLES = {"admin", "planner"}
+SITE_VIEW_ALL_ROLES = {"admin", "manager", "planner"}
+
+
+def _ensure_site_manage_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["sites:create:write", "sites:update:write", "sites:survey-stage:write"],
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
 
 
 def _can_view_all_sites(current_user: User) -> bool:
-    return getattr(current_user, "role", None) in SITE_VIEW_ALL_ROLES
+    return user_has_any_role_or_permission(
+        current_user,
+        role_codes=list(SITE_VIEW_ALL_ROLES),
+        permission_codes=["sites:list:read", "sites:detail:read", "sites:update:write", "sites:create:write", "sites:lld:write"],
+    )
 
 
 def _apply_site_visibility_filter(query, db: Session, current_user: User):
@@ -59,7 +73,6 @@ def _apply_site_visibility_filter(query, db: Session, current_user: User):
 
     Rules:
     - admin/manager/planner: can view all sites
-      (manager is mapped to admin by get_current_user)
     - all other roles: can only view sites that have work orders assigned to them,
       including completed work orders.
     """
@@ -434,8 +447,7 @@ async def upload_survey_stage_batch(
     current_user: User = Depends(get_current_user),
 ):
     """批量跳过勘察/恢复需要勘察（支持 dry_run）。"""
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_manage_access(current_user)
 
     action_norm = (action or "").strip().lower()
     if action_norm not in ["skip", "require"]:
@@ -780,8 +792,7 @@ async def basic_batch_upload(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_manage_access(current_user)
 
     content = await file.read()
     if not file.filename.lower().endswith((".xlsx", ".xls")):
@@ -918,8 +929,7 @@ async def list_basic_import_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_manage_access(current_user)
 
     query = db.query(AuditEvent).filter(AuditEvent.resource_type == "site_basic_import")
     total = query.count()
@@ -955,8 +965,7 @@ async def get_basic_import_history_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_manage_access(current_user)
     e = db.query(AuditEvent).filter(AuditEvent.id == batch_id, AuditEvent.resource_type == "site_basic_import").first()
     if not e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="批次不存在")
@@ -997,8 +1006,7 @@ async def skip_site_survey(
     current_user: User = Depends(get_current_user),
 ):
     """跳过勘察阶段：将站点标记为无需勘察，并从 survey_pending 推进到 planning。"""
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_manage_access(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if site is None:
@@ -1063,8 +1071,7 @@ async def require_site_survey(
     current_user: User = Depends(get_current_user),
 ):
     """恢复需要勘察：仅允许在 planning 且未形成规划版本时，将站点回退到 survey_pending。"""
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_manage_access(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if site is None:
@@ -1113,8 +1120,7 @@ async def check_site_delete(
     current_user: User = Depends(get_current_user),
 ):
     """删除前检查：仅允许删除无任何关联数据的站点。"""
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    _ensure_site_manage_access(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if site is None:
@@ -1143,11 +1149,7 @@ async def update_site(
         )
     
     # 权限：仅允许 admin/manager 编辑站点基础信息
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    _ensure_site_manage_access(current_user)
     
     update_data = site_update.dict(exclude_unset=True)
     # 明确不支持：状态/指派人
@@ -1168,11 +1170,7 @@ async def delete_site(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    _ensure_site_manage_access(current_user)
     
     site = db.query(Site).filter(Site.id == site_id).first()
     if site is None:
@@ -1228,11 +1226,7 @@ async def get_site_stats_summary(
     current_user: User = Depends(get_current_user)
 ):
     """站点统计信息（管理员/经理）"""
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    _ensure_site_manage_access(current_user)
 
     total_sites = db.query(func.count(Site.id)).scalar() or 0
 

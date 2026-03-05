@@ -1977,8 +1977,7 @@ const userOptions = ref([])
 const userSelectLoading = ref(false)
 
 const canEdit = computed(() => {
-  const role = userStore.user?.role
-  return role === 'admin' || role === 'manager'
+  return userStore.hasPermission('system:mobile-settings:write')
 })
 
 const roleRows = [

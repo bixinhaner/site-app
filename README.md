@@ -128,12 +128,15 @@ npm run build                  # 生产构建
 | test_user | user123 | user | 普通用户 |
 | planner | planner123 | planner | 网络规划人员 |
 
-### 权限角色
-- **admin**: 系统管理员，拥有所有权限
-- **manager**: 项目经理，管理站点和人员分配
-- **inspector**: 现场工程师，执行检查和数据录入
-- **planner**: 网络规划人员，负责站点规划
-- **user**: 普通用户，查看分配的任务
+### RBAC（2026-03）
+- 后端已升级为 **多角色 + 权限码** 模型，`users.role` 字段已移除，改为 `users` + `user_roles` 关联。
+- 权限码采用 `module:resource:action` 结构，例如：`workorder:dispatch:write`、`inventory:return:write`。
+- `admin` 账号绕过全部权限校验；`manager` 不再自动等同 `admin`。
+- Web 管理端新增 **系统配置 -> 角色权限** 页面（`/settings/permissions`），支持：
+- 新建/编辑/删除自定义角色
+- 配置角色权限点
+- 用户管理页支持给用户分配多个角色
+- 当前迭代覆盖范围：`web-admin + backend`，不包含 UniApp 客户端鉴权改造。
 
 ## 🏢 核心功能模块
 
@@ -200,6 +203,18 @@ npm run build                  # 生产构建
 - `GET /api/auth/me` - 获取当前用户信息
 - `POST /api/auth/register` - 用户注册
 
+### 权限管理（RBAC）
+- `GET /api/authz/permissions` - 权限点列表
+- `GET /api/authz/permissions/modules` - 按模块分组的权限点
+- `GET /api/authz/roles` - 角色列表（含当前授权）
+- `POST /api/authz/roles` - 创建角色
+- `PUT /api/authz/roles/{role_id}` - 更新角色信息
+- `PUT /api/authz/roles/{role_id}/permissions` - 配置角色权限
+- `DELETE /api/authz/roles/{role_id}` - 删除角色（系统角色不可删）
+- `GET /api/authz/users/{user_id}/roles` - 查询用户角色
+- `PUT /api/authz/users/{user_id}/roles` - 配置用户角色
+- `GET /api/authz/users/{user_id}/effective-permissions` - 查询用户生效权限
+
 ### 工单管理
 - `GET /api/work-orders` - 获取工单列表
 - `GET /api/work-orders/{id}` - 获取工单详情
@@ -245,7 +260,11 @@ npm run build                  # 生产构建
 ## 🗄️ 数据库设计
 
 ### 核心数据表
-- **users**: 用户信息和权限管理
+- **users**: 用户基础信息（不再存单角色）
+- **roles**: 角色定义
+- **permissions**: 权限点定义
+- **user_roles**: 用户-角色关联
+- **role_permissions**: 角色-权限关联
 - **sites**: 站点基础信息
 - **work_orders**: 工单主表
 - **work_order_items**: 工单检查项

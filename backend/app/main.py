@@ -8,7 +8,9 @@ from email_validator import EmailNotValidError, validate_email
 from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal
 from app.core.security import get_password_hash
+from app.services.authz_service import ensure_builtin_roles_and_permissions, set_user_roles_by_codes
 from app.utils.stock_schema import ensure_stock_schema
+from app.utils.authz_schema import ensure_authz_schema
 from app.utils.geocode_schema import ensure_geocode_schema
 from app.utils.site_schema import ensure_site_schema
 from app.utils.planning_schema import ensure_planning_schema
@@ -26,12 +28,13 @@ from app.models import ssv_archive as _ssv_archive_models  # noqa: F401
 from app.models import omc_cellname_sync as _omc_cellname_sync_models  # noqa: F401
 from app.models import system_config as _system_config_models  # noqa: F401
 from app.models import ai_call_log as _ai_call_log_models  # noqa: F401
+from app.models import authz as _authz_models  # noqa: F401
 from app.models import geocode_cache as _geocode_cache_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.models import app_version as _app_version_models  # noqa: F401
 from app.models import mobile_client_log as _mobile_client_log_models  # noqa: F401
 from app.models.user import User
-from app.api import auth, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai, ai_management
+from app.api import auth, authz, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai, ai_management
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
 from app.api import operation_logs, app_version
 from app.api import mobile_client_logs
@@ -43,6 +46,14 @@ from app.middleware.operation_log import OperationLogMiddleware
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
+# 轻量迁移：RBAC users.role -> user_roles（SQLite 友好）
+ensure_authz_schema(engine)
+# 初始化内置角色与权限定义
+_seed_db = SessionLocal()
+try:
+    ensure_builtin_roles_and_permissions(_seed_db)
+finally:
+    _seed_db.close()
 # 轻量迁移：为库存相关旧表补列（SQLite 友好）
 ensure_stock_schema(engine)
 # 轻量迁移：为 geocode_cache 旧表补列（SQLite 友好）
@@ -98,6 +109,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # 路由注册
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
+app.include_router(authz.router, prefix="/api/authz", tags=["权限管理"])
 app.include_router(users.router, prefix="/api/users", tags=["用户管理"])
 app.include_router(sites.router, prefix="/api/sites", tags=["站点管理"])
 app.include_router(inspections.router, prefix="/api/inspections", tags=["检查管理"])
@@ -164,11 +176,12 @@ def _ensure_default_admin_user() -> None:
                 email=admin_email,
                 hashed_password=get_password_hash(password),
                 full_name=full_name,
-                role="admin",
                 is_active=True,
             )
             db.add(user)
             db.commit()
+            db.refresh(user)
+            set_user_roles_by_codes(db, user, ["admin"])
             print(f"✅ 默认管理员已创建: {username}")
             return
 
@@ -189,6 +202,10 @@ def _ensure_default_admin_user() -> None:
             existing.email = target_email
             db.commit()
             print(f"⚠️ 已修复管理员邮箱为: {existing.email}")
+        # 保证 admin 账号具备 admin 角色
+        if not existing.has_role("admin"):
+            target_roles = sorted(set((existing.role_codes or []) + ["admin"]))
+            set_user_roles_by_codes(db, existing, target_roles)
     except IntegrityError as e:
         db.rollback()
         print(f"❌ 默认管理员初始化失败（IntegrityError）: {e}")

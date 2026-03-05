@@ -17,6 +17,7 @@ from app.services.backup_service import (
     perform_backup,
     restore_backup,
 )
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 
 
@@ -24,7 +25,11 @@ router = APIRouter()
 
 
 def _require_admin_or_manager(current_user: User) -> None:
-    if current_user.role not in ["admin", "manager"]:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["system:backup:write"],
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有管理员或项目经理可以访问数据备份功能",

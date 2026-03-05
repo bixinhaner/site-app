@@ -6,6 +6,7 @@ from .inspection import (
 )
 from .work_order import WorkOrder, WorkOrderItem, AuditEvent
 from .equipment import Equipment, EquipmentPackage, EquipmentPackageItem, EquipmentInstance, Warehouse, Inventory, StockTransaction, StockTransactionItem, PickupRecord
+from .authz import Role, Permission, UserRole, RolePermission
 from .planning import SitePlanning, SitePlanningSector, SiteAntennaPort, SiteSwitchPort, PlanningChangeLog
 from .survey import SiteSurvey, SiteSurveyPhoto
 from .survey_archive import SiteSurveyArchive, SiteSurveyArchiveVersion, SiteSurveyArchiveKVIndex
@@ -35,6 +36,10 @@ __all__ = [
     "StockTransaction",
     "StockTransactionItem",
     "PickupRecord",
+    "Role",
+    "Permission",
+    "UserRole",
+    "RolePermission",
     "SitePlanning",
     "SitePlanningSector",
     "SiteAntennaPort",

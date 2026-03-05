@@ -152,11 +152,14 @@ const displayUserName = computed(() => {
   return fullName || username || t('common.userFallback')
 })
 
-const hasRoleAccess = (r) => {
+const hasRouteAccess = (r) => {
+  const permissions = r?.meta?.permissions
+  if (Array.isArray(permissions) && permissions.length > 0) {
+    return permissions.some(code => userStore.hasPermission(code))
+  }
   const roles = r?.meta?.roles
   if (!roles || !Array.isArray(roles) || roles.length === 0) return true
-  const role = userStore.user?.role
-  return !!role && roles.includes(role)
+  return roles.some(code => userStore.hasRole(code))
 }
 
 const getRouteTitle = (routeLike) => {
@@ -169,7 +172,7 @@ const menuRoutes = computed(() => {
     .find(route => route.path === '/')
     ?.children
     // 仅展示带有标题的菜单项
-    .filter(r => r.meta && (r.meta.titleKey || r.meta.title) && !r.meta.hidden && hasRoleAccess(r)) || []
+    .filter(r => r.meta && (r.meta.titleKey || r.meta.title) && !r.meta.hidden && hasRouteAccess(r)) || []
 })
 
 const currentRoute = computed(() => route)
@@ -177,7 +180,7 @@ const currentRoute = computed(() => route)
 // 过滤可见子菜单
 const visibleChildren = (route) => {
   if (!route.children) return []
-  return route.children.filter(c => !c.meta?.hidden && (c.meta?.titleKey || c.meta?.title) && hasRoleAccess(c))
+  return route.children.filter(c => !c.meta?.hidden && (c.meta?.titleKey || c.meta?.title) && hasRouteAccess(c))
 }
 
 const isInventoryRoute = (r) => r?.name === 'InventoryMgmt'

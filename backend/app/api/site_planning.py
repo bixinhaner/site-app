@@ -25,6 +25,7 @@ from app.models.planning import (
     PlanningChangeLog,
     SitePlanningCell,
 )
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.planning_schema import LLD_CELL_EXTRA_FIELD_CANDIDATES
 from app.utils.timezone import to_utc_iso
 from app.schemas.planning import (
@@ -75,6 +76,24 @@ LLD_ACTIVE_OPENING_WO_STATUSES = [
     WorkOrderStatusEnum.APPROVED,
     WorkOrderStatusEnum.ACTIVATED,
 ]
+
+
+def _ensure_planning_editor(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager", "planner"],
+        permission_codes=["sites:lld:write"],
+    ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+
+def _ensure_planning_batch_operator(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["sites:create:write", "sites:lld:write"],
+    ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
 
 LLD_TEMPLATE_HEADER_TO_FIELD: Dict[str, str] = {
     # base fields
@@ -180,7 +199,14 @@ def _active_opening_work_orders_site_ids(db: Session, site_ids: List[int]) -> se
 
 def _compute_lld_edit_policy(site: Site, has_active_opening_wo: bool, current_user: User) -> LldEditPolicy:
     status = (getattr(site, "status", None) or "").strip()
-    has_role = bool(current_user and getattr(current_user, "role", None) in LLD_EDIT_ALLOWED_ROLES)
+    has_role = bool(
+        current_user
+        and user_has_any_role_or_permission(
+            current_user,
+            role_codes=list(LLD_EDIT_ALLOWED_ROLES),
+            permission_codes=["sites:lld:write"],
+        )
+    )
 
     if not has_role:
         return LldEditPolicy(
@@ -1619,8 +1645,7 @@ async def update_planning(
     current_user: User = Depends(get_current_user),
 ):
     # Permissions: admin/manager can write; inspectors/users read only
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
@@ -1712,8 +1737,7 @@ async def get_version(site_id: int, version: int, db: Session = Depends(get_db),
 
 @router.post("/{site_id}/planning/versions/{version}/restore", response_model=SitePlanningResponse)
 async def restore_version(site_id: int, version: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
     planning = (
         db.query(SitePlanning)
         .filter(SitePlanning.site_id == site_id, SitePlanning.version == version)
@@ -1764,8 +1788,7 @@ async def upload_planning(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
@@ -2059,8 +2082,7 @@ async def batch_upload_planning(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_batch_operator(current_user)
     content = await file.read()
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="仅支持 Excel(.xlsx/.xls)")
@@ -2217,8 +2239,7 @@ async def lld_batch_upload_planning(
 
     使用 SiteCode 作为 SITE ID，匹配 sites.site_code。
     """
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     content = await file.read()
     if not file.filename.lower().endswith((".xlsx", ".xls")):
@@ -2497,8 +2518,7 @@ async def lld_upload_planning_for_site(
     单站 LLD 导入：只处理 LLD 文件中 SiteCode 与该站点 site_code 匹配的行。
     返回 BatchPlanningResult 以复用前端展示逻辑。
     """
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
@@ -2790,8 +2810,7 @@ async def update_lld_planning(
     批量更新 LLD 规划（基于现有规划创建新版本）。
     主要用于前端编辑后保存整个规划状态，保持版本管理。
     """
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
@@ -2884,8 +2903,7 @@ async def create_lld_cell(
     添加新的 LLD Cell。
     会自动创建新规划版本并更新基础规划数据。
     """
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
@@ -3037,8 +3055,7 @@ async def update_lld_cell(
     更新指定的 LLD Cell。
     会自动创建新规划版本并复制其他 Cell 到新版本。
     """
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
@@ -3233,8 +3250,7 @@ async def delete_lld_cell(
     删除指定的 LLD Cell。
     会自动创建新规划版本并复制其他 Cell 到新版本。
     """
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
@@ -3564,8 +3580,7 @@ async def list_lld_planning(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     items, total = _fetch_lld_planning_summary(
         db=db,
@@ -3604,8 +3619,7 @@ async def list_lld_cells(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     items, total = _fetch_lld_cells(
         db=db,
@@ -3641,8 +3655,7 @@ async def list_lld_cells_template(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     rat_norm = (rat or "").strip().upper()
     if rat_norm not in ["LTE", "NR"]:
@@ -3699,8 +3712,7 @@ async def export_lld_planning(
 ):
     from fastapi.responses import StreamingResponse
 
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     items, _ = _fetch_lld_planning_summary(
         db=db,
@@ -3791,8 +3803,7 @@ async def export_lld_cells(
 ):
     from fastapi.responses import StreamingResponse
 
-    if current_user.role not in ["admin", "manager", "planner"]:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _ensure_planning_editor(current_user)
 
     template_path = _get_lld_template_path()
     if not template_path.exists():

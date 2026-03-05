@@ -1,8 +1,29 @@
-from pydantic import BaseModel, EmailStr, validator, field_serializer
+from pydantic import BaseModel, EmailStr, Field, validator, field_serializer
 from typing import Optional, List
 from datetime import datetime
 
 from app.utils.timezone import to_utc_iso
+
+
+def _normalize_role_code(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    code = str(value).strip()
+    if not code:
+        return None
+    if len(code) > 64:
+        raise ValueError("Role code too long")
+    return code
+
+
+def _normalize_roles(values: Optional[List[str]]) -> List[str]:
+    codes: List[str] = []
+    for item in values or []:
+        code = _normalize_role_code(item)
+        if code:
+            codes.append(code)
+    return sorted(set(codes))
+
 
 class UserBase(BaseModel):
     username: str
@@ -14,20 +35,16 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
-    role: Optional[str] = "user"
-    
+    role: Optional[str] = None
+    roles: List[str] = Field(default_factory=list)
+
     @validator('role')
     def validate_role(cls, v):
-        # Align with roles referenced across the codebase
-        allowed_roles = [
-            'admin', 'manager',
-            'inspector', 'surveyor',
-            'planner', 'warehouse_manager', 'reviewer',
-            'user'
-        ]
-        if v not in allowed_roles:
-            raise ValueError(f'Role must be one of: {allowed_roles}')
-        return v
+        return _normalize_role_code(v)
+
+    @validator('roles')
+    def validate_roles(cls, v):
+        return _normalize_roles(v)
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
@@ -36,20 +53,18 @@ class UserUpdate(BaseModel):
     department: Optional[str] = None
     position: Optional[str] = None
     role: Optional[str] = None
+    roles: Optional[List[str]] = None
     is_active: Optional[bool] = None
-    
+
     @validator('role')
     def validate_role(cls, v):
-        if v is not None:
-            allowed_roles = [
-                'admin', 'manager',
-                'inspector', 'surveyor',
-                'planner', 'warehouse_manager', 'reviewer',
-                'user'
-            ]
-            if v not in allowed_roles:
-                raise ValueError(f'Role must be one of: {allowed_roles}')
-        return v
+        return _normalize_role_code(v)
+
+    @validator('roles')
+    def validate_roles(cls, v):
+        if v is None:
+            return None
+        return _normalize_roles(v)
 
 class UserPasswordReset(BaseModel):
     user_id: int
@@ -75,7 +90,9 @@ class UserSearchParams(BaseModel):
 
 class UserResponse(UserBase):
     id: int
-    role: str
+    role: Optional[str] = None
+    roles: List[str] = Field(default_factory=list)
+    permissions: List[str] = Field(default_factory=list)
     is_active: bool
     avatar: Optional[str] = None
     created_at: datetime
@@ -101,5 +118,6 @@ class UserLogin(BaseModel):
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str
-    user: UserResponse
+    user: Optional[UserResponse] = None

@@ -35,9 +35,15 @@
         </el-descriptions-item>
         
         <el-descriptions-item label="角色">
-          <el-tag :type="getRoleTagType(user.role)">
-            {{ getRoleLabel(user.role) }}
-          </el-tag>
+          <div class="role-tags">
+            <el-tag
+              v-for="role in getUserRoles(user)"
+              :key="`detail-role-${role}`"
+              :type="getRoleTagType(role)"
+            >
+              {{ getRoleLabel(role) }}
+            </el-tag>
+          </div>
         </el-descriptions-item>
         
         <el-descriptions-item label="部门">
@@ -216,25 +222,36 @@ const passwordRules = {
 // 权限计算
 const canEdit = computed(() => {
   const currentUser = userStore.currentUser
-  return userStore.isAdmin || currentUser?.id === props.user.id
+  return userStore.hasPermission('users:update:write') || currentUser?.id === props.user.id
 })
 
 const canToggleStatus = computed(() => {
-  return userStore.isAdmin && userStore.currentUser?.id !== props.user.id
+  return userStore.hasPermission('users:delete:write') && userStore.currentUser?.id !== props.user.id
 })
 
-const canResetPassword = computed(() => userStore.isAdmin)
+const canResetPassword = computed(() => userStore.hasPermission('users:password:write'))
 
 const hasActions = computed(() => {
   return canToggleStatus.value || canResetPassword.value
 })
 
 // 角色相关
+const getUserRoles = (user) => {
+  const roles = Array.isArray(user?.roles) ? user.roles : []
+  if (roles.length > 0) return roles
+  if (user?.role) return [user.role]
+  return []
+}
+
 const getRoleLabel = (role) => {
   const roleMap = {
     admin: '管理员',
     manager: '项目经理',
+    warehouse_manager: '仓库管理员',
+    planner: '规划人员',
+    reviewer: '审核人员',
     inspector: '现场工程师',
+    surveyor: '勘察人员',
     user: '普通用户'
   }
   return roleMap[role] || role
@@ -244,7 +261,11 @@ const getRoleTagType = (role) => {
   const typeMap = {
     admin: 'danger',
     manager: 'warning',
+    warehouse_manager: 'success',
+    planner: '',
+    reviewer: 'warning',
     inspector: 'primary',
+    surveyor: 'info',
     user: 'info'
   }
   return typeMap[role] || 'info'
@@ -362,6 +383,12 @@ onMounted(() => {
 .username-text {
   font-weight: 500;
   color: #f97316;
+}
+
+.role-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .action-buttons {

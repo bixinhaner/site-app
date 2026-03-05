@@ -25,6 +25,7 @@ from app.schemas.template_binding import (
     InspectionTemplateResponse, TemplateExportResponse, TemplateImportPayload
 )
 from app.api.auth import get_current_user
+from app.services.authz_service import user_has_any_role_or_permission
 from app.services.template_resolver import (
     TemplateResolver, ResolveContext, create_resolver
 )
@@ -33,6 +34,30 @@ from app.utils.template_cascader import cascade_update_check_items
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
+
+
+def _ensure_template_read_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager", "inspector", "surveyor"],
+        permission_codes=["inspection:template:read"],
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="权限不足",
+        )
+
+
+def _ensure_template_write_access(current_user: User) -> None:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["inspection:template:write"],
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="权限不足",
+        )
 
 
 @router.get("/templates", response_model=List[InspectionTemplateResponse])
@@ -48,11 +73,7 @@ async def get_templates(
 ):
     """获取检查模板列表"""
     # 权限检查：管理员/经理可管理，检查员可读
-    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_read_access(current_user)
     
     query = db.query(InspectionTemplate).options(
         joinedload(InspectionTemplate.creator)
@@ -127,11 +148,7 @@ async def create_template(
 ):
     """创建检查模板"""
     # 权限检查
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_write_access(current_user)
     
     # 创建模板
     template = InspectionTemplate(
@@ -168,11 +185,7 @@ async def get_template(
 ):
     """获取模板详情"""
     # 权限检查
-    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_read_access(current_user)
     
     template = db.query(InspectionTemplate).options(
         joinedload(InspectionTemplate.creator)
@@ -239,11 +252,7 @@ async def get_template_usage(
     """获取模板使用情况（简化版）"""
     
     # 权限检查
-    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_read_access(current_user)
     
     # 验证模板存在
     from app.models.inspection import SiteInspection, InspectionStatusEnum
@@ -306,8 +315,11 @@ async def export_template(
     current_user: User = Depends(get_current_user),
 ):
     """导出检查模板为 JSON（不含绑定规则）"""
-    # 仅管理员 / 经理
-    if current_user.role not in ["admin", "manager"]:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["inspection:template:write"],
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有管理员或项目经理可以导出模板",
@@ -380,8 +392,11 @@ async def import_template(
     current_user: User = Depends(get_current_user),
 ):
     """从 JSON 导入检查模板（始终新建一个模板，不覆盖现有）"""
-    # 仅管理员 / 经理
-    if current_user.role not in ["admin", "manager"]:
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["inspection:template:write"],
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有管理员或项目经理可以导入模板",
@@ -481,11 +496,7 @@ async def update_template(
     """更新检查模板（带自动级联更新）"""
     
     # 权限检查
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_write_access(current_user)
     
     template = db.query(InspectionTemplate).filter(
         InspectionTemplate.id == template_id
@@ -573,11 +584,7 @@ async def delete_template(
     规则：
     - 已被绑定（template_bindings）或已被任何检查/档案引用时，禁止删除。
     """
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足",
-        )
+    _ensure_template_write_access(current_user)
 
     template = db.query(InspectionTemplate).filter(InspectionTemplate.id == template_id).first()
     if not template:
@@ -668,11 +675,7 @@ async def get_template_bindings(
 ):
     """获取模板绑定列表"""
     # 权限检查
-    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_read_access(current_user)
     
     # 验证模板存在
     template = db.query(InspectionTemplate).filter(
@@ -735,11 +738,7 @@ async def create_template_binding(
 ):
     """创建模板绑定"""
     # 权限检查
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_write_access(current_user)
     
     # 验证模板存在
     template = db.query(InspectionTemplate).filter(
@@ -820,11 +819,7 @@ async def update_template_binding(
 ):
     """更新模板绑定"""
     # 权限检查
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_write_access(current_user)
     
     binding = db.query(TemplateBinding).filter(
         TemplateBinding.id == binding_id,
@@ -911,11 +906,7 @@ async def delete_template_binding(
 ):
     """删除模板绑定"""
     # 权限检查
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_write_access(current_user)
     
     binding = db.query(TemplateBinding).filter(
         TemplateBinding.id == binding_id,
@@ -943,11 +934,7 @@ async def batch_update_binding_priority(
 ):
     """批量更新绑定优先级（用于拖拽排序）"""
     # 权限检查
-    if current_user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_write_access(current_user)
     
     # 验证模板存在
     template = db.query(InspectionTemplate).filter(
@@ -990,11 +977,7 @@ async def resolve_template(
 ):
     """解析最匹配的模板"""
     # 权限检查
-    if current_user.role not in ["admin", "manager", "inspector", "surveyor"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    _ensure_template_read_access(current_user)
     
     # 创建解析上下文
     resolve_context = ResolveContext(

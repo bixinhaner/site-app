@@ -74,18 +74,22 @@
 
       <el-row :gutter="20">
         <el-col :span="12">
-          <el-form-item label="角色" prop="role">
+          <el-form-item label="角色" prop="roles">
             <el-select
-              v-model="form.role"
-              placeholder="请选择角色"
+              v-model="form.roles"
+              placeholder="请选择角色（可多选）"
               style="width: 100%"
               :disabled="!canChangeRole"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
             >
-              <el-option label="管理员" value="admin" />
-              <el-option label="项目经理" value="manager" />
-              <el-option label="现场工程师" value="inspector" />
-              <el-option label="勘察人员" value="surveyor" />
-              <el-option label="普通用户" value="user" />
+              <el-option
+                v-for="role in roleOptions"
+                :key="role.code"
+                :label="`${role.name} (${role.code})`"
+                :value="role.code"
+              />
             </el-select>
           </el-form-item>
         </el-col>
@@ -134,6 +138,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { userAPI } from '@/api/user'
+import { authzApi } from '@/api/authz'
 import { useUserStore } from '@/stores/user'
 
 // Props
@@ -153,6 +158,7 @@ const userStore = useUserStore()
 // 响应式数据
 const loading = ref(false)
 const formRef = ref()
+const roleOptions = ref([])
 
 // 表单数据
 const form = reactive({
@@ -162,7 +168,7 @@ const form = reactive({
   confirmPassword: '',
   full_name: '',
   phone: '',
-  role: 'user',
+  roles: ['user'],
   department: '',
   position: '',
   is_active: true
@@ -170,9 +176,9 @@ const form = reactive({
 
 // 计算属性
 const isEditing = computed(() => !!props.user)
-const canChangeRole = computed(() => userStore.isAdmin)
+const canChangeRole = computed(() => userStore.hasPermission('authz:manage:all'))
 const canChangeStatus = computed(() => {
-  if (!userStore.isAdmin) return false
+  if (!userStore.hasPermission('users:delete:write')) return false
   if (isEditing.value && props.user?.id === userStore.currentUser?.id) return false
   return true
 })
@@ -205,8 +211,17 @@ const rules = computed(() => {
         trigger: 'blur'
       }
     ],
-    role: [
-      { required: true, message: '请选择角色', trigger: 'change' }
+    roles: [
+      {
+        validator: (rule, value, callback) => {
+          if (!Array.isArray(value) || value.length === 0) {
+            callback(new Error('请至少选择一个角色'))
+            return
+          }
+          callback()
+        },
+        trigger: 'change'
+      }
     ],
     department: [
       { max: 100, message: '部门名称不能超过100个字符', trigger: 'blur' }
@@ -248,7 +263,8 @@ const initForm = () => {
     form.email = props.user.email
     form.full_name = props.user.full_name || ''
     form.phone = props.user.phone || ''
-    form.role = props.user.role
+    const roles = Array.isArray(props.user.roles) ? props.user.roles : []
+    form.roles = roles.length > 0 ? [...roles] : (props.user.role ? [props.user.role] : ['user'])
     form.department = props.user.department || ''
     form.position = props.user.position || ''
     form.is_active = props.user.is_active
@@ -266,7 +282,7 @@ const resetForm = () => {
   form.confirmPassword = ''
   form.full_name = ''
   form.phone = ''
-  form.role = 'user'
+  form.roles = ['user']
   form.department = ''
   form.position = ''
   form.is_active = true
@@ -291,9 +307,9 @@ const handleSubmit = async () => {
         is_active: form.is_active
       }
 
-      // 只有admin可以修改角色
+      // 角色由 authz:manage:all 控制
       if (canChangeRole.value) {
-        updateData.role = form.role
+        updateData.roles = form.roles
       }
 
       await userAPI.updateUser(props.user.id, updateData)
@@ -306,7 +322,7 @@ const handleSubmit = async () => {
         password: form.password,
         full_name: form.full_name || null,
         phone: form.phone ? form.phone.replace(/\s+/g, '') : null,
-        role: form.role,
+        roles: form.roles,
         department: form.department || null,
         position: form.position || null
       }
@@ -335,8 +351,27 @@ watch(() => props.user, initForm, { immediate: true })
 
 // 组件挂载
 onMounted(() => {
+  loadRoleOptions()
   initForm()
 })
+
+const loadRoleOptions = async () => {
+  try {
+    const rows = await authzApi.listRoles()
+    roleOptions.value = (rows || []).filter((r) => r.is_active !== false)
+  } catch (error) {
+    roleOptions.value = [
+      { code: 'user', name: '普通用户' },
+      { code: 'manager', name: '项目经理' },
+      { code: 'warehouse_manager', name: '仓库管理员' },
+      { code: 'inspector', name: '现场工程师' },
+      { code: 'surveyor', name: '勘察人员' },
+      { code: 'reviewer', name: '审核人员' },
+      { code: 'planner', name: '规划人员' },
+      { code: 'admin', name: '系统管理员' },
+    ]
+  }
+}
 </script>
 
 <style scoped>

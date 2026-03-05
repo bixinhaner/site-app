@@ -143,9 +143,9 @@ import { createDebouncedTracker } from '@/utils/operationTrack'
 
 const router = useRouter()
 const userStore = useUserStore()
-const canManagePlanning = computed(() => ['admin', 'manager', 'planner'].includes(userStore.user?.role))
-const canCreateSite = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
-const canManageSurveyStage = computed(() => ['admin', 'manager'].includes(userStore.user?.role))
+const canManagePlanning = computed(() => userStore.hasPermission('sites:lld:write'))
+const canCreateSite = computed(() => userStore.hasPermission('sites:create:write'))
+const canManageSurveyStage = computed(() => userStore.hasPermission('sites:survey-stage:write'))
 const loading = ref(false)
 const sites = ref([])
 const total = ref(0)

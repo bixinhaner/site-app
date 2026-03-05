@@ -251,7 +251,7 @@ const filteredIssues = computed(() => {
   return (issues.value || []).filter(i => (i.site_code || '').trim() === kw)
 })
 
-const canEdit = computed(() => ['admin', 'manager', 'planner'].includes(userStore.user?.role))
+const canEdit = computed(() => userStore.hasPermission('sites:lld:write'))
 
 const goBack = () => router.back()
 

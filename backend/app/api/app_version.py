@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.app_version import AppVersion, AppVersionDownloadLog, AppVersionReleaseNote, AppVersionReleaseNoteItem, AppVersionUsageLog
+from app.services.authz_service import user_has_any_role_or_permission
 from app.schemas.app_version import (
     AppVersionCheckRequest, AppVersionCheckResponse, AppVersionInfo,
     AppVersionCreate, AppVersionUpdate, AppVersionResponse, AppVersionListResponse,
@@ -359,7 +360,11 @@ async def record_download_complete(
 
 def _check_admin(current_user: User):
     """检查管理员权限"""
-    if current_user.role != "admin":
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["system:app-version:write"],
+    ):
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
 def _recalc_latest_active_version(db: Session) -> None:
@@ -1011,7 +1016,14 @@ async def get_release_note(
         raise HTTPException(status_code=404, detail="Release Note不存在")
 
     token_user = _try_get_access_user(req, db)
-    is_admin = bool(token_user and token_user.role == "admin")
+    is_admin = bool(
+        token_user
+        and user_has_any_role_or_permission(
+            token_user,
+            role_codes=["admin"],
+            permission_codes=["system:app-version:write"],
+        )
+    )
 
     release_note = db.query(AppVersionReleaseNote).filter(
         AppVersionReleaseNote.version_id == version_id

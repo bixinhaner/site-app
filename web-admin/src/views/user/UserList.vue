@@ -38,11 +38,12 @@
             clearable
             @change="handleSearch"
           >
-            <el-option label="管理员" value="admin" />
-            <el-option label="项目经理" value="manager" />
-            <el-option label="现场工程师" value="inspector" />
-            <el-option label="勘察人员" value="surveyor" />
-            <el-option label="普通用户" value="user" />
+            <el-option
+              v-for="role in roleOptions"
+              :key="role.code"
+              :label="`${role.name} (${role.code})`"
+              :value="role.code"
+            />
           </el-select>
           
           <el-select
@@ -122,9 +123,17 @@
         
         <el-table-column prop="email" label="邮箱" width="200" />
         
-        <el-table-column prop="role" label="角色" width="120">
+        <el-table-column prop="roles" label="角色" min-width="220">
           <template #default="{ row }">
-            <el-tag :type="getRoleTagType(row.role)">{{ getRoleLabel(row.role) }}</el-tag>
+            <div class="role-tags">
+              <el-tag
+                v-for="role in getUserRoles(row)"
+                :key="`${row.id}-${role}`"
+                :type="getRoleTagType(role)"
+              >
+                {{ getRoleLabel(role) }}
+              </el-tag>
+            </div>
           </template>
         </el-table-column>
         
@@ -259,6 +268,7 @@ import {
   Check, Close
 } from '@element-plus/icons-vue'
 import { userAPI } from '@/api/user'
+import { authzApi } from '@/api/authz'
 import { useUserStore } from '@/stores/user'
 import { trackOperation } from '@/utils/operationTrack'
 import UserDetail from './components/UserDetail.vue'
@@ -271,6 +281,7 @@ const userStore = useUserStore()
 const loading = ref(false)
 const userList = ref([])
 const selectedUsers = ref([])
+const roleOptions = ref([])
 
 // 搜索筛选
 const searchKeyword = ref('')
@@ -323,26 +334,37 @@ const passwordRules = {
   ]
 }
 
-// 权限计算（将 manager 视为 admin 等同）
-const canCreate = computed(() => userStore.isAdmin)
-const canBatchOperate = computed(() => userStore.isAdmin)
-const canResetPassword = computed(() => userStore.isAdmin)
+// 权限计算
+const canCreate = computed(() => userStore.hasPermission('users:create:write'))
+const canBatchOperate = computed(() => userStore.hasPermission('users:batch:write'))
+const canResetPassword = computed(() => userStore.hasPermission('users:password:write'))
 
 const canEdit = (user) => {
   const currentUser = userStore.currentUser
-  return userStore.isAdmin || currentUser?.id === user.id
+  return userStore.hasPermission('users:update:write') || currentUser?.id === user.id
 }
 
 const canToggleStatus = (user) => {
-  return userStore.isAdmin && userStore.currentUser?.id !== user.id
+  return userStore.hasPermission('users:delete:write') && userStore.currentUser?.id !== user.id
 }
 
 // 角色相关
+const getUserRoles = (user) => {
+  const roles = Array.isArray(user?.roles) ? user.roles : []
+  if (roles.length > 0) return roles
+  if (user?.role) return [user.role]
+  return []
+}
+
 const getRoleLabel = (role) => {
   const roleMap = {
     admin: '管理员',
-    manager: '项目经理', 
+    manager: '项目经理',
+    warehouse_manager: '仓库管理员',
+    planner: '规划人员',
+    reviewer: '审核人员',
     inspector: '现场工程师',
+    surveyor: '勘察人员',
     user: '普通用户'
   }
   return roleMap[role] || role
@@ -352,7 +374,11 @@ const getRoleTagType = (role) => {
   const typeMap = {
     admin: 'danger',
     manager: 'warning',
+    warehouse_manager: 'success',
+    planner: '',
+    reviewer: 'warning',
     inspector: 'primary',
+    surveyor: 'info',
     user: 'info'
   }
   return typeMap[role] || 'info'
@@ -385,6 +411,24 @@ const loadUserList = async () => {
     ElMessage.error('加载用户列表失败: ' + error.message)
   } finally {
     loading.value = false
+  }
+}
+
+const loadRoleOptions = async () => {
+  try {
+    const rows = await authzApi.listRoles()
+    roleOptions.value = (rows || []).filter((r) => r.is_active !== false)
+  } catch (error) {
+    roleOptions.value = [
+      { code: 'admin', name: '系统管理员' },
+      { code: 'manager', name: '项目经理' },
+      { code: 'warehouse_manager', name: '仓库管理员' },
+      { code: 'planner', name: '规划人员' },
+      { code: 'reviewer', name: '审核人员' },
+      { code: 'inspector', name: '现场工程师' },
+      { code: 'surveyor', name: '勘察人员' },
+      { code: 'user', name: '普通用户' },
+    ]
   }
 }
 
@@ -534,6 +578,7 @@ const resetForm = () => {
 
 // 页面初始化
 onMounted(() => {
+  loadRoleOptions()
   loadUserList()
 })
 </script>
@@ -606,6 +651,12 @@ onMounted(() => {
 .username-text {
   font-weight: 500;
   color: #f97316;
+}
+
+.role-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .pagination-wrapper {

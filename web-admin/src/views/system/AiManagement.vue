@@ -412,8 +412,7 @@ import { aiAdminApi } from '@/api/system'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
-const role = computed(() => userStore.user?.role || '')
-const canEditConfig = computed(() => ['admin', 'manager'].includes(role.value))
+const canEditConfig = computed(() => userStore.hasPermission('system:ai:write'))
 
 const activeTab = ref(canEditConfig.value ? 'config' : 'stats')
 const selectedDays = ref(30)

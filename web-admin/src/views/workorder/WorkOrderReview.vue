@@ -2874,8 +2874,7 @@ const deviceRefreshCooldown = ref(0)
 let deviceCooldownTimer = null
 
 const canShowManualConfirm = computed(() => {
-  const role = userStore.user?.role
-  return manualConfirmEnabled.value && ['admin', 'manager', 'reviewer'].includes(role)
+  return manualConfirmEnabled.value && userStore.hasPermission('workorder:review:write')
 })
 
 const manualConfirm = async (row, action) => {
