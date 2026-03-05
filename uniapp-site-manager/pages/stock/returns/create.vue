@@ -79,7 +79,13 @@
 								</view>
 								<view class="stepper">
 									<view class="step u-pressable" @click="decAux(it)">−</view>
-									<text class="num mono">{{ auxQtyMap[it.equipment_id] || 0 }}</text>
+									<input
+										class="num-input mono"
+										type="number"
+										:value="auxQtyMap[it.equipment_id] ?? 0"
+										@input="onAuxInput(it, $event)"
+										@blur="normalizeAux(it)"
+									/>
 									<view class="step u-pressable" @click="incAux(it)">＋</view>
 								</view>
 							</view>
@@ -410,19 +416,44 @@
 		selectedMainSns.value = selectedMainSns.value.filter(s => s !== sn)
 	}
 
+	const auxMaxQty = (it) => {
+		const max = Number(it?.max_returnable || 0)
+		return Number.isFinite(max) && max > 0 ? Math.floor(max) : 0
+	}
+
+	const setAuxQty = (it, raw, normalize = false) => {
+		const eid = Number(it?.equipment_id)
+		if (!Number.isFinite(eid)) return
+		let value = normalize ? Number(String(raw ?? '').trim()) : Number(raw)
+		if (!Number.isFinite(value) || value < 0) value = 0
+		const max = auxMaxQty(it)
+		if (value > max) value = max
+		auxQtyMap.value = { ...(auxQtyMap.value || {}), [eid]: Math.floor(value) }
+	}
+
+	const onAuxInput = (it, e) => {
+		setAuxQty(it, e?.detail?.value ?? '', false)
+	}
+
+	const normalizeAux = (it) => {
+		const eid = Number(it?.equipment_id)
+		if (!Number.isFinite(eid)) return
+		setAuxQty(it, auxQtyMap.value?.[eid], true)
+	}
+
 	const decAux = (it) => {
 		const eid = Number(it?.equipment_id)
 		if (!Number.isFinite(eid)) return
 		const cur = Number(auxQtyMap.value?.[eid] || 0)
-		auxQtyMap.value = { ...(auxQtyMap.value || {}), [eid]: Math.max(0, cur - 1) }
+		setAuxQty(it, Math.max(0, cur - 1), true)
 	}
 
 	const incAux = (it) => {
 		const eid = Number(it?.equipment_id)
 		if (!Number.isFinite(eid)) return
 		const cur = Number(auxQtyMap.value?.[eid] || 0)
-		const max = Number(it?.max_returnable || 0)
-		auxQtyMap.value = { ...(auxQtyMap.value || {}), [eid]: Math.min(max, cur + 1) }
+		const max = auxMaxQty(it)
+		setAuxQty(it, Math.min(max, cur + 1), true)
 	}
 
 	const selectAllReturnable = () => {
@@ -746,9 +777,24 @@
 	.aux-name { display: block; font-size: 13px; font-weight: 800; color: var(--text-primary); }
 	.aux-meta { display: block; margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
 
-	.stepper { display: flex; align-items: center; gap: 10px; }
+	.stepper {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		border: 1px solid rgba(229, 231, 235, 0.9);
+		border-radius: 12px;
+		background: #fff;
+		padding: 2px;
+	}
 	.step { width: 34px; height: 34px; border-radius: 12px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 900; color: #111827; }
-	.num { width: 42px; text-align: center; font-size: 14px; font-weight: 900; color: var(--text-primary); }
+	.num-input {
+		width: 56px;
+		height: 34px;
+		text-align: center;
+		font-size: 14px;
+		font-weight: 900;
+		color: var(--text-primary);
+	}
 
 	.footer { margin: 16px; }
 	.spacer { height: 24px; }

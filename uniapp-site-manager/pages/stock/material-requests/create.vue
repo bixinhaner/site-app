@@ -67,7 +67,7 @@
 							<text class="label">{{ $t('stock.materialRequestPackageCount') }}</text>
 							<view class="stepper">
 								<view class="step u-pressable" @click="decPackageCount">−</view>
-								<text class="num mono">{{ packageCount }}</text>
+								<input class="num-input mono" type="number" v-model="packageCount" @blur="normalizePackageCount" />
 								<view class="step u-pressable" @click="incPackageCount">＋</view>
 							</view>
 						</view>
@@ -431,6 +431,13 @@
 		packageCount.value = Math.max(1, Number(packageCount.value || 1) - 1)
 	}
 
+	const normalizePackageCount = () => {
+		let n = Number(String(packageCount.value || '').trim())
+		if (!Number.isFinite(n) || n < 1) n = 1
+		if (n > 999) n = 999
+		packageCount.value = Math.floor(n)
+	}
+
 	const openEquipmentPicker = () => {
 		equipPickerVisible.value = true
 		equipKeyword.value = ''
@@ -761,10 +768,19 @@
 		border: 1px solid var(--border-color);
 		border-radius: 12px;
 		background: rgba(255, 255, 255, 0.72);
-		padding: 8px 10px;
+		padding: 8px 8px;
 	}
 	.step { width: 36px; height: 36px; border-radius: 10px; background: #f3f4f6; color: #111827; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; }
-	.num { font-size: 14px; font-weight: 800; color: #111827; }
+	.num-input {
+		flex: 1;
+		min-width: 0;
+		height: 36px;
+		padding: 0 8px;
+		text-align: center;
+		font-size: 14px;
+		font-weight: 800;
+		color: #111827;
+	}
 
 	.preview { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
 
