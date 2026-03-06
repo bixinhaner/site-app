@@ -14,10 +14,32 @@ from app.services.authz_service import (
     get_user_permission_codes,
     get_user_with_authz,
     set_user_roles_by_codes,
+    user_has_permission,
 )
 
 router = APIRouter()
 security = HTTPBearer()
+LOGIN_CLIENT_ALIASES = {
+    'web': 'web',
+    'web-admin': 'web',
+    'web_admin': 'web',
+    'webadmin': 'web',
+    'browser': 'web',
+    'app': 'app',
+    'mobile': 'app',
+    'mobile-app': 'app',
+    'uniapp': 'app',
+}
+LOGIN_CLIENT_RULES = {
+    'web': {
+        'permission': 'auth:web-login',
+        'detail': 'WEB_LOGIN_FORBIDDEN',
+    },
+    'app': {
+        'permission': 'auth:app-login',
+        'detail': 'APP_LOGIN_FORBIDDEN',
+    },
+}
 
 def get_user_by_username(db: Session, username: str):
     return get_user_with_authz(db, username)
@@ -33,6 +55,25 @@ def _attach_authz_payload(user: User) -> User:
     except Exception:
         pass
     return user
+
+
+def _normalize_login_client(raw_value: str | None) -> str | None:
+    code = str(raw_value or '').strip().lower()
+    if not code:
+        return None
+    return LOGIN_CLIENT_ALIASES.get(code)
+
+
+def _resolve_login_client(request: Request, raw_client_type: str | None) -> str:
+    for candidate in (
+        raw_client_type,
+        request.headers.get('X-Client'),
+        request.headers.get('x-client'),
+    ):
+        normalized = _normalize_login_client(candidate)
+        if normalized:
+            return normalized
+    return 'web'
 
 def authenticate_user(db: Session, username: str, password: str):
     user = get_user_by_username(db, username)
@@ -78,20 +119,31 @@ def get_current_user(
     return user
 
 @router.post("/login", response_model=Token)
-async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
+async def login(
+    user_credentials: UserLogin,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     user = authenticate_user(db, user_credentials.username, user_credentials.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="INVALID_CREDENTIALS",
             headers={"WWW-Authenticate": "Bearer"},
         )
     # 禁用用户：登录时返回专门提示，状态仍为401，方便现有客户端复用错误处理
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Account disabled",
+            detail="ACCOUNT_DISABLED",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    login_client = _resolve_login_client(request, user_credentials.client_type)
+    login_rule = LOGIN_CLIENT_RULES.get(login_client)
+    if login_rule and not user_has_permission(user, login_rule['permission']):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=login_rule['detail'],
         )
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)

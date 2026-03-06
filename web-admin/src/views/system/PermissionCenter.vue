@@ -64,26 +64,48 @@
             />
 
               <el-checkbox-group v-model="checkedPermissions" class="permission-group">
-                <el-card
-                  v-for="moduleName in sortedModules"
-                  :key="moduleName"
-                class="module-card"
-                shadow="never"
-              >
-                <template #header>
-                  <div class="module-title">{{ moduleName }}</div>
-                </template>
-                <div class="module-perms">
-                  <el-checkbox
-                    v-for="perm in permissionModules[moduleName] || []"
-                    :key="perm.code"
-                    :label="perm.code"
-                  >
-                    {{ perm.name }}
-                    <span class="perm-code">({{ perm.code }})</span>
-                  </el-checkbox>
-                </div>
-              </el-card>
+                <section
+                  v-for="section in terminalPermissionSections"
+                  :key="section.key"
+                  class="terminal-section"
+                >
+                  <div class="terminal-section-header">
+                    <div class="terminal-section-copy">
+                      <div class="terminal-section-title">{{ section.title }}</div>
+                      <div class="terminal-section-desc">{{ section.description }}</div>
+                    </div>
+                    <el-tag type="info">{{ getSelectedCount(section) }} / {{ getPermissionCount(section) }}</el-tag>
+                  </div>
+
+                  <div class="terminal-cards">
+                    <el-card
+                      v-for="card in section.cards"
+                      :key="card.key"
+                      class="module-card"
+                      shadow="never"
+                    >
+                      <template #header>
+                        <div class="module-header">
+                          <div class="module-copy">
+                            <div class="module-title">{{ card.title }}</div>
+                            <div v-if="card.description" class="module-desc">{{ card.description }}</div>
+                          </div>
+                          <el-tag v-if="card.isLoginCard" type="success" effect="light">登录入口</el-tag>
+                        </div>
+                      </template>
+                      <div class="module-perms" :class="{ 'single-column': (card.permissions || []).length <= 2 }">
+                        <el-checkbox
+                          v-for="perm in card.permissions || []"
+                          :key="perm.code"
+                          :label="perm.code"
+                        >
+                          {{ perm.name }}
+                          <span class="perm-code">({{ perm.code }})</span>
+                        </el-checkbox>
+                      </div>
+                    </el-card>
+                  </div>
+                </section>
             </el-checkbox-group>
 
             <el-divider content-position="left">数据范围</el-divider>
@@ -175,6 +197,37 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authzApi } from '@/api/authz'
 
+const MODULE_TITLE_MAP = {
+  app: 'APP功能权限',
+  authz: '权限系统',
+  dashboard: '仪表盘',
+  users: '用户管理',
+  sites: '站点管理',
+  inspection: '检查管理',
+  workorder: '工单管理',
+  inventory: '库存管理',
+  system: '系统配置',
+}
+
+const TERMINAL_SECTION_CONFIGS = [
+  {
+    key: 'app',
+    title: 'APP端权限',
+    description: '控制移动端 App 的登录、首页入口、底部导航、页面访问和关键按钮。',
+    loginPermissionCode: 'auth:app-login',
+    loginCardDescription: '未勾选时，该角色不能从移动端新登录。',
+    moduleCodes: ['app'],
+  },
+  {
+    key: 'web',
+    title: 'WEB端权限',
+    description: '控制 Web 管理端的登录、菜单可见性、页面进入和后台操作按钮。',
+    loginPermissionCode: 'auth:web-login',
+    loginCardDescription: '未勾选时，该角色不能从 Web 管理端新登录。',
+    moduleCodes: ['dashboard', 'users', 'sites', 'inspection', 'workorder', 'inventory', 'system', 'authz'],
+  },
+]
+
 const loading = ref(false)
 const loadingPermissions = ref(false)
 const savingPermissions = ref(false)
@@ -225,7 +278,70 @@ const editRules = {
 }
 
 const selectedRole = computed(() => roles.value.find((r) => r.id === selectedRoleId.value) || null)
-const sortedModules = computed(() => Object.keys(permissionModules.value || {}).sort((a, b) => a.localeCompare(b, 'zh-CN')))
+
+const buildPermissionCard = (sectionKey, moduleCode, permissions, options = {}) => ({
+  key: `${sectionKey}-${moduleCode}`,
+  title: options.title || MODULE_TITLE_MAP[moduleCode] || moduleCode,
+  description: options.description || '',
+  permissions: Array.isArray(permissions) ? permissions : [],
+  isLoginCard: options.isLoginCard === true,
+})
+
+const terminalPermissionSections = computed(() => {
+  const modules = permissionModules.value || {}
+  const authPermissions = Array.isArray(modules.auth) ? modules.auth : []
+  const usedModuleCodes = new Set(['auth'])
+
+  const sections = TERMINAL_SECTION_CONFIGS.map((config) => {
+    const cards = []
+    const loginPermissions = authPermissions.filter((perm) => perm.code === config.loginPermissionCode)
+    if (loginPermissions.length > 0) {
+      cards.push(buildPermissionCard(config.key, 'login', loginPermissions, {
+        title: '登录权限',
+        description: config.loginCardDescription,
+        isLoginCard: true,
+      }))
+    }
+    for (const moduleCode of config.moduleCodes || []) {
+      const perms = Array.isArray(modules[moduleCode]) ? modules[moduleCode] : []
+      if (perms.length === 0) continue
+      usedModuleCodes.add(moduleCode)
+      cards.push(buildPermissionCard(config.key, moduleCode, perms))
+    }
+    return {
+      ...config,
+      cards,
+    }
+  })
+
+  const remainingModules = Object.keys(modules)
+    .filter((moduleCode) => !usedModuleCodes.has(moduleCode))
+    .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+
+  if (remainingModules.length > 0) {
+    const webSection = sections.find((item) => item.key === 'web')
+    if (webSection) {
+      for (const moduleCode of remainingModules) {
+        const perms = Array.isArray(modules[moduleCode]) ? modules[moduleCode] : []
+        if (perms.length === 0) continue
+        webSection.cards.push(buildPermissionCard('web', moduleCode, perms))
+      }
+    }
+  }
+
+  return sections.filter((section) => section.cards.length > 0)
+})
+
+const getPermissionCount = (section) => {
+  return (section?.cards || []).reduce((total, card) => total + (card.permissions || []).length, 0)
+}
+
+const getSelectedCount = (section) => {
+  const selected = new Set(checkedPermissions.value || [])
+  return (section?.cards || []).reduce((total, card) => {
+    return total + (card.permissions || []).filter((perm) => selected.has(perm.code)).length
+  }, 0)
+}
 
 const applySelectedRolePermissions = () => {
   const perms = selectedRole.value?.permissions || []
@@ -458,10 +574,6 @@ onMounted(() => {
   gap: 12px;
 }
 
-.module-card {
-  border-color: #ebeef5;
-}
-
 .scope-group {
   display: flex;
   flex-direction: column;
@@ -507,12 +619,80 @@ onMounted(() => {
 
 .module-title {
   font-weight: 600;
+  line-height: 1.4;
+}
+
+.module-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.module-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.module-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.6;
 }
 
 .module-perms {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 16px;
+}
+
+.module-perms.single-column {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.terminal-section {
+  border: 1px solid #ebeef5;
+  border-radius: 14px;
+  padding: 16px;
+  background: #fafafa;
+}
+
+.terminal-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.terminal-section-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1.4;
+}
+
+.terminal-section-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.6;
+}
+
+.terminal-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.module-card {
+  border-color: #ebeef5;
 }
 
 .perm-code {

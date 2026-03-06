@@ -117,6 +117,15 @@ const loginForm = reactive({
   password: ''
 })
 
+const LOGIN_ERROR_KEY_MAP = {
+  INVALID_CREDENTIALS: 'login.invalidCredentials',
+  'Incorrect username or password': 'login.invalidCredentials',
+  ACCOUNT_DISABLED: 'login.accountDisabled',
+  'Account disabled': 'login.accountDisabled',
+  WEB_LOGIN_FORBIDDEN: 'login.webLoginForbidden',
+  APP_LOGIN_FORBIDDEN: 'login.appLoginForbidden',
+}
+
 const loginRules = computed(() => ({
   username: [
     { required: true, message: t('login.usernameRequired'), trigger: 'blur' },
@@ -148,7 +157,8 @@ const handleLogin = async () => {
       const nextRoute = resolveDefaultAuthenticatedRoute(router.options.routes, userStore)
       router.push(nextRoute || { path: '/dashboard' })
     } else {
-      ElMessage.error(result.error || t('login.failed'))
+      const messageKey = LOGIN_ERROR_KEY_MAP[result?.errorCode]
+      ElMessage.error((messageKey ? t(messageKey) : '') || result.error || t('login.failed'))
     }
   } catch (error) {
     console.error('登录错误:', error)

@@ -8,6 +8,7 @@ from app.core.permissions import (
     BUILTIN_PERMISSION_DEFINITIONS,
     BUILTIN_ROLE_DEFINITIONS,
     LEGACY_BUILTIN_ROLE_APP_PERMISSION_VARIANTS,
+    TERMINAL_LOGIN_PERMISSION_CODES,
     BUILTIN_ROLE_PERMISSION_TEMPLATE,
     permission_matches,
 )
@@ -19,6 +20,7 @@ from app.services.data_scope_service import get_user_effective_data_scopes
 def ensure_builtin_roles_and_permissions(db: Session) -> None:
     role_by_code: Dict[str, Role] = {r.code: r for r in db.query(Role).all()}
     perm_by_code: Dict[str, Permission] = {p.code: p for p in db.query(Permission).all()}
+    newly_created_permission_codes: Set[str] = set()
 
     for item in BUILTIN_ROLE_DEFINITIONS:
         code = str(item["code"]).strip()
@@ -55,6 +57,7 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
             db.add(perm)
             db.flush()
             perm_by_code[code] = perm
+            newly_created_permission_codes.add(code)
         else:
             perm.name = item.get("name") or perm.name
             perm.module = item.get("module") or perm.module
@@ -166,6 +169,26 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
             if not perm:
                 continue
             grant_permission(role.id, perm.id)
+
+    # 终端登录权限是后补接入的。
+    # 仅在该权限码第一次出现在当前库中时，为内置角色补齐默认授权，
+    # 避免后续管理员手工移除后被每次启动强行恢复。
+    new_terminal_login_codes = TERMINAL_LOGIN_PERMISSION_CODES & newly_created_permission_codes
+    if new_terminal_login_codes:
+        for role_code, desired_codes in BUILTIN_ROLE_PERMISSION_TEMPLATE.items():
+            role = role_by_code.get(role_code)
+            if not role:
+                continue
+            desired_terminal_codes = {
+                str(code).strip()
+                for code in desired_codes or []
+                if str(code).strip() in new_terminal_login_codes
+            }
+            for perm_code in sorted(desired_terminal_codes):
+                perm = perm_by_code.get(perm_code)
+                if not perm:
+                    continue
+                grant_permission(role.id, perm.id)
 
     role_scope_map: Dict[tuple[int, str], str] = {
         (int(row.role_id), str(row.resource_code).strip()): str(row.scope_code).strip()

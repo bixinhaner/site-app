@@ -137,11 +137,14 @@ npm run build                  # 生产构建
 - 后端已升级为 **多角色 + 权限码** 模型，`users.role` 字段已移除，改为 `users` + `user_roles` 关联。
 - 权限码采用 `module:resource:action` 结构，例如：`workorder:dispatch:write`、`inventory:return:write`。
 - `admin` 账号绕过全部权限校验；`manager` 不再自动等同 `admin`。
+- 新增两项终端登录权限：`auth:web-login` 和 `auth:app-login`。登录接口会根据 `client_type` / `X-Client` 判断是 Web 端还是 App 端；如果角色没勾选对应权限，会在登录时直接提示原因并拒绝新登录。
+- 当前采用“方案 A”：只限制**新登录**。已经签发的 token 不会因为后续撤销登录权限而立刻失效，刷新/续期逻辑也不主动踢下线。
 - Web 管理端新增 **系统配置 -> 角色权限** 页面（`/settings/permissions`），支持：
 - 新建/编辑/删除自定义角色
 - 配置角色权限点
 - 配置角色数据范围（站点 / 工单 / 检查）
 - 用户管理页支持给用户分配多个角色
+- 权限配置页现在按 **APP端权限 / WEB端权限** 分区展示，并把各自的“登录权限”固定放在最前面，方便先看“能不能登录”，再看“登录后能做什么”。
 - 当前迭代已覆盖：`web-admin + backend + uniapp-site-manager`。
 - UniApp 现已接入统一权限能力：登录态会返回 `roles / permissions / data_scopes`，前端统一通过 `hasRole / hasPermission / can / getDataScope` 做判断。
 - UniApp 接入原则：`权限优先，旧角色兜底`。如果账号还没有任何 `app:*` 权限码，则继续按旧 `role` 规则兼容，保证老角色升级后功能范围不突变。

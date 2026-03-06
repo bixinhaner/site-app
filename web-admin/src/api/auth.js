@@ -5,7 +5,8 @@ export const authApi = {
   login: async (username, password) => {
     return await request.post('/api/auth/login', {
       username,
-      password
+      password,
+      client_type: 'web',
     })
   },
   

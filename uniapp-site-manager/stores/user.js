@@ -164,7 +164,8 @@ export const useUserStore = defineStore('user', () => {
 				method: 'POST',
 				data: {
 					username,
-					password
+					password,
+					client_type: 'app',
 				}
 			})
 
@@ -262,8 +263,13 @@ export const useUserStore = defineStore('user', () => {
 
 				console.log('登录成功:', user)
 				return { success: true }
-			} else if (response.statusCode === 401) {
-				return { success: false, errorCode: 'INVALID_CREDENTIALS' }
+			} else if (response.statusCode === 401 || response.statusCode === 403) {
+				const backendDetail = String(response.data?.detail || '').trim()
+				return {
+					success: false,
+					errorCode: backendDetail || (response.statusCode === 401 ? 'INVALID_CREDENTIALS' : 'PERMISSION_DENIED'),
+					error: backendDetail || '',
+				}
 			} else {
 				console.error('登录失败:', response)
 				const errorMsg = response.data?.detail || `服务器错误 (${response.statusCode})`

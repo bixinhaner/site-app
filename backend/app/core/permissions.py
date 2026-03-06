@@ -19,6 +19,8 @@ BUILTIN_ROLE_DEFINITIONS = [
 BUILTIN_PERMISSION_DEFINITIONS = [
     {"code": "authz:manage:all", "name": "权限系统管理", "module": "authz"},
     {"code": "dashboard:view:read", "name": "仪表盘查看", "module": "dashboard"},
+    {"code": "auth:web-login", "name": "WEB端登录", "module": "auth", "description": "允许登录 Web 管理端"},
+    {"code": "auth:app-login", "name": "APP端登录", "module": "auth", "description": "允许登录移动端 App"},
     {"code": "app:home:read", "name": "App首页查看", "module": "app"},
     {"code": "app:sites:read", "name": "App站点模块访问", "module": "app"},
     {"code": "app:workorders:read", "name": "App工单模块访问", "module": "app"},
@@ -89,12 +91,19 @@ BUILTIN_PERMISSION_DEFINITIONS = [
     {"code": "system:ai:write", "name": "AI 管理配置", "module": "system"},
 ]
 
+TERMINAL_LOGIN_PERMISSION_CODES = {
+    "auth:web-login",
+    "auth:app-login",
+}
+
 
 BUILTIN_ROLE_PERMISSION_TEMPLATE: Dict[str, List[str]] = {
     # admin 通过绕过机制获得全部权限；此处仍授予 authz 管理权限便于显式展示
     "admin": [p["code"] for p in BUILTIN_PERMISSION_DEFINITIONS],
     "manager": [
         "dashboard:view:read",
+        "auth:web-login",
+        "auth:app-login",
         "app:home:read",
         "app:sites:read",
         "app:workorders:read",
@@ -156,6 +165,8 @@ BUILTIN_ROLE_PERMISSION_TEMPLATE: Dict[str, List[str]] = {
         "system:ai:read",
     ],
     "warehouse_manager": [
+        "auth:web-login",
+        "auth:app-login",
         "app:home:read",
         "app:profile:read",
         "app:inspection:create",
@@ -185,6 +196,8 @@ BUILTIN_ROLE_PERMISSION_TEMPLATE: Dict[str, List[str]] = {
         "inventory:user-ownership:read",
     ],
     "planner": [
+        "auth:web-login",
+        "auth:app-login",
         "app:home:read",
         "app:profile:read",
         "app:inspection:create",
@@ -198,6 +211,8 @@ BUILTIN_ROLE_PERMISSION_TEMPLATE: Dict[str, List[str]] = {
         "sites:lld:write",
     ],
     "reviewer": [
+        "auth:web-login",
+        "auth:app-login",
         "app:home:read",
         "app:profile:read",
         "app:inspection:create",
@@ -213,6 +228,8 @@ BUILTIN_ROLE_PERMISSION_TEMPLATE: Dict[str, List[str]] = {
     ],
     "inspector": [
         "dashboard:view:read",
+        "auth:web-login",
+        "auth:app-login",
         "app:home:read",
         "app:sites:read",
         "app:workorders:read",
@@ -235,6 +252,8 @@ BUILTIN_ROLE_PERMISSION_TEMPLATE: Dict[str, List[str]] = {
     ],
     "surveyor": [
         "dashboard:view:read",
+        "auth:web-login",
+        "auth:app-login",
         "app:home:read",
         "app:sites:read",
         "app:workorders:read",
@@ -247,6 +266,8 @@ BUILTIN_ROLE_PERMISSION_TEMPLATE: Dict[str, List[str]] = {
     ],
     "user": [
         "dashboard:view:read",
+        "auth:web-login",
+        "auth:app-login",
         "app:home:read",
         "app:sites:read",
         "app:workorders:read",

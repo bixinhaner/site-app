@@ -116,6 +116,7 @@ class UserListResponse(BaseModel):
 class UserLogin(BaseModel):
     username: str
     password: str
+    client_type: Optional[str] = None
 
 class Token(BaseModel):
     access_token: str

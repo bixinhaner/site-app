@@ -90,8 +90,12 @@ export const useUserStore = defineStore('user', () => {
     } catch (error) {
       console.error('登录失败:', error)
       const backendDetail = error.response?.data?.detail
-      const message = backendDetail || error.message || 'Login failed'
-      return { success: false, error: message }
+      const errorCode = String(backendDetail || '').trim() || 'LOGIN_FAILED'
+      return {
+        success: false,
+        errorCode,
+        error: backendDetail || error.message || 'Login failed',
+      }
     }
   }
 

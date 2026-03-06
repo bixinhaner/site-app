@@ -141,6 +141,16 @@
 		username: '',
 		password: ''
 	})
+
+	const LOGIN_ERROR_KEY_MAP = {
+		INVALID_CREDENTIALS: 'messages.invalidCredentials',
+		'Incorrect username or password': 'messages.invalidCredentials',
+		ACCOUNT_DISABLED: 'messages.accountDisabled',
+		'Account disabled': 'messages.accountDisabled',
+		WEB_LOGIN_FORBIDDEN: 'messages.webLoginForbidden',
+		APP_LOGIN_FORBIDDEN: 'messages.appLoginForbidden',
+		PERMISSION_DENIED: 'messages.permissionDenied',
+	}
 	
 	const toggleServerMenu = () => {
 		showLanguageMenu.value = false
@@ -354,6 +364,7 @@
 				let displayMessage = ''
 				if (result?.errorCode) {
 					const errorCodeKeyMap = {
+						...LOGIN_ERROR_KEY_MAP,
 						INVALID_CREDENTIALS: 'messages.invalidCredentials',
 						NETWORK_TIMEOUT: 'messages.networkTimeout',
 						NETWORK_FAIL: 'messages.networkFail',
