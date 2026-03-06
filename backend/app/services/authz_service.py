@@ -62,23 +62,58 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
 
     db.flush()
 
+    perm_code_by_id: Dict[int, str] = {
+        perm.id: str(perm.code).strip()
+        for perm in perm_by_code.values()
+        if perm.id is not None and str(perm.code or "").strip()
+    }
+    existing_role_permission_pairs: Set[tuple[int, int]] = set()
+    role_permission_codes: Dict[int, Set[str]] = defaultdict(set)
+    for role_id, permission_id in (
+        db.query(RolePermission.role_id, RolePermission.permission_id).all()
+    ):
+        key = (int(role_id), int(permission_id))
+        existing_role_permission_pairs.add(key)
+        code = perm_code_by_id.get(int(permission_id))
+        if code:
+            role_permission_codes[int(role_id)].add(code)
+
+    def grant_permission(role_id: int, perm_id: int) -> None:
+        key = (int(role_id), int(perm_id))
+        if key in existing_role_permission_pairs:
+            return
+        db.add(RolePermission(role_id=role_id, permission_id=perm_id))
+        existing_role_permission_pairs.add(key)
+        code = perm_code_by_id.get(int(perm_id))
+        if code:
+            role_permission_codes[int(role_id)].add(code)
+
+    def revoke_permission(role_id: int, perm_id: int) -> None:
+        key = (int(role_id), int(perm_id))
+        if key not in existing_role_permission_pairs:
+            return
+        db.query(RolePermission).filter(
+            RolePermission.role_id == role_id,
+            RolePermission.permission_id == perm_id,
+        ).delete(synchronize_session=False)
+        existing_role_permission_pairs.discard(key)
+        code = perm_code_by_id.get(int(perm_id))
+        if code:
+            role_permission_codes[int(role_id)].discard(code)
+
     # 内置角色权限模板：仅在该角色尚未有授权时灌入，避免覆盖人工配置
     for role_code, perms in BUILTIN_ROLE_PERMISSION_TEMPLATE.items():
         role = role_by_code.get(role_code)
         if not role:
             continue
-        existing_count = (
-            db.query(RolePermission.id)
-            .filter(RolePermission.role_id == role.id)
-            .count()
-        )
+        existing_count = len(role_permission_codes.get(role.id, set()))
         if existing_count > 0:
             continue
         for perm_code in perms:
             perm = perm_by_code.get(perm_code)
             if not perm:
                 continue
-            db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+            grant_permission(role.id, perm.id)
 
     # App 权限是后补接入的。这里仅修复两类场景：
     # 1) 老库中内置角色还没有任何 app:* 授权；
@@ -97,13 +132,7 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
         if not desired_app_codes:
             continue
 
-        existing_codes = set(
-            row[0]
-            for row in db.query(Permission.code)
-            .join(RolePermission, RolePermission.permission_id == Permission.id)
-            .filter(RolePermission.role_id == role.id)
-            .all()
-        )
+        existing_codes = set(role_permission_codes.get(role.id, set()))
         existing_app_codes = {code for code in existing_codes if code.startswith("app:")}
         legacy_app_code_variants = [
             {
@@ -123,23 +152,18 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
 
         stale_app_codes = existing_app_codes - desired_app_codes
         if stale_app_codes:
-            stale_perm_ids = [
-                perm_by_code[code].id
-                for code in stale_app_codes
-                if code in perm_by_code
-            ]
-            if stale_perm_ids:
-                db.query(RolePermission).filter(
-                    RolePermission.role_id == role.id,
-                    RolePermission.permission_id.in_(stale_perm_ids),
-                ).delete(synchronize_session=False)
-                existing_codes -= stale_app_codes
+            for code in stale_app_codes:
+                perm = perm_by_code.get(code)
+                if not perm:
+                    continue
+                revoke_permission(role.id, perm.id)
+            existing_codes = set(role_permission_codes.get(role.id, set()))
 
         for perm_code in sorted(desired_codes_set - existing_codes):
             perm = perm_by_code.get(perm_code)
             if not perm:
                 continue
-            db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+            grant_permission(role.id, perm.id)
 
     db.commit()
 
