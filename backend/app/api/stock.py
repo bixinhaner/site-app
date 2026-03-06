@@ -3397,18 +3397,25 @@ async def search_equipment_instances(
         query = query.filter(EquipmentInstance.status == status)
 
     like_prefix = f"{sn_value}%"
+    like_contains = f"%{sn_value}%"
     query = query.filter(
         or_(
             EquipmentInstance.serial_number == sn_value,
             EquipmentInstance.serial_number.like(like_prefix),
+            EquipmentInstance.serial_number.like(like_contains),
             EquipmentInstance.original_serial_number == sn_value,
             EquipmentInstance.original_serial_number.like(like_prefix),
+            EquipmentInstance.original_serial_number.like(like_contains),
         )
     )
 
     exact_rank = case(
-        (EquipmentInstance.serial_number == sn_value, 2),
-        (EquipmentInstance.original_serial_number == sn_value, 1),
+        (EquipmentInstance.serial_number == sn_value, 6),
+        (EquipmentInstance.original_serial_number == sn_value, 5),
+        (EquipmentInstance.serial_number.like(like_prefix), 4),
+        (EquipmentInstance.original_serial_number.like(like_prefix), 3),
+        (EquipmentInstance.serial_number.like(like_contains), 2),
+        (EquipmentInstance.original_serial_number.like(like_contains), 1),
         else_=0,
     )
 
