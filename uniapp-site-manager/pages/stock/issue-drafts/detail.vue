@@ -147,6 +147,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 	import { formatDateTime } from '@/utils/time.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
@@ -215,18 +216,12 @@
 		return $t('stock.issueDraftContinuePick')
 	})
 
-	const ensureLoggedIn = () => {
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({ url: '/pages/login/login' })
-			return false
-		}
-		if (userStore.isSurveyor) {
-			uni.showToast({ title: $t('stock.surveyorNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 600)
-			return false
-		}
-		return true
-	}
+	const ensureLoggedIn = () => guardRouteAccess({
+		userStore,
+		route: 'pages/stock/issue-drafts/detail',
+		t: $t,
+		redirectUrl: '/pages/home/home',
+	})
 
 	const load = async () => {
 		if (!ensureLoggedIn()) return

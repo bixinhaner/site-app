@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.permissions import (
     BUILTIN_PERMISSION_DEFINITIONS,
     BUILTIN_ROLE_DEFINITIONS,
+    LEGACY_BUILTIN_ROLE_APP_PERMISSION_VARIANTS,
     BUILTIN_ROLE_PERMISSION_TEMPLATE,
     permission_matches,
 )
@@ -74,6 +75,67 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
         if existing_count > 0:
             continue
         for perm_code in perms:
+            perm = perm_by_code.get(perm_code)
+            if not perm:
+                continue
+            db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+
+    # App 权限是后补接入的。这里仅修复两类场景：
+    # 1) 老库中内置角色还没有任何 app:* 授权；
+    # 2) 已命中过往已发布过的内置角色 app 模板（含错误模板/中间模板），
+    #    需要按当前默认边界纠正，但不覆盖人工自定义授权。
+    for role_code, desired_codes in BUILTIN_ROLE_PERMISSION_TEMPLATE.items():
+        role = role_by_code.get(role_code)
+        if not role:
+            continue
+        desired_codes_set = {
+            str(code).strip()
+            for code in desired_codes or []
+            if str(code).strip() and str(code).strip() in perm_by_code
+        }
+        desired_app_codes = {code for code in desired_codes_set if code.startswith("app:")}
+        if not desired_app_codes:
+            continue
+
+        existing_codes = set(
+            row[0]
+            for row in db.query(Permission.code)
+            .join(RolePermission, RolePermission.permission_id == Permission.id)
+            .filter(RolePermission.role_id == role.id)
+            .all()
+        )
+        existing_app_codes = {code for code in existing_codes if code.startswith("app:")}
+        legacy_app_code_variants = [
+            {
+                str(code).strip()
+                for code in codes or []
+                if str(code).strip()
+            }
+            for codes in LEGACY_BUILTIN_ROLE_APP_PERMISSION_VARIANTS.get(role_code, [])
+        ]
+
+        should_repair = not existing_app_codes or any(
+            variant and existing_app_codes == variant
+            for variant in legacy_app_code_variants
+        )
+        if not should_repair:
+            continue
+
+        stale_app_codes = existing_app_codes - desired_app_codes
+        if stale_app_codes:
+            stale_perm_ids = [
+                perm_by_code[code].id
+                for code in stale_app_codes
+                if code in perm_by_code
+            ]
+            if stale_perm_ids:
+                db.query(RolePermission).filter(
+                    RolePermission.role_id == role.id,
+                    RolePermission.permission_id.in_(stale_perm_ids),
+                ).delete(synchronize_session=False)
+                existing_codes -= stale_app_codes
+
+        for perm_code in sorted(desired_codes_set - existing_codes):
             perm = perm_by_code.get(perm_code)
             if not perm:
                 continue

@@ -112,6 +112,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { formatTimeAgo } from '@/utils/time.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 	import EmptyState from '@/components/EmptyState.vue'
@@ -132,10 +133,7 @@
 	const records = ref([])
 
 	const hasMore = computed(() => records.value.length < total.value)
-	const isWarehouseSide = computed(() => {
-		const role = String(userStore.userInfo?.role || '')
-		return ['admin', 'manager', 'warehouse_manager'].includes(role)
-	})
+		const canAccessApproval = computed(() => userStore.can('material_approval'))
 
 	const timeAgo = (ts) => {
 		return formatTimeAgo(ts, $t) || ''
@@ -172,16 +170,16 @@
 		return 'u-tag-info'
 	}
 
+	const ensureApprovalAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/stock/material-requests/approval-list',
+		t: $t,
+		deniedMessage: $t('stock.materialApprovalNoPermission'),
+		redirectUrl: '/pages/home/home',
+	})
+
 	const ensureReady = async () => {
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({ url: '/pages/login/login' })
-			return false
-		}
-		if (!isWarehouseSide.value) {
-			uni.showToast({ title: $t('stock.materialApprovalNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 600)
-			return false
-		}
+		if (!ensureApprovalAccess()) return false
 
 		try {
 			const flowRes = await uni.request({

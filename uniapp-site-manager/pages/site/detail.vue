@@ -290,6 +290,7 @@
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useLanguageStore } from '@/stores/language'
 	import { API_ENDPOINTS, buildApiUrl, getAuthHeaders, createRequestConfig } from '@/config/api.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	
 	const userStore = useUserStore()
@@ -311,6 +312,12 @@
 	const omcError = ref('')
 
 	const site = computed(() => siteStore.currentSite)
+	const ensureSitesAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/site/detail',
+		t: $t,
+		redirectUrl: '/pages/site/list',
+	})
 
 	// 获取状态样式类
 	const getStatusClass = (status) => {
@@ -460,6 +467,7 @@
 
 	// 加载站点详情
 	const loadSiteDetail = async () => {
+		if (!ensureSitesAccess()) return
 		if (!siteId.value) return
 
 		loading.value = true
@@ -532,6 +540,11 @@
 	}
 	
 	onLoad((options) => {
+		if (!userStore.isLoggedIn) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		if (!ensureSitesAccess()) return
 		siteId.value = options.id
 		if (siteId.value) {
 			loadSiteDetail()

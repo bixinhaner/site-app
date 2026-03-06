@@ -114,6 +114,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { formatTimeAgo } from '@/utils/time.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 	import EmptyState from '@/components/EmptyState.vue'
@@ -134,10 +135,7 @@
 	const records = ref([])
 
 	const hasMore = computed(() => records.value.length < total.value)
-	const isWarehouseSide = computed(() => {
-		const role = String(userStore.userInfo?.role || '')
-		return ['admin', 'manager', 'warehouse_manager'].includes(role)
-	})
+		const canAccessIssueConfirm = computed(() => userStore.can('issue_confirm'))
 
 	const isConfirmable = (status) => {
 		const s = String(status || '')
@@ -178,16 +176,16 @@
 		return 'u-tag-info'
 	}
 
+	const ensureIssueConfirmAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/stock/issue-drafts/confirm-list',
+		t: $t,
+		deniedMessage: $t('stock.issueConfirmNoPermission'),
+		redirectUrl: '/pages/home/home',
+	})
+
 	const ensureReady = async () => {
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({ url: '/pages/login/login' })
-			return false
-		}
-		if (!isWarehouseSide.value) {
-			uni.showToast({ title: $t('stock.issueConfirmNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 600)
-			return false
-		}
+		if (!ensureIssueConfirmAccess()) return false
 
 		try {
 			const flowRes = await uni.request({

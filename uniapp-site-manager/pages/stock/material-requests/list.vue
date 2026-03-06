@@ -140,6 +140,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { formatTimeAgo } from '@/utils/time.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 	import EmptyState from '@/components/EmptyState.vue'
@@ -217,16 +218,15 @@
 		return items.reduce((sum, it) => sum + Number(it?.issued_qty || 0), 0)
 	}
 
-	const ensureReady = async () => {
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({ url: '/pages/login/login' })
-			return false
-		}
-		if (userStore.isSurveyor) {
-			uni.showToast({ title: $t('stock.surveyorNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 600)
-			return false
-		}
+		const ensureMaterialRequestAccess = () => guardRouteAccess({
+			userStore,
+			route: 'pages/stock/material-requests/list',
+			t: $t,
+			redirectUrl: '/pages/home/home',
+		})
+
+		const ensureReady = async () => {
+			if (!ensureMaterialRequestAccess()) return false
 
 		try {
 			const flowRes = await uni.request({
@@ -344,13 +344,9 @@
 		await load(true)
 	}
 
-	const goCreate = () => {
-		if (userStore.isSurveyor) {
-			uni.showToast({ title: $t('stock.surveyorNoPermission'), icon: 'none' })
-			return
+		const goCreate = () => {
+			uni.navigateTo({ url: '/pages/stock/material-requests/create' })
 		}
-		uni.navigateTo({ url: '/pages/stock/material-requests/create' })
-	}
 
 	const goDetail = (req) => {
 		uni.navigateTo({ url: `/pages/stock/material-requests/detail?id=${req.id}` })

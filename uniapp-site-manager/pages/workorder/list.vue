@@ -157,6 +157,7 @@ import { useUserStore } from '@/stores/user'
 import { useUpgradeStore } from '@/stores/upgrade'
 import { trackOperation } from '@/utils/operationTrack.js'
 import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+import { guardFeatureAccess, resolvePermissionDeniedMessage } from '@/utils/feature-access.js'
 import CustomNavbar from '@/components/CustomNavbar.vue'
 import SkeletonCard from '@/components/SkeletonCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -202,8 +203,19 @@ const handleUpdateInstalled = () => {
 }
 
 const { $t } = getCurrentInstance().appContext.config.globalProperties
+const ensureWorkOrderAccess = () => guardFeatureAccess({
+  userStore,
+  feature: 'workorders',
+  deniedMessage: resolvePermissionDeniedMessage(userStore, $t),
+  redirectUrl: '/pages/home/home',
+})
 
 const reload = async () => {
+  if (!userStore.isLoggedIn) {
+    uni.reLaunch({ url: '/pages/login/login' })
+    return
+  }
+  if (!ensureWorkOrderAccess()) return
   try {
     refreshing.value = true
     const keyword = (searchKeyword.value || '').trim()
@@ -589,6 +601,8 @@ onMounted(() => {
 // 每次页面显示时刷新数据
 onShow(() => {
   console.log('👁️ 工单列表页面 onShow', { isPageVisible: isPageVisible.value })
+  if (!userStore.isLoggedIn) return
+  if (!ensureWorkOrderAccess()) return
   // 避免重复刷新（onMounted后立即触发onShow）
   if (isPageVisible.value) {
     console.log('🔄 页面重新显示，自动刷新数据')

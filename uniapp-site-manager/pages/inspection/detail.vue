@@ -647,6 +647,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl, API_ENDPOINTS } from '@/config/api.js'
 	import { createPhotoCacheContext, ensurePhotoCached } from '@/utils/photoCache.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	
 	const inspectionStore = useInspectionStore()
@@ -654,6 +655,12 @@
 	const languageStore = useLanguageStore()
 	
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const ensureInspectionDetailAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/inspection/detail',
+		t: $t,
+		redirectUrl: '/pages/workorder/list',
+	})
 
 	const normalizeLocale = (value) => {
 		const s = String(value || '').trim().toLowerCase().replace('_', '-')
@@ -796,11 +803,11 @@
 			   inspectionData.value.inspector_id === userStore.userInfo?.id
 	})
 	
-	const canReview = computed(() => {
-		return inspectionData.value && 
-			   inspectionData.value.status === 'submitted' &&
-			   (['admin', 'manager', 'reviewer'].includes(userStore.userInfo?.role))
-	})
+		const canReview = computed(() => {
+			return inspectionData.value && 
+				   inspectionData.value.status === 'submitted' &&
+				   userStore.can('inspection_review')
+		})
 	
 	const getDeviceKey = (item) => {
 		if (!item?.sector_id || !item?.band) return null
@@ -965,6 +972,11 @@
 	// 页面初次加载
 	onLoad((options) => {
 		console.log('📱 检查详情页面 onLoad', options)
+		if (!userStore.isLoggedIn) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		if (!ensureInspectionDetailAccess()) return
 		if (options.id) {
 			inspectionId.value = options.id
 			isPageVisible.value = true
@@ -974,6 +986,7 @@
 	
 	// 每次页面显示时刷新数据
 	onShow(() => {
+		if (!ensureInspectionDetailAccess()) return
 		console.log('👁️ 检查详情页面 onShow', { 
 			inspectionId: inspectionId.value,
 			isPageVisible: isPageVisible.value 
@@ -1216,6 +1229,7 @@
 	}
 	
 	const loadInspectionDetail = async () => {
+		if (!ensureInspectionDetailAccess()) return
 		try {
 			console.log('🔄 检查详情页面加载中...', { inspectionId: inspectionId.value })
 			loading.value = true

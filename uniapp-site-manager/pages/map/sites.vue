@@ -105,6 +105,7 @@
 	import { useSiteStore } from '@/stores/site'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	
 	const siteStore = useSiteStore()
 	const userStore = useUserStore()
@@ -115,6 +116,12 @@
 		const _ = languageStore.currentLocale
 		return $t(key, params)
 	}
+	const ensureMapAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/map/sites',
+		t,
+		redirectUrl: '/pages/home/home',
+	})
 	
 	// 页面数据
 	const sites = ref([])
@@ -690,6 +697,7 @@
 	
 	// 加载站点数据
 	const loadSites = async () => {
+		if (!ensureMapAccess()) return
 		try {
 			loading.value = true
 			const result = await siteStore.getSites()
@@ -788,6 +796,11 @@
 	
 	// 页面加载
 	onLoad((options) => {
+		if (!userStore.isLoggedIn) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		if (!ensureMapAccess()) return
 		// 设置页面标题
 		uni.setNavigationBarTitle({
 			title: t('map.sitesDistributionTitle')

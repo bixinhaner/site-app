@@ -11,6 +11,7 @@ import i18n from './utils/i18n.js'
 import { setI18nInstance } from './stores/language.js'
 import { trackPageView } from './utils/operationTrack.js'
 import { useUserStore } from './stores/user.js'
+import { guardRouteAccess, isPublicRoute, normalizeRoutePath } from './utils/feature-access.js'
 import { formatPercentInt, toPercentInt } from './utils/number.js'
 
 // 统一拦截 showToast
@@ -96,22 +97,35 @@ export function createApp() {
 	// 设置i18n实例给语言store使用
 	setI18nInstance(i18n)
 
+	const ensureCurrentPageAccess = (silent = true) => {
+		try {
+			const pages = getCurrentPages()
+			const route = normalizeRoutePath(pages?.[pages.length - 1]?.route || '')
+			if (!route || isPublicRoute(route)) {
+				return true
+			}
+			const userStore = useUserStore()
+			return guardRouteAccess({
+				userStore,
+				route,
+				t: i18n?.global?.t?.bind(i18n.global),
+				silent,
+				delay: 0,
+			})
+		} catch (e) {
+			return true
+		}
+	}
+
 	// 方案A：不记录普通GET，页面访问/查询等通过前端轨迹上报
 	app.mixin({
+		onLoad() {
+			ensureCurrentPageAccess(true)
+		},
 		onShow() {
-			// 统一登录态兜底：避免未登录进入业务页后只看到“加载失败/未登录”的弱提示
-			try {
-				const pages = getCurrentPages()
-				const route = pages?.[pages.length - 1]?.route || ''
-				if (route && route !== 'pages/login/login') {
-					const userStore = useUserStore()
-					if (!userStore.isLoggedIn) {
-						uni.reLaunch({ url: '/pages/login/login' })
-						return
-					}
-				}
-			} catch (e) {
-				// ignore
+			// 统一登录态与页面权限兜底，避免“入口隐藏了但 URL 还能进”。
+			if (!ensureCurrentPageAccess(true)) {
+				return
 			}
 			trackPageView()
 		}

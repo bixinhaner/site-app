@@ -218,6 +218,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { formatDateTime } from '@/utils/time.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
@@ -241,14 +242,11 @@
 	const auxConfirmRows = ref([])
 
 	const statusValue = computed(() => String(draft.value?.status || ''))
-	const isWarehouseSide = computed(() => {
-		const role = String(userStore.userInfo?.role || '')
-		return ['admin', 'manager', 'warehouse_manager'].includes(role)
-	})
+		const canAccessIssueConfirm = computed(() => userStore.can('issue_confirm'))
 
-	const canConfirm = computed(() => {
-		return ['pending_confirm', 'partially_confirmed'].includes(statusValue.value)
-	})
+		const canConfirm = computed(() => {
+			return canAccessIssueConfirm.value && ['pending_confirm', 'partially_confirmed'].includes(statusValue.value)
+		})
 	const canReject = computed(() => statusValue.value === 'pending_confirm')
 	const canRejectRemaining = computed(() => statusValue.value === 'partially_confirmed')
 
@@ -351,13 +349,13 @@
 	}
 
 	const ensureReady = async () => {
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({ url: '/pages/login/login' })
-			return false
-		}
-		if (!isWarehouseSide.value) {
-			uni.showToast({ title: $t('stock.issueConfirmNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 700)
+		if (!guardRouteAccess({
+			userStore,
+			route: 'pages/stock/issue-drafts/confirm',
+			t: $t,
+			deniedMessage: $t('stock.issueConfirmNoPermission'),
+			redirectUrl: '/pages/home/home',
+		})) {
 			return false
 		}
 

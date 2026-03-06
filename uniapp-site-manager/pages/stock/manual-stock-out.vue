@@ -274,6 +274,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { parseBarcode } from '@/utils/barcode-parser.js'
 	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
@@ -342,24 +343,19 @@
 		return detail?.message || fallback || $t('messages.operationFailed')
 	}
 
-	const ensureAccess = async () => {
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({ url: '/pages/login/login' })
-			return false
-		}
-		if (!userStore.isWarehouseOperator) {
-			uni.showToast({ title: $t('stock.manualStockOutNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 700)
-			return false
-		}
-		if (userStore.isSurveyor) {
-			uni.showToast({ title: $t('stock.surveyorNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 700)
-			return false
-		}
+		const ensureAccess = async () => {
+			if (!guardRouteAccess({
+				userStore,
+				route: 'pages/stock/manual-stock-out',
+				t: $t,
+				deniedMessage: $t('stock.manualStockOutNoPermission'),
+				redirectUrl: '/pages/home/home',
+			})) {
+				return false
+			}
 
-		try {
-			const flowRes = await uni.request({
+			try {
+				const flowRes = await uni.request({
 				url: buildApiUrl(API_ENDPOINTS.STOCK.FLOW_SETTINGS),
 				method: 'GET',
 				header: getAuthHeaders(userStore.token),

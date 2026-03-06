@@ -32,6 +32,27 @@
 </template>
 
 <script setup>
+	import { getCurrentInstance, onMounted } from 'vue'
+	import { useUserStore } from '@/stores/user'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
+
+	const userStore = useUserStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
+	const ensureReviewAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/inspection/review',
+		t: $t,
+		redirectUrl: '/pages/workorder/list',
+	})
+
+	onMounted(() => {
+		if (!userStore.isLoggedIn) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		ensureReviewAccess()
+	})
+
 	const goBack = () => {
 		uni.navigateBack()
 	}

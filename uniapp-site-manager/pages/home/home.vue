@@ -102,55 +102,55 @@
 				<!-- 实际内容 -->
 				<template v-else>
 					<!-- 所有角色都能进行现场检查 -->
-					<view class="action-item u-pressable" @click="goToNewInspection">
+						<view class="action-item u-pressable" v-if="canOpenInspection" @click="goToNewInspection">
 						<view class="action-icon">📷</view>
 						<text class="action-label">{{ $t('inspection.title') }}</text>
 					</view>
 					
 					<!-- 所有角色都能查看站点列表 -->
-					<view class="action-item u-pressable" @click="goToSiteList">
+						<view class="action-item u-pressable" v-if="canOpenSites" @click="goToSiteList">
 						<view class="action-icon">📋</view>
 						<text class="action-label">{{ $t('site.list') }}</text>
 					</view>
 					
 					<!-- 我的设备 - 管理员/经理/检查员可用，勘察员不可用 -->
-					<view class="action-item u-pressable" v-if="!isSurveyor" @click="goToScanPickup">
+						<view class="action-item u-pressable" v-if="canOpenScanPickup" @click="goToScanPickup">
 						<view class="action-icon">📦</view>
 						<text class="action-label">{{ $t('stock.scanPickup') }}</text>
 					</view>
 
 					<!-- 物料申请（新流程） - 勘察员不可用 -->
-					<view class="action-item u-pressable" v-if="!isSurveyor" @click="goToMaterialRequests">
+						<view class="action-item u-pressable" v-if="canOpenMaterialRequests" @click="goToMaterialRequests">
 						<view class="action-icon">🧾</view>
 						<text class="action-label">{{ $t('stock.materialRequestEntry') }}</text>
 					</view>
 
 					<!-- 物料审批 - 仓库角色 -->
-					<view class="action-item u-pressable" v-if="isWarehouseSide" @click="goToMaterialApprovalList">
+						<view class="action-item u-pressable" v-if="canOpenMaterialApproval" @click="goToMaterialApprovalList">
 						<view class="action-icon">✅</view>
 						<text class="action-label">{{ $t('stock.materialApprovalEntry') }}</text>
 					</view>
 
 					<!-- 出库确认 - 仓库角色 -->
-					<view class="action-item u-pressable" v-if="isWarehouseSide" @click="goToIssueConfirmList">
+						<view class="action-item u-pressable" v-if="canOpenIssueConfirm" @click="goToIssueConfirmList">
 						<view class="action-icon">📤</view>
 						<text class="action-label">{{ $t('stock.issueConfirmEntry') }}</text>
 					</view>
 
 					<!-- 退库申请（新流程） - 勘察员不可用 -->
-					<view class="action-item u-pressable" v-if="!isSurveyor" @click="goToReturnRequests">
+						<view class="action-item u-pressable" v-if="canOpenReturnRequests" @click="goToReturnRequests">
 						<view class="action-icon">↩️</view>
 						<text class="action-label">{{ $t('stock.returnEntry') }}</text>
 					</view>
 
 					<!-- 快速出库（无申请） - 仅管理员/经理 -->
-					<view class="action-item u-pressable" v-if="isAdmin || isManager" @click="goToManualStockOut">
+						<view class="action-item u-pressable" v-if="canOpenManualStockOut" @click="goToManualStockOut">
 						<view class="action-icon">🚚</view>
 						<text class="action-label">{{ $t('stock.manualStockOutTitle') }}</text>
 					</view>
 					
 					<!-- 公共功能 -->
-					<view class="action-item u-pressable" @click="goToMap">
+						<view class="action-item u-pressable" v-if="canOpenMap" @click="goToMap">
 						<view class="action-icon">🗺️</view>
 						<text class="action-label">{{ $t('site.location') }}</text>
 					</view>
@@ -162,7 +162,7 @@
 		<view class="recent-activities">
 			<view class="section-header">
 				<text class="section-title">{{ $t('home.recentActivities') }}</text>
-				<text class="see-all" @click="goToWorkOrders">{{ $t('common.viewAll') }}</text>
+					<text v-if="canOpenWorkOrders" class="see-all" @click="goToWorkOrders">{{ $t('common.viewAll') }}</text>
 			</view>
 			
 			<view class="activity-list">
@@ -229,10 +229,11 @@
 	import { useWorkOrderStore } from '@/stores/workorder'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
-	import { useUpgradeStore } from '@/stores/upgrade'
-	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
-	import { formatTimeAgo } from '@/utils/time.js'
-	import SkeletonCard from '@/components/SkeletonCard.vue'
+		import { useUpgradeStore } from '@/stores/upgrade'
+		import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+		import { formatTimeAgo } from '@/utils/time.js'
+		import { guardFeatureAccess, resolvePermissionDeniedMessage } from '@/utils/feature-access.js'
+		import SkeletonCard from '@/components/SkeletonCard.vue'
 	import EmptyState from '@/components/EmptyState.vue'
 	import UpdateDialog from '@/components/UpdateDialog.vue'
 	
@@ -275,20 +276,26 @@
 	const refreshing = ref(false)
 	const isLoading = ref(true)
 	
-	
-	// 权限控制计算属性
-	const userRole = computed(() => {
-		if (!userStore || !userStore.userInfo) return 'user'
-		return userStore.userInfo.role || 'user'
-	})
-	const isAdmin = computed(() => userRole.value === 'admin')
-	const isManager = computed(() => userRole.value === 'manager')
-	const isWarehouseManager = computed(() => userRole.value === 'warehouse_manager')
-	const isInspector = computed(() => userRole.value === 'inspector')
-	const isSurveyor = computed(() => userRole.value === 'surveyor')
-	const isWarehouseSide = computed(() => isAdmin.value || isManager.value || isWarehouseManager.value)
-	const canViewStats = computed(() => isAdmin.value || isManager.value)
-// 报告占位入口已移除
+		// 功能权限改为权限码优先；inspection/surveyor 这类数据范围语义继续保留角色判断
+		const isInspector = computed(() => userStore.isInspector)
+		const isSurveyor = computed(() => userStore.isSurveyor)
+		const canViewStats = computed(() => userStore.can('site_stats'))
+		const canOpenInspection = computed(() => userStore.can('inspection_create'))
+		const canOpenSites = computed(() => userStore.can('sites'))
+		const canOpenWorkOrders = computed(() => userStore.can('workorders'))
+		const canOpenMap = computed(() => userStore.can('map_view'))
+		const canOpenScanPickup = computed(() => userStore.can('scan_pickup'))
+		const canOpenMaterialRequests = computed(() => userStore.can('material_request'))
+		const canOpenMaterialApproval = computed(() => userStore.can('material_approval'))
+		const canOpenIssueConfirm = computed(() => userStore.can('issue_confirm'))
+		const canOpenReturnRequests = computed(() => userStore.can('return_request'))
+		const canOpenManualStockOut = computed(() => userStore.can('manual_stock_out'))
+		const ensureHomeAccess = () => guardFeatureAccess({
+			userStore,
+			feature: 'home',
+			deniedMessage: resolvePermissionDeniedMessage(userStore, t),
+			redirectUrl: '/pages/profile/profile',
+		})
 	
 	// 获取用户头像文字
 	const getAvatarText = () => {
@@ -296,76 +303,72 @@
 		return name.charAt(0).toUpperCase()
 	}
 
-	// 加载数据
-	const loadData = async (showLoading = false) => {
-		if (showLoading) {
-			refreshing.value = true
-		}
-		// 检查登录状态
-		if (!userStore || !userStore.isLoggedIn) {
-			uni.reLaunch({
-				url: '/pages/login/login'
-			})
-			return
-		}
-		
-		try {
-			// 加载工单数据（先加载，用于统计站点）
-			let wos = [] // 定义在外层作用域
-			const woRes = await workOrderStore.getMyWorkOrders()
-			if (woRes.success) {
-				wos = woRes.data || []
-				// 后端返回的状态是大写格式，需要匹配大写
-				// 统计活跃工单：ASSIGNED + ACTIVE + IN_PROGRESS + ACCEPTED
-				workOrderStats.assigned = wos.filter(w =>
-					['ASSIGNED', 'ACTIVE', 'IN_PROGRESS', 'ACCEPTED'].includes(w.status)
-				).length
-				// 待审核工单：SUBMITTED + UNDER_REVIEW
-				workOrderStats.in_progress = wos.filter(w =>
-					['SUBMITTED', 'UNDER_REVIEW'].includes(w.status)
-				).length
-				// 已完成工单：APPROVED + COMPLETED
-				workOrderStats.submitted = wos.filter(w =>
-					['APPROVED', 'COMPLETED', 'ACTIVATED'].includes(w.status)
-				).length
-				recentActivities.value = wos
-					.sort((a, b) => new Date(b.assigned_at) - new Date(a.assigned_at))
-					.slice(0, 5)
-					.map(wo => ({ id: wo.id, created_at: wo.assigned_at, title: `${t('workorder.title')}: ${wo.title}`, type: 'work_order', status: wo.status }))
+		// 加载数据
+		const loadData = async (showLoading = false) => {
+			if (showLoading) {
+				refreshing.value = true
+			}
+			if (!userStore || !userStore.isLoggedIn) {
+				uni.reLaunch({
+					url: '/pages/login/login'
+				})
+				return
+			}
+			if (!ensureHomeAccess()) {
+				if (showLoading) refreshing.value = false
+				return
 			}
 
-			// 加载站点数据（所有角色都可以访问API）
-			const sitesResult = await siteStore.getSites()
-			if (sitesResult.success) {
-				let sites = sitesResult.data
-
-				// inspector和surveyor角色：只统计工单关联的站点
-				if (isInspector.value || isSurveyor.value) {
-					const workOrderSiteIds = new Set(
-						wos.map(wo => wo.site_id).filter(id => id)
-					)
-					sites = sites.filter(site => workOrderSiteIds.has(site.id))
+			try {
+				let wos = []
+				const woRes = await workOrderStore.getMyWorkOrders()
+				if (woRes.success) {
+					wos = woRes.data || []
+					workOrderStats.assigned = wos.filter(w =>
+						['ASSIGNED', 'ACTIVE', 'IN_PROGRESS', 'ACCEPTED'].includes(w.status)
+					).length
+					workOrderStats.in_progress = wos.filter(w =>
+						['SUBMITTED', 'UNDER_REVIEW'].includes(w.status)
+					).length
+					workOrderStats.submitted = wos.filter(w =>
+						['APPROVED', 'COMPLETED', 'ACTIVATED'].includes(w.status)
+					).length
+					recentActivities.value = wos
+						.sort((a, b) => new Date(b.assigned_at) - new Date(a.assigned_at))
+						.slice(0, 5)
+						.map(wo => ({
+							id: wo.id,
+							created_at: wo.assigned_at,
+							title: `${t('workorder.title')}: ${wo.title}`,
+							type: 'work_order',
+							status: wo.status
+						}))
 				}
 
-				siteStats.total = sites.length
+				const sitesResult = await siteStore.getSites()
+				if (sitesResult.success) {
+					let sites = sitesResult.data
+					if (isInspector.value || isSurveyor.value) {
+						const workOrderSiteIds = new Set(wos.map(wo => wo.site_id).filter(id => id))
+						sites = sites.filter(site => workOrderSiteIds.has(site.id))
+					}
 
-				// 站点状态统计（仅admin和manager显示）
-				if (canViewStats.value) {
-					siteStats.operational = sites.filter(s => s.status === 'operational').length
-					siteStats.maintenance = sites.filter(s => s.status === 'maintenance').length
-					siteStats.construction = sites.filter(s => s.status === 'construction').length
+					siteStats.total = sites.length
+					if (canViewStats.value) {
+						siteStats.operational = sites.filter(s => s.status === 'operational').length
+						siteStats.maintenance = sites.filter(s => s.status === 'maintenance').length
+						siteStats.construction = sites.filter(s => s.status === 'construction').length
+					}
+				}
+			} catch (error) {
+				console.error('Load data error:', error)
+			} finally {
+				isLoading.value = false
+				if (showLoading) {
+					refreshing.value = false
 				}
 			}
-
-		} catch (error) {
-		console.error('Load data error:', error)
-	} finally {
-		isLoading.value = false
-		if (showLoading) {
-			refreshing.value = false
 		}
-	}
-}
 	
 	// 下拉刷新处理
 	const handleRefresh = async () => {
@@ -502,25 +505,20 @@
 		}
 	}
 	
-	onMounted(async () => {
-		// 确保用户store已初始化
-		if (!userStore) {
-			console.error('UserStore not initialized')
-			return
-		}
-		
-		// 检查登录状态，如果没有登录信息则先检查本地存储
-		if (!userStore.userInfo) {
-			userStore.checkLoginStatus()
-		}
-		
-		// 延迟一下确保store状态更新
-		setTimeout(() => {
-			loadData()
-		}, 100)
-		
-		// 版本检测由App.vue全局触发，这里通过watch监听upgradeStore.shouldShowDialog自动响应
-	})
+		onMounted(async () => {
+			if (!userStore) {
+				console.error('UserStore not initialized')
+				return
+			}
+
+			if (!userStore.userInfo) {
+				userStore.checkLoginStatus()
+			}
+
+			setTimeout(() => {
+				loadData()
+			}, 100)
+		})
 	
 	// 更新安装完成处理
 	const handleUpdateInstalled = () => {
@@ -535,11 +533,13 @@
 		upgradeStore.hideDialog()  // 同步清除全局状态
 	}
 	
-	// 页面显示时刷新数据
-	onShow(() => {
-		console.log('📱 首页显示，刷新数据')
-		loadData()
-	})
+		// 页面显示时刷新数据
+		onShow(() => {
+			if (!userStore.isLoggedIn) return
+			if (!ensureHomeAccess()) return
+			console.log('📱 首页显示，刷新数据')
+			loadData()
+		})
 </script>
 
 <style lang="scss" scoped>

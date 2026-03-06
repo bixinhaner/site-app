@@ -166,6 +166,7 @@
 	import { onLoad } from '@dcloudio/uni-app'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
@@ -203,6 +204,13 @@
 	const bindModalMessage = ref('')
 	const bindModalBindings = ref([])
 	const unbindSubmitting = ref(false)
+
+	const ensureReturnAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/stock/returns/create',
+		t: $t,
+		redirectUrl: '/pages/home/home',
+	})
 
 	const onWarehouseChange = (e) => {
 		warehouseIndex.value = Number(e.detail.value || 0)
@@ -683,6 +691,7 @@
 	}
 
 	onMounted(async () => {
+		if (!ensureReturnAccess()) return
 		await loadWarehouses()
 		await loadActualCandidates()
 		await tryPreselectSn()

@@ -33,48 +33,45 @@
 	import { ref, computed, onMounted, getCurrentInstance, watch } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { useWorkOrderStore } from '@/stores/workorder'
-	
+		
 	const userStore = useUserStore()
 	const workOrderStore = useWorkOrderStore()
 	const currentPath = ref('')
-
-  const ALL_ROLES = ['admin', 'manager', 'inspector', 'surveyor', 'user']
   const ACTIVE_COLOR = 'var(--color-primary)'
   const INACTIVE_COLOR = '#9ca3af'
 
 	// 所有标签页配置（使用图标名称，而非图片文件）
-	const allTabs = [
-		{
-			pagePath: 'pages/home/home',
-			icon: 'home',
-			text: 'navigation.home',
-			roles: ALL_ROLES
-		},
-		{
-			pagePath: 'pages/site/list',
-			icon: 'site',
-			text: 'navigation.sites',
-			roles: ALL_ROLES
-		},
-		{
-			pagePath: 'pages/workorder/list',
-			icon: 'workorder',
-			text: 'navigation.workorders',
-			roles: ALL_ROLES
-		},
-		{
-			pagePath: 'pages/profile/profile',
-			icon: 'profile',
-			text: 'navigation.profile',
-			roles: ALL_ROLES
-		}
-	]
+		const allTabs = [
+			{
+				pagePath: 'pages/home/home',
+				icon: 'home',
+				text: 'navigation.home',
+				feature: 'home',
+			},
+			{
+				pagePath: 'pages/site/list',
+				icon: 'site',
+				text: 'navigation.sites',
+				feature: 'sites',
+			},
+			{
+				pagePath: 'pages/workorder/list',
+				icon: 'workorder',
+				text: 'navigation.workorders',
+				feature: 'workorders',
+			},
+			{
+				pagePath: 'pages/profile/profile',
+				icon: 'profile',
+				text: 'navigation.profile',
+				feature: 'profile',
+			}
+		]
 
-	// 根据用户角色筛选可见标签页
-	const visibleTabs = computed(() => {
-		const userRole = userStore.userInfo?.role || 'user'
-		return allTabs.filter(tab => tab.roles.includes(userRole))
-	})
+		// 根据权限筛选可见标签页
+		const visibleTabs = computed(() => {
+			return allTabs.filter(tab => !tab.feature || userStore.can(tab.feature))
+		})
 
   // 将图标名称映射为 uni-icons 的 type
   const getIconType = (name) => {

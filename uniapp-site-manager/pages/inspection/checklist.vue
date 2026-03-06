@@ -731,6 +731,7 @@
 	import { createPhotoCacheContext, ensurePhotoCached, saveLocalPhotoToCache, removeCachedPhoto } from '@/utils/photoCache.js'
 	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { validateField, validateAllFields } from '@/utils/field-validator.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import { 
 		processFieldDependencies, 
@@ -750,6 +751,12 @@
 			const _ = languageStore.currentLocale
 			return $t(key, params)
 		}
+		const ensureChecklistAccess = () => guardRouteAccess({
+			userStore,
+			route: 'pages/inspection/checklist',
+			t,
+			redirectUrl: '/pages/workorder/list',
+		})
 
 		const normalizeLocale = (value) => {
 			const s = String(value || '').trim().toLowerCase().replace('_', '-')
@@ -1217,11 +1224,16 @@
 			}
 		}
 		
-		// 生命周期
-		onLoad((options) => {
-			console.log('Checklist页面加载，参数:', options)
-			if (options.inspectionId) {
-			inspectionId.value = options.inspectionId
+			// 生命周期
+			onLoad((options) => {
+				if (!userStore.isLoggedIn) {
+					uni.reLaunch({ url: '/pages/login/login' })
+					return
+				}
+				if (!ensureChecklistAccess()) return
+				console.log('Checklist页面加载，参数:', options)
+				if (options.inspectionId) {
+				inspectionId.value = options.inspectionId
 			console.log('开始加载检查数据，inspectionId:', options.inspectionId)
 			loadInspectionData()
 		} else {
@@ -1237,6 +1249,7 @@
 	
 	// 方法
 	const loadInspectionData = async () => {
+		if (!ensureChecklistAccess()) return
 		console.log('🚀 loadInspectionData函数开始执行')
 		try {
 			// 加载检查数据

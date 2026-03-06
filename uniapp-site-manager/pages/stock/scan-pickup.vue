@@ -538,6 +538,7 @@
 	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { getCurrentInstance, watch, onMounted } from 'vue'
@@ -718,18 +719,8 @@ export default {
     }
 	  },
   
-  onLoad() {
-    // 权限检查：勘察员不能访问我的设备功能
-    if (this.userStore.userInfo?.role === 'surveyor') {
-      uni.showToast({
-        title: this.$t('stock.surveyorNoPermission'),
-        icon: 'none'
-      })
-      setTimeout(() => {
-        uni.navigateBack()
-      }, 1500)
-      return
-    }
+	  onLoad() {
+	    if (!this.ensureScanPickupAccess()) return
 
     this.loadWarehouses()
     this.loadIssuedItems()
@@ -743,6 +734,15 @@ export default {
   },
   
   methods: {
+    ensureScanPickupAccess() {
+      return guardRouteAccess({
+        userStore: this.userStore,
+        route: 'pages/stock/scan-pickup',
+        t: this.$t,
+        redirectUrl: '/pages/home/home',
+      })
+    },
+
     buildParsedBarcodeForBackend(barcode) {
       const raw = String(barcode || '').trim()
       if (!raw) return null

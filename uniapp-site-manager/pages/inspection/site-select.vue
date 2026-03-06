@@ -173,6 +173,7 @@
 	import { useInspectionStore } from '@/stores/inspection'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
+	import { guardFeatureAccess, resolvePermissionDeniedMessage } from '@/utils/feature-access.js'
 	import { getLocationWithAddressStrategy } from '@/utils/locationStrategy.js'
 	
 	const siteStore = useSiteStore()
@@ -184,6 +185,12 @@
 		const _ = languageStore.currentLocale
 		return $t(key, params)
 	}
+	const ensureInspectionCreateAccess = () => guardFeatureAccess({
+		userStore,
+		feature: 'inspection_create',
+		deniedMessage: resolvePermissionDeniedMessage(userStore, t),
+		redirectUrl: '/pages/home/home',
+	})
 	
 	// 页面参数
 	const inspectionType = ref('opening')
@@ -263,12 +270,18 @@
 		if (options.type) {
 			inspectionType.value = options.type
 		}
+		if (!userStore.isLoggedIn) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		if (!ensureInspectionCreateAccess()) return
 		loadSites()
 		getCurrentLocation()
 	})
 	
 	// 方法
 	const loadSites = async (reset = false) => {
+		if (!ensureInspectionCreateAccess()) return
 		try {
 			loading.value = true
 			

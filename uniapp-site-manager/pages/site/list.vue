@@ -147,6 +147,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { useUpgradeStore } from '@/stores/upgrade'
 	import { createDebouncedTracker } from '@/utils/operationTrack.js'
+	import { guardFeatureAccess, resolvePermissionDeniedMessage } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 	import EmptyState from '@/components/EmptyState.vue'
@@ -277,11 +278,13 @@
 		return sites
 	})
 	
-	// 是否可以添加站点（只有管理员和经理可以）
-	const canAddSite = computed(() => {
-		const role = userStore.userInfo?.role
-		return role === 'admin' || role === 'manager'
-	})
+		const canAddSite = computed(() => userStore.hasPermission('sites:create:write'))
+		const ensureSitesAccess = () => guardFeatureAccess({
+			userStore,
+			feature: 'sites',
+			deniedMessage: resolvePermissionDeniedMessage(userStore, $t),
+			redirectUrl: '/pages/home/home',
+		})
 
 	// 实时搜索（防抖处理）
 	const onSearchInput = () => {
@@ -396,17 +399,21 @@
 	}
 	
 	// 加载数据
-	const loadData = async (showLoading = false) => {
-		if (showLoading) {
-			refreshing.value = true
-		}
+		const loadData = async (showLoading = false) => {
+			if (showLoading) {
+				refreshing.value = true
+			}
 
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({
-				url: '/pages/login/login'
-			})
-			return
-		}
+			if (!userStore.isLoggedIn) {
+				uni.reLaunch({
+					url: '/pages/login/login'
+				})
+				return
+			}
+			if (!ensureSitesAccess()) {
+				if (showLoading) refreshing.value = false
+				return
+			}
 
 		try {
 			const userRole = userStore.userInfo?.role
@@ -451,13 +458,13 @@
 		trackSearch()
 	})
 	
-	onMounted(() => {
-		// 动态设置页面标题
-		uni.setNavigationBarTitle({
-			title: $t('site.list')
+		onMounted(() => {
+			// 动态设置页面标题
+			uni.setNavigationBarTitle({
+				title: $t('site.list')
+			})
+			loadData()
 		})
-		loadData()
-	})
 </script>
 
 <style lang="scss" scoped>

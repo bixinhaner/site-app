@@ -164,7 +164,7 @@
 					</view>
 				</view>
 				
-				<view class="menu-item" @click="showSettings" v-if="isAdmin">
+					<view class="menu-item" @click="showSettings" v-if="canOpenSettings">
 					<view class="menu-left">
 						<uni-icons class="menu-icon" type="settings" size="18" color="#6b7280" />
 						<text class="menu-text">{{ $t('profile.settings') }}</text>
@@ -193,7 +193,7 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="goToLoggingTest" v-if="isAdmin">
+					<view class="menu-item" @click="goToLoggingTest" v-if="canOpenDevtools">
 					<view class="menu-left">
 						<uni-icons class="menu-icon" type="search" size="18" color="#6b7280" />
 						<text class="menu-text">{{ t('profile.loggingTest') }}</text>
@@ -201,7 +201,7 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="goToLocationPluginTest" v-if="isAdmin">
+					<view class="menu-item" @click="goToLocationPluginTest" v-if="canOpenDevtools">
 					<view class="menu-left">
 						<uni-icons class="menu-icon" type="map-pin-ellipse" size="18" color="#6b7280" />
 						<text class="menu-text">{{ t('profile.locationPluginTest') }}</text>
@@ -209,7 +209,7 @@
 					<text class="menu-arrow">›</text>
 				</view>
 				
-				<view class="menu-item" @click="goToBuiltinLocationTest" v-if="isAdmin">
+					<view class="menu-item" @click="goToBuiltinLocationTest" v-if="canOpenDevtools">
 					<view class="menu-left">
 						<uni-icons class="menu-icon" type="map" size="18" color="#6b7280" />
 						<text class="menu-text">{{ t('profile.builtinLocationTest') }}</text>
@@ -291,6 +291,7 @@
 	import { useUpgradeStore } from '@/stores/upgrade'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { env, getVersion } from '@/config/env.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import UpdateDialog from '@/components/UpdateDialog.vue'
 	
 	const userStore = useUserStore()
@@ -299,6 +300,12 @@
 	
 	const instance = getCurrentInstance()
 	const $t = instance.appContext.config.globalProperties.$t
+	const ensureProfileAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/profile/profile',
+		t: $t,
+		redirectUrl: '/pages/home/home',
+	})
 	
 	// 版本号（从manifest.json动态获取）
 	const appVersion = ref(env.APP_VERSION)
@@ -394,14 +401,9 @@
 	const passwordSaving = ref(false)
 	
 const userInfo = computed(() => userStore.userInfo)
-const isAdmin = computed(() => userStore.isAdmin)
-	
-	// 权限控制
-	const canViewSites = computed(() => {
-		const role = userInfo.value?.role
-		return role === 'admin' || role === 'manager' || role === 'inspector'
-	})
-	
+const canOpenSettings = computed(() => userStore.can('settings'))
+const canOpenDevtools = computed(() => userStore.can('devtools'))
+		
 	// 获取头像文字
 	const getAvatarText = () => {
 		const name = userInfo.value?.full_name || userInfo.value?.username || ''
@@ -762,6 +764,11 @@ const isAdmin = computed(() => userStore.isAdmin)
 	})
 	
 	onMounted(() => {
+		if (!userStore.isLoggedIn) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		if (!ensureProfileAccess()) return
 		// 动态设置页面标题
 		uni.setNavigationBarTitle({
 			title: $t('profile.title')

@@ -190,6 +190,7 @@ export default {
 	import { watermarkTool } from '@/utils/watermark.js'
 	import { watermarkConfig, securityUtils } from '@/config/watermark.js'
 	import { getLocationMode, getLocationWithAddressStrategy, getPhotoWatermarkEffective } from '@/utils/locationStrategy.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	
 	const userStore = useUserStore()
 	const inspectionStore = useInspectionStore()
@@ -201,6 +202,12 @@ export default {
 		const _ = languageStore.currentLocale
 		return $t(key, params)
 	}
+	const ensureCameraAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/inspection/camera',
+		t,
+		redirectUrl: '/pages/workorder/list',
+	})
 
 	const normalizeLocale = (value) => {
 		const s = String(value || '').trim().toLowerCase().replace('_', '-')
@@ -319,6 +326,11 @@ export default {
 	
 	// 处理URL参数的函数
 	const setupOnLoad = (options) => {
+		if (!userStore.isLoggedIn) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		if (!ensureCameraAccess()) return
 		console.log('Camera页面setup接收参数:', options)
 		
 		// 更新URL参数
@@ -341,6 +353,7 @@ export default {
 	
 	// Vue生命周期
 	onMounted(() => {
+		if (!ensureCameraAccess()) return
 		initCamera()
 		loadCheckItemInfo()
 		startGpsWatch()
@@ -373,6 +386,7 @@ export default {
 	}
 	
 	const loadCheckItemInfo = async () => {
+		if (!ensureCameraAccess()) return
 		try {
 			const inspectionId = urlParams.value.inspectionId || props.inspectionId
 			const checkItemId = urlParams.value.checkItemId || props.checkItemId

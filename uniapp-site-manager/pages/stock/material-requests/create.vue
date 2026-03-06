@@ -208,6 +208,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 
 	const userStore = useUserStore()
@@ -302,18 +303,12 @@
 		})
 	}
 
-	const ensureLoggedIn = () => {
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({ url: '/pages/login/login' })
-			return false
-		}
-		if (userStore.isSurveyor) {
-			uni.showToast({ title: $t('stock.surveyorNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 600)
-			return false
-		}
-		return true
-	}
+	const ensureLoggedIn = () => guardRouteAccess({
+		userStore,
+		route: 'pages/stock/material-requests/create',
+		t: $t,
+		redirectUrl: '/pages/home/home',
+	})
 
 	const loadWarehouses = async () => {
 		const res = await uni.request({

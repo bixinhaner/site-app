@@ -158,6 +158,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 
 	const MAX_DOC_PREVIEW = 8
 
@@ -361,8 +362,16 @@
 		})
 	}
 
-	const load = async (reset = true) => {
-		if (!userStore.token) return
+		const ensureReturnAccess = () => guardRouteAccess({
+			userStore,
+			route: 'pages/stock/returns/list',
+			t: $t,
+			redirectUrl: '/pages/home/home',
+		})
+
+		const load = async (reset = true) => {
+			if (!ensureReturnAccess()) return
+			if (!userStore.token) return
 		if (reset) {
 			page.value = 1
 			records.value = []
@@ -443,9 +452,10 @@
 		})
 	}
 
-	const goCreate = () => {
-		uni.navigateTo({ url: '/pages/stock/returns/create' })
-	}
+		const goCreate = () => {
+			if (!ensureReturnAccess()) return
+			uni.navigateTo({ url: '/pages/stock/returns/create' })
+		}
 
 	onShow(async () => {
 		await load(true)

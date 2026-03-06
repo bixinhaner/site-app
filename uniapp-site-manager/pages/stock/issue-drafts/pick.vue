@@ -175,6 +175,7 @@
 		import { useLanguageStore } from '@/stores/language'
 		import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 		import { parseBarcode } from '@/utils/barcode-parser.js'
+		import { guardRouteAccess } from '@/utils/feature-access.js'
 		import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 		import { formatDateTime } from '@/utils/time.js'
 		import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
@@ -266,18 +267,12 @@
 		return 'u-tag-info'
 	}
 
-	const ensureLoggedIn = () => {
-		if (!userStore.isLoggedIn) {
-			uni.reLaunch({ url: '/pages/login/login' })
-			return false
-		}
-		if (userStore.isSurveyor) {
-			uni.showToast({ title: $t('stock.surveyorNoPermission'), icon: 'none' })
-			setTimeout(() => uni.navigateBack(), 600)
-			return false
-		}
-		return true
-	}
+	const ensureLoggedIn = () => guardRouteAccess({
+		userStore,
+		route: 'pages/stock/issue-drafts/pick',
+		t: $t,
+		redirectUrl: '/pages/home/home',
+	})
 
 	const load = async () => {
 		if (!ensureLoggedIn()) return

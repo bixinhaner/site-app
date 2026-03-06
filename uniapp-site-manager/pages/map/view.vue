@@ -55,8 +55,11 @@
 <script setup>
 	import { ref, computed, getCurrentInstance } from 'vue'
 	import { onLoad } from '@dcloudio/uni-app'
+	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
+	import { guardRouteAccess } from '@/utils/feature-access.js'
 
+	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	const t = (key, params = {}) => {
@@ -64,6 +67,12 @@
 		const _ = languageStore.currentLocale
 		return $t(key, params)
 	}
+	const ensureMapAccess = () => guardRouteAccess({
+		userStore,
+		route: 'pages/map/view',
+		t,
+		redirectUrl: '/pages/home/home',
+	})
 	
 	// 页面参数
 	const latitude = ref(0)
@@ -127,6 +136,11 @@
 	
 	// 页面加载
 	onLoad((options) => {
+		if (!userStore.isLoggedIn) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		if (!ensureMapAccess()) return
 		console.log('地图页面参数:', options)
 		
 		if (options.latitude && options.longitude) {
