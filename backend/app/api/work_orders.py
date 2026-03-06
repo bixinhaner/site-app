@@ -59,7 +59,12 @@ from app.services.omc_monitor import (
     advance_replacement_work_orders_by_ever,
 )
 from app.services.omc_client import get_omc_manual_confirm_enabled
-from app.services.omc_state import get_bound_sns_for_site, upsert_omc_device_state
+from app.services.omc_state import (
+    get_bound_sns_for_site,
+    summarize_site_omc_state,
+    upsert_omc_device_state,
+)
+from app.services.work_order_rule_service import get_ssv_create_by_ever_activated_only
 from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 
@@ -71,6 +76,14 @@ VOIDABLE_WORK_ORDER_STATUSES = (
     WorkOrderStatusEnum.SUBMITTED,
     WorkOrderStatusEnum.UNDER_REVIEW,
     WorkOrderStatusEnum.REJECTED,
+)
+SSV_IN_PROGRESS_STATUSES = (
+    WorkOrderStatusEnum.PENDING,
+    WorkOrderStatusEnum.ACTIVE,
+    WorkOrderStatusEnum.SUBMITTED,
+    WorkOrderStatusEnum.UNDER_REVIEW,
+    WorkOrderStatusEnum.APPROVED,
+    WorkOrderStatusEnum.ACTIVATED,
 )
 
 
@@ -97,6 +110,27 @@ def _ensure_access(
     if _has_access(user, role_codes=role_codes, permission_codes=permission_codes):
         return
     raise HTTPException(status_code=403, detail=detail)
+
+
+def _validate_ssv_create_rule(db: Session, site: Site) -> None:
+    if get_ssv_create_by_ever_activated_only(db):
+        omc_summary = summarize_site_omc_state(db, site.id)
+        if not bool(omc_summary.get("all_ever_activated")):
+            raise HTTPException(status_code=409, detail="站点设备未全部 ever 激活，不能创建 SSV 工单")
+        return
+
+    if site.status != "operational":
+        raise HTTPException(status_code=409, detail="站点尚未运营，不能创建 SSV 工单")
+
+
+def _ensure_no_in_progress_ssv_work_order(db: Session, site_id: int) -> None:
+    existing_ssv = db.query(WorkOrder).filter(
+        WorkOrder.site_id == site_id,
+        WorkOrder.type == WorkOrderTypeEnum.SSV,
+        WorkOrder.status.in_(SSV_IN_PROGRESS_STATUSES),
+    ).first()
+    if existing_ssv:
+        raise HTTPException(status_code=409, detail="该站点已有进行中的 SSV 工单")
 
 
 # 站点状态自动更新辅助函数
@@ -866,25 +900,6 @@ async def create_work_order(
                 ),
             )
 
-    # SSV 工单创建规则校验：站点必须 operational，且同站点仅一条进行中
-    if data.type == WorkOrderTypeEnum.SSV:
-        if site.status != "operational":
-            raise HTTPException(status_code=409, detail="站点尚未运营，不能创建 SSV 工单")
-        existing_ssv = db.query(WorkOrder).filter(
-            WorkOrder.site_id == data.site_id,
-            WorkOrder.type == WorkOrderTypeEnum.SSV,
-            WorkOrder.status.in_([
-                WorkOrderStatusEnum.PENDING,
-                WorkOrderStatusEnum.ACTIVE,
-                WorkOrderStatusEnum.SUBMITTED,
-                WorkOrderStatusEnum.UNDER_REVIEW,
-                WorkOrderStatusEnum.APPROVED,
-                WorkOrderStatusEnum.ACTIVATED,
-            ])
-        ).first()
-        if existing_ssv:
-            raise HTTPException(status_code=409, detail="该站点已有进行中的 SSV 工单")
-
     # 开站工单创建规则（去重）：
     # - 同一站点仅允许存在一条“进行中的”开站工单
     # - 若仅存在历史开站工单（已完成/已驳回），则允许前端二次确认后继续创建
@@ -961,25 +976,9 @@ async def create_work_order(
                     }
                 )
 
-    # SSV 工单创建规则校验：站点需为 operational，且同一站点同时间只允许一条进行中的 SSV 工单
     if data.type == WorkOrderTypeEnum.SSV:
-        if site.status != "operational":
-            raise HTTPException(status_code=409, detail="站点尚未运营，不能创建 SSV 工单")
-        in_progress_statuses = [
-            WorkOrderStatusEnum.PENDING,
-            WorkOrderStatusEnum.ACTIVE,
-            WorkOrderStatusEnum.SUBMITTED,
-            WorkOrderStatusEnum.UNDER_REVIEW,
-            WorkOrderStatusEnum.APPROVED,
-            WorkOrderStatusEnum.ACTIVATED,
-        ]
-        existing_ssv = db.query(WorkOrder).filter(
-            WorkOrder.site_id == data.site_id,
-            WorkOrder.type == WorkOrderTypeEnum.SSV,
-            WorkOrder.status.in_(in_progress_statuses)
-        ).first()
-        if existing_ssv:
-            raise HTTPException(status_code=409, detail="该站点已有进行中的 SSV 工单")
+        _validate_ssv_create_rule(db, site)
+        _ensure_no_in_progress_ssv_work_order(db, data.site_id)
 
     # 分配/审核人：设备更换工单允许执行人自发起，但派单人/审核人应尽量沿用站点负责人（site.assigned_to）
     assigned_by_id = current_user.id

@@ -1002,15 +1002,7 @@ const submitCreate = () => {
       return
     }
     try {
-      // SSV 仅支持运营中的站点
-      if (createForm.value.type === 'ssv') {
-        const s = siteOptions.value.find(x => x.id === createForm.value.site_id)
-        if (s && s.status !== 'operational') {
-          ElMessage.error('SSV 工单仅支持运营中的站点')
-          creating.value = false
-          return
-        }
-      }
+      // SSV 创建规则支持后台开关切换，统一以后端校验结果为准。
       const payload = { ...createForm.value }
       if (payload.type === 'equipment_replacement') {
         const keys = Array.isArray(payload.replacement_targets) ? payload.replacement_targets : []

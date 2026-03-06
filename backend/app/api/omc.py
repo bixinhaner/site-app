@@ -24,6 +24,10 @@ from app.services.omc_client import (
 )
 from app.services.omc_state import upsert_omc_device_state
 from app.services.omc_monitor import advance_opening_work_orders_by_ever
+from app.services.work_order_rule_service import (
+  get_ssv_create_by_ever_activated_only,
+  upsert_work_order_rules,
+)
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -35,6 +39,7 @@ class OmcConfigPayload(BaseModel):
   password: Optional[str] = None
   timeout_seconds: Optional[int] = 10
   manual_confirm_enabled: Optional[bool] = False
+  ssv_create_by_ever_activated_only: Optional[bool] = None
 
 
 class OmcConfigResponse(BaseModel):
@@ -42,6 +47,7 @@ class OmcConfigResponse(BaseModel):
   username: Optional[str] = None
   timeout_seconds: int = 10
   manual_confirm_enabled: bool = False
+  ssv_create_by_ever_activated_only: bool = False
 
 
 class OmcTestResponse(BaseModel):
@@ -91,14 +97,18 @@ def _ensure_admin(user: User) -> None:
 
 def _load_omc_config(db: Session) -> OmcConfigResponse:
   row = db.query(SystemConfig).filter(SystemConfig.key == "omc_api").first()
+  ssv_create_by_ever_activated_only = get_ssv_create_by_ever_activated_only(db)
   if not row or not row.value:
-    return OmcConfigResponse()
+    return OmcConfigResponse(
+      ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
+    )
   data = row.value or {}
   return OmcConfigResponse(
     base_url=data.get("base_url"),
     username=data.get("username"),
     timeout_seconds=int(data.get("timeout_seconds") or 10),
     manual_confirm_enabled=bool(data.get("manual_confirm_enabled") or False),
+    ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
   )
 
 
@@ -134,6 +144,11 @@ async def update_omc_config(
   new_password = (payload.password or "").strip()
   timeout = payload.timeout_seconds or 10
   manual_confirm_enabled = bool(payload.manual_confirm_enabled or False)
+  ssv_create_by_ever_activated_only = (
+    get_ssv_create_by_ever_activated_only(db)
+    if payload.ssv_create_by_ever_activated_only is None
+    else bool(payload.ssv_create_by_ever_activated_only)
+  )
 
   row = db.query(SystemConfig).filter(SystemConfig.key == "omc_api").first()
   if not row:
@@ -159,6 +174,10 @@ async def update_omc_config(
     # JSON 字段需要显式标记已修改，SQLAlchemy 才会持久化变更
     flag_modified(row, "value")
 
+  upsert_work_order_rules(
+    db,
+    {"ssv_create_by_ever_activated_only": ssv_create_by_ever_activated_only},
+  )
   db.commit()
 
   return OmcConfigResponse(
@@ -166,6 +185,7 @@ async def update_omc_config(
     username=username,
     timeout_seconds=timeout,
     manual_confirm_enabled=manual_confirm_enabled,
+    ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
   )
 
 

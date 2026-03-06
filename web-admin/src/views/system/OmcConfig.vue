@@ -64,6 +64,25 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-card v-loading="loading" class="mt16">
+      <template #header>SSV 创建规则</template>
+      <el-form :model="form" label-width="180px" :disabled="!canManageOmc">
+        <el-form-item label="站点设备激活即可创建SSV">
+          <el-switch
+            v-model="form.ssv_create_by_ever_activated_only"
+            active-text="开启"
+            inactive-text="关闭"
+          />
+          <div class="tip">
+            关闭后：沿用旧规则，仅当站点状态为 <code>operational</code> 时允许创建 SSV。
+          </div>
+          <div class="tip">
+            开启后：不再判断站点状态，只要站点设备全部 <code>ever_activated</code> 即允许创建 SSV；包括 <code>maintenance</code> 等非运营中状态。
+          </div>
+        </el-form-item>
+      </el-form>
+    </el-card>
   </div>
 </template>
 
@@ -84,6 +103,7 @@ const form = ref({
   password: '',
   timeout_seconds: 10,
   manual_confirm_enabled: false,
+  ssv_create_by_ever_activated_only: false,
 })
 
 const canManageOmc = computed(() => userStore.hasPermission('system:mobile-settings:write'))
@@ -97,6 +117,7 @@ const loadConfig = async () => {
     form.value.password = ''
     form.value.timeout_seconds = res.timeout_seconds || 10
     form.value.manual_confirm_enabled = !!res.manual_confirm_enabled
+    form.value.ssv_create_by_ever_activated_only = !!res.ssv_create_by_ever_activated_only
   } catch (e) {
     console.error(e)
     ElMessage.error(e?.response?.data?.detail || '加载 OMC 配置失败')
@@ -118,6 +139,7 @@ const save = async () => {
       password: form.value.password || undefined,
       timeout_seconds: form.value.timeout_seconds || 10,
       manual_confirm_enabled: !!form.value.manual_confirm_enabled,
+      ssv_create_by_ever_activated_only: !!form.value.ssv_create_by_ever_activated_only,
     }
     await request.put('/api/omc/config', payload)
     ElMessage.success('保存成功')
@@ -184,6 +206,7 @@ onMounted(() => {
   gap: 12px;
 }
 .mb16 { margin-bottom: 16px; }
+.mt16 { margin-top: 16px; }
 .tip {
   font-size: 12px;
   color: #909399;
