@@ -169,9 +169,25 @@
   <el-dialog v-model="createVisible" title="新建工单" width="560px">
     <el-form :model="createForm" label-width="96px" :rules="rules" ref="formRef">
       <el-form-item label="站点" prop="site_id">
-        <el-select v-model="createForm.site_id" filterable placeholder="选择站点" style="width: 100%" @visible-change="v=> v && loadSites()" @change="onTypeOrSiteChange">
+        <el-select
+          v-model="createForm.site_id"
+          filterable
+          remote
+          clearable
+          default-first-option
+          remote-show-suffix
+          :loading="siteOptionsLoading"
+          :remote-method="handleSiteRemoteSearch"
+          :no-data-text="siteSelectNoDataText"
+          loading-text="正在搜索站点..."
+          placeholder="输入站点名称或编码搜索"
+          style="width: 100%"
+          @visible-change="handleSiteDropdownVisible"
+          @change="handleSiteChange"
+        >
           <el-option v-for="s in siteOptions" :key="s.id" :label="s.site_name + ' ('+ s.site_code +')'" :value="s.id" />
         </el-select>
+        <div class="form-hint">{{ siteSelectHint }}</div>
       </el-form-item>
       <el-form-item label="类型" prop="type">
         <el-select v-model="createForm.type" placeholder="选择类型" style="width: 100%" @change="onTypeOrSiteChange">
@@ -376,7 +392,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
@@ -540,7 +556,14 @@ const createForm = ref({
   // 设备更换工单：多选设备位（用 key 数组承载，提交时转换为 [{sector_id, band}]）
   replacement_targets: [],
 })
+const SITE_SUGGEST_LIMIT = 20
+const SITE_SEARCH_LIMIT = 50
+const SITE_SEARCH_DEBOUNCE_MS = 300
 const siteOptions = ref([])
+const siteOptionsLoading = ref(false)
+const siteSearchKeyword = ref('')
+const siteSearchTotal = ref(0)
+const selectedSiteOption = ref(null)
 const userOptions = ref([])
 const templateOptions = ref([])
 const formRef = ref()
@@ -587,6 +610,69 @@ const rules = {
   replacement_targets: [{ validator: validateReplacementTargets, trigger: 'change' }],
 }
 
+const siteSelectNoDataText = computed(() => {
+  if (siteOptionsLoading.value) return '正在搜索站点...'
+  return siteSearchKeyword.value.trim() ? '未找到匹配站点' : '输入站点名称或编码搜索'
+})
+
+const siteSelectHint = computed(() => {
+  if (siteOptionsLoading.value) return '正在搜索站点，请稍候。'
+
+  const keyword = siteSearchKeyword.value.trim()
+  const visibleCount = siteOptions.value.length
+
+  if (keyword) {
+    if (!visibleCount) return `未找到与“${keyword}”匹配的站点，请尝试站点名称、编码或更短关键词。`
+    if (siteSearchTotal.value > SITE_SEARCH_LIMIT) {
+      return `共匹配 ${siteSearchTotal.value} 个站点，当前显示前 ${visibleCount} 个，请继续缩小关键词。`
+    }
+    return `已找到 ${siteSearchTotal.value || visibleCount} 个匹配站点，可直接选择。`
+  }
+
+  if (!visibleCount) return '打开下拉后默认只显示少量建议结果，输入站点名称或编码可搜索更多。'
+  if (siteSearchTotal.value > SITE_SUGGEST_LIMIT) {
+    return `当前仅展示前 ${visibleCount} 个建议站点，输入名称或编码可搜索全部可见站点。`
+  }
+  return `当前展示 ${visibleCount} 个建议站点，可直接选择或继续搜索。`
+})
+
+const dedupeSites = (sites = []) => {
+  const list = []
+  const seenIds = new Set()
+  for (const site of sites) {
+    if (!site || site.id == null || seenIds.has(site.id)) continue
+    seenIds.add(site.id)
+    list.push(site)
+  }
+  return list
+}
+
+const applySiteOptions = (sites = []) => {
+  const selected = selectedSiteOption.value && selectedSiteOption.value.id === createForm.value.site_id
+    ? selectedSiteOption.value
+    : null
+  siteOptions.value = dedupeSites(selected ? [selected, ...sites] : sites)
+}
+
+let siteSearchTimer = null
+let siteSearchRequestId = 0
+
+const clearSiteSearchTimer = () => {
+  if (!siteSearchTimer) return
+  clearTimeout(siteSearchTimer)
+  siteSearchTimer = null
+}
+
+const resetSiteSearchState = () => {
+  clearSiteSearchTimer()
+  siteSearchRequestId += 1
+  siteOptionsLoading.value = false
+  siteSearchKeyword.value = ''
+  siteSearchTotal.value = 0
+  selectedSiteOption.value = null
+  siteOptions.value = []
+}
+
 const openCreate = () => {
   // reset form
   createForm.value = {
@@ -600,6 +686,7 @@ const openCreate = () => {
     template_id: null,
     replacement_targets: [],
   }
+  resetSiteSearchState()
   templateOptions.value = []
   replacementTargetOptions.value = []
   lastReplacementTargetsSiteId.value = null
@@ -653,16 +740,27 @@ const clearStatusInFilter = () => {
 
 const ensureSiteOption = async (siteId) => {
   if (!siteId) return
-  const exists = siteOptions.value.some(s => s.id === siteId)
-  if (exists) return
+  const existing = siteOptions.value.find(s => s.id === siteId)
+  if (existing) {
+    selectedSiteOption.value = existing
+    applySiteOptions(siteOptions.value)
+    return existing
+  }
+  if (selectedSiteOption.value?.id === siteId) {
+    applySiteOptions(siteOptions.value)
+    return selectedSiteOption.value
+  }
   try {
     const s = await request.get(`/api/sites/${siteId}`)
     if (s && s.id != null) {
-      siteOptions.value.push(s)
+      selectedSiteOption.value = s
+      applySiteOptions(siteOptions.value)
+      return s
     }
   } catch (e) {
     // ignore
   }
+  return null
 }
 
 const openCreateWithPreset = async ({ siteId, type, title } = {}) => {
@@ -717,13 +815,69 @@ const applyCreatePrefillFromRoute = async () => {
   }
 }
 
-const loadSites = async () => {
+const fetchSiteOptions = async ({ keyword = '' } = {}) => {
+  const requestId = ++siteSearchRequestId
+  const normalizedKeyword = String(keyword || '').trim()
+  siteSearchKeyword.value = normalizedKeyword
+  siteOptionsLoading.value = true
+
   try {
-    const res = await request.get('/api/sites/', { params: { limit: 100 } })
-    siteOptions.value = Array.isArray(res) ? res : []
+    const params = {
+      skip: 0,
+      limit: normalizedKeyword ? SITE_SEARCH_LIMIT : SITE_SUGGEST_LIMIT,
+      sort_by: normalizedKeyword ? 'site_code' : 'updated_at',
+      sort_order: normalizedKeyword ? 'asc' : 'desc',
+    }
+    if (normalizedKeyword) params.keyword = normalizedKeyword
+
+    const res = await request.get('/api/sites/search', { params })
+    if (requestId !== siteSearchRequestId) return
+
+    const list = Array.isArray(res?.sites) ? res.sites : []
+    siteSearchTotal.value = typeof res?.total === 'number' ? res.total : list.length
+    applySiteOptions(list)
   } catch (e) {
-    // ignore
+    if (requestId !== siteSearchRequestId) return
+    siteSearchTotal.value = 0
+    applySiteOptions([])
+  } finally {
+    if (requestId === siteSearchRequestId) {
+      siteOptionsLoading.value = false
+    }
   }
+}
+
+const loadSites = async (keyword = '') => {
+  await fetchSiteOptions({ keyword })
+}
+
+const handleSiteRemoteSearch = (query) => {
+  clearSiteSearchTimer()
+  siteSearchTimer = setTimeout(() => {
+    fetchSiteOptions({ keyword: query })
+  }, SITE_SEARCH_DEBOUNCE_MS)
+}
+
+const handleSiteDropdownVisible = async (visible) => {
+  if (!visible) {
+    clearSiteSearchTimer()
+    return
+  }
+
+  if (createForm.value.site_id) {
+    await ensureSiteOption(createForm.value.site_id)
+  }
+  await loadSites()
+}
+
+const handleSiteChange = async (siteId) => {
+  if (siteId) {
+    await ensureSiteOption(siteId)
+  } else {
+    selectedSiteOption.value = null
+    applySiteOptions(siteOptions.value)
+  }
+  await onTypeOrSiteChange()
 }
 
 const loadUsers = async () => {
@@ -802,6 +956,12 @@ const loadReplacementTargets = async () => {
 }
 
 const onTypeOrSiteChange = async () => {
+  if (!createForm.value.site_id) {
+    replacementTargetOptions.value = []
+    createForm.value.replacement_targets = []
+    lastReplacementTargetsSiteId.value = null
+  }
+
   // load candidate templates
   await loadTemplates()
   // try resolve default
@@ -1328,6 +1488,13 @@ watch(statusFilter, (val) => {
   }
 })
 
+watch(createVisible, (visible) => {
+  if (visible) return
+  clearSiteSearchTimer()
+  siteSearchRequestId += 1
+  siteOptionsLoading.value = false
+})
+
 // 动态筛选/排序：变化时回到第 1 页并刷新
 watch([searchKeyword, statusFilter, typeFilter, statusInFilter], () => {
   currentPage.value = 1
@@ -1339,6 +1506,10 @@ watch([sortBy, sortOrder], () => {
   currentPage.value = 1
   trackSearch()
   load()
+})
+
+onBeforeUnmount(() => {
+  clearSiteSearchTimer()
 })
 </script>
 
