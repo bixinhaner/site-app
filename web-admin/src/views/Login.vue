@@ -102,6 +102,7 @@ import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import LocaleSwitcher from '../components/common/LocaleSwitcher.vue'
+import { resolveDefaultAuthenticatedRoute } from '../router/access'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -144,7 +145,8 @@ const handleLogin = async () => {
     
     if (result.success) {
       ElMessage.success(t('login.success'))
-      router.push('/dashboard')
+      const nextRoute = resolveDefaultAuthenticatedRoute(router.options.routes, userStore)
+      router.push(nextRoute || { path: '/dashboard' })
     } else {
       ElMessage.error(result.error || t('login.failed'))
     }

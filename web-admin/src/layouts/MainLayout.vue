@@ -98,7 +98,7 @@
         <!-- 面包屑导航 -->
         <div class="breadcrumb-container">
           <el-breadcrumb separator="/">
-            <el-breadcrumb-item :to="{ name: 'Dashboard' }">{{ t('common.home') }}</el-breadcrumb-item>
+            <el-breadcrumb-item :to="homeRoute">{{ t('common.home') }}</el-breadcrumb-item>
             <el-breadcrumb-item v-if="getRouteTitle(currentRoute)">
               {{ getRouteTitle(currentRoute) }}
             </el-breadcrumb-item>
@@ -124,6 +124,7 @@ import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
 import { containsCJK, resolveRouteTitle } from '../i18n/translator'
 import LocaleSwitcher from '../components/common/LocaleSwitcher.vue'
+import { resolveDefaultAuthenticatedRoute, routeHasAccess } from '../router/access'
 
 const router = useRouter()
 const route = useRoute()
@@ -152,15 +153,7 @@ const displayUserName = computed(() => {
   return fullName || username || t('common.userFallback')
 })
 
-const hasRouteAccess = (r) => {
-  const permissions = r?.meta?.permissions
-  if (Array.isArray(permissions) && permissions.length > 0) {
-    return permissions.some(code => userStore.hasPermission(code))
-  }
-  const roles = r?.meta?.roles
-  if (!roles || !Array.isArray(roles) || roles.length === 0) return true
-  return roles.some(code => userStore.hasRole(code))
-}
+const hasRouteAccess = (r) => routeHasAccess(r, userStore)
 
 const getRouteTitle = (routeLike) => {
   return resolveRouteTitle(routeLike, String(routeLike?.name || ''))
@@ -176,6 +169,9 @@ const menuRoutes = computed(() => {
 })
 
 const currentRoute = computed(() => route)
+const homeRoute = computed(() => {
+  return resolveDefaultAuthenticatedRoute(router.options.routes, userStore) || { name: 'Dashboard' }
+})
 
 // 过滤可见子菜单
 const visibleChildren = (route) => {

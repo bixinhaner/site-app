@@ -3,6 +3,7 @@ import { useUserStore } from '../stores/user'
 import { buildRouteSnapshot, trackOperation } from '../utils/operationTrack'
 import i18n from '../i18n'
 import { resolveRouteTitle } from '../i18n/translator'
+import { isSameRouteTarget, resolveDefaultAuthenticatedRoute, routeHasAccess } from './access'
 
 const routes = [
   {
@@ -358,34 +359,24 @@ const router = createRouter({
 // 路由守卫
 router.beforeEach((to, from, next) => {
   const userStore = useUserStore()
-  const permissions = to.meta?.permissions
-  const roles = to.meta?.roles
-
-  const hasPermissionAccess = () => {
-    if (!Array.isArray(permissions) || permissions.length === 0) return true
-    return permissions.some(code => userStore.hasPermission(code))
-  }
-
-  const hasRoleAccess = () => {
-    if (!Array.isArray(roles) || roles.length === 0) return true
-    return roles.some(code => userStore.hasRole(code))
-  }
+  const fallbackRoute = resolveDefaultAuthenticatedRoute(router.options.routes, userStore)
 
   if (to.meta.requiresAuth && !userStore.isLoggedIn) {
     next('/login')
   } else if (to.path === '/login' && userStore.isLoggedIn) {
-    next('/dashboard')
-  } else {
-    if (!hasPermissionAccess()) {
-      next('/dashboard')
+    if (fallbackRoute) {
+      next(fallbackRoute)
       return
     }
-    // 若该路由未配置 permissions，继续使用 roles 作为兼容兜底
-    if (!Array.isArray(permissions) || permissions.length === 0) {
-      if (!hasRoleAccess()) {
-        next('/dashboard')
+    next()
+  } else {
+    if (!routeHasAccess(to, userStore)) {
+      if (fallbackRoute && !isSameRouteTarget(fallbackRoute, to)) {
+        next(fallbackRoute)
         return
       }
+      next('/login')
+      return
     }
     next()
   }
