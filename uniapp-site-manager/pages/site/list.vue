@@ -244,15 +244,14 @@
 	}
 	
 	// 过滤后的站点列表
-	const filteredSites = computed(() => {
-		let sites = siteStore.sites || []
+		const filteredSites = computed(() => {
+			let sites = siteStore.sites || []
 
-		// inspector和surveyor角色：只显示工单关联的站点
-		const userRole = userStore.userInfo?.role
-		if (userRole === 'inspector' || userRole === 'surveyor') {
-			// 获取工单关联的站点ID集合
-			const workOrderSiteIds = new Set(
-				(workOrderStore.list || [])
+			const siteScope = userStore.getDataScope('sites')
+			if (siteScope === 'related_work_orders') {
+				// 获取工单关联的站点ID集合
+				const workOrderSiteIds = new Set(
+					(workOrderStore.list || [])
 					.map(wo => wo.site_id)
 					.filter(id => id)
 			)
@@ -415,13 +414,12 @@
 				return
 			}
 
-		try {
-			const userRole = userStore.userInfo?.role
+			try {
+				const siteScope = userStore.getDataScope('sites')
 
-			// inspector和surveyor角色需要先加载工单，用于过滤站点
-			if (userRole === 'inspector' || userRole === 'surveyor') {
-				await workOrderStore.getMyWorkOrders()
-			}
+				if (siteScope === 'related_work_orders') {
+					await workOrderStore.getMyWorkOrders()
+				}
 
 			// 加载站点列表（所有角色都可以访问API）
 			await siteStore.getSites()

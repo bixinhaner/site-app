@@ -31,6 +31,7 @@ from app.models.survey import SiteSurvey
 from app.models.survey_archive import SiteSurveyArchive
 from app.models.opening_archive import SiteOpeningArchive
 from app.models.ssv_archive import SiteSSVArchive
+from app.services.data_scope_service import get_user_data_scope
 from app.services.omc_client import (
     get_omc_client,
     get_omc_manual_confirm_enabled,
@@ -48,8 +49,6 @@ from app.services.omc_monitor import (
 
 router = APIRouter()
 
-SITE_VIEW_ALL_ROLES = {"admin", "manager", "planner"}
-
 
 def _ensure_site_manage_access(current_user: User) -> None:
     if not user_has_any_role_or_permission(
@@ -61,11 +60,7 @@ def _ensure_site_manage_access(current_user: User) -> None:
 
 
 def _can_view_all_sites(current_user: User) -> bool:
-    return user_has_any_role_or_permission(
-        current_user,
-        role_codes=list(SITE_VIEW_ALL_ROLES),
-        permission_codes=["sites:list:read", "sites:detail:read", "sites:update:write", "sites:create:write", "sites:lld:write"],
-    )
+    return str(get_user_data_scope(current_user, "sites") or "all").strip() == "all"
 
 
 def _apply_site_visibility_filter(query, db: Session, current_user: User):

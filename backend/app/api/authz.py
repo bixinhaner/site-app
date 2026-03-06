@@ -10,20 +10,28 @@ from app.core.database import get_db
 from app.models.authz import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.authz import (
+    DataScopeDefinitionResponse,
     EffectivePermissionsResponse,
     PermissionResponse,
     RoleCreateRequest,
     RoleResponse,
     RoleUpdateRequest,
+    SetRoleDataScopesRequest,
     SetRolePermissionsRequest,
     SetUserRolesRequest,
 )
 from app.services.authz_service import (
+    get_user_data_scopes,
     get_user_permission_codes,
     get_user_role_codes,
     list_permission_modules,
     set_role_permissions_by_codes,
     set_user_roles_by_codes,
+)
+from app.services.data_scope_service import (
+    get_role_effective_data_scopes,
+    list_data_scope_definitions,
+    set_role_data_scopes_by_mapping,
 )
 
 router = APIRouter()
@@ -44,6 +52,7 @@ def _role_permissions(role: Role) -> List[str]:
 def _role_to_response(role: Role) -> RoleResponse:
     payload = RoleResponse.from_orm(role)
     payload.permissions = _role_permissions(role)
+    payload.data_scopes = get_role_effective_data_scopes(role)
     return payload
 
 
@@ -78,6 +87,16 @@ async def list_permissions_by_module(
     }
 
 
+@router.get('/data-scopes/definitions', response_model=List[DataScopeDefinitionResponse])
+async def get_data_scope_definitions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission('authz:manage:all')),
+):
+    _ = db
+    _ = current_user
+    return list_data_scope_definitions()
+
+
 @router.get('/roles', response_model=List[RoleResponse])
 async def list_roles(
     db: Session = Depends(get_db),
@@ -86,7 +105,10 @@ async def list_roles(
     _ = current_user
     rows = (
         db.query(Role)
-        .options(joinedload(Role.permission_links).joinedload(RolePermission.permission))
+        .options(
+            joinedload(Role.permission_links).joinedload(RolePermission.permission),
+            joinedload(Role.data_scope_links),
+        )
         .order_by(Role.is_system.desc(), Role.code.asc())
         .all()
     )
@@ -126,10 +148,20 @@ async def create_role(
             db.delete(role)
             db.commit()
             raise HTTPException(status_code=400, detail=str(exc))
+    if payload.data_scopes:
+        try:
+            set_role_data_scopes_by_mapping(db, role, payload.data_scopes)
+        except ValueError as exc:
+            db.delete(role)
+            db.commit()
+            raise HTTPException(status_code=400, detail=str(exc))
 
     role = (
         db.query(Role)
-        .options(joinedload(Role.permission_links).joinedload(RolePermission.permission))
+        .options(
+            joinedload(Role.permission_links).joinedload(RolePermission.permission),
+            joinedload(Role.data_scope_links),
+        )
         .filter(Role.id == role.id)
         .first()
     )
@@ -165,10 +197,18 @@ async def update_role(
             set_role_permissions_by_codes(db, role, payload.permissions)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+    if payload.data_scopes is not None:
+        try:
+            set_role_data_scopes_by_mapping(db, role, payload.data_scopes)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     role = (
         db.query(Role)
-        .options(joinedload(Role.permission_links).joinedload(RolePermission.permission))
+        .options(
+            joinedload(Role.permission_links).joinedload(RolePermission.permission),
+            joinedload(Role.data_scope_links),
+        )
         .filter(Role.id == role.id)
         .first()
     )
@@ -194,7 +234,39 @@ async def set_role_permissions(
 
     role = (
         db.query(Role)
-        .options(joinedload(Role.permission_links).joinedload(RolePermission.permission))
+        .options(
+            joinedload(Role.permission_links).joinedload(RolePermission.permission),
+            joinedload(Role.data_scope_links),
+        )
+        .filter(Role.id == role.id)
+        .first()
+    )
+    return _role_to_response(role)
+
+
+@router.put('/roles/{role_id}/data-scopes', response_model=RoleResponse)
+async def set_role_data_scopes(
+    role_id: int,
+    payload: SetRoleDataScopesRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission('authz:manage:all')),
+):
+    _ = current_user
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail='角色不存在')
+
+    try:
+        set_role_data_scopes_by_mapping(db, role, payload.data_scopes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    role = (
+        db.query(Role)
+        .options(
+            joinedload(Role.permission_links).joinedload(RolePermission.permission),
+            joinedload(Role.data_scope_links),
+        )
         .filter(Role.id == role.id)
         .first()
     )
@@ -268,12 +340,14 @@ async def set_user_roles(
 
     db.refresh(user)
     permissions = get_user_permission_codes(user)
+    data_scopes = get_user_data_scopes(user)
     return EffectivePermissionsResponse(
         user_id=user.id,
         username=user.username,
         roles=get_user_role_codes(user),
         permissions=permissions,
         permission_modules=_build_permission_modules(permissions),
+        data_scopes=data_scopes,
     )
 
 
@@ -289,12 +363,14 @@ async def get_effective_permissions(
         raise HTTPException(status_code=404, detail='用户不存在')
 
     permissions = get_user_permission_codes(user)
+    data_scopes = get_user_data_scopes(user)
     return EffectivePermissionsResponse(
         user_id=user.id,
         username=user.username,
         roles=get_user_role_codes(user),
         permissions=permissions,
         permission_modules=_build_permission_modules(permissions),
+        data_scopes=data_scopes,
     )
 
 
@@ -308,10 +384,12 @@ async def get_my_effective_permissions(
         raise HTTPException(status_code=404, detail='用户不存在')
 
     permissions = get_user_permission_codes(user)
+    data_scopes = get_user_data_scopes(user)
     return EffectivePermissionsResponse(
         user_id=user.id,
         username=user.username,
         roles=get_user_role_codes(user),
         permissions=permissions,
         permission_modules=_build_permission_modules(permissions),
+        data_scopes=data_scopes,
     )

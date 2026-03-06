@@ -66,6 +66,7 @@ from app.services.omc_state import (
 )
 from app.services.work_order_rule_service import get_ssv_create_by_ever_activated_only
 from app.services.authz_service import user_has_any_role_or_permission
+from app.services.data_scope_service import get_user_data_scope
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -158,13 +159,16 @@ def _audit_site_status_change(db: Session, site_id: int, old_status: str, new_st
 
 
 # Role helpers
+def _work_order_scope(u: User) -> str:
+    return str(get_user_data_scope(u, "work_orders") or "all").strip() or "all"
+
+
 def _is_field_worker(u: User) -> bool:
-    r = getattr(u, 'role', None)
-    return r in ("inspector", "surveyor")
+    return _work_order_scope(u) in ("assigned", "assigned_survey_only")
 
 
 def _is_surveyor(u: User) -> bool:
-    return getattr(u, 'role', None) == "surveyor"
+    return _work_order_scope(u) == "assigned_survey_only"
 
 
 def _ensure_surveyor_wo_type(wo: WorkOrder, u: User):
@@ -550,7 +554,7 @@ async def search_work_orders(
         role_codes=["admin", "manager"],
         permission_codes=["workorder:dispatch:write", "workorder:review:write", "workorder:batch:write"],
     )
-    is_field_worker = current_user.role in ["inspector", "surveyor"]
+    is_field_worker = _is_field_worker(current_user)
 
     query = db.query(WorkOrder).join(Site, WorkOrder.site_id == Site.id, isouter=True)
 
@@ -590,7 +594,7 @@ async def search_work_orders(
     if is_field_worker:
         query = query.filter(WorkOrder.assigned_to == current_user.id)
         query = query.filter(WorkOrder.status != WorkOrderStatusEnum.VOIDED)
-        if current_user.role == "surveyor":
+        if _is_surveyor(current_user):
             query = query.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
     elif is_admin_or_manager and assigned_to:
         query = query.filter(WorkOrder.assigned_to == assigned_to)
@@ -3310,8 +3314,9 @@ async def get_activation_status(
         raise HTTPException(status_code=404, detail="工单不存在")
     _ensure_work_order_not_voided(wo, detail="已作废工单不能标记完成")
     
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     activation_check = wo.extra_data.get("activation_check") if wo.extra_data else None
     
@@ -3431,8 +3436,9 @@ async def get_work_order_progress(
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
     
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     from app.utils.work_order_progress import WorkOrderProgressCalculator
     
@@ -3461,8 +3467,9 @@ async def get_work_order_audit_logs(
         raise HTTPException(status_code=404, detail="工单不存在")
     
     # 权限检查：施工员只能查看自己的工单
-    if current_user.role == "inspector" and wo.assigned_to != current_user.id:
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问此工单审核历史")
+    _ensure_surveyor_wo_type(wo, current_user)
     
     # 查询工单相关的审核日志
     audit_logs = db.query(AuditEvent).filter(

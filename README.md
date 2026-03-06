@@ -137,17 +137,21 @@ npm run build                  # 生产构建
 - Web 管理端新增 **系统配置 -> 角色权限** 页面（`/settings/permissions`），支持：
 - 新建/编辑/删除自定义角色
 - 配置角色权限点
+- 配置角色数据范围（站点 / 工单 / 检查）
 - 用户管理页支持给用户分配多个角色
 - 当前迭代已覆盖：`web-admin + backend + uniapp-site-manager`。
-- UniApp 现已接入统一权限能力：登录态会返回 `roles / permissions`，前端统一通过 `hasRole / hasPermission / can` 做功能判断。
+- UniApp 现已接入统一权限能力：登录态会返回 `roles / permissions / data_scopes`，前端统一通过 `hasRole / hasPermission / can / getDataScope` 做判断。
 - UniApp 接入原则：`权限优先，旧角色兜底`。如果账号还没有任何 `app:*` 权限码，则继续按旧 `role` 规则兼容，保证老角色升级后功能范围不突变。
 - 默认内置角色的 app 权限模板已按旧移动端行为对齐，例如 `warehouse_manager` 仍保留原先可见的检查/地图入口，但不会额外获得站点列表、工单列表这类旧版没有的功能；后续新建/自定义角色，建议直接按权限码控制 app 功能。
-- 后端启动时的内置角色/权限初始化已做幂等处理，同一台服务器重复重启、重复执行初始化不会再因为 `role_permissions` 重复写入而启动失败。
+- 默认内置角色的数据范围模板也会随启动自动补齐到数据库；初始化已做幂等处理，同一台服务器重复重启、重复执行初始化不会再因为 `role_permissions` 或 `role_data_scopes` 重复写入而启动失败。
 
 ### UniApp 权限边界（2026-03）
 - **功能权限**：控制菜单、首页入口、底部 Tab、页面可达性、关键按钮显示；这一层统一走权限码和 `can(...)`。
-- **数据范围 / 业务语义**：继续保留旧角色语义，例如 `surveyor / inspector` 只能看自己关联工单或工单关联站点、`surveyor` 仍只允许处理勘察类业务；这一层暂时不改成权限码。
-- 这两层是故意分开的：权限码负责“能不能打开某个功能”，旧角色语义负责“打开后能看到哪些数据、能处理哪类业务”。
+- **数据范围**：现在也接入统一角色管理，但不和功能权限码混用。当前已显式支持 `站点 / 工单 / 检查` 三类范围；例如 `inspector` 默认是“仅自己”，`surveyor` 默认是“仅自己且仅勘察”，其余内置角色默认是“全部”。
+- **业务语义**：像 `surveyor` 只能处理勘察类业务，这种不是单纯“看多少数据”的规则，仍由后端业务逻辑兜底，不强行塞成权限码。
+- 这三层是故意分开的：权限码负责“能不能打开某个功能”，数据范围负责“打开后能看到哪些数据”，业务语义负责“具体能处理哪类业务”。
+- 多角色合并规则也拆开看：**功能权限取并集**；**数据范围按后端角色优先级取主范围**。为保证自定义角色可用，解析时会让“自定义角色”优先于基础 `user`，但仍不会压过 `admin / manager / warehouse_manager / planner / reviewer / inspector / surveyor` 这些现网内置角色。
+- 如果某个角色还没有显式配置数据范围，后端会自动回退到旧角色语义，保证老账号升级后行为不突变。
 - `admin` 继续全量绕过；`manager` 走显式权限，不再隐式等同 `admin`。
 
 ## 🏢 核心功能模块
@@ -225,14 +229,16 @@ npm run build                  # 生产构建
 ### 权限管理（RBAC）
 - `GET /api/authz/permissions` - 权限点列表
 - `GET /api/authz/permissions/modules` - 按模块分组的权限点
+- `GET /api/authz/data-scopes/definitions` - 数据范围定义列表
 - `GET /api/authz/roles` - 角色列表（含当前授权）
 - `POST /api/authz/roles` - 创建角色
 - `PUT /api/authz/roles/{role_id}` - 更新角色信息
 - `PUT /api/authz/roles/{role_id}/permissions` - 配置角色权限
+- `PUT /api/authz/roles/{role_id}/data-scopes` - 配置角色数据范围
 - `DELETE /api/authz/roles/{role_id}` - 删除角色（系统角色不可删）
 - `GET /api/authz/users/{user_id}/roles` - 查询用户角色
 - `PUT /api/authz/users/{user_id}/roles` - 配置用户角色
-- `GET /api/authz/users/{user_id}/effective-permissions` - 查询用户生效权限
+- `GET /api/authz/users/{user_id}/effective-permissions` - 查询用户生效权限与数据范围
 
 ### 工单管理
 - `GET /api/work-orders` - 获取工单列表
@@ -297,6 +303,7 @@ npm run build                  # 生产构建
 - **permissions**: 权限点定义
 - **user_roles**: 用户-角色关联
 - **role_permissions**: 角色-权限关联
+- **role_data_scopes**: 角色-数据范围关联
 - **sites**: 站点基础信息
 - **work_orders**: 工单主表
 - **work_order_items**: 工单检查项

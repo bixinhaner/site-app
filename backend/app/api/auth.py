@@ -10,6 +10,7 @@ from app.core.security import create_access_token, create_refresh_token, verify_
 from app.models.user import User
 from app.schemas.user import UserLogin, Token, UserResponse, UserCreate, UserPasswordChange
 from app.services.authz_service import (
+    get_user_data_scopes,
     get_user_permission_codes,
     get_user_with_authz,
     set_user_roles_by_codes,
@@ -24,9 +25,11 @@ def get_user_by_username(db: Session, username: str):
 
 def _attach_authz_payload(user: User) -> User:
     permissions = get_user_permission_codes(user)
+    data_scopes = get_user_data_scopes(user)
     try:
         setattr(user, "permissions", permissions)
         setattr(user, "permission_codes", permissions)
+        setattr(user, "data_scopes", data_scopes)
     except Exception:
         pass
     return user

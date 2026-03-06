@@ -16,12 +16,17 @@ export const useWorkOrderStore = defineStore('workorder', () => {
     if (!userStore.token) return { success: false, error: '未登录' }
     loading.value = true
     try {
+      const workOrderScope = userStore.getDataScope('work_orders')
+
       // 如果有搜索关键词，使用搜索端点
       if (keyword && keyword.trim()) {
         const queryParams = []
         queryParams.push(`keyword=${encodeURIComponent(keyword.trim())}`)
-        if (userStore.userInfo?.id) {
+        if (userStore.userInfo?.id && ['assigned', 'assigned_survey_only'].includes(workOrderScope)) {
           queryParams.push(`assigned_to=${userStore.userInfo.id}`)
+        }
+        if (workOrderScope === 'assigned_survey_only') {
+          queryParams.push('type=site_survey')
         }
         if (status) {
           queryParams.push(`status=${status}`)
@@ -45,13 +50,13 @@ export const useWorkOrderStore = defineStore('workorder', () => {
       } else {
         // 没有搜索关键词，使用普通列表端点
         const queryParams = []
-        if (userStore.userInfo?.id) {
+        if (userStore.userInfo?.id && ['assigned', 'assigned_survey_only'].includes(workOrderScope)) {
           queryParams.push(`assigned_to=${userStore.userInfo.id}`)
         }
         if (status) {
           queryParams.push(`status_filter=${status}`)
         }
-        if (userStore.userInfo?.role === 'surveyor') {
+        if (workOrderScope === 'assigned_survey_only') {
           queryParams.push('type_filter=site_survey')
         }
 

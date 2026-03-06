@@ -34,6 +34,7 @@ class RoleResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     permissions: List[str] = Field(default_factory=list)
+    data_scopes: Dict[str, str] = Field(default_factory=dict)
 
     @field_serializer("created_at", "updated_at")
     def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:
@@ -48,6 +49,7 @@ class RoleCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     permissions: List[str] = Field(default_factory=list)
+    data_scopes: Dict[str, str] = Field(default_factory=dict)
 
 
 class RoleUpdateRequest(BaseModel):
@@ -55,14 +57,32 @@ class RoleUpdateRequest(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     permissions: Optional[List[str]] = None
+    data_scopes: Optional[Dict[str, str]] = None
 
 
 class SetRolePermissionsRequest(BaseModel):
     permissions: List[str] = Field(default_factory=list)
 
 
+class SetRoleDataScopesRequest(BaseModel):
+    data_scopes: Dict[str, str] = Field(default_factory=dict)
+
+
 class SetUserRolesRequest(BaseModel):
     roles: List[str] = Field(default_factory=list)
+
+
+class DataScopeOptionResponse(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+
+
+class DataScopeDefinitionResponse(BaseModel):
+    resource: str
+    name: str
+    description: Optional[str] = None
+    options: List[DataScopeOptionResponse] = Field(default_factory=list)
 
 
 class EffectivePermissionsResponse(BaseModel):
@@ -71,3 +91,4 @@ class EffectivePermissionsResponse(BaseModel):
     roles: List[str]
     permissions: List[str]
     permission_modules: Dict[str, List[str]]
+    data_scopes: Dict[str, str] = Field(default_factory=dict)

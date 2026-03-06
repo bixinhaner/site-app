@@ -3,6 +3,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set
 
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.data_scopes import BUILTIN_ROLE_DATA_SCOPE_TEMPLATE
 from app.core.permissions import (
     BUILTIN_PERMISSION_DEFINITIONS,
     BUILTIN_ROLE_DEFINITIONS,
@@ -10,8 +11,9 @@ from app.core.permissions import (
     BUILTIN_ROLE_PERMISSION_TEMPLATE,
     permission_matches,
 )
-from app.models.authz import Permission, Role, RolePermission, UserRole
+from app.models.authz import Permission, Role, RoleDataScope, RolePermission, UserRole
 from app.models.user import User
+from app.services.data_scope_service import get_user_effective_data_scopes
 
 
 def ensure_builtin_roles_and_permissions(db: Session) -> None:
@@ -165,6 +167,28 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
                 continue
             grant_permission(role.id, perm.id)
 
+    role_scope_map: Dict[tuple[int, str], str] = {
+        (int(row.role_id), str(row.resource_code).strip()): str(row.scope_code).strip()
+        for row in db.query(RoleDataScope.role_id, RoleDataScope.resource_code, RoleDataScope.scope_code).all()
+        if row.role_id is not None and str(row.resource_code or "").strip() and str(row.scope_code or "").strip()
+    }
+    for role_code, desired_scopes in BUILTIN_ROLE_DATA_SCOPE_TEMPLATE.items():
+        role = role_by_code.get(role_code)
+        if not role:
+            continue
+        for resource_code, scope_code in desired_scopes.items():
+            key = (int(role.id), str(resource_code).strip())
+            if key in role_scope_map:
+                continue
+            db.add(
+                RoleDataScope(
+                    role_id=role.id,
+                    resource_code=str(resource_code).strip(),
+                    scope_code=str(scope_code).strip(),
+                )
+            )
+            role_scope_map[key] = str(scope_code).strip()
+
     db.commit()
 
 
@@ -185,7 +209,10 @@ def get_user_with_authz(db: Session, username: str) -> Optional[User]:
             joinedload(User.role_links)
             .joinedload(UserRole.role)
             .joinedload(Role.permission_links)
-            .joinedload(RolePermission.permission)
+            .joinedload(RolePermission.permission),
+            joinedload(User.role_links)
+            .joinedload(UserRole.role)
+            .joinedload(Role.data_scope_links),
         )
         .filter(User.username == username)
         .first()
@@ -220,6 +247,10 @@ def get_user_permission_codes(user: User) -> List[str]:
             if code:
                 out.add(code)
     return sorted(out)
+
+
+def get_user_data_scopes(user: User) -> Dict[str, str]:
+    return get_user_effective_data_scopes(user)
 
 
 def user_has_permission(user: User, permission_code: str) -> bool:

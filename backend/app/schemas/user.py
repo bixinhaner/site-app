@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, validator, field_serializer
-from typing import Optional, List
+from typing import Dict, Optional, List
 from datetime import datetime
 
 from app.utils.timezone import to_utc_iso
@@ -93,6 +93,7 @@ class UserResponse(UserBase):
     role: Optional[str] = None
     roles: List[str] = Field(default_factory=list)
     permissions: List[str] = Field(default_factory=list)
+    data_scopes: Dict[str, str] = Field(default_factory=dict)
     is_active: bool
     avatar: Optional[str] = None
     created_at: datetime

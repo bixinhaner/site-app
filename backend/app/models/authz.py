@@ -28,6 +28,7 @@ class Role(Base):
 
     user_links = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
     permission_links = relationship("RolePermission", back_populates="role", cascade="all, delete-orphan")
+    data_scope_links = relationship("RoleDataScope", back_populates="role", cascade="all, delete-orphan")
 
 
 class Permission(Base):
@@ -73,3 +74,19 @@ class RolePermission(Base):
 
     role = relationship("Role", back_populates="permission_links")
     permission = relationship("Permission", back_populates="role_links")
+
+
+class RoleDataScope(Base):
+    __tablename__ = "role_data_scopes"
+    __table_args__ = (
+        UniqueConstraint("role_id", "resource_code", name="uq_role_data_scopes_role_resource"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, index=True)
+    resource_code = Column(String(64), nullable=False, index=True)
+    scope_code = Column(String(64), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    role = relationship("Role", back_populates="data_scope_links")

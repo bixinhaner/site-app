@@ -58,6 +58,7 @@ from app.services.photo_similarity_guard import (
     extract_similarity_features,
 )
 from app.services.authz_service import user_has_any_role_or_permission
+from app.services.data_scope_service import get_user_data_scope
 from app.services.equipment_unbind_service import (
     is_device_level_check_item,
     rollback_equipment_status_after_unbind,
@@ -82,12 +83,13 @@ class PhotoUploadPrecheckRequest(BaseModel):
     original_content_hash: str
 
 def _is_field_worker(u) -> bool:
-    r = getattr(u, 'role', None)
-    return r in ('inspector', 'surveyor')
+    scope = str(get_user_data_scope(u, 'inspections') or 'all').strip() or 'all'
+    return scope in ('assigned', 'assigned_survey_only')
 
 
 def _ensure_surveyor_inspection_type(db: Session, u, inspection: SiteInspection):
-    if getattr(u, 'role', None) == 'surveyor' and inspection and inspection.work_order_id:
+    scope = str(get_user_data_scope(u, 'inspections') or 'all').strip() or 'all'
+    if scope == 'assigned_survey_only' and inspection and inspection.work_order_id:
         wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
         if not wo or wo.type != WorkOrderTypeEnum.SITE_SURVEY:
             raise HTTPException(status_code=403, detail="仅可操作勘察检查")

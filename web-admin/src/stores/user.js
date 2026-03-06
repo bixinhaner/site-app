@@ -7,6 +7,17 @@ const normalizeCodeList = (value) => {
   return [...new Set(value.map(v => String(v || '').trim()).filter(Boolean))]
 }
 
+const normalizeDataScopes = (value) => {
+  if (!value || typeof value !== 'object') return {}
+  return Object.entries(value).reduce((out, [resource, scope]) => {
+    const resourceCode = String(resource || '').trim()
+    const scopeCode = String(scope || '').trim()
+    if (!resourceCode || !scopeCode) return out
+    out[resourceCode] = scopeCode
+    return out
+  }, {})
+}
+
 const permissionMatches = (target, grantedCodes) => {
   const code = String(target || '').trim()
   if (!code) return false
@@ -29,6 +40,7 @@ const normalizeUser = (raw) => {
     role,
     roles: normalizedRoles,
     permissions: normalizeCodeList(src.permissions),
+    data_scopes: normalizeDataScopes(src.data_scopes),
   }
 }
 
@@ -41,6 +53,7 @@ export const useUserStore = defineStore('user', () => {
   const isLoggedIn = computed(() => !!token.value && !!user.value?.id)
   const roleCodes = computed(() => normalizeCodeList(user.value?.roles || (user.value?.role ? [user.value.role] : [])))
   const permissionCodes = computed(() => normalizeCodeList(user.value?.permissions))
+  const dataScopeMap = computed(() => normalizeDataScopes(user.value?.data_scopes))
 
   const hasRole = (roleCode) => roleCodes.value.includes(String(roleCode || '').trim())
   const hasAnyRole = (roleList = []) => roleList.some(role => hasRole(role))
@@ -48,6 +61,7 @@ export const useUserStore = defineStore('user', () => {
     if (hasRole('admin')) return true
     return permissionMatches(permissionCode, permissionCodes.value)
   }
+  const getDataScope = (resourceCode) => dataScopeMap.value[String(resourceCode || '').trim()] || null
 
   const isAdmin = computed(() => hasRole('admin'))
   const isManager = computed(() => hasRole('manager'))
@@ -116,6 +130,7 @@ export const useUserStore = defineStore('user', () => {
     currentUser: user,
     roleCodes,
     permissionCodes,
+    dataScopeMap,
     isLoggedIn,
     isAdmin,
     isManager,
@@ -126,6 +141,7 @@ export const useUserStore = defineStore('user', () => {
     hasRole,
     hasAnyRole,
     hasPermission,
+    getDataScope,
     can: hasPermission,
     login,
     logout,

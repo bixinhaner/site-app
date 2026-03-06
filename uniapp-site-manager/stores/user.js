@@ -33,16 +33,30 @@ const normalizePermissionCodes = (rawPermissions = []) => {
 	return Array.from(permissionSet)
 }
 
+const normalizeDataScopes = (rawDataScopes = null) => {
+	const scopeMap = {}
+	if (!rawDataScopes || typeof rawDataScopes !== 'object') return scopeMap
+	for (const [resource, scope] of Object.entries(rawDataScopes)) {
+		const resourceCode = String(resource || '').trim()
+		const scopeCode = String(scope || '').trim()
+		if (!resourceCode || !scopeCode) continue
+		scopeMap[resourceCode] = scopeCode
+	}
+	return scopeMap
+}
+
 const normalizeUserInfo = (rawUser) => {
 	if (!rawUser || typeof rawUser !== 'object') return null
 	const roles = normalizeRoleCodes(rawUser.roles, rawUser.role)
 	const role = String(rawUser.role || roles[0] || '').trim() || null
 	const permissions = normalizePermissionCodes(rawUser.permissions)
+	const dataScopes = normalizeDataScopes(rawUser.data_scopes)
 	return {
 		...rawUser,
 		role,
 		roles,
 		permissions,
+		data_scopes: dataScopes,
 	}
 }
 
@@ -67,6 +81,7 @@ export const useUserStore = defineStore('user', () => {
 	const isLoggedIn = computed(() => !!token.value)
 	const roles = computed(() => normalizeRoleCodes(userInfo.value?.roles, userInfo.value?.role))
 	const permissions = computed(() => normalizePermissionCodes(userInfo.value?.permissions))
+	const dataScopes = computed(() => normalizeDataScopes(userInfo.value?.data_scopes))
 	const hasAnyAppPermission = computed(() => permissions.value.some(code => String(code || '').startsWith('app:')))
 
 	const hasRole = (roleCode) => {
@@ -89,6 +104,18 @@ export const useUserStore = defineStore('user', () => {
 
 	const hasAllPermissions = (permissionCodes = []) => {
 		return (permissionCodes || []).every(code => hasPermission(code))
+	}
+
+	const getDataScope = (resourceCode) => {
+		const key = String(resourceCode || '').trim()
+		if (!key) return null
+		return dataScopes.value[key] || null
+	}
+
+	const hasDataScope = (resourceCode, scopeCodes = []) => {
+		const current = getDataScope(resourceCode)
+		if (!current) return false
+		return (scopeCodes || []).some(code => String(code || '').trim() === current)
 	}
 
 	// 权限相关的计算属性
@@ -469,9 +496,10 @@ export const useUserStore = defineStore('user', () => {
 		token,
 		refreshToken,
 		userInfo,
-		roles,
-		permissions,
-		legacyScanPickupEnabled,
+			roles,
+			permissions,
+			dataScopes,
+			legacyScanPickupEnabled,
 		isLoggedIn,
 		isAdmin,
 		isActualAdmin,
@@ -486,10 +514,12 @@ export const useUserStore = defineStore('user', () => {
 		isWarehouseOperator,
 		hasRole,
 		hasAnyRole,
-		hasPermission,
-		hasAnyPermission,
-		hasAllPermissions,
-		can,
+			hasPermission,
+			hasAnyPermission,
+			hasAllPermissions,
+			getDataScope,
+			hasDataScope,
+			can,
 		login,
 		logout,
 		checkLoginStatus,

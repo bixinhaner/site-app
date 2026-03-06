@@ -296,21 +296,21 @@
 				limit: pageSize.value
 			}
 			
-			// 根据检查类型设置筛选条件
-			if (inspectionType.value === 'opening' || inspectionType.value === 'installation') {
-				// 新站点设备安装：获取规划中或建设中的站点
-				// 管理员和检查员可以看到所有这类站点，普通用户只能看分配给自己的
-				if (userStore.userInfo?.role === 'user') {
-					params.assigned_to = userStore.userInfo.id
+				// 根据检查类型设置筛选条件
+				if (inspectionType.value === 'opening' || inspectionType.value === 'installation') {
+					// 新站点设备安装：获取规划中或建设中的站点
+					// 受限范围角色保持按自己的业务范围选站点
+					if (userStore.getDataScope('sites') !== 'all') {
+						params.assigned_to = userStore.userInfo.id
+					}
+					// 不限制status，让后端根据权限返回合适的站点
+				} else if (inspectionType.value === 'maintenance') {
+					// 维护检查：获取运行中的站点
+					params.status = 'operational'
+					if (userStore.getDataScope('sites') !== 'all') {
+						params.assigned_to = userStore.userInfo.id
+					}
 				}
-				// 不限制status，让后端根据权限返回合适的站点
-			} else if (inspectionType.value === 'maintenance') {
-				// 维护检查：获取运行中的站点
-				params.status = 'operational'
-				if (userStore.userInfo?.role === 'user') {
-					params.assigned_to = userStore.userInfo.id
-				}
-			}
 			
 			const result = await siteStore.getSites(params)
 			

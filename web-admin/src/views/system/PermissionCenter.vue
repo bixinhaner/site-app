@@ -54,19 +54,19 @@
 
           <el-empty v-if="!selectedRole" description="请选择左侧角色" />
 
-          <div v-else>
-            <el-alert
-              v-if="selectedRole.is_system"
-              type="info"
-              :closable="false"
+            <div v-else>
+              <el-alert
+                v-if="selectedRole.is_system"
+                type="info"
+                :closable="false"
               title="系统角色可以调整权限，但不支持删除"
               class="mb12"
             />
 
-            <el-checkbox-group v-model="checkedPermissions" class="permission-group">
-              <el-card
-                v-for="moduleName in sortedModules"
-                :key="moduleName"
+              <el-checkbox-group v-model="checkedPermissions" class="permission-group">
+                <el-card
+                  v-for="moduleName in sortedModules"
+                  :key="moduleName"
                 class="module-card"
                 shadow="never"
               >
@@ -86,8 +86,43 @@
               </el-card>
             </el-checkbox-group>
 
+            <el-divider content-position="left">数据范围</el-divider>
+
+            <div class="scope-group">
+              <el-card
+                v-for="definition in dataScopeDefinitions"
+                :key="definition.resource"
+                class="scope-card"
+                shadow="never"
+              >
+                <div class="scope-row">
+                  <div class="scope-meta">
+                    <div class="module-title">{{ definition.name }}</div>
+                    <div class="scope-desc">{{ definition.description }}</div>
+                  </div>
+                  <el-select
+                    v-model="selectedDataScopes[definition.resource]"
+                    class="scope-select"
+                    placeholder="请选择数据范围"
+                  >
+                    <el-option
+                      v-for="option in definition.options || []"
+                      :key="option.code"
+                      :label="option.name"
+                      :value="option.code"
+                    >
+                      <div class="scope-option">
+                        <span>{{ option.name }}</span>
+                        <span class="scope-option-desc">{{ option.description }}</span>
+                      </div>
+                    </el-option>
+                  </el-select>
+                </div>
+              </el-card>
+            </div>
+
             <div class="footer-actions">
-              <el-button type="primary" @click="saveRolePermissions" :loading="savingPermissions">保存权限</el-button>
+              <el-button type="primary" @click="saveRolePermissions" :loading="savingPermissions">保存权限与范围</el-button>
             </div>
           </div>
         </el-card>
@@ -147,8 +182,10 @@ const submittingRole = ref(false)
 
 const roles = ref([])
 const permissionModules = ref({})
+const dataScopeDefinitions = ref([])
 const selectedRoleId = ref(null)
 const checkedPermissions = ref([])
+const selectedDataScopes = reactive({})
 
 const createDialogVisible = ref(false)
 const editDialogVisible = ref(false)
@@ -193,6 +230,15 @@ const sortedModules = computed(() => Object.keys(permissionModules.value || {}).
 const applySelectedRolePermissions = () => {
   const perms = selectedRole.value?.permissions || []
   checkedPermissions.value = [...new Set(perms.map((x) => String(x || '').trim()).filter(Boolean))]
+  const roleScopes = selectedRole.value?.data_scopes || {}
+  Object.keys(selectedDataScopes).forEach((key) => {
+    delete selectedDataScopes[key]
+  })
+  ;(dataScopeDefinitions.value || []).forEach((definition) => {
+    const resource = String(definition.resource || '').trim()
+    const fallback = definition.options?.[0]?.code || ''
+    selectedDataScopes[resource] = String(roleScopes[resource] || fallback || '').trim()
+  })
 }
 
 const loadRoles = async () => {
@@ -217,10 +263,16 @@ const loadPermissionModules = async () => {
   }
 }
 
+const loadDataScopeDefinitions = async () => {
+  const rows = await authzApi.listDataScopeDefinitions()
+  dataScopeDefinitions.value = Array.isArray(rows) ? rows : []
+}
+
 const loadAll = async () => {
   loading.value = true
   try {
-    await Promise.all([loadRoles(), loadPermissionModules()])
+    await Promise.all([loadRoles(), loadPermissionModules(), loadDataScopeDefinitions()])
+    applySelectedRolePermissions()
   } catch (error) {
     ElMessage.error(error?.response?.data?.detail || '加载权限配置失败')
   } finally {
@@ -237,11 +289,21 @@ const saveRolePermissions = async () => {
   if (!selectedRole.value) return
   try {
     savingPermissions.value = true
-    await authzApi.setRolePermissions(selectedRole.value.id, checkedPermissions.value)
-    ElMessage.success('权限保存成功')
+    const nextDataScopes = Object.entries(selectedDataScopes).reduce((out, [resource, scope]) => {
+      const resourceCode = String(resource || '').trim()
+      const scopeCode = String(scope || '').trim()
+      if (!resourceCode || !scopeCode) return out
+      out[resourceCode] = scopeCode
+      return out
+    }, {})
+    await Promise.all([
+      authzApi.setRolePermissions(selectedRole.value.id, checkedPermissions.value),
+      authzApi.setRoleDataScopes(selectedRole.value.id, nextDataScopes),
+    ])
+    ElMessage.success('权限与数据范围保存成功')
     await loadRoles()
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '保存权限失败')
+    ElMessage.error(error?.response?.data?.detail || '保存配置失败')
   } finally {
     savingPermissions.value = false
   }
@@ -398,6 +460,49 @@ onMounted(() => {
 
 .module-card {
   border-color: #ebeef5;
+}
+
+.scope-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scope-card {
+  border-color: #ebeef5;
+}
+
+.scope-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.scope-meta {
+  flex: 1;
+}
+
+.scope-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.scope-select {
+  width: 280px;
+  flex-shrink: 0;
+}
+
+.scope-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scope-option-desc {
+  font-size: 12px;
+  color: #909399;
 }
 
 .module-title {

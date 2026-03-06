@@ -14,6 +14,7 @@ from app.schemas.user import (
 )
 from app.api.auth import get_current_user
 from app.services.authz_service import (
+    get_user_data_scopes,
     get_user_permission_codes,
     set_user_roles_by_codes,
     user_has_any_role_or_permission,
@@ -47,8 +48,10 @@ def _with_authz_payload(user: User) -> User:
         return user
     try:
         permissions = get_user_permission_codes(user)
+        data_scopes = get_user_data_scopes(user)
         setattr(user, 'permissions', permissions)
         setattr(user, 'permission_codes', permissions)
+        setattr(user, 'data_scopes', data_scopes)
     except Exception:
         pass
     return user
