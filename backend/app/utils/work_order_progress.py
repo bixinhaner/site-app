@@ -21,7 +21,8 @@ class WorkOrderProgressCalculator:
         WorkOrderStatusEnum.APPROVED: 85,     # 审核通过
         WorkOrderStatusEnum.ACTIVATED: 95,    # 已开通 (新增)
         WorkOrderStatusEnum.COMPLETED: 100,   # 已完成
-        WorkOrderStatusEnum.REJECTED: 50      # 审核驳回
+        WorkOrderStatusEnum.REJECTED: 50,     # 审核驳回
+        WorkOrderStatusEnum.VOIDED: 0         # 已作废
     }
     
     @classmethod
@@ -75,6 +76,12 @@ class WorkOrderProgressCalculator:
         elif work_order.status == WorkOrderStatusEnum.ACTIVATED:
             activation_info = cls._calculate_activation_progress(work_order)
             result["details"] = activation_info
+        elif work_order.status == WorkOrderStatusEnum.VOIDED:
+            result["details"] = {
+                "voided": True,
+                "void_reason": getattr(work_order, "void_reason", None),
+                "voided_at": to_utc_iso(getattr(work_order, "voided_at", None)) if getattr(work_order, "voided_at", None) else None,
+            }
         
         return result
     
@@ -170,7 +177,8 @@ class WorkOrderProgressCalculator:
             WorkOrderStatusEnum.APPROVED: "审核通过",
             WorkOrderStatusEnum.ACTIVATED: "已开通",
             WorkOrderStatusEnum.COMPLETED: "已完成",
-            WorkOrderStatusEnum.REJECTED: "审核驳回"
+            WorkOrderStatusEnum.REJECTED: "审核驳回",
+            WorkOrderStatusEnum.VOIDED: "已作废",
         }
         return stage_names.get(status, status.value)
     
@@ -185,7 +193,8 @@ class WorkOrderProgressCalculator:
             WorkOrderStatusEnum.APPROVED: "等待设备开通检测",
             WorkOrderStatusEnum.ACTIVATED: "等待管理员确认完成",
             WorkOrderStatusEnum.COMPLETED: "工单已完成",
-            WorkOrderStatusEnum.REJECTED: "需要重新修改"
+            WorkOrderStatusEnum.REJECTED: "需要重新修改",
+            WorkOrderStatusEnum.VOIDED: "工单已作废"
         }
         return next_actions.get(status, "")
 

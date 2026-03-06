@@ -12,6 +12,7 @@ class InspectionStatusEnum(str, enum.Enum):
     APPROVED = "approved"              # 已通过
     REJECTED = "rejected"              # 已驳回
     COMPLETED = "completed"            # 已完成
+    VOIDED = "voided"                  # 已作废
 
 class InspectionTypeEnum(str, enum.Enum):
     OPENING = "OPENING"               # 新站点设备安装

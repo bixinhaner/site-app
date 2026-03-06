@@ -114,6 +114,14 @@ def _ensure_stats_access(current_user: User) -> None:
         )
 
 
+def _ensure_inspection_not_voided(
+    inspection: SiteInspection,
+    detail: str = "该检查已作废，不允许继续操作",
+) -> None:
+    if inspection.status == InspectionStatusEnum.VOIDED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+
 def _normalize_photo_content_hash(raw_hash: Optional[str], *, required: bool = False) -> Optional[str]:
     text = str(raw_hash or "").strip().lower()
     if not text:
@@ -1257,6 +1265,7 @@ async def get_inspection(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="检查记录不存在"
         )
+    _ensure_inspection_not_voided(inspection, detail="已作废检查不能修改")
     
     # 权限检查
     if (_is_field_worker(current_user) and 
@@ -2008,6 +2017,7 @@ async def batch_inspection_photo_operations(
     inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
     if not inspection:
         raise HTTPException(status_code=404, detail="检查记录不存在")
+    _ensure_inspection_not_voided(inspection, detail="已作废检查不能清理照片")
         
     if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限操作该检查照片")
@@ -3504,6 +3514,7 @@ async def bind_equipment_to_sector(
             status_code=404,
             detail="检查记录不存在或无权限操作"
         )
+    _ensure_inspection_not_voided(inspection, detail="已作废检查不能绑定或解绑设备")
 
     # 识别工单类型（设备更换工单允许“直接换绑”）
     wo: Optional[WorkOrder] = None

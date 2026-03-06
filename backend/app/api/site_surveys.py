@@ -34,12 +34,21 @@ def _require_admin(current_user: User) -> None:
 
 
 def _can_edit(db: Session, current_user: User, survey: SiteSurvey) -> bool:
+    linked_work_order = None
+    if getattr(survey, 'work_order_id', None):
+        from app.models.work_order import WorkOrder, WorkOrderTypeEnum, WorkOrderStatusEnum
+
+        linked_work_order = db.query(WorkOrder).filter(WorkOrder.id == survey.work_order_id).first()
+        if linked_work_order and linked_work_order.status == WorkOrderStatusEnum.VOIDED:
+            return False
+
     role = getattr(current_user, 'role', None)
     if role in ("admin", "manager"):
         return True
     if role == "surveyor" and getattr(survey, 'work_order_id', None):
-        from app.models.work_order import WorkOrder, WorkOrderTypeEnum, WorkOrderStatusEnum
-        wo = db.query(WorkOrder).filter(WorkOrder.id == survey.work_order_id).first()
+        from app.models.work_order import WorkOrderTypeEnum, WorkOrderStatusEnum
+
+        wo = linked_work_order
         if not wo:
             return False
         if wo.assigned_to != current_user.id:

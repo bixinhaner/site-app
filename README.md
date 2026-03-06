@@ -143,10 +143,13 @@ npm run build                  # 生产构建
 ## 🏢 核心功能模块
 
 ### 1. 工单管理系统
-- **工单状态流**: PENDING → ACTIVE → SUBMITTED → UNDER_REVIEW → APPROVED/REJECTED → ACTIVATED → COMPLETED
+- **工单状态流**: 主线为 `PENDING → ACTIVE → SUBMITTED → UNDER_REVIEW → APPROVED/REJECTED → ACTIVATED → COMPLETED`；其中 `PENDING / ACTIVE / SUBMITTED / UNDER_REVIEW / REJECTED` 可在 `web-admin` 进入 `VOIDED（已作废）`
 - **工单类型**: 开通检查、维护、电源问题、传输问题、GPS问题、信号问题
 - **优先级管理**: 低、普通、高、紧急
 - **分配和审核**: 支持多级审批和完整审计追踪
+- **工单作废（Web 管理端，2026-03）**: 仅 `web-admin` 支持“作废工单”，要求填写作废原因；作废后保留工单、检查记录、照片和审计历史，但冻结为只读，不允许继续审核、提交、认领、手工确认或 AI 采纳
+- **作废前置校验（2026-03）**: 若设备级检查项仍绑定 `SN`，或该工单已生成勘察/开站/SSV 档案，系统会拒绝作废；作废后不再参与“进行中工单冲突”判断，可重新创建新工单
+- **移动端兼容（2026-03）**: `uniapp` 不提供作废入口；现场人员列表默认不展示 `VOIDED` 工单，即便收到该状态也会显示“已作废”并保持只读
 
 ### 2. 现场检查系统
 - **模板驱动**: JSON 格式的检查模板，支持站点级和扇区级检查项
@@ -222,9 +225,11 @@ npm run build                  # 生产构建
 ### 工单管理
 - `GET /api/work-orders` - 获取工单列表
 - `GET /api/work-orders/{id}` - 获取工单详情
+- `POST /api/work-orders/{id}/void` - 作废工单（仅 Web 管理端；原因必填）
 - `POST /api/work-orders/{id}/items/{item_id}` - 更新检查项
 - `POST /api/work-orders/{id}/photos` - 上传检查照片
 - `POST /api/work-orders/{id}/complete` - 完成工单
+- `POST /api/work-orders/batch-operation` - 批量操作工单（支持 `delete / change_status / change_assignee / change_priority / void`）
 
 ### 检查管理
 - `GET /api/inspections` - 获取检查列表

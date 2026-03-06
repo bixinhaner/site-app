@@ -34,6 +34,7 @@ class WorkOrderSyncService:
             WorkOrderStatusEnum.SUBMITTED: InspectionStatusEnum.SUBMITTED,
             WorkOrderStatusEnum.UNDER_REVIEW: InspectionStatusEnum.UNDER_REVIEW,
             WorkOrderStatusEnum.COMPLETED: InspectionStatusEnum.COMPLETED,
+            WorkOrderStatusEnum.VOIDED: InspectionStatusEnum.VOIDED,
         }
         
         new_inspection_status = status_mapping.get(work_order.status)
@@ -83,6 +84,7 @@ class WorkOrderSyncService:
             "APPROVED": WorkOrderStatusEnum.COMPLETED,
             "REJECTED": WorkOrderStatusEnum.ACTIVE,  # 驳回后回到活跃状态
             "COMPLETED": WorkOrderStatusEnum.COMPLETED,
+            "VOIDED": WorkOrderStatusEnum.VOIDED,
         }
         
         new_work_order_status = status_mapping.get(inspection_status_str)

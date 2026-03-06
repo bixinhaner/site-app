@@ -11,6 +11,9 @@ def ensure_work_order_schema(engine: Engine) -> None:
     required_columns = {
         "work_orders": {
             "review_comments_i18n": "review_comments_i18n TEXT",
+            "void_reason": "void_reason TEXT",
+            "voided_by": "voided_by INTEGER",
+            "voided_at": "voided_at DATETIME",
         },
     }
 
@@ -36,3 +39,18 @@ def ensure_work_order_schema(engine: Engine) -> None:
                     print(f"[Schema Migration] Skipped {column_name} on {table_name}: {e}")
                     continue
 
+        if engine.dialect.name == "mysql":
+            try:
+                conn.execute(
+                    text(
+                        """
+                        ALTER TABLE work_orders
+                        MODIFY COLUMN status ENUM(
+                            'PENDING', 'ACTIVE', 'SUBMITTED', 'UNDER_REVIEW',
+                            'APPROVED', 'ACTIVATED', 'REJECTED', 'COMPLETED', 'VOIDED'
+                        ) NOT NULL DEFAULT 'PENDING'
+                        """
+                    )
+                )
+            except Exception as e:
+                print(f"[Schema Migration] Skipped enum alter for work_orders.status: {e}")

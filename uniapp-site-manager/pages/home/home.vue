@@ -410,6 +410,7 @@
 			REJECTED: t('workorder.rejected'),
 			COMPLETED: t('workorder.completed'),
 			ACTIVATED: t('workorder.completed'),
+			VOIDED: t('workorder.voided'),
 		}
 		return statusMap[status] || status
 	}

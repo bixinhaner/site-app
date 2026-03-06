@@ -20,6 +20,7 @@ class WorkOrderStatusEnum(str, Enum):
     ACTIVATED = "ACTIVATED"
     REJECTED = "REJECTED"
     COMPLETED = "COMPLETED"
+    VOIDED = "VOIDED"
 
 
 class WorkOrderTypeEnum(str, Enum):
@@ -101,6 +102,10 @@ class WorkOrderReviewRequest(BaseModel):
     comments_i18n: Optional[Dict[str, str]] = None
     score: Optional[float] = None
     require_recheck: Optional[bool] = False
+
+
+class WorkOrderVoidRequest(BaseModel):
+    reason: str = Field(..., min_length=5, max_length=200)
 
 
 class WorkOrderOmcManualConfirmRequest(BaseModel):
@@ -192,9 +197,13 @@ class WorkOrderResponse(BaseModel):
     submitted_at: Optional[datetime] = None
     reviewed_at: Optional[datetime] = None
     completed_at: Optional[datetime]
+    voided_at: Optional[datetime] = None
     due_date: Optional[datetime]
     review_comments: Optional[str] = None
     review_comments_i18n: Optional[Dict[str, str]] = None
+    void_reason: Optional[str] = None
+    voided_by: Optional[int] = None
+    voided_by_name: Optional[str] = None
     has_duplicate_photos: bool = False
     duplicate_photo_count: int = 0
     has_similar_photos: bool = False
@@ -221,6 +230,7 @@ class WorkOrderResponse(BaseModel):
         'submitted_at',
         'reviewed_at',
         'completed_at',
+        'voided_at',
         'due_date',
         'created_at',
         'updated_at',
@@ -242,8 +252,9 @@ class ReviewSummary(BaseModel):
 
 class WorkOrderBatchOperation(BaseModel):
     work_order_ids: List[str]
-    operation: str  # 'delete', 'change_status', 'change_assignee', 'change_priority'
+    operation: str  # 'delete', 'void', 'change_status', 'change_assignee', 'change_priority'
     value: Optional[str] = None  # For operations that need a value
+    reason: Optional[str] = None
 
 
 class WorkOrderSearchParams(BaseModel):

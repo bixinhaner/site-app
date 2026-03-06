@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
@@ -42,6 +42,7 @@ from app.schemas.work_order import (
     WorkOrderReviewRequest,
     WorkOrderReviewCommentsI18nUpdateRequest,
     WorkOrderOmcManualConfirmRequest,
+    WorkOrderVoidRequest,
     ItemReviewRequest,
     ReviewSummary,
     WorkOrderBatchOperation,
@@ -63,6 +64,14 @@ from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
+WEB_ADMIN_CLIENT = "web-admin"
+VOIDABLE_WORK_ORDER_STATUSES = (
+    WorkOrderStatusEnum.PENDING,
+    WorkOrderStatusEnum.ACTIVE,
+    WorkOrderStatusEnum.SUBMITTED,
+    WorkOrderStatusEnum.UNDER_REVIEW,
+    WorkOrderStatusEnum.REJECTED,
+)
 
 
 def _has_access(
@@ -167,6 +176,179 @@ def _has_bound_device_check_items(db: Session, wo: WorkOrder) -> bool:
         .first()
     )
     return bool(exists_row)
+
+
+def _get_related_inspections(db: Session, wo: WorkOrder) -> List[SiteInspection]:
+    inspections: List[SiteInspection] = []
+    seen_ids = set()
+
+    if wo.inspection_id:
+        inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+        if inspection:
+            inspections.append(inspection)
+            seen_ids.add(inspection.id)
+
+    extra_inspections = db.query(SiteInspection).filter(SiteInspection.work_order_id == wo.id).all()
+    for inspection in extra_inspections:
+        if inspection.id in seen_ids:
+            continue
+        inspections.append(inspection)
+        seen_ids.add(inspection.id)
+
+    return inspections
+
+
+def _get_request_client(request: Request) -> str:
+    return str((request.headers.get("X-Client") or "unknown")).strip().lower()
+
+
+def _ensure_web_admin_client(request: Request) -> None:
+    if _get_request_client(request) != WEB_ADMIN_CLIENT:
+        raise HTTPException(status_code=403, detail="作废工单仅允许在 Web 管理端执行")
+
+
+def _normalize_void_reason(reason: Optional[str]) -> str:
+    normalized = str(reason or "").strip()
+    if len(normalized) < 5:
+        raise HTTPException(status_code=400, detail="作废原因至少需要 5 个字符")
+    if len(normalized) > 200:
+        raise HTTPException(status_code=400, detail="作废原因不能超过 200 个字符")
+    return normalized
+
+
+def _ensure_work_order_not_voided(wo: WorkOrder, detail: str = "工单已作废，不允许继续操作") -> None:
+    if wo.status == WorkOrderStatusEnum.VOIDED:
+        raise HTTPException(status_code=409, detail=detail)
+
+
+def _get_work_order_archive_block_reason(db: Session, work_order_id: str) -> Optional[str]:
+    if db.query(SiteSurveyArchive).filter(SiteSurveyArchive.work_order_id == work_order_id).first():
+        return "该工单已生成勘察档案，无法作废"
+    if db.query(SiteOpeningArchive).filter(SiteOpeningArchive.work_order_id == work_order_id).first():
+        return "该工单已生成开站档案，无法作废"
+    if db.query(SiteSSVArchive).filter(SiteSSVArchive.work_order_id == work_order_id).first():
+        return "该工单已生成 SSV 档案，无法作废"
+    return None
+
+
+def _count_other_opening_work_orders(
+    db: Session,
+    site_id: int,
+    *,
+    exclude_ids: List[str],
+) -> int:
+    query = db.query(WorkOrder).filter(
+        WorkOrder.site_id == site_id,
+        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+    )
+    if exclude_ids:
+        query = query.filter(~WorkOrder.id.in_(exclude_ids))
+    return query.count()
+
+
+def _apply_void_work_order(
+    db: Session,
+    wo: WorkOrder,
+    *,
+    operator_id: int,
+    reason: str,
+    request_client: str,
+    audit_action: str,
+    site_reason_prefix: str,
+    exclude_opening_order_ids: Optional[List[str]] = None,
+) -> WorkOrderStatusEnum:
+    _ensure_work_order_not_voided(wo)
+
+    if wo.status not in VOIDABLE_WORK_ORDER_STATUSES:
+        raise HTTPException(status_code=400, detail=f"无法作废{wo.status}状态的工单")
+
+    if _has_bound_device_check_items(db, wo):
+        raise HTTPException(status_code=409, detail="该工单存在已绑定设备检查项，无法作废；请先在APP解绑设备")
+
+    archive_block_reason = _get_work_order_archive_block_reason(db, wo.id)
+    if archive_block_reason:
+        raise HTTPException(status_code=409, detail=archive_block_reason)
+
+    now = datetime.utcnow()
+    old_status = wo.status
+    old_wo_type = wo.type
+    old_site_id = wo.site_id
+    opening_exclude_ids = list(dict.fromkeys((exclude_opening_order_ids or []) + [wo.id]))
+
+    remaining_opening_orders = None
+    if old_wo_type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        remaining_opening_orders = _count_other_opening_work_orders(
+            db,
+            old_site_id,
+            exclude_ids=opening_exclude_ids,
+        )
+
+    site_status_before = None
+    if old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        try:
+            extra = wo.extra_data or {}
+            site_status_before = extra.get("site_status_before")
+        except Exception:
+            site_status_before = None
+
+    wo.status = WorkOrderStatusEnum.VOIDED
+    wo.void_reason = reason
+    wo.voided_by = operator_id
+    wo.voided_at = now
+    wo.updated_at = now
+
+    inspections = _get_related_inspections(db, wo)
+    for inspection in inspections:
+        inspection.status = InspectionStatusEnum.VOIDED
+        inspection.updated_at = now
+
+    if old_wo_type == WorkOrderTypeEnum.OPENING_INSPECTION and remaining_opening_orders == 0:
+        site = db.query(Site).filter(Site.id == old_site_id).first()
+        if site and site.status != "planned":
+            old_site_status = site.status
+            site.status = "planned"
+            _audit_site_status_change(
+                db,
+                old_site_id,
+                old_site_status,
+                site.status,
+                f"{site_reason_prefix}安装工单，站点状态回滚至 planned",
+            )
+
+    if old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        site = db.query(Site).filter(Site.id == old_site_id).first()
+        before = str(site_status_before or "").strip()
+        if site and before and site.status == "maintenance" and site.status != before:
+            old_site_status = site.status
+            site.status = before
+            _audit_site_status_change(
+                db,
+                old_site_id,
+                old_site_status,
+                site.status,
+                f"{site_reason_prefix}设备更换工单，站点状态回滚",
+            )
+
+    db.add(
+        AuditEvent(
+            id=str(uuid.uuid4()),
+            resource_type="work_order",
+            resource_id=wo.id,
+            action=audit_action,
+            operator_id=operator_id,
+            from_status=old_status.value,
+            to_status=WorkOrderStatusEnum.VOIDED.value,
+            comments=reason,
+            details={
+                "reason": reason,
+                "client": request_client,
+                "voided_at": to_utc_iso(now),
+                "inspection_ids": [inspection.id for inspection in inspections],
+            },
+        )
+    )
+    return old_status
 
 
 def _detach_stock_records_from_work_order(db: Session, wo: WorkOrder) -> None:
@@ -373,6 +555,7 @@ async def search_work_orders(
     # 分配人筛选与角色可见范围
     if is_field_worker:
         query = query.filter(WorkOrder.assigned_to == current_user.id)
+        query = query.filter(WorkOrder.status != WorkOrderStatusEnum.VOIDED)
         if current_user.role == "surveyor":
             query = query.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
     elif is_admin_or_manager and assigned_to:
@@ -457,7 +640,10 @@ def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
         "submitted_at": wo.submitted_at,
         "reviewed_at": wo.reviewed_at,
         "completed_at": wo.completed_at,
+        "voided_at": getattr(wo, "voided_at", None),
         "due_date": wo.due_date,
+        "void_reason": getattr(wo, "void_reason", None),
+        "voided_by": getattr(wo, "voided_by", None),
         "extra_data": wo.extra_data or {},
         "created_at": wo.created_at or current_time,
         "updated_at": wo.updated_at or current_time,
@@ -484,6 +670,10 @@ def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
         u = db.query(User).filter(User.id == wo.reviewer_id).first()
         if u:
             data["reviewer_name"] = u.full_name or u.username
+    if getattr(wo, "voided_by", None):
+        u = db.query(User).filter(User.id == wo.voided_by).first()
+        if u:
+            data["voided_by_name"] = u.full_name or u.username
 
     if wo.inspection_id:
         duplicate_photo_count = (
@@ -856,6 +1046,7 @@ async def list_work_orders(
 
     if _is_field_worker(current_user):
         q = q.filter(WorkOrder.assigned_to == current_user.id)
+        q = q.filter(WorkOrder.status != WorkOrderStatusEnum.VOIDED)
         if _is_surveyor(current_user):
             q = q.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
 
@@ -890,6 +1081,7 @@ async def update_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不允许修改")
     if (
         not _has_access(
             current_user,
@@ -973,6 +1165,7 @@ async def delete_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不允许删除，请保留历史记录")
     
     # 权限检查：只有管理员或创建者可以删除
     if (
@@ -1012,6 +1205,7 @@ async def delete_work_order(
         remaining_opening_orders = db.query(WorkOrder).filter(
             WorkOrder.site_id == old_site_id,
             WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
             WorkOrder.id != wo.id,
         ).count()
 
@@ -1120,6 +1314,53 @@ async def delete_work_order(
         raise HTTPException(status_code=500, detail="删除失败：服务器内部错误")
 
 
+@router.post("/{work_order_id}/void")
+async def void_work_order(
+    work_order_id: str,
+    payload: WorkOrderVoidRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """作废工单（仅允许 Web 管理端执行）。"""
+    _ensure_web_admin_client(request)
+    reason = _normalize_void_reason(payload.reason)
+
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+
+    if not _has_access(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:void:write"],
+    ):
+        raise HTTPException(status_code=403, detail="无权限作废工单")
+
+    try:
+        _apply_void_work_order(
+            db,
+            wo,
+            operator_id=current_user.id,
+            reason=reason,
+            request_client=_get_request_client(request),
+            audit_action="void",
+            site_reason_prefix="作废",
+        )
+        db.commit()
+        db.refresh(wo)
+        return {
+            "message": "工单作废成功",
+            "work_order": _enrich_work_order_response(db, wo),
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="工单作废失败：服务器内部错误")
+
+
 @router.post("/{work_order_id}/accept")
 async def accept_work_order(
     work_order_id: str,
@@ -1130,7 +1371,8 @@ async def accept_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能接受")
+
     # 权限检查：只有被分配人才能接受
     if wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="只有被分配人才能接受工单")
@@ -1500,6 +1742,7 @@ async def complete_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能完成")
     
     if (
         wo.assigned_to != current_user.id
@@ -1629,6 +1872,7 @@ async def update_item(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能修改检查项")
     if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限修改此工单")
     _ensure_surveyor_wo_type(wo, current_user)
@@ -1788,6 +2032,7 @@ async def start_review(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能认领审核")
     if wo.status != WorkOrderStatusEnum.SUBMITTED:
         raise HTTPException(status_code=400, detail=f"只能从 submitted 认领，当前：{wo.status}")
     old = wo.status
@@ -1815,6 +2060,7 @@ async def review_item(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo or not wo.inspection_id:
         raise HTTPException(status_code=404, detail="工单或关联检查不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能审核检查项")
     
     item = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.id == item_id, 
@@ -1857,6 +2103,7 @@ async def update_review_comments_i18n(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能修改审核意见")
 
     updated_work_order = False
     updated_items = 0
@@ -1954,6 +2201,7 @@ async def final_review(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能审核")
     if wo.status not in [WorkOrderStatusEnum.SUBMITTED, WorkOrderStatusEnum.UNDER_REVIEW]:
         raise HTTPException(status_code=400, detail=f"当前状态不允许审核：{wo.status}")
 
@@ -2141,6 +2389,7 @@ async def manual_confirm_opening_omc_status(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能执行设备状态确认")
     if wo.type not in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT):
         raise HTTPException(status_code=400, detail="仅开站/设备更换工单支持手工确认设备状态")
     if wo.status in (WorkOrderStatusEnum.REJECTED, WorkOrderStatusEnum.COMPLETED):
@@ -2224,6 +2473,8 @@ def _update_work_order_result(db: Session, work_order_id: str):
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo or not wo.inspection_id:
         return
+    if wo.status == WorkOrderStatusEnum.VOIDED:
+        return
     
     items = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == wo.inspection_id).all()
     result = None
@@ -2263,6 +2514,7 @@ async def get_item_field_schema(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能提交")
     if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问该工单")
     _ensure_surveyor_wo_type(wo, current_user)
@@ -2433,6 +2685,7 @@ def recall_work_order(
     wo: WorkOrder = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能撤回")
 
     # 权限校验：指派人或 admin/manager
     if not (
@@ -2500,6 +2753,7 @@ async def review_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能审核")
     
     # 权限检查：只有管理员、项目经理或指定审核人才能审核
     if (
@@ -2670,6 +2924,7 @@ async def review_work_order(
 @router.post("/batch-operation")
 async def batch_work_order_operation(
     operation: WorkOrderBatchOperation,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -2698,6 +2953,18 @@ async def batch_work_order_operation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Some work orders not found"
         )
+
+    request_client = _get_request_client(request)
+    void_reason = None
+    if operation.operation == "void":
+        _ensure_web_admin_client(request)
+        if not _has_access(
+            current_user,
+            role_codes=["admin", "manager"],
+            permission_codes=["workorder:void:write"],
+        ):
+            raise HTTPException(status_code=403, detail="无权限批量作废工单")
+        void_reason = _normalize_void_reason(operation.reason)
     
     # 执行批量操作
     updated_count = 0
@@ -2708,7 +2975,25 @@ async def batch_work_order_operation(
     
     for wo in work_orders:
         try:
-            if operation.operation == "delete":
+            if operation.operation == "void":
+                try:
+                    _apply_void_work_order(
+                        db,
+                        wo,
+                        operator_id=current_user.id,
+                        reason=void_reason,
+                        request_client=request_client,
+                        audit_action="batch_void",
+                        site_reason_prefix="批量作废",
+                        exclude_opening_order_ids=operation.work_order_ids,
+                    )
+                    updated_count += 1
+                except HTTPException as exc:
+                    errors.append(f"工单 {wo.id} {exc.detail}")
+                    error_count += 1
+                    continue
+
+            elif operation.operation == "delete":
                 # 检查工单状态：只能删除待分配或已分配状态的工单
                 if wo.status not in [WorkOrderStatusEnum.PENDING, WorkOrderStatusEnum.ACTIVE]:
                     errors.append(f"工单 {wo.id} 状态不允许删除: {wo.status}")
@@ -2756,6 +3041,7 @@ async def batch_work_order_operation(
                     remaining_opening_orders = db.query(WorkOrder).filter(
                         WorkOrder.site_id == old_site_id,
                         WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+                        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
                         ~WorkOrder.id.in_(operation.work_order_ids),
                     ).count()
 
@@ -2842,6 +3128,14 @@ async def batch_work_order_operation(
             elif operation.operation == "change_status" and operation.value:
                 try:
                     new_status = WorkOrderStatusEnum(operation.value)
+                    if new_status == WorkOrderStatusEnum.VOIDED:
+                        errors.append(f"工单 {wo.id} 不能通过批量改状态直接作废，请使用批量作废")
+                        error_count += 1
+                        continue
+                    if wo.status == WorkOrderStatusEnum.VOIDED:
+                        errors.append(f"工单 {wo.id} 已作废，不能再批量修改状态")
+                        error_count += 1
+                        continue
                     old_status = wo.status
                     wo.status = new_status
                     _audit(db, "work_order", wo.id, "batch_status_change", current_user.id,
@@ -2853,6 +3147,10 @@ async def batch_work_order_operation(
                     
             elif operation.operation == "change_assignee" and operation.value:
                 try:
+                    if wo.status == WorkOrderStatusEnum.VOIDED:
+                        errors.append(f"工单 {wo.id} 已作废，不能再重新分配")
+                        error_count += 1
+                        continue
                     # 检查工单状态：只能重新分配待分配或已分配状态的工单
                     if wo.status not in [WorkOrderStatusEnum.PENDING, WorkOrderStatusEnum.ACTIVE]:
                         errors.append(f"工单 {wo.id} 状态不允许重新分配: {wo.status}")
@@ -2893,6 +3191,10 @@ async def batch_work_order_operation(
                     
             elif operation.operation == "change_priority" and operation.value:
                 try:
+                    if wo.status == WorkOrderStatusEnum.VOIDED:
+                        errors.append(f"工单 {wo.id} 已作废，不能再批量修改优先级")
+                        error_count += 1
+                        continue
                     new_priority = WorkOrderPriorityEnum(operation.value)
                     wo.priority = new_priority
                     _audit(db, "work_order", wo.id, "batch_priority_change", current_user.id,
@@ -2981,6 +3283,7 @@ async def check_equipment_activation(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能执行开通检测")
     
     if wo.status != WorkOrderStatusEnum.APPROVED:
         raise HTTPException(
@@ -3006,6 +3309,7 @@ async def get_activation_status(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能标记完成")
     
     if current_user.role == "inspector" and wo.assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="无权限访问此工单")
@@ -3084,6 +3388,7 @@ async def finalize_survey_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    _ensure_work_order_not_voided(wo, detail="已作废工单不能执行完成")
     if wo.type != WorkOrderTypeEnum.SITE_SURVEY:
         raise HTTPException(status_code=400, detail="仅支持勘察类工单")
     if wo.status not in [WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.UNDER_REVIEW, WorkOrderStatusEnum.SUBMITTED]:

@@ -63,6 +63,22 @@ def ensure_inspection_schema(engine: Engine) -> None:
                     print(f"[Schema Migration] Skipped {column_name} on {table_name}: {e}")
                     continue
 
+        if engine.dialect.name == "mysql":
+            try:
+                conn.execute(
+                    text(
+                        """
+                        ALTER TABLE site_inspections
+                        MODIFY COLUMN status ENUM(
+                            'draft', 'in_progress', 'submitted', 'under_review',
+                            'approved', 'rejected', 'completed', 'voided'
+                        ) DEFAULT 'draft'
+                        """
+                    )
+                )
+            except Exception as e:
+                print(f"[Schema Migration] Skipped enum alter for site_inspections.status: {e}")
+
         # 兼容新规则：关闭阻断时允许重复上传，因此移除旧版强制唯一索引
         try:
             conn.execute(text("DROP INDEX IF EXISTS uq_inspection_photos_scope_content_hash"))

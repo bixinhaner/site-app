@@ -40,6 +40,11 @@ export const workOrderAPI = {
     return request.delete(`/api/work-orders/${workOrderId}`)
   },
 
+  // 作废工单
+  voidWorkOrder: (workOrderId, reason) => {
+    return request.post(`/api/work-orders/${workOrderId}/void`, { reason })
+  },
+
   // 接受工单
   acceptWorkOrder: (workOrderId) => {
     return request.post(`/api/work-orders/${workOrderId}/accept`)
@@ -61,11 +66,12 @@ export const workOrderAPI = {
   },
 
   // 批量操作工单
-  batchOperation: (workOrderIds, operation, value = null) => {
+  batchOperation: (workOrderIds, operation, value = null, reason = null) => {
     return request.post('/api/work-orders/batch-operation', {
       work_order_ids: workOrderIds,
       operation: operation,
-      value: value
+      value: value,
+      reason: reason
     })
   },
 

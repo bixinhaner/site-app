@@ -469,7 +469,8 @@ const statusText = (s) => {
     APPROVED: $t('workorder.approved'),
     ACTIVATED: $t('workorder.activated'),
     REJECTED: $t('workorder.rejected'),
-    COMPLETED: $t('workorder.completed')
+    COMPLETED: $t('workorder.completed'),
+    VOIDED: $t('workorder.voided')
   })[s] || s
 }
 
@@ -814,6 +815,11 @@ onUnmounted(() => {
 		&.status-COMPLETED {
 			background: #d1fae5;
 			color: #059669;
+		}
+
+		&.status-VOIDED {
+			background: #e2e8f0;
+			color: #64748b;
 		}
 	}
 	

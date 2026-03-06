@@ -1562,6 +1562,7 @@
 			approved: 'status-approved',
 			rejected: 'status-rejected',
 			completed: 'status-completed',
+			voided: 'status-voided',
 			pending: 'status-pending',
 			failed: 'status-failed'
 		}
@@ -1631,6 +1632,7 @@
 			approved: $t('inspection.approved') || $t('inspection.completed'),
 			rejected: $t('inspection.rejected') || $t('inspection.failed'),
 			completed: $t('inspection.completed'),
+			voided: $t('workorder.voided'),
 			pending: $t('inspection.pending'),
 			failed: $t('inspection.failed')
 		}
@@ -1767,7 +1769,8 @@
 				APPROVED: $t('workorder.approved'),
 				ACTIVATED: $t('workorder.activated'),
 				COMPLETED: $t('workorder.completed'),
-				REJECTED: $t('workorder.rejected')
+				REJECTED: $t('workorder.rejected'),
+				VOIDED: $t('workorder.voided')
 			}
 			return openingMap[status] || status
 		}
@@ -1779,7 +1782,8 @@
 			APPROVED: $t('workorder.approved'),
 			ACTIVATED: $t('workorder.activated'),
 			COMPLETED: $t('workorder.completed'),
-			REJECTED: $t('workorder.rejected')
+			REJECTED: $t('workorder.rejected'),
+			VOIDED: $t('workorder.voided')
 		}
 		return statusMap[status] || status
 	}
@@ -1845,6 +1849,11 @@
 	.status-completed {
 		background: #d1fae5;
 		color: #059669;
+	}
+
+	.status-voided {
+		background: #e2e8f0;
+		color: #64748b;
 	}
 	
 	.header-info {

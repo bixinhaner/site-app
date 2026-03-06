@@ -8,7 +8,14 @@ from sqlalchemy.orm import Session
 from app.api.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.inspection import CheckItemStatusEnum, InspectionAuditLog, InspectionCheckItem
+from app.models.inspection import (
+    CheckItemStatusEnum,
+    InspectionAuditLog,
+    InspectionCheckItem,
+    InspectionStatusEnum,
+    SiteInspection,
+)
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum
 from app.models.user import User
 from app.schemas.ai import (
     AiCheckItemAnalyzeRequest,
@@ -45,6 +52,18 @@ def _ensure_ai_configured() -> None:
         raise HTTPException(status_code=400, detail="AI 未配置：AI_API_KEY 为空")
     if not (settings.AI_MODEL or "").strip():
         raise HTTPException(status_code=400, detail="AI 未配置：AI_MODEL 为空")
+
+
+def _ensure_check_item_not_voided(db: Session, check_item: InspectionCheckItem) -> None:
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == check_item.inspection_id).first()
+    if inspection and inspection.status == InspectionStatusEnum.VOIDED:
+        raise HTTPException(status_code=409, detail="检查记录已作废，不能继续执行 AI 检查或采纳")
+
+    work_order = None
+    if inspection and inspection.work_order_id:
+        work_order = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
+    if work_order and work_order.status == WorkOrderStatusEnum.VOIDED:
+        raise HTTPException(status_code=409, detail="工单已作废，不能继续执行 AI 检查或采纳")
 
 
 @router.post("/translate", response_model=AiTranslateResponse)
@@ -247,6 +266,7 @@ def analyze_check_item(
     check_item = db.query(InspectionCheckItem).filter(InspectionCheckItem.id == check_item_id).first()
     if not check_item:
         raise HTTPException(status_code=404, detail="检查项不存在")
+    _ensure_check_item_not_voided(db, check_item)
 
     try:
         svc = AiCheckItemService()
@@ -286,6 +306,7 @@ def apply_check_item_ai_suggestion(
     check_item = db.query(InspectionCheckItem).filter(InspectionCheckItem.id == check_item_id).first()
     if not check_item:
         raise HTTPException(status_code=404, detail="检查项不存在")
+    _ensure_check_item_not_voided(db, check_item)
 
     if check_item.review_status in ("pass", "warning", "fail"):
         raise HTTPException(status_code=400, detail="该检查项已有人为审核结果，无法采纳 AI 建议")

@@ -15,11 +15,23 @@
           <el-descriptions-item label="分配给">{{ order.assignee_name }}</el-descriptions-item>
           <el-descriptions-item label="优先级">{{ priorityText(order.priority) }}</el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag>{{ statusText(order.status, order.type) }}</el-tag>
+            <el-tag :type="statusTagType(order.status)">{{ statusText(order.status, order.type) }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="分配时间">{{ formatDateTime(order.assigned_at) }}</el-descriptions-item>
           <el-descriptions-item label="提交时间">{{ formatDateTime(order.submitted_at) }}</el-descriptions-item>
+          <el-descriptions-item v-if="order.voided_at" label="作废时间">{{ formatDateTime(order.voided_at) }}</el-descriptions-item>
+          <el-descriptions-item v-if="order.voided_at" label="作废原因">{{ order.void_reason || '-' }}</el-descriptions-item>
         </el-descriptions>
+
+        <el-alert
+          v-if="order.status === 'VOIDED'"
+          class="mb16"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`该工单已作废${order.voided_by_name ? `（${order.voided_by_name}）` : ''}`"
+          :description="'工单、检查记录和勘察草稿均已冻结为只读，不可继续审核或修改。'"
+        />
 
         <el-alert
           v-if="duplicatePhotoSummary.total > 0"
@@ -209,7 +221,7 @@
                     size="small"
                     type="success"
                     plain
-                    :disabled="manualConfirmSubmitting || row.ever_online"
+                    :disabled="isVoided || manualConfirmSubmitting || row.ever_online"
                     @click="manualConfirm(row, 'online')"
                   >
                     确认上线
@@ -218,7 +230,7 @@
                     size="small"
                     type="warning"
                     plain
-                    :disabled="manualConfirmSubmitting || row.ever_activated"
+                    :disabled="isVoided || manualConfirmSubmitting || row.ever_activated"
                     @click="manualConfirm(row, 'activated')"
                   >
                     确认激活
@@ -251,7 +263,7 @@
 	              trigger="click"
 	              @command="runAiCheckBatch"
 	            >
-	              <el-button size="small" type="primary" :disabled="itemsLoading || aiCheckProgress.running">
+		              <el-button size="small" type="primary" :disabled="isVoided || itemsLoading || aiCheckProgress.running">
 	                <el-icon><MagicStick /></el-icon>一键AI检查
 	                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
 	              </el-button>
@@ -471,7 +483,7 @@
 	                  </el-button>
 	                  <template #dropdown>
 	                    <el-dropdown-menu>
-	                      <el-dropdown-item :disabled="aiCheckProgress.running" command="check">AI检查</el-dropdown-item>
+		                      <el-dropdown-item :disabled="isVoided || aiCheckProgress.running" command="check">AI检查</el-dropdown-item>
 	                      <el-dropdown-item :disabled="!canApplyAi(row)" command="apply">采纳AI</el-dropdown-item>
 	                    </el-dropdown-menu>
 	                  </template>
@@ -540,6 +552,7 @@
                 {{ hasFailedItems ? '存在不合格检查项，无法通过' : '通过' }}
               </el-button>
               <el-button type="danger" :disabled="!canReject" @click="finalReview('reject')">驳回</el-button>
+              <el-button v-if="canVoidCurrentOrder" type="warning" @click="voidCurrentWorkOrder">作废工单</el-button>
               <el-button type="info" @click="showAuditHistory">
                 <el-icon><Clock /></el-icon>查看审核历史
               </el-button>
@@ -584,7 +597,7 @@
 	          <div style="display: flex; align-items: center; justify-content: space-between;">
 	            <h4 style="margin: 0;">AI 建议（需人工确认后采纳）</h4>
 	            <el-space>
-	              <el-button size="small" type="primary" :disabled="aiCheckProgress.running" @click="aiCheckSingle(selectedItem)">
+		              <el-button size="small" type="primary" :disabled="isVoided || aiCheckProgress.running" @click="aiCheckSingle(selectedItem)">
 	                <el-icon><MagicStick /></el-icon>AI检查
 	              </el-button>
 	              <el-button size="small" type="success" :disabled="!canApplyAi(selectedItem)" @click="applyAiSuggestion(selectedItem)">
@@ -1494,8 +1507,10 @@ const statuses = [
   { label: '已通过/待上线', value: 'APPROVED' },
   { label: '已开通(上线阶段)', value: 'ACTIVATED' },
   { label: '已驳回', value: 'REJECTED' },
-  { label: '已完成', value: 'COMPLETED' }
+  { label: '已完成', value: 'COMPLETED' },
+  { label: '已作废', value: 'VOIDED' },
 ]
+const VOIDABLE_STATUSES = ['PENDING', 'ACTIVE', 'SUBMITTED', 'UNDER_REVIEW', 'REJECTED']
 const types = [
   { label: '新站点设备安装', value: 'opening_inspection' },
   { label: '设备更换', value: 'equipment_replacement' },
@@ -1508,8 +1523,12 @@ const types = [
   { label: 'SSV 验收', value: 'ssv' },
 ]
 
+const isVoided = computed(() => order.value?.status === 'VOIDED')
 const canStartReview = computed(() => order.value && order.value.status === 'SUBMITTED')
 const canFinalReview = computed(() => order.value && ['SUBMITTED','UNDER_REVIEW'].includes(order.value.status))
+const canVoidCurrentOrder = computed(() => {
+  return !!order.value && userStore.hasPermission('workorder:void:write') && VOIDABLE_STATUSES.includes(order.value.status)
+})
 
 const checkItemStatusText = (status) => {
   const value = (status ?? '').toString()
@@ -1556,6 +1575,7 @@ const checkItemStatusText = (status) => {
 	}
 
 	const canApplyAi = (row) => {
+	  if (isVoided.value) return false
 	  if (!row) return false
 	  if (row.review_status === 'pass' || row.review_status === 'warning' || row.review_status === 'fail') return false
 	  const status = String(row.status || '').trim()
@@ -1566,6 +1586,7 @@ const checkItemStatusText = (status) => {
 	}
 
 const canReviewCheckItem = (item) => {
+  if (isVoided.value) return false
   const status = (item?.status ?? '').toString()
   return status === 'completed'
 }
@@ -1642,6 +1663,7 @@ const getItemLocationCompareStats = (item) => {
 }
 
 const checkItemReviewDisabledReason = (item) => {
+  if (isVoided.value) return '工单已作废，不能继续审核检查项'
   const statusText = checkItemStatusText(item?.status)
   return `该检查项未完成提交（当前：${statusText}），无法审核`
 }
@@ -1998,6 +2020,14 @@ const pendingItemsCount = computed(() => {
 })
 
 const reviewHeaderHint = computed(() => {
+  if (isVoided.value) {
+    return {
+      type: 'warning',
+      text: '工单已作废',
+      tooltip: '该工单已作废，审核与编辑操作均已冻结。',
+      icon: WarningFilled,
+    }
+  }
   if (hasPendingItems.value) {
     const count = pendingItemsCount.value
     return {
@@ -2032,6 +2062,15 @@ const canApprove = computed(() => {
 const canReject = computed(() => {
   return canFinalReview.value
 })
+
+const statusTagType = (status) => {
+  if (status === 'VOIDED') return 'info'
+  if (status === 'REJECTED') return 'danger'
+  if (['SUBMITTED', 'UNDER_REVIEW'].includes(status)) return 'warning'
+  if (['APPROVED', 'ACTIVATED', 'COMPLETED'].includes(status)) return 'success'
+  if (status === 'ACTIVE') return 'primary'
+  return ''
+}
 
 const refresh = async () => {
   const id = route.query.id
@@ -2553,6 +2592,43 @@ const finalReview = async (action) => {
   }
 }
 
+const promptVoidReason = async () => {
+  const result = await ElMessageBox.prompt(
+    '作废后工单与检查记录会保留，但会被冻结为只读。若仍有设备级 SN 绑定，系统会拒绝作废。请输入作废原因：',
+    '确认作废工单',
+    {
+      confirmButtonText: '确认作废',
+      cancelButtonText: '取消',
+      type: 'warning',
+      inputType: 'textarea',
+      inputPlaceholder: '请填写至少 5 个字的作废原因',
+      closeOnClickModal: false,
+      inputValidator: (value) => {
+        const text = String(value || '').trim()
+        if (text.length < 5) return '作废原因至少需要 5 个字符'
+        if (text.length > 200) return '作废原因不能超过 200 个字符'
+        return true
+      },
+    },
+  )
+  return String(result.value || '').trim()
+}
+
+const voidCurrentWorkOrder = async () => {
+  const id = route.query.id
+  if (!id || !order.value) return
+  try {
+    const reason = await promptVoidReason()
+    await request.post(`/api/work-orders/${id}/void`, { reason })
+    ElMessage.success('工单已作废')
+    await refresh()
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '作废失败')
+  }
+}
+
 
 const getImageUrl = (filePath) => {
   return resolveImageUrl(filePath)
@@ -2874,7 +2950,7 @@ const deviceRefreshCooldown = ref(0)
 let deviceCooldownTimer = null
 
 const canShowManualConfirm = computed(() => {
-  return manualConfirmEnabled.value && userStore.hasPermission('workorder:review:write')
+  return !isVoided.value && manualConfirmEnabled.value && userStore.hasPermission('workorder:review:write')
 })
 
 const manualConfirm = async (row, action) => {
@@ -2985,6 +3061,8 @@ const getActionText = (action, source) => {
     'final_review': '最终审核',
     'approve': '通过',
     'reject': '驳回',
+    'void': '作废',
+    'batch_void': '批量作废',
     'update_status': '更新状态',
     'update': '更新',
     'delete': '删除',
@@ -3029,7 +3107,7 @@ const getTimelineActionTagType = (log) => {
   const source = log?.source
   if (source === 'binding') return 'info'
   if (['approve', 'accept'].includes(action)) return 'success'
-  if (['reject', 'delete'].includes(action)) return 'danger'
+  if (['reject', 'delete', 'void', 'batch_void'].includes(action)) return 'danger'
   if (['submit', 'resubmit', 'start_review'].includes(action)) return 'warning'
   if (['item_review', 'photo_review'].includes(action)) return 'primary'
   if (['delete_photo', 'replace_photo', 'batch_photo_operations', 'cleanup_duplicate_photos'].includes(action)) return 'warning'
@@ -3041,7 +3119,7 @@ const getTimelineLogType = (log) => {
   const source = log?.source
   if (source === 'binding') return 'info'
   if (['approve', 'accept', 'mark_completed'].includes(action)) return 'success'
-  if (['reject', 'delete'].includes(action)) return 'danger'
+  if (['reject', 'delete', 'void', 'batch_void'].includes(action)) return 'danger'
   if (['submit', 'resubmit'].includes(action)) return 'primary'
   return 'info'
 }
@@ -3066,6 +3144,7 @@ const formatTimelineStatus = (status) => {
     approved: '已通过',
     rejected: '已驳回',
     completed: '已完成',
+    voided: '已作废',
   }
   return inspectionMap[v] || v
 }

@@ -14,6 +14,7 @@ class WorkOrderStatusEnum(str, enum.Enum):
     ACTIVATED = "ACTIVATED"     # 已开通
     REJECTED = "REJECTED"       # 审核驳回
     COMPLETED = "COMPLETED"
+    VOIDED = "VOIDED"           # 已作废
 
 
 class WorkOrderPriorityEnum(str, enum.Enum):
@@ -76,7 +77,12 @@ class WorkOrder(Base):
     reviewed_at = Column(DateTime)
     activated_at = Column(DateTime)
     completed_at = Column(DateTime)
+    voided_at = Column(DateTime)
     due_date = Column(DateTime)
+
+    # 作废信息
+    void_reason = Column(Text)
+    voided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     # 扩展信息 (JSON格式存储其他配置)
     extra_data = Column(JSON, default={})
@@ -90,6 +96,7 @@ class WorkOrder(Base):
     assigner = relationship("User", foreign_keys=[assigned_by])
     assignee = relationship("User", foreign_keys=[assigned_to])
     reviewer = relationship("User", foreign_keys=[reviewer_id])
+    voider = relationship("User", foreign_keys=[voided_by])
     inspection = relationship("SiteInspection", foreign_keys=[inspection_id])
     inspections = relationship("SiteInspection", foreign_keys="SiteInspection.work_order_id", back_populates="work_order")
     items = relationship("WorkOrderItem", back_populates="work_order")

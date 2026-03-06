@@ -74,6 +74,7 @@
           <!-- <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button> -->
           <el-button size="small" type="warning" @click="showBatchAssignDialog = true">批量重新分配</el-button>
           <el-button size="small" type="info" @click="showBatchPriorityDialog = true">批量修改优先级</el-button>
+          <el-button v-if="canVoidPermission" size="small" type="warning" @click="confirmBatchVoid">批量作废</el-button>
           <el-button size="small" type="danger" @click="confirmBatchDelete">批量删除</el-button>
         </div>
       </div>
@@ -107,6 +108,11 @@
                 </el-tooltip>
               </div>
               <div class="work-order-id">ID: {{ row.id }}</div>
+              <div v-if="row.status === 'VOIDED'" class="work-order-void-meta">
+                作废：{{ row.void_reason || '未填写原因' }}
+                <span v-if="row.voided_by_name"> · {{ row.voided_by_name }}</span>
+                <span v-if="row.voided_at"> · {{ formatDateTime(row.voided_at) }}</span>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -122,19 +128,22 @@
         </el-table-column>
         <el-table-column prop="status" label="状态" width="160">
           <template #default="{ row }">
-            <el-tag>{{ statusText(row.status, row.type) }}</el-tag>
+            <el-tag :type="statusTagType(row.status)">{{ statusText(row.status, row.type) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="assigned_at" label="分配时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)" v-if="canEdit(row)">
               <el-icon><Edit /></el-icon>编辑
             </el-button>
             <el-button link type="primary" size="small" @click="openReview(row)">
               <el-icon><Stamp /></el-icon>审核
+            </el-button>
+            <el-button link type="warning" size="small" @click="confirmVoid(row)" v-if="canVoid(row)">
+              作废
             </el-button>
             <el-button link type="danger" size="small" @click="confirmDelete(row)" v-if="canDelete(row)">
               <el-icon><Delete /></el-icon>删除
@@ -374,9 +383,11 @@ import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Edit, Delete, Search, Refresh, Plus, Sort, WarningFilled } from '@element-plus/icons-vue'
 import { createDebouncedTracker } from '@/utils/operationTrack'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 const loading = ref(false)
 const items = ref([])
 const total = ref(0)
@@ -426,10 +437,13 @@ const statuses = [
   { label: '已通过/待上线', value: 'APPROVED' },
   { label: '已开通(上线阶段)', value: 'ACTIVATED' },
   { label: '已驳回', value: 'REJECTED' },
-  { label: '已完成', value: 'COMPLETED' }
+  { label: '已完成', value: 'COMPLETED' },
+  { label: '已作废', value: 'VOIDED' }
 ]
 const statusValueSet = new Set(statuses.map(s => s.value))
 const INSTALLED_SITE_PRESET_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'ACTIVATED', 'COMPLETED']
+const VOIDABLE_STATUSES = ['PENDING', 'ACTIVE', 'SUBMITTED', 'UNDER_REVIEW', 'REJECTED']
+const canVoidPermission = computed(() => userStore.hasPermission('workorder:void:write'))
 
 const parseCsvQuery = (value) => {
   const raw = String(_firstQueryValue(value) || '').trim()
@@ -912,6 +926,10 @@ const canDelete = (row) => {
   return ['PENDING', 'ACTIVE'].includes(row.status)
 }
 
+const canVoid = (row) => {
+  return canVoidPermission.value && VOIDABLE_STATUSES.includes(row.status)
+}
+
 // 编辑功能
 const editSiteName = ref('')
 const editSiteCode = ref('')
@@ -1029,6 +1047,51 @@ const deleteWorkOrder = async (id) => {
   }
 }
 
+const promptVoidReason = async (title, message) => {
+  const result = await ElMessageBox.prompt(
+    `${message}\n\n作废后工单与检查记录会保留，但会被冻结为只读。若仍有设备级 SN 绑定，系统会拒绝作废。请输入作废原因：`,
+    title,
+    {
+      confirmButtonText: '确认作废',
+      cancelButtonText: '取消',
+      type: 'warning',
+      inputType: 'textarea',
+      inputPlaceholder: '请填写至少 5 个字的作废原因',
+      closeOnClickModal: false,
+      inputValidator: (value) => {
+        const text = String(value || '').trim()
+        if (text.length < 5) return '作废原因至少需要 5 个字符'
+        if (text.length > 200) return '作废原因不能超过 200 个字符'
+        return true
+      },
+    }
+  )
+  return String(result.value || '').trim()
+}
+
+const confirmVoid = async (row) => {
+  try {
+    const reason = await promptVoidReason(
+      '确认作废工单',
+      `确定要作废工单“${row.title}”吗？`
+    )
+    await voidWorkOrder(row.id, reason)
+  } catch (e) {
+    // 用户取消作废
+  }
+}
+
+const voidWorkOrder = async (id, reason) => {
+  try {
+    await workOrderAPI.voidWorkOrder(id, reason)
+    ElMessage.success('工单已作废')
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '作废失败')
+  }
+}
+
 const statusText = (status, type) => {
   if (type === 'opening_inspection' || type === 'equipment_replacement') {
     if (status === 'APPROVED') return '待上线 (80%)'
@@ -1036,6 +1099,14 @@ const statusText = (status, type) => {
     if (status === 'COMPLETED') return '已激活 (100%)'
   }
   return statuses.find(s => s.value === status)?.label || status
+}
+const statusTagType = (status) => {
+  if (status === 'VOIDED') return 'info'
+  if (status === 'REJECTED') return 'danger'
+  if (['SUBMITTED', 'UNDER_REVIEW'].includes(status)) return 'warning'
+  if (['APPROVED', 'ACTIVATED', 'COMPLETED'].includes(status)) return 'success'
+  if (status === 'ACTIVE') return 'primary'
+  return ''
 }
 const typeText = (v) => (typeLabelMap[v] || v)
 const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
@@ -1048,6 +1119,18 @@ const handleSelectionChange = (selection) => {
 
 const clearSelection = () => {
   selectedWorkOrders.value = []
+}
+
+const confirmBatchVoid = async () => {
+  try {
+    const reason = await promptVoidReason(
+      '确认批量作废',
+      `确定要作废选中的 ${selectedWorkOrders.value.length} 个工单吗？`
+    )
+    await executeBatchVoid(reason)
+  } catch (e) {
+    // 用户取消作废
+  }
 }
 
 const confirmBatchDelete = async () => {
@@ -1089,6 +1172,30 @@ const executeBatchDelete = async () => {
   } catch (e) {
     console.error(e)
     ElMessage.error('批量删除失败: ' + e.message)
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+const executeBatchVoid = async (reason) => {
+  try {
+    batchLoading.value = true
+    const workOrderIds = selectedWorkOrders.value.map(wo => wo.id)
+    const result = await workOrderAPI.batchOperation(workOrderIds, 'void', null, reason)
+
+    batchResult.value = result
+
+    if (result.error_count > 0) {
+      showErrorDialog.value = true
+    } else {
+      ElMessage.success(`成功作废 ${result.updated_count} 个工单`)
+    }
+
+    clearSelection()
+    await load()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('批量作废失败: ' + (e?.message || e))
   } finally {
     batchLoading.value = false
   }
@@ -1248,6 +1355,13 @@ watch([sortBy, sortOrder], () => {
   color: #909399; 
   margin-top: 4px; 
   font-family: 'Courier New', monospace;
+}
+
+.work-order-void-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #909399;
 }
 
 .title-with-duplicate {
