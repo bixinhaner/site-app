@@ -64,6 +64,20 @@ export const mobileSettingsApi = {
   },
 }
 
+export const workOrderExecutionSettingsApi = {
+  getSettings() {
+    return request.get('/api/system/workorder-execution-settings')
+  },
+
+  updateSettings(data) {
+    return request.put('/api/system/workorder-execution-settings', data)
+  },
+
+  getEffectiveSettings() {
+    return request.get('/api/system/workorder-execution-settings/effective')
+  },
+}
+
 // 逆地理缓存观测相关 API
 export const geocodeCacheApi = {
   getStats() {

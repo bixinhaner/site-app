@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import config from '@/config/env.js'
 
 // 工单API
 export const workOrderAPI = {
@@ -30,6 +31,16 @@ export const workOrderAPI = {
     return request.get(`/api/work-orders/${workOrderId}`)
   },
 
+  // 获取 Web 工单执行上下文
+  getExecutionContext: (workOrderId) => {
+    return request.get(`/api/work-orders/${workOrderId}/execution-context`)
+  },
+
+  // 获取工单关联检查
+  getWorkOrderInspection: (workOrderId) => {
+    return request.get(`/api/work-orders/${workOrderId}/inspection`)
+  },
+
   // 更新工单信息
   updateWorkOrder: (workOrderId, workOrderData) => {
     return request.put(`/api/work-orders/${workOrderId}`, workOrderData)
@@ -55,6 +66,11 @@ export const workOrderAPI = {
     return request.post(`/api/work-orders/${workOrderId}/submit`)
   },
 
+  // 撤回工单
+  recallWorkOrder: (workOrderId) => {
+    return request.post(`/api/work-orders/${workOrderId}/recall`)
+  },
+
   // 完成工单
   completeWorkOrder: (workOrderId) => {
     return request.post(`/api/work-orders/${workOrderId}/complete`)
@@ -78,7 +94,43 @@ export const workOrderAPI = {
   // 获取工单统计信息
   getWorkOrderStats: () => {
     return request.get('/api/work-orders/stats/summary')
-  }
+  },
+
+  getWorkOrderProgress: (workOrderId) => {
+    return request.get(`/api/work-orders/${workOrderId}/progress`)
+  },
+}
+
+export const inspectionExecutionApi = {
+  getInspectionDetail: (inspectionId) => request.get(`/api/inspections/detail/${inspectionId}`),
+
+  getInspectionItems: (inspectionId, params = {}) => request.get(`/api/inspections/detail/${inspectionId}/items`, { params }),
+
+  updateInspectionItem: (inspectionId, itemId, data) =>
+    request.put(`/api/inspections/detail/${inspectionId}/items/${itemId}`, data),
+
+  precheckPhotoUpload: (inspectionId, data) =>
+    request.post(`/api/inspections/detail/${inspectionId}/photos/precheck`, data),
+
+  uploadPhoto: (inspectionId, formData) =>
+    request.post(`/api/inspections/detail/${inspectionId}/photos`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: config.LONG_REQUEST_TIMEOUT,
+    }),
+
+  deletePhoto: (photoId) => request.delete(`/api/inspections/photos/${photoId}`),
+
+  replacePhoto: (photoId, formData) =>
+    request.put(`/api/inspections/photos/${photoId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: config.LONG_REQUEST_TIMEOUT,
+    }),
+
+  bindEquipment: (inspectionId, data) =>
+    request.post(`/api/inspections/detail/${inspectionId}/bind-equipment`, data),
+
+  checkEquipmentPickup: (sn) =>
+    request.get(`/api/inspections/equipment/check-pickup/${encodeURIComponent(sn)}`),
 }
 
 export const WorkOrderType = {

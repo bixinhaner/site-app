@@ -174,8 +174,10 @@ const routes = [
         component: RouterView,
         meta: { title: '工单管理', icon: 'Tickets' },
         children: [
+          { path: 'my-execution', name: 'MyExecutionWorkOrders', component: () => import('../views/workorder/MyExecutionWorkOrders.vue'), meta: { title: '我的执行工单', icon: 'DocumentChecked' } },
           { path: 'list', name: 'WorkOrderList', component: () => import('../views/workorder/WorkOrderList.vue'), meta: { title: '工单列表', icon: 'List' } },
-          { path: 'review', name: 'WorkOrderReview', component: () => import('../views/workorder/WorkOrderReview.vue'), meta: { title: '工单审核台', icon: 'Stamp' } }
+          { path: 'review', name: 'WorkOrderReview', component: () => import('../views/workorder/WorkOrderReview.vue'), meta: { title: '工单审核台', icon: 'Stamp' } },
+          { path: 'execute/:id', name: 'WorkOrderExecute', component: () => import('../views/workorder/WorkOrderExecute.vue'), meta: { title: '工单执行台', hidden: true } }
         ]
       },
       // 用户管理（二级菜单）
@@ -200,6 +202,12 @@ const routes = [
             name: 'MobileLocationSettings',
             component: () => import('../views/system/MobileLocationSettings.vue'),
             meta: { title: '移动端配置', icon: 'Iphone' }
+          },
+          {
+            path: 'workorder-execution',
+            name: 'WorkOrderExecutionSettings',
+            component: () => import('../views/system/WorkOrderExecutionSettings.vue'),
+            meta: { title: 'Web工单执行配置', icon: 'Monitor' }
           },
           {
             path: 'geocode-cache',
@@ -319,10 +327,13 @@ const ROUTE_PERMISSION_MAP = {
   SSVArchiveDetail: ['sites:detail:read'],
   InspectionTemplates: ['inspection:template:read'],
   TemplateEditor: ['inspection:template:write'],
+  MyExecutionWorkOrders: ['workorder:execute:web'],
   WorkOrderList: ['workorder:list:read'],
   WorkOrderReview: ['workorder:review:write'],
+  WorkOrderExecute: ['workorder:execute:web'],
   UserList: ['users:list:read'],
   MobileLocationSettings: ['system:mobile-settings:read'],
+  WorkOrderExecutionSettings: ['system:workorder-execution-settings:read'],
   GeocodeCache: ['system:geocode-cache:read'],
   OmcConfig: ['system:mobile-settings:write'],
   OmcDeviceStates: ['system:logs:read'],

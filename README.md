@@ -139,6 +139,9 @@ npm run build                  # 生产构建
 - `admin` 账号绕过全部权限校验；`manager` 不再自动等同 `admin`。
 - 新增两项终端登录权限：`auth:web-login` 和 `auth:app-login`。登录接口会根据 `client_type` / `X-Client` 判断是 Web 端还是 App 端；如果角色没勾选对应权限，会在登录时直接提示原因并拒绝新登录。
 - 当前采用“方案 A”：只限制**新登录**。已经签发的 token 不会因为后续撤销登录权限而立刻失效，刷新/续期逻辑也不主动踢下线。
+- 新增 Web 工单执行相关权限码：
+- `workorder:execute:web`：允许在 `web-admin` 进入工单执行台并填写/提交工单
+- `system:workorder-execution-settings:read / write`：允许查看或修改“Web工单执行配置”
 - Web 管理端新增 **系统配置 -> 角色权限** 页面（`/settings/permissions`），支持：
 - 新建/编辑/删除自定义角色
 - 配置角色权限点
@@ -173,6 +176,9 @@ npm run build                  # 生产构建
 - **移动端兼容（2026-03）**: `uniapp` 不提供作废入口；现场人员列表默认不展示 `VOIDED` 工单，即便收到该状态也会显示“已作废”并保持只读
 - **新建工单站点选择（2026-03）**: `web-admin` 新建工单时，站点下拉已改成“大规模数据友好”的远程搜索模式。首次展开只加载少量建议结果，输入站点名称或编码后通过 `/api/sites/search` 实时查询匹配站点，并保留已选站点回显；如果某账号仍只能看到部分站点，优先检查该账号是否属于 `admin / manager / planner`，或是否具备站点查看相关权限，因为非全量可见角色本来就只允许看到自己业务范围内的站点
 - **SSV 创建规则开关（2026-03）**: Web 管理端 `系统配置 -> OMC API 配置` 新增“SSV 创建规则”区块，开关名称为“站点设备激活即可创建SSV”。默认关闭时沿用旧规则，只允许 `site.status = operational` 的站点创建 `SSV`；开启后不再判断站点状态，只要站点设备全部 `ever_activated` 就允许创建 `SSV`，包括 `maintenance` 等非运营中状态
+- **Web 工单执行台（2026-03）**: `web-admin` 新增“我的执行工单”（`工单管理 -> 我的执行工单`），只展示当前登录人在浏览器里可处理的工单；进入后可接受工单、填写检查项、上传照片、绑定/解绑设备、提交或撤回工单，原“工单列表”不再保留执行入口
+- **与 App 兼容边界（2026-03）**: Web 执行台和 UniApp 继续共用同一套 `work_orders / site_inspections / inspection_check_items / inspection_photos` 数据，不会新增第二套填写表；Web 端改动只对 `X-Client=web-admin` 请求生效，App 原有填写流程不受影响
+- **Web 工单执行配置（2026-03）**: `系统配置 -> Web工单执行配置` 支持按“全局 / 角色 / 用户”控制是否开放 Web 执行入口，以及是否允许照片上传、无定位本地上传、设备绑定、提交、撤回，并可限制到具体工单类型；默认关闭，适合分角色、分工单类型逐步放开
 
 ### 2. 现场检查系统
 - **模板驱动**: JSON 格式的检查模板，支持站点级和扇区级检查项
@@ -249,15 +255,25 @@ npm run build                  # 生产构建
 
 ### 工单管理
 - `GET /api/work-orders` - 获取工单列表
+- `GET /api/work-orders/search` - 按关键字、状态、多状态、多类型分页筛选工单
 - `GET /api/work-orders/{id}` - 获取工单详情
+- `GET /api/work-orders/{id}/execution-context` - 获取 Web 工单执行页所需的聚合上下文（工单、检查、进度、生效开关）
+- `POST /api/work-orders/{id}/accept` - 接受工单并创建关联检查实例
+- `POST /api/work-orders/{id}/submit` - 提交工单
+- `POST /api/work-orders/{id}/recall` - 撤回已提交工单（回到可编辑状态）
 - `POST /api/work-orders/{id}/void` - 作废工单（仅 Web 管理端；原因必填）
-- `POST /api/work-orders/{id}/items/{item_id}` - 更新检查项
-- `POST /api/work-orders/{id}/photos` - 上传检查照片
 - `POST /api/work-orders/{id}/complete` - 完成工单
 - `POST /api/work-orders/batch-operation` - 批量操作工单（支持 `delete / change_status / change_assignee / change_priority / void`）
 
 ### 检查管理
 - `GET /api/inspections` - 获取检查列表
+- `GET /api/inspections/detail/{inspection_id}` - 获取检查详情
+- `GET /api/inspections/detail/{inspection_id}/items` - 获取检查项列表
+- `PUT /api/inspections/detail/{inspection_id}/items/{item_id}` - 更新检查项（Web 与 App 共用）
+- `POST /api/inspections/detail/{inspection_id}/photos/precheck` - 检查照片上传预检
+- `POST /api/inspections/detail/{inspection_id}/photos` - 上传检查照片
+- `DELETE /api/inspections/photos/{photo_id}` - 删除检查照片
+- `POST /api/inspections/detail/{inspection_id}/bind-equipment` - 绑定或解绑设备
 - `GET /api/inspections/detail/{id}` - 获取检查详情
 - `POST /api/inspections` - 创建新检查
 - `PUT /api/inspections/{id}` - 更新检查状态
@@ -299,6 +315,11 @@ npm run build                  # 生产构建
 - `GET /api/system/mobile-settings` - 管理端获取完整移动端配置（管理员/项目经理）
 - `PUT /api/system/mobile-settings` - 管理端更新完整移动端配置（管理员/项目经理，需携带 `config_version`；若版本冲突返回 `409`，需先刷新再保存）
 - `GET /api/system/mobile-settings/effective` - 移动端获取“当前用户生效”的配置（含定位策略、水印策略、水印模板）
+
+### Web工单执行配置
+- `GET /api/system/workorder-execution-settings` - 获取完整 Web 工单执行配置（含全局、角色、用户覆盖）
+- `PUT /api/system/workorder-execution-settings` - 更新完整 Web 工单执行配置（需携带当前 `config_version`，冲突时返回 `409`）
+- `GET /api/system/workorder-execution-settings/effective` - 获取“当前登录人”在 Web 管理端生效的工单执行策略
 - `GET /api/system/location-mode` - 获取定位模式全局默认值（兼容旧版）
 - `PUT /api/system/location-mode` - 更新定位模式全局默认值（兼容旧版）
 
@@ -369,10 +390,30 @@ npm run build                  # 生产构建
   - 新增 `config_version` 乐观锁：管理端保存时必须带当前版本号；若其他会话已改动，接口会返回 `409`，前端提示刷新并重新加载最新配置，避免“后保存覆盖先保存”。
   - 新增模板清空二次确认：当本次保存会把“自定义模板数量”从 `>0` 变成 `0`（仅保留 `default`）时，后端会先返回 `409` 要求确认；前端弹框确认后才会带 `confirm_template_reset=true` 重试。
   - 新增后台审计字段：每次成功保存都会记录 `template_count_before/after`、`template_ids_before/after`、`config_version_before/after`，用于排查“模板消失/配置回滚”来源。
-- 支持内容：
-  - 模板管理：新增、复制、删除、设置默认模板
-  - 模板样式：位置、文字色、背景色与透明度、字号、行高、内外边距、圆角、最大宽度比例、水印区域占比
-  - 模板内容：图标显隐、本地上传标注、GPS、精度、地址、时间、检查员、检查项、站点、前缀/后缀文本、坐标精度
+
+### Web工单执行配置（新增）
+- 管理入口：`Web 管理端 -> 系统配置 -> Web工单执行配置`
+- 执行入口：`Web 管理端 -> 工单管理 -> 我的执行工单`
+- 设计原则：
+  - 默认关闭
+  - 只影响 `web-admin` 执行链路，不影响 App 现有工单填写
+  - Web 和 App 继续共用同一套工单、检查项、照片、设备绑定数据
+- 当前可配置项：
+  - 是否开放 Web 工单执行入口
+  - 是否允许照片上传
+  - 是否允许无定位本地上传
+  - 是否允许设备绑定/解绑
+  - 是否允许提交
+  - 是否允许撤回
+  - 哪些工单类型允许在 Web 端执行
+- 覆盖粒度：
+  - 全局默认
+  - 按角色覆盖
+  - 按用户覆盖
+- 当前执行动线：
+  - 从“我的执行工单”按状态分组查看：待接受、执行中、已提交、已驳回
+  - 点进单条工单后进入执行台，按检查项逐项填写
+  - Web 与 App 填写的是同一份数据，刷新后两端可看到彼此最新修改
   - 分配规则：全局默认 + 按角色覆盖 + 按用户覆盖
   - 场景策略：拍照场景启用、相册场景启用、本地上传无定位时是否强制本地标注
   - 管理端预览：支持 `720p(1280x720)`、`1080p(1920x1080)`、`2k(2560x1440)`、`4k(3840x2160)` 四档 Tab 预览

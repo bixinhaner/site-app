@@ -134,7 +134,7 @@
         <el-table-column prop="assigned_at" label="分配时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="340" fixed="right">
+        <el-table-column label="操作" width="420" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)" v-if="canEdit(row)">
               <el-icon><Edit /></el-icon>编辑
@@ -1467,7 +1467,9 @@ const executeBatchPriority = async () => {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+})
 
 watch(() => route.query, () => {
   applyListFiltersFromRoute()

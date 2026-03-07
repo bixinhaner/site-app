@@ -63,6 +63,16 @@ from app.services.equipment_unbind_service import (
     is_device_level_check_item,
     rollback_equipment_status_after_unbind,
 )
+from app.services.work_order_execution_settings_service import (
+    WORK_ORDER_EXECUTION_CAPABILITY_DEVICE_BINDING,
+    WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+    WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO,
+    WORK_ORDER_EXECUTION_CAPABILITY_PHOTO_UPLOAD,
+    WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT,
+    can_use_web_work_order_execution,
+    ensure_web_work_order_execution_allowed,
+    is_web_admin_request,
+)
 from app.utils.timezone import to_utc_iso
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
@@ -93,6 +103,12 @@ def _ensure_surveyor_inspection_type(db: Session, u, inspection: SiteInspection)
         wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
         if not wo or wo.type != WorkOrderTypeEnum.SITE_SURVEY:
             raise HTTPException(status_code=403, detail="仅可操作勘察检查")
+
+
+def _get_work_order_for_inspection(db: Session, inspection: SiteInspection) -> Optional[WorkOrder]:
+    if not inspection or not getattr(inspection, 'work_order_id', None):
+        return None
+    return db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
 
 
 def _ensure_review_access(current_user: User, detail: str = "没有权限执行审核操作") -> None:
@@ -1415,13 +1431,23 @@ async def update_inspection(
 
 @router.post("/detail/{inspection_id}/photos/precheck")
 async def precheck_inspection_photo_upload(
+    request: Request,
     inspection_id: str,
     payload: PhotoUploadPrecheckRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """检查项照片上传前预检（基于原图特征码，返回短期上传票据）。"""
-    _get_uploadable_inspection_or_raise(db, inspection_id, current_user)
+    inspection = _get_uploadable_inspection_or_raise(db, inspection_id, current_user)
+    work_order = _get_work_order_for_inspection(db, inspection)
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=work_order.type if work_order else None,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_PHOTO_UPLOAD,
+        detail="当前未启用 Web 端照片上传",
+    )
     check_item, normalized_field_id = _resolve_photo_upload_check_item_and_field(
         db,
         inspection_id=inspection_id,
@@ -1531,6 +1557,24 @@ async def upload_inspection_photo(
             )
     
     inspection = _get_uploadable_inspection_or_raise(db, inspection_id, current_user)
+    work_order = _get_work_order_for_inspection(db, inspection)
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=work_order.type if work_order else None,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_PHOTO_UPLOAD,
+        detail="当前未启用 Web 端照片上传",
+    )
+    if local_upload_without_geo:
+        ensure_web_work_order_execution_allowed(
+            request,
+            db,
+            current_user,
+            work_order_type=work_order.type if work_order else None,
+            capability=WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO,
+            detail="当前未启用 Web 端无定位本地上传",
+        )
     check_item, normalized_field_id = _resolve_photo_upload_check_item_and_field(
         db,
         inspection_id=inspection_id,
@@ -1750,6 +1794,7 @@ async def upload_inspection_photo(
 
 @router.delete("/photos/{photo_id}")
 async def delete_inspection_photo(
+    request: Request,
     photo_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -1769,6 +1814,15 @@ async def delete_inspection_photo(
     if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限删除该照片")
     _ensure_surveyor_inspection_type(db, current_user, inspection)
+    work_order = _get_work_order_for_inspection(db, inspection)
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=work_order.type if work_order else None,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_PHOTO_UPLOAD,
+        detail="当前未启用 Web 端照片上传",
+    )
     
     # 检查检查状态是否允许删除照片
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
@@ -1811,6 +1865,7 @@ async def delete_inspection_photo(
 
 @router.put("/photos/{photo_id}", response_model=InspectionPhotoResponse)
 async def replace_inspection_photo(
+    request: Request,
     photo_id: str,
     file: UploadFile = File(...),
     gps_latitude: Optional[float] = Form(None),
@@ -1835,6 +1890,15 @@ async def replace_inspection_photo(
     if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限替换该照片")
     _ensure_surveyor_inspection_type(db, current_user, inspection)
+    work_order = _get_work_order_for_inspection(db, inspection)
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=work_order.type if work_order else None,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_PHOTO_UPLOAD,
+        detail="当前未启用 Web 端照片上传",
+    )
     
     # 检查检查状态是否允许替换照片
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
@@ -2726,6 +2790,7 @@ async def get_inspection_items(
 
 @router.put("/detail/{inspection_id}/items/{item_id}", response_model=InspectionCheckItemResponse)
 async def update_inspection_item(
+    request: Request,
     inspection_id: str,
     item_id: str,
     item_update: InspectionCheckItemUpdate,
@@ -2757,6 +2822,15 @@ async def update_inspection_item(
             detail="没有权限修改此检查记录"
         )
     _ensure_surveyor_inspection_type(db, current_user, inspection)
+    work_order = _get_work_order_for_inspection(db, inspection)
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=work_order.type if work_order else None,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+        detail="当前未启用 Web 工单填写",
+    )
 
     # 检查状态门禁：仅允许草稿/进行中/驳回继续更新检查项（避免已提交/审核中/已通过/已完成继续修改）
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
@@ -3066,22 +3140,32 @@ async def update_inspection_item(
         
         print(f"DEBUG: 检查项更新完成100% - 检查ID: {inspection.id}, 当前状态: {inspection.status}, submitted_at: {inspection.submitted_at}")
         
-        # 如果检查状态还是进行中，更新为已提交
-        if inspection.status == InspectionStatusEnum.IN_PROGRESS:
-            inspection.status = InspectionStatusEnum.SUBMITTED
-            inspection.end_time = dt.utcnow()
-            print(f"DEBUG: 状态从IN_PROGRESS更新为SUBMITTED: {inspection.id}")
-        
-        # 如果检查状态是SUBMITTED但没有submitted_at，设置它
-        if inspection.status == InspectionStatusEnum.SUBMITTED and not inspection.submitted_at:
-            inspection.submitted_at = dt.utcnow()
-            print(f"DEBUG: 设置submitted_at时间戳: {inspection.id}, 时间: {inspection.submitted_at}")
-        
-        # 如果检查关联了工单，同步工单状态（无论检查当前状态如何）
-        if inspection.work_order_id:
-            print(f"DEBUG: 开始同步工单状态 - 检查ID: {inspection.id}, 工单ID: {inspection.work_order_id}")
-            sync_service = get_work_order_sync_service(db)
-            sync_service.sync_inspection_to_work_order_status(inspection)
+        auto_submit_allowed = True
+        if is_web_admin_request(request) and work_order is not None:
+            auto_submit_allowed = can_use_web_work_order_execution(
+                db,
+                current_user,
+                work_order_type=work_order.type,
+                capability=WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT,
+            )
+
+        if auto_submit_allowed:
+            # 如果检查状态还是进行中，更新为已提交
+            if inspection.status == InspectionStatusEnum.IN_PROGRESS:
+                inspection.status = InspectionStatusEnum.SUBMITTED
+                inspection.end_time = dt.utcnow()
+                print(f"DEBUG: 状态从IN_PROGRESS更新为SUBMITTED: {inspection.id}")
+            
+            # 如果检查状态是SUBMITTED但没有submitted_at，设置它
+            if inspection.status == InspectionStatusEnum.SUBMITTED and not inspection.submitted_at:
+                inspection.submitted_at = dt.utcnow()
+                print(f"DEBUG: 设置submitted_at时间戳: {inspection.id}, 时间: {inspection.submitted_at}")
+            
+            # 如果检查关联了工单，同步工单状态（无论检查当前状态如何）
+            if inspection.work_order_id:
+                print(f"DEBUG: 开始同步工单状态 - 检查ID: {inspection.id}, 工单ID: {inspection.work_order_id}")
+                sync_service = get_work_order_sync_service(db)
+                sync_service.sync_inspection_to_work_order_status(inspection)
     
     db.commit()
     
@@ -3484,6 +3568,7 @@ async def check_equipment_pickup_status(
 
 @router.post("/detail/{inspection_id}/bind-equipment")
 async def bind_equipment_to_sector(
+    request: Request,
     inspection_id: str,
     request_data: dict,
     current_user: User = Depends(get_current_user),
@@ -3517,9 +3602,18 @@ async def bind_equipment_to_sector(
             detail="检查记录不存在或无权限操作"
         )
     _ensure_inspection_not_voided(inspection, detail="已作废检查不能绑定或解绑设备")
+    work_order = _get_work_order_for_inspection(db, inspection)
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=work_order.type if work_order else None,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_DEVICE_BINDING,
+        detail="当前未启用 Web 端设备绑定",
+    )
 
     # 识别工单类型（设备更换工单允许“直接换绑”）
-    wo: Optional[WorkOrder] = None
+    wo: Optional[WorkOrder] = work_order
     is_replacement_wo = False
     if getattr(inspection, "work_order_id", None):
         wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()

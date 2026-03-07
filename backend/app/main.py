@@ -39,6 +39,7 @@ from app.api import site_planning, logs, site_surveys, dashboard, survey_archive
 from app.api import operation_logs, app_version
 from app.api import mobile_client_logs
 from app.api import mock_omc_proxy
+from app.api import work_order_execution_settings
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
 from app.services.mobile_client_log_retention_scheduler import start_mobile_client_log_retention_scheduler
@@ -124,6 +125,7 @@ app.include_router(logs.router, prefix="/api", tags=["用户日志"])
 app.include_router(operation_logs.router, prefix="/api", tags=["操作日志"])
 app.include_router(mobile_client_logs.router, prefix="/api", tags=["移动端日志"])
 app.include_router(mobile_settings.router, prefix="/api/system", tags=["系统配置"])
+app.include_router(work_order_execution_settings.router, prefix="/api/system", tags=["系统配置"])
 app.include_router(geocode_cache.router, prefix="/api/system", tags=["地理编码缓存"])
 app.include_router(ai_management.router, prefix="/api/system/ai", tags=["AI管理"])
 app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站点勘察"])

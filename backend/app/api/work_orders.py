@@ -67,6 +67,13 @@ from app.services.omc_state import (
 from app.services.work_order_rule_service import get_ssv_create_by_ever_activated_only
 from app.services.authz_service import user_has_any_role_or_permission
 from app.services.data_scope_service import get_user_data_scope
+from app.services.work_order_execution_settings_service import (
+    WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+    WORK_ORDER_EXECUTION_CAPABILITY_RECALL,
+    WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT,
+    ensure_web_work_order_execution_allowed,
+    get_effective_work_order_execution_settings,
+)
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -86,6 +93,10 @@ SSV_IN_PROGRESS_STATUSES = (
     WorkOrderStatusEnum.APPROVED,
     WorkOrderStatusEnum.ACTIVATED,
 )
+
+
+def _enum_value(value):
+    return getattr(value, "value", value)
 
 
 def _has_access(
@@ -529,6 +540,7 @@ async def search_work_orders(
     status: Optional[WorkOrderStatusEnum] = Query(None),
     status_in: Optional[str] = Query(None, description="多状态筛选，逗号分隔，如 SUBMITTED,UNDER_REVIEW"),
     type: Optional[WorkOrderTypeEnum] = Query(None),
+    type_in: Optional[str] = Query(None, description="多类型筛选，逗号分隔，如 site_survey,opening_inspection"),
     assigned_to: Optional[int] = Query(None),
     priority: Optional[WorkOrderPriorityEnum] = Query(None),
     site_id: Optional[int] = Query(None),
@@ -587,8 +599,21 @@ async def search_work_orders(
         query = query.filter(WorkOrder.status.in_(status_values))
 
     # 类型筛选
+    type_values = []
+    if type_in:
+        for raw in str(type_in).split(","):
+            token = raw.strip()
+            if not token:
+                continue
+            try:
+                type_values.append(WorkOrderTypeEnum(token))
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"不支持的工单类型值: {token}")
+
     if type:
         query = query.filter(WorkOrder.type == type)
+    elif type_values:
+        query = query.filter(WorkOrder.type.in_(type_values))
 
     # 分配人筛选与角色可见范围
     if is_field_worker:
@@ -1366,6 +1391,7 @@ async def void_work_order(
 
 @router.post("/{work_order_id}/accept")
 async def accept_work_order(
+    request: Request,
     work_order_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -1375,6 +1401,14 @@ async def accept_work_order(
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
     _ensure_work_order_not_voided(wo, detail="已作废工单不能接受")
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=wo.type,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+        detail="当前未启用 Web 工单填写",
+    )
 
     # 权限检查：只有被分配人才能接受
     if wo.assigned_to != current_user.id:
@@ -1640,6 +1674,7 @@ async def accept_work_order(
 
 @router.get("/{work_order_id}/inspection")
 async def get_work_order_inspection(
+    request: Request,
     work_order_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -1648,6 +1683,14 @@ async def get_work_order_inspection(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=wo.type,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+        detail="当前未启用 Web 工单填写",
+    )
     
     # 权限检查
     if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
@@ -1667,6 +1710,92 @@ async def get_work_order_inspection(
         db.commit()
     
     return {"inspection_id": inspection.id, "status": inspection.status.value}
+
+
+@router.get("/{work_order_id}/execution-context")
+async def get_work_order_execution_context(
+    request: Request,
+    work_order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """返回 Web 工单执行页所需的聚合上下文。"""
+    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=wo.type,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+        detail="当前未启用 Web 工单填写",
+    )
+
+    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_surveyor_wo_type(wo, current_user)
+
+    from app.utils.work_order_progress import WorkOrderProgressCalculator
+
+    inspection = None
+    if wo.inspection_id:
+        inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+
+    effective_settings = get_effective_work_order_execution_settings(db, current_user)
+    can_recall = (
+        bool(effective_settings.get('allow_recall'))
+        and wo.status in (WorkOrderStatusEnum.SUBMITTED, WorkOrderStatusEnum.UNDER_REVIEW)
+        and (
+            wo.assigned_to == current_user.id
+            or _has_access(
+                current_user,
+                role_codes=["admin", "manager"],
+                permission_codes=["workorder:update:write"],
+            )
+        )
+    )
+
+    return {
+        "work_order": _enrich_work_order_response(db, wo),
+        "inspection": (
+            {
+                "inspection_id": inspection.id,
+                "status": _enum_value(inspection.status),
+                "completion_rate": float(getattr(inspection, "completion_rate", 0) or 0),
+                "total_items": int(getattr(inspection, "total_items", 0) or 0),
+                "completed_items": int(getattr(inspection, "completed_items", 0) or 0),
+                "failed_items": int(getattr(inspection, "failed_items", 0) or 0),
+                "submitted_at": to_utc_iso(getattr(inspection, "submitted_at", None)),
+            }
+            if inspection
+            else None
+        ),
+        "progress": {
+            "work_order_id": work_order_id,
+            "status": wo.status.value,
+            "stage_name": WorkOrderProgressCalculator.get_stage_name(wo.status),
+            "next_action": WorkOrderProgressCalculator.get_next_action(wo.status),
+            **WorkOrderProgressCalculator.calculate_progress(db, wo),
+        },
+        "effective_settings": effective_settings,
+        "permissions": {
+            "can_accept": wo.status == WorkOrderStatusEnum.PENDING and wo.assigned_to == current_user.id,
+            "can_edit": (
+                wo.assigned_to == current_user.id
+                and wo.status in (WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED)
+                and inspection is not None
+            ),
+            "can_submit": (
+                bool(effective_settings.get('allow_submit'))
+                and wo.assigned_to == current_user.id
+                and wo.status in (WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED)
+                and inspection is not None
+            ),
+            "can_recall": can_recall,
+        },
+    }
 
 
 @router.get("/{work_order_id}/survey")
@@ -2569,6 +2698,7 @@ async def get_item_field_schema(
 
 @router.post("/{work_order_id}/submit")
 async def submit_work_order(
+    request: Request,
     work_order_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -2577,6 +2707,14 @@ async def submit_work_order(
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=wo.type,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT,
+        detail="当前未启用 Web 端提交工单",
+    )
     
     # 权限检查：只有被分配人才能提交
     if wo.assigned_to != current_user.id:
@@ -2673,6 +2811,7 @@ async def submit_work_order(
 
 @router.post("/{work_order_id}/recall")
 def recall_work_order(
+    request: Request,
     work_order_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -2689,6 +2828,14 @@ def recall_work_order(
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
     _ensure_work_order_not_voided(wo, detail="已作废工单不能撤回")
+    ensure_web_work_order_execution_allowed(
+        request,
+        db,
+        current_user,
+        work_order_type=wo.type,
+        capability=WORK_ORDER_EXECUTION_CAPABILITY_RECALL,
+        detail="当前未启用 Web 端撤回工单",
+    )
 
     # 权限校验：指派人或 admin/manager
     if not (
