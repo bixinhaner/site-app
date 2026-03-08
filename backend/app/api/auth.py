@@ -16,6 +16,7 @@ from app.services.authz_service import (
     set_user_roles_by_codes,
     user_has_permission,
 )
+from app.services.warehouse_access_service import build_inventory_access_profile
 
 router = APIRouter()
 security = HTTPBearer()
@@ -57,6 +58,20 @@ def _attach_authz_payload(user: User) -> User:
     return user
 
 
+def _attach_inventory_access_payload(db: Session, user: User) -> User:
+    if not user:
+        return user
+    profile = build_inventory_access_profile(db, user)
+    try:
+        setattr(user, "inventory_scope", str(profile.get("inventory_scope") or "self"))
+        setattr(user, "managed_warehouse_ids", list(profile.get("managed_warehouse_ids") or []))
+        setattr(user, "managed_warehouse_count", int(profile.get("managed_warehouse_count") or 0))
+        setattr(user, "has_managed_warehouses", bool(profile.get("has_managed_warehouses")))
+    except Exception:
+        pass
+    return user
+
+
 def _normalize_login_client(raw_value: str | None) -> str | None:
     code = str(raw_value or '').strip().lower()
     if not code:
@@ -81,7 +96,8 @@ def authenticate_user(db: Session, username: str, password: str):
         return False
     if not verify_password(password, user.hashed_password):
         return False
-    return _attach_authz_payload(user)
+    user = _attach_authz_payload(user)
+    return _attach_inventory_access_payload(db, user)
 
 def get_current_user(
     request: Request,
@@ -110,6 +126,7 @@ def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exception
     user = _attach_authz_payload(user)
+    user = _attach_inventory_access_payload(db, user)
     # 供中间件/审计日志使用
     try:
         request.state.current_user = user
@@ -204,6 +221,7 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
     db_user = get_user_by_username(db, db_user.username)
     db_user = _attach_authz_payload(db_user)
+    db_user = _attach_inventory_access_payload(db, db_user)
     return UserResponse.from_orm(db_user)
 
 @router.get("/me", response_model=UserResponse)
@@ -216,6 +234,7 @@ async def get_current_user_info(
     if not refreshed:
         raise HTTPException(status_code=404, detail="User not found")
     refreshed = _attach_authz_payload(refreshed)
+    refreshed = _attach_inventory_access_payload(db, refreshed)
     return UserResponse.from_orm(refreshed)
 
 

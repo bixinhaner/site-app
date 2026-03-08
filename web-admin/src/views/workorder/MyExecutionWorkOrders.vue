@@ -105,7 +105,12 @@
             </template>
           </el-table-column>
           <el-table-column prop="type" label="类型" width="150">
-            <template #default="{ row }">{{ typeText(row.type) }}</template>
+            <template #default="{ row }">
+              <div class="type-cell">
+                <span>{{ typeText(row.type) }}</span>
+                <el-tag v-if="isReadonlyType(row.type)" size="small" type="info" effect="plain">仅App执行</el-tag>
+              </div>
+            </template>
           </el-table-column>
           <el-table-column prop="status" label="状态" width="120">
             <template #default="{ row }">
@@ -162,7 +167,6 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowRight, Refresh, Search } from '@element-plus/icons-vue'
 
-import { workOrderExecutionSettingsApi } from '@/api/system'
 import { workOrderAPI } from '@/api/workorder'
 import { useUserStore } from '@/stores/user'
 
@@ -217,7 +221,9 @@ const effectiveSettings = ref({
   allow_device_binding: false,
   allow_submit: false,
   allow_recall: false,
-  allowed_work_order_types: [],
+  visible_work_order_types: [],
+  editable_work_order_types: [],
+  reasons: [],
 })
 
 const keyword = ref('')
@@ -236,12 +242,17 @@ const summary = ref({
 })
 
 const currentUserId = computed(() => Number(userStore.currentUser?.id || 0))
-const allowedTypes = computed(() => {
-  const raw = effectiveSettings.value?.allowed_work_order_types
+const visibleTypes = computed(() => {
+  const raw = effectiveSettings.value?.visible_work_order_types
   return Array.isArray(raw) ? raw : []
 })
 
-const allowedTypeOptions = computed(() => allowedTypes.value.map((type) => ({
+const editableTypes = computed(() => {
+  const raw = effectiveSettings.value?.editable_work_order_types
+  return Array.isArray(raw) ? raw : []
+})
+
+const allowedTypeOptions = computed(() => visibleTypes.value.map((type) => ({
   value: type,
   label: TYPE_LABEL_MAP[type] || type,
 })))
@@ -249,7 +260,7 @@ const allowedTypeOptions = computed(() => allowedTypes.value.map((type) => ({
 const activeGroupMeta = computed(() => GROUPS.find(group => group.key === activeGroup.value) || GROUPS[0])
 
 const emptyDescription = computed(() => {
-  if (keyword.value || typeFilter.value) return '当前筛选条件下没有可执行工单'
+  if (keyword.value || typeFilter.value) return '当前筛选条件下没有可查看工单'
   return `当前没有${activeGroupMeta.value.label}`
 })
 
@@ -257,6 +268,7 @@ const buildCommonParams = (groupKey) => {
   const params = {
     assigned_to: currentUserId.value,
     status_in: (GROUPS.find(group => group.key === groupKey)?.statuses || []).join(','),
+    web_execution_scope: 'visible',
   }
 
   const text = String(keyword.value || '').trim()
@@ -264,8 +276,8 @@ const buildCommonParams = (groupKey) => {
 
   if (typeFilter.value) {
     params.type = typeFilter.value
-  } else if (allowedTypes.value.length) {
-    params.type_in = allowedTypes.value.join(',')
+  } else if (visibleTypes.value.length) {
+    params.type_in = visibleTypes.value.join(',')
   }
 
   return params
@@ -289,20 +301,26 @@ const statusTagType = (status) => {
 }
 
 const executeActionText = (row) => {
+  if (isReadonlyType(row.type)) return '只读查看'
   if (row.status === 'PENDING') return '接受并执行'
   if (row.status === 'SUBMITTED' || row.status === 'UNDER_REVIEW') return '查看执行'
   return '进入执行'
 }
 
+const isReadonlyType = (type) => visibleTypes.value.includes(type) && !editableTypes.value.includes(type)
+
 const loadEffectiveSettings = async () => {
-  const data = await workOrderExecutionSettingsApi.getEffectiveSettings()
+  const data = await userStore.refreshAuthzProfile()
+  const preview = data?.work_order_execution || userStore.workOrderExecution
   effectiveSettings.value = {
-    enabled: Boolean(data?.enabled),
-    allow_photo_upload: Boolean(data?.allow_photo_upload),
-    allow_device_binding: Boolean(data?.allow_device_binding),
-    allow_submit: Boolean(data?.allow_submit),
-    allow_recall: Boolean(data?.allow_recall),
-    allowed_work_order_types: Array.isArray(data?.allowed_work_order_types) ? data.allowed_work_order_types : [],
+    enabled: Boolean(preview?.global_enabled),
+    allow_photo_upload: Boolean(preview?.allow_photo_upload),
+    allow_device_binding: Boolean(preview?.allow_device_binding),
+    allow_submit: Boolean(preview?.allow_submit),
+    allow_recall: Boolean(preview?.allow_recall),
+    visible_work_order_types: Array.isArray(preview?.visible_work_order_types) ? preview.visible_work_order_types : [],
+    editable_work_order_types: Array.isArray(preview?.editable_work_order_types) ? preview.editable_work_order_types : [],
+    reasons: Array.isArray(preview?.reasons) ? preview.reasons : [],
   }
 
   if (!effectiveSettings.value.enabled) {
@@ -313,16 +331,16 @@ const loadEffectiveSettings = async () => {
     return false
   }
 
-  if (!effectiveSettings.value.allowed_work_order_types.length) {
+  if (!effectiveSettings.value.visible_work_order_types.length) {
     pageUnavailable.value = {
-      title: '当前没有可执行的工单类型',
-      subTitle: '系统配置没有给当前账号分配任何可在 Web 端处理的工单类型。',
+      title: '当前没有可在 Web 端查看的工单类型',
+      subTitle: '系统配置没有给当前账号分配任何可在浏览器里查看的工单类型。',
     }
     return false
   }
 
   pageUnavailable.value = { title: '', subTitle: '' }
-  if (typeFilter.value && !allowedTypes.value.includes(typeFilter.value)) {
+  if (typeFilter.value && !visibleTypes.value.includes(typeFilter.value)) {
     typeFilter.value = ''
   }
   return true

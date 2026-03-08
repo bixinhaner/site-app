@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1>工单执行台</h1>
-        <div class="page-subtitle">Web 端接受、填写、上传现场照片并提交工单，所有数据仍与 App 共用同一套检查记录。</div>
+        <div class="page-subtitle">{{ pageSubtitle }}</div>
       </div>
       <div class="header-actions">
         <el-button @click="goBack">返回我的执行工单</el-button>
@@ -44,6 +44,7 @@
               <el-progress :percentage="progressPercent" :stroke-width="10" />
             </div>
             <div class="hero-card__flags">
+              <el-tag v-if="permissions.is_readonly_type" type="info" effect="plain">该类型仅支持 App 执行</el-tag>
               <el-tag v-if="!effectiveSettings.allow_photo_upload" type="info" effect="plain">照片上传已关闭</el-tag>
               <el-tag v-if="!effectiveSettings.allow_device_binding" type="info" effect="plain">设备绑定已关闭</el-tag>
               <el-tag v-if="!effectiveSettings.allow_submit" type="warning" effect="plain">仅允许补录，不允许提交</el-tag>
@@ -97,6 +98,16 @@
       </el-card>
 
       <el-alert
+        v-if="permissions.is_readonly_type"
+        class="mb16"
+        type="info"
+        show-icon
+        :closable="false"
+        title="该工单类型在 Web 端仅可查看"
+        description="接受工单、填写检查项、上传照片、绑定设备和提交工单都需要在 App 端完成。"
+      />
+
+      <el-alert
         v-if="order.status === 'REJECTED' && order.review_comments"
         class="mb16"
         type="error"
@@ -122,8 +133,8 @@
         type="warning"
         show-icon
         :closable="false"
-        title="当前工单缺少关联检查实例"
-        description="请先接受工单；如果工单已经处于已分配状态但仍未生成检查记录，请联系管理员处理历史数据。"
+        :title="inspectionMissingAlert.title"
+        :description="inspectionMissingAlert.description"
       />
 
       <div class="execute-layout">
@@ -602,6 +613,12 @@ const permissions = computed(() => context.value?.permissions || {})
 const effectiveSettings = computed(() => context.value?.effective_settings || {})
 const progressInfo = computed(() => context.value?.progress || {})
 const progressPercent = computed(() => Number(progressInfo.value?.progress || inspection.value?.completion_rate || 0))
+const pageSubtitle = computed(() => {
+  if (permissions.value?.is_readonly_type) {
+    return '该工单类型仅支持在 App 端接受和执行，Web 端当前只用于查看工单进度、检查结果和历史照片。'
+  }
+  return 'Web 端可接受、填写、上传现场照片并提交工单，所有数据仍与 App 共用同一套检查记录。'
+})
 
 const selectedItem = computed(() => items.value.find(item => item.id === selectedItemId.value) || null)
 const completedCount = computed(() => items.value.filter(item => item.status === 'completed').length)
@@ -609,6 +626,18 @@ const pendingCount = computed(() => items.value.length - completedCount.value)
 const inspectionMissingButShouldExist = computed(() => {
   if (!order.value) return false
   return order.value.status !== 'PENDING' && !inspection.value?.inspection_id
+})
+const inspectionMissingAlert = computed(() => {
+  if (permissions.value?.is_readonly_type) {
+    return {
+      title: '当前还没有可供 Web 查看的检查记录',
+      description: '该工单类型只能在 App 端接受和填写。请先在 App 完成接受后，再回到 Web 查看当前进度。',
+    }
+  }
+  return {
+    title: '当前工单缺少关联检查实例',
+    description: '请先接受工单；如果工单已经处于已分配状态但仍未生成检查记录，请联系管理员处理历史数据。',
+  }
 })
 
 const canEditCurrentItem = computed(() => {

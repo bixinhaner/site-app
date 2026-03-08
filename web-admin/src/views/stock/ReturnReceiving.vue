@@ -310,14 +310,12 @@ const keyword = ref('')
 const statusFilter = ref('pending_receive')
 
 const warehouses = ref([])
-const hasGlobalWarehouseAccess = computed(() => {
-  return userStore.hasRole('admin') || userStore.hasPermission('inventory:warehouse:write')
-})
+const hasGlobalWarehouseAccess = computed(() => userStore.hasGlobalInventoryAccess)
 const selectableWarehouses = computed(() => {
   const list = warehouses.value || []
   if (hasGlobalWarehouseAccess.value) return list
-  const uid = userStore.user?.id
-  return list.filter((w) => w.manager_id === uid)
+  const managedIds = new Set((userStore.managedWarehouseIds || []).map((id) => Number(id)))
+  return list.filter((w) => managedIds.has(Number(w.id)))
 })
 const selectedWarehouseIds = ref([])
 

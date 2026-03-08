@@ -1,7 +1,39 @@
 const hasCodeList = (value) => Array.isArray(value) && value.length > 0
 
+const routePassesAccessKey = (routeLike, userStore) => {
+  const accessKey = String(routeLike?.meta?.accessKey || '').trim()
+  if (!accessKey) return null
+
+  if (accessKey === 'web-workorder-entry') {
+    return Boolean(userStore.canAccessMyExecutionWorkOrders)
+  }
+
+  if (accessKey === 'inventory-material-approval') {
+    return Boolean(userStore.hasManagedInventoryAccess)
+  }
+
+  if (accessKey === 'inventory-issue-confirm') {
+    return Boolean(userStore.hasManagedInventoryAccess)
+  }
+
+  if (accessKey === 'inventory-return-receiving') {
+    return Boolean(userStore.hasManagedInventoryAccess)
+  }
+
+  if (accessKey === 'inventory-history') {
+    return Boolean(userStore.canViewInventoryHistory)
+  }
+
+  return null
+}
+
 export const routeHasAccess = (routeLike, userStore) => {
   if (!routeLike) return false
+
+  const accessKeyResult = routePassesAccessKey(routeLike, userStore)
+  if (accessKeyResult !== null) {
+    return accessKeyResult
+  }
 
   const permissions = routeLike.meta?.permissions
   if (hasCodeList(permissions)) {

@@ -94,6 +94,10 @@ class UserResponse(UserBase):
     roles: List[str] = Field(default_factory=list)
     permissions: List[str] = Field(default_factory=list)
     data_scopes: Dict[str, str] = Field(default_factory=dict)
+    inventory_scope: str = 'self'
+    managed_warehouse_ids: List[int] = Field(default_factory=list)
+    managed_warehouse_count: int = 0
+    has_managed_warehouses: bool = False
     is_active: bool
     avatar: Optional[str] = None
     created_at: datetime

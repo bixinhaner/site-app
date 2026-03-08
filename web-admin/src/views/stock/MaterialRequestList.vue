@@ -331,8 +331,7 @@ const userSearching = ref(false)
 const userOptions = ref([])
 
 const isWarehouseOperator = computed(() =>
-  userStore.hasAnyRole(['admin', 'manager', 'warehouse_manager']) ||
-  userStore.hasPermission('inventory:material-request:write')
+  userStore.hasManagedInventoryAccess
 )
 
 const formatDateTime = (dateString) => {

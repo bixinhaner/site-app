@@ -33,6 +33,8 @@ from app.services.data_scope_service import (
     list_data_scope_definitions,
     set_role_data_scopes_by_mapping,
 )
+from app.services.warehouse_access_service import build_inventory_access_profile
+from app.services.work_order_execution_settings_service import get_work_order_execution_access_summary
 
 router = APIRouter()
 
@@ -62,6 +64,26 @@ def _build_permission_modules(codes: List[str]) -> Dict[str, List[str]]:
         module = str(code).split(':', 1)[0] if ':' in str(code) else 'general'
         out[module].append(code)
     return dict(out)
+
+
+def _build_effective_permissions_response(db: Session, user: User) -> EffectivePermissionsResponse:
+    permissions = get_user_permission_codes(user)
+    data_scopes = get_user_data_scopes(user)
+    inventory_profile = build_inventory_access_profile(db, user)
+    work_order_execution = get_work_order_execution_access_summary(db, user)
+    return EffectivePermissionsResponse(
+        user_id=user.id,
+        username=user.username,
+        roles=get_user_role_codes(user),
+        permissions=permissions,
+        permission_modules=_build_permission_modules(permissions),
+        data_scopes=data_scopes,
+        inventory_scope=str(inventory_profile.get("inventory_scope") or "self"),
+        managed_warehouse_ids=list(inventory_profile.get("managed_warehouse_ids") or []),
+        managed_warehouse_count=int(inventory_profile.get("managed_warehouse_count") or 0),
+        has_managed_warehouses=bool(inventory_profile.get("has_managed_warehouses")),
+        work_order_execution=work_order_execution,
+    )
 
 
 @router.get('/permissions', response_model=List[PermissionResponse])
@@ -339,16 +361,7 @@ async def set_user_roles(
         raise HTTPException(status_code=400, detail=str(exc))
 
     db.refresh(user)
-    permissions = get_user_permission_codes(user)
-    data_scopes = get_user_data_scopes(user)
-    return EffectivePermissionsResponse(
-        user_id=user.id,
-        username=user.username,
-        roles=get_user_role_codes(user),
-        permissions=permissions,
-        permission_modules=_build_permission_modules(permissions),
-        data_scopes=data_scopes,
-    )
+    return _build_effective_permissions_response(db, user)
 
 
 @router.get('/users/{user_id}/effective-permissions', response_model=EffectivePermissionsResponse)
@@ -362,16 +375,7 @@ async def get_effective_permissions(
     if not user:
         raise HTTPException(status_code=404, detail='用户不存在')
 
-    permissions = get_user_permission_codes(user)
-    data_scopes = get_user_data_scopes(user)
-    return EffectivePermissionsResponse(
-        user_id=user.id,
-        username=user.username,
-        roles=get_user_role_codes(user),
-        permissions=permissions,
-        permission_modules=_build_permission_modules(permissions),
-        data_scopes=data_scopes,
-    )
+    return _build_effective_permissions_response(db, user)
 
 
 @router.get('/me/effective-permissions', response_model=EffectivePermissionsResponse)
@@ -383,13 +387,4 @@ async def get_my_effective_permissions(
     if not user:
         raise HTTPException(status_code=404, detail='用户不存在')
 
-    permissions = get_user_permission_codes(user)
-    data_scopes = get_user_data_scopes(user)
-    return EffectivePermissionsResponse(
-        user_id=user.id,
-        username=user.username,
-        roles=get_user_role_codes(user),
-        permissions=permissions,
-        permission_modules=_build_permission_modules(permissions),
-        data_scopes=data_scopes,
-    )
+    return _build_effective_permissions_response(db, user)

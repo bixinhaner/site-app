@@ -33,6 +33,15 @@ const normalizePermissionCodes = (rawPermissions = []) => {
 	return Array.from(permissionSet)
 }
 
+const normalizeIdList = (rawIds = []) => {
+	const idSet = new Set()
+	for (const item of rawIds || []) {
+		const id = Number(item)
+		if (Number.isInteger(id) && id > 0) idSet.add(id)
+	}
+	return Array.from(idSet)
+}
+
 const normalizeDataScopes = (rawDataScopes = null) => {
 	const scopeMap = {}
 	if (!rawDataScopes || typeof rawDataScopes !== 'object') return scopeMap
@@ -57,6 +66,10 @@ const normalizeUserInfo = (rawUser) => {
 		roles,
 		permissions,
 		data_scopes: dataScopes,
+		inventory_scope: String(rawUser.inventory_scope || '').trim() || 'self',
+		managed_warehouse_ids: normalizeIdList(rawUser.managed_warehouse_ids),
+		managed_warehouse_count: Math.max(0, Number(rawUser.managed_warehouse_count || 0) || 0),
+		has_managed_warehouses: Boolean(rawUser.has_managed_warehouses),
 	}
 }
 
@@ -82,6 +95,14 @@ export const useUserStore = defineStore('user', () => {
 	const roles = computed(() => normalizeRoleCodes(userInfo.value?.roles, userInfo.value?.role))
 	const permissions = computed(() => normalizePermissionCodes(userInfo.value?.permissions))
 	const dataScopes = computed(() => normalizeDataScopes(userInfo.value?.data_scopes))
+	const inventoryScope = computed(() => String(userInfo.value?.inventory_scope || 'self').trim() || 'self')
+	const managedWarehouseIds = computed(() => normalizeIdList(userInfo.value?.managed_warehouse_ids))
+	const hasManagedWarehouses = computed(() => {
+		if (inventoryScope.value === 'managed') return managedWarehouseIds.value.length > 0
+		return Boolean(userInfo.value?.has_managed_warehouses)
+	})
+	const hasGlobalInventoryAccess = computed(() => inventoryScope.value === 'all')
+	const hasManagedInventoryAccess = computed(() => hasGlobalInventoryAccess.value || hasManagedWarehouses.value)
 	const hasAnyAppPermission = computed(() => permissions.value.some(code => String(code || '').startsWith('app:')))
 
 	const hasRole = (roleCode) => {
@@ -143,13 +164,17 @@ export const useUserStore = defineStore('user', () => {
 		const allPermissions = Array.isArray(rule.allPermissions) ? rule.allPermissions : []
 		const anyPermissions = Array.isArray(rule.anyPermissions) ? rule.anyPermissions : []
 		const roleCodes = Array.isArray(rule.roles) ? rule.roles : []
+		const inventoryScopes = Array.isArray(rule.inventoryScopes)
+			? rule.inventoryScopes.map(code => String(code || '').trim()).filter(Boolean)
+			: []
 
 		const permissionsReady = hasAllPermissions(allPermissions) && (anyPermissions.length === 0 || hasAnyPermission(anyPermissions))
 		const rolesReady = roleCodes.length === 0 || hasAnyRole(roleCodes)
-		if (permissionsReady && rolesReady) return true
+		const scopeReady = inventoryScopes.length === 0 || inventoryScopes.includes(inventoryScope.value)
+		if (permissionsReady && rolesReady && scopeReady) return true
 
 		if (!hasAnyAppPermission.value && Array.isArray(rule.legacyRoles) && rule.legacyRoles.length > 0) {
-			return hasAnyRole(rule.legacyRoles)
+			return hasAnyRole(rule.legacyRoles) && scopeReady
 		}
 		return false
 	}
@@ -501,10 +526,15 @@ export const useUserStore = defineStore('user', () => {
 	return {
 		token,
 		refreshToken,
-		userInfo,
+			userInfo,
 			roles,
 			permissions,
 			dataScopes,
+			inventoryScope,
+			managedWarehouseIds,
+			hasManagedWarehouses,
+			hasGlobalInventoryAccess,
+			hasManagedInventoryAccess,
 			legacyScanPickupEnabled,
 		isLoggedIn,
 		isAdmin,

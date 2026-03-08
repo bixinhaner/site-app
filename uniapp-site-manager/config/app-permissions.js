@@ -66,12 +66,13 @@ export const APP_FEATURE_RULES = {
     legacyRoles: ['admin', 'manager', 'warehouse_manager', 'planner', 'reviewer', 'inspector', 'user'],
   },
   material_approval: {
-    allPermissions: [APP_PERMISSION_CODES.MATERIAL_APPROVAL_USE, 'inventory:material-request:write'],
-    legacyRoles: ['admin', 'manager', 'warehouse_manager'],
+    inventoryScopes: ['managed', 'all'],
   },
   issue_confirm: {
-    allPermissions: [APP_PERMISSION_CODES.ISSUE_CONFIRM_USE, 'inventory:issue-draft:write'],
-    legacyRoles: ['admin', 'manager', 'warehouse_manager'],
+    inventoryScopes: ['managed', 'all'],
+  },
+  return_receiving: {
+    inventoryScopes: ['managed', 'all'],
   },
   return_request: {
     allPermissions: [APP_PERMISSION_CODES.RETURN_REQUEST_USE],
@@ -129,6 +130,8 @@ export const APP_ROUTE_ACCESS_RULES = {
   'pages/stock/material-requests/approve': { feature: 'material_approval' },
   'pages/stock/issue-drafts/confirm-list': { feature: 'issue_confirm' },
   'pages/stock/issue-drafts/confirm': { feature: 'issue_confirm' },
+  'pages/stock/returns/receive-list': { feature: 'return_receiving' },
+  'pages/stock/returns/receive': { feature: 'return_receiving' },
   'pages/stock/manual-stock-out': { feature: 'manual_stock_out' },
   'pages/stock/returns/list': { feature: 'return_request', surveyorMessageKey: 'stock.surveyorNoPermission' },
   'pages/stock/returns/create': { feature: 'return_request', surveyorMessageKey: 'stock.surveyorNoPermission' },

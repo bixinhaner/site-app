@@ -72,13 +72,13 @@ const routes = [
             path: 'issue-drafts',
             name: 'IssueDraftList',
             component: () => import('../views/stock/IssueDraftList.vue'),
-            meta: { title: '待确认出库', icon: 'DocumentChecked', roles: ['admin', 'warehouse_manager', 'manager'], group: 'flow', order: 4 }
+            meta: { title: '待确认出库', icon: 'DocumentChecked', accessKey: 'inventory-issue-confirm', group: 'flow', order: 4 }
           },
           {
             path: 'issue-drafts/:id',
             name: 'IssueDraftDetail',
             component: () => import('../views/stock/IssueDraftDetail.vue'),
-            meta: { title: '出库确认', hidden: true, roles: ['admin', 'warehouse_manager', 'manager'] }
+            meta: { title: '出库确认', hidden: true, accessKey: 'inventory-issue-confirm' }
           },
           {
             path: 'manual-stock-out',
@@ -90,7 +90,7 @@ const routes = [
             path: 'return-receiving',
             name: 'ReturnReceiving',
             component: () => import('../views/stock/ReturnReceiving.vue'),
-            meta: { title: '退库收货', icon: 'CircleCheck', roles: ['admin', 'warehouse_manager', 'manager'], group: 'flow', order: 5 }
+            meta: { title: '退库收货', icon: 'CircleCheck', accessKey: 'inventory-return-receiving', group: 'flow', order: 5 }
           },
           {
             path: 'flow-settings',
@@ -102,7 +102,7 @@ const routes = [
             path: 'history',
             name: 'StockHistory',
             component: () => import('../views/stock/StockHistory.vue'),
-            meta: { title: '出入库记录', icon: 'Document', group: 'ledger', order: 1 }
+            meta: { title: '出入库记录', icon: 'Document', accessKey: 'inventory-history', group: 'ledger', order: 1 }
           },
           {
             path: 'user-ownership',
@@ -126,7 +126,7 @@ const routes = [
             path: 'lifecycle',
             name: 'EquipmentLifecycle',
             component: () => import('../views/equipment/EquipmentLifecycle.vue'),
-            meta: { title: '设备生命周期', icon: 'TrendCharts', group: 'ledger', order: 4 }
+            meta: { title: '设备生命周期', icon: 'TrendCharts', accessKey: 'inventory-history', group: 'ledger', order: 4 }
           }
         ]
       },
@@ -174,10 +174,10 @@ const routes = [
         component: RouterView,
         meta: { title: '工单管理', icon: 'Tickets' },
         children: [
-          { path: 'my-execution', name: 'MyExecutionWorkOrders', component: () => import('../views/workorder/MyExecutionWorkOrders.vue'), meta: { title: '我的执行工单', icon: 'DocumentChecked' } },
+          { path: 'my-execution', name: 'MyExecutionWorkOrders', component: () => import('../views/workorder/MyExecutionWorkOrders.vue'), meta: { title: '我的执行工单', icon: 'DocumentChecked', accessKey: 'web-workorder-entry' } },
           { path: 'list', name: 'WorkOrderList', component: () => import('../views/workorder/WorkOrderList.vue'), meta: { title: '工单列表', icon: 'List' } },
           { path: 'review', name: 'WorkOrderReview', component: () => import('../views/workorder/WorkOrderReview.vue'), meta: { title: '工单审核台', icon: 'Stamp' } },
-          { path: 'execute/:id', name: 'WorkOrderExecute', component: () => import('../views/workorder/WorkOrderExecute.vue'), meta: { title: '工单执行台', hidden: true } }
+          { path: 'execute/:id', name: 'WorkOrderExecute', component: () => import('../views/workorder/WorkOrderExecute.vue'), meta: { title: '工单执行台', hidden: true, accessKey: 'web-workorder-entry' } }
         ]
       },
       // 用户管理（二级菜单）
@@ -333,7 +333,7 @@ const ROUTE_PERMISSION_MAP = {
   WorkOrderExecute: ['workorder:execute:web'],
   UserList: ['users:list:read'],
   MobileLocationSettings: ['system:mobile-settings:read'],
-  WorkOrderExecutionSettings: ['system:workorder-execution-settings:read'],
+  WorkOrderExecutionSettings: ['authz:manage:all'],
   GeocodeCache: ['system:geocode-cache:read'],
   OmcConfig: ['system:mobile-settings:write'],
   OmcDeviceStates: ['system:logs:read'],

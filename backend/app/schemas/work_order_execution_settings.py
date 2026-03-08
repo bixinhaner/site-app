@@ -37,7 +37,8 @@ class WorkOrderExecutionSettingsPayload(BaseModel):
     allow_submit: BoolRule = Field(default_factory=lambda: BoolRule(default=True))
     allow_recall: BoolRule = Field(default_factory=lambda: BoolRule(default=True))
     allow_local_upload_without_geo: BoolRule = Field(default_factory=lambda: BoolRule(default=False))
-    allowed_work_order_types: WorkOrderTypeRule = Field(default_factory=WorkOrderTypeRule)
+    visible_work_order_types: WorkOrderTypeRule = Field(default_factory=WorkOrderTypeRule)
+    editable_work_order_types: WorkOrderTypeRule = Field(default_factory=WorkOrderTypeRule)
     config_version: int = 1
 
 
@@ -52,4 +53,5 @@ class EffectiveWorkOrderExecutionSettingsResponse(BaseModel):
     allow_submit: bool = True
     allow_recall: bool = True
     allow_local_upload_without_geo: bool = False
-    allowed_work_order_types: List[str] = Field(default_factory=list)
+    visible_work_order_types: List[str] = Field(default_factory=list)
+    editable_work_order_types: List[str] = Field(default_factory=list)

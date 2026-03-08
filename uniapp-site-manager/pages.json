@@ -181,6 +181,20 @@
 			}
 		},
 		{
+			"path": "pages/stock/returns/receive-list",
+			"style": {
+				"navigationBarTitleText": "退库收货",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/stock/returns/receive",
+			"style": {
+				"navigationBarTitleText": "收货确认",
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/stock/returns/create",
 			"style": {
 				"navigationBarTitleText": "新建退库",

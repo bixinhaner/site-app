@@ -9,7 +9,7 @@ from app.schemas.work_order_execution_settings import (
     WorkOrderExecutionSettingsPayload,
     WorkOrderExecutionSettingsUpdatePayload,
 )
-from app.services.authz_service import user_has_any_role_or_permission
+from app.services.authz_service import user_has_permission
 from app.services.work_order_execution_settings_service import (
     build_work_order_execution_settings_from_payload,
     get_effective_work_order_execution_settings,
@@ -23,23 +23,15 @@ router = APIRouter()
 
 
 def _ensure_read_access(current_user: User) -> None:
-    if user_has_any_role_or_permission(
-        current_user,
-        role_codes=['admin', 'manager'],
-        permission_codes=['system:workorder-execution-settings:read'],
-    ):
+    if user_has_permission(current_user, 'authz:manage:all'):
         return
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='没有权限查看 Web 工单执行配置')
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='只有权限管理员可以查看 Web 工单执行配置')
 
 
 def _ensure_write_access(current_user: User) -> None:
-    if user_has_any_role_or_permission(
-        current_user,
-        role_codes=['admin', 'manager'],
-        permission_codes=['system:workorder-execution-settings:write'],
-    ):
+    if user_has_permission(current_user, 'authz:manage:all'):
         return
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='没有权限修改 Web 工单执行配置')
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='只有权限管理员可以修改 Web 工单执行配置')
 
 
 @router.get('/workorder-execution-settings', response_model=WorkOrderExecutionSettingsPayload)

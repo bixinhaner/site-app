@@ -16,6 +16,7 @@ from app.services.authz_service import user_has_permission
 
 WORK_ORDER_EXECUTION_SETTINGS_KEY = 'workorder_execution_settings'
 WORK_ORDER_WEB_EXECUTION_PERMISSION_CODE = 'workorder:execute:web'
+WEB_LOGIN_PERMISSION_CODE = 'auth:web-login'
 WEB_ADMIN_CLIENT = 'web-admin'
 
 WORK_ORDER_EXECUTION_CAPABILITY_ENABLED = 'enabled'
@@ -24,6 +25,12 @@ WORK_ORDER_EXECUTION_CAPABILITY_DEVICE_BINDING = 'allow_device_binding'
 WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT = 'allow_submit'
 WORK_ORDER_EXECUTION_CAPABILITY_RECALL = 'allow_recall'
 WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO = 'allow_local_upload_without_geo'
+WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY = 'visible_work_order_types'
+WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY = 'editable_work_order_types'
+
+WEB_WORK_ORDER_ACCESS_HIDDEN = 'hidden'
+WEB_WORK_ORDER_ACCESS_READONLY = 'readonly'
+WEB_WORK_ORDER_ACCESS_EDITABLE = 'editable'
 
 _BOOL_RULE_KEYS = (
     WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
@@ -69,21 +76,23 @@ def build_default_work_order_execution_settings() -> Dict[str, Any]:
     return defaults.model_dump()
 
 
-def _normalize_bool_rule(raw_rule: Any, *, default: bool) -> Dict[str, Any]:
+def _normalize_bool_rule(raw_rule: Any, *, default: bool, allow_overrides: bool = True) -> Dict[str, Any]:
     rule = raw_rule if isinstance(raw_rule, dict) else {}
     per_role: Dict[str, bool] = {}
-    for role_code, value in (rule.get('per_role') or {}).items():
-        key = _normalize_role_key(role_code)
-        if not key:
-            continue
-        per_role[key] = bool(value)
+    if allow_overrides:
+        for role_code, value in (rule.get('per_role') or {}).items():
+            key = _normalize_role_key(role_code)
+            if not key:
+                continue
+            per_role[key] = bool(value)
 
     per_user: Dict[str, bool] = {}
-    for user_id, value in (rule.get('per_user') or {}).items():
-        key = _normalize_user_key(user_id)
-        if not key:
-            continue
-        per_user[key] = bool(value)
+    if allow_overrides:
+        for user_id, value in (rule.get('per_user') or {}).items():
+            key = _normalize_user_key(user_id)
+            if not key:
+                continue
+            per_user[key] = bool(value)
 
     return {
         'default': bool(rule.get('default', default)),
@@ -121,6 +130,44 @@ def _normalize_type_rule(raw_rule: Any) -> Dict[str, Any]:
     }
 
 
+def _intersect_type_lists(primary: Iterable[Any], secondary: Iterable[Any]) -> list[str]:
+    secondary_set = set(normalize_work_order_type_list(secondary))
+    return [item for item in normalize_work_order_type_list(primary) if item in secondary_set]
+
+
+def _sanitize_editable_type_rule(
+    visible_rule: Dict[str, Any],
+    editable_rule: Dict[str, Any],
+) -> Dict[str, Any]:
+    default_visible = normalize_work_order_type_list(visible_rule.get('default') or [])
+    visible_per_role = visible_rule.get('per_role') or {}
+    visible_per_user = visible_rule.get('per_user') or {}
+
+    sanitized_per_role: Dict[str, list[str]] = {}
+    for role_code, value in (editable_rule.get('per_role') or {}).items():
+        visible_scope = visible_per_role.get(role_code)
+        sanitized_per_role[role_code] = _intersect_type_lists(
+            value or [],
+            visible_scope if visible_scope is not None else default_visible,
+        )
+
+    sanitized_per_user: Dict[str, list[str]] = {}
+    for user_id, value in (editable_rule.get('per_user') or {}).items():
+        # 用户覆盖页当前仅支持“跟随全局默认/用户显式可见类型”两种来源，
+        # 因此这里按相同口径做后端兜底，避免保存出“可编辑不在可见里”的脏配置。
+        visible_scope = visible_per_user.get(user_id)
+        sanitized_per_user[user_id] = _intersect_type_lists(
+            value or [],
+            visible_scope if visible_scope is not None else default_visible,
+        )
+
+    return {
+        'default': _intersect_type_lists(editable_rule.get('default') or [], default_visible),
+        'per_role': sanitized_per_role,
+        'per_user': sanitized_per_user,
+    }
+
+
 def sanitize_work_order_execution_settings(raw_settings: Any) -> Dict[str, Any]:
     raw = raw_settings if isinstance(raw_settings, dict) else {}
     defaults = build_default_work_order_execution_settings()
@@ -130,9 +177,26 @@ def sanitize_work_order_execution_settings(raw_settings: Any) -> Dict[str, Any]:
         sanitized[key] = _normalize_bool_rule(
             raw.get(key),
             default=bool(defaults[key]['default']),
+            allow_overrides=key != WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
         )
 
-    sanitized['allowed_work_order_types'] = _normalize_type_rule(raw.get('allowed_work_order_types'))
+    legacy_type_rule = raw.get('allowed_work_order_types')
+    visible_rule_raw = raw.get(WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY)
+    editable_rule_raw = raw.get(WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY)
+
+    visible_rule = _normalize_type_rule(
+        visible_rule_raw if visible_rule_raw is not None else legacy_type_rule
+    )
+    editable_rule = _normalize_type_rule(
+        editable_rule_raw if editable_rule_raw is not None else (
+            legacy_type_rule if legacy_type_rule is not None else visible_rule_raw
+        )
+    )
+    sanitized[WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY] = visible_rule
+    sanitized[WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY] = _sanitize_editable_type_rule(
+        visible_rule,
+        editable_rule,
+    )
     return sanitized
 
 
@@ -199,8 +263,8 @@ def _resolve_bool_for_user(settings: Dict[str, Any], key: str, user: Optional[Us
     return bool(rule.get('default', False))
 
 
-def _resolve_type_list_for_user(settings: Dict[str, Any], user: Optional[User]) -> list[str]:
-    rule = settings.get('allowed_work_order_types') or {}
+def _resolve_type_list_for_user(settings: Dict[str, Any], key: str, user: Optional[User]) -> list[str]:
+    rule = settings.get(key) or {}
     override = _resolve_rule_override_for_user(rule, user)
     if override is not None:
         return normalize_work_order_type_list(override)
@@ -209,6 +273,15 @@ def _resolve_type_list_for_user(settings: Dict[str, Any], user: Optional[User]) 
 
 def get_effective_work_order_execution_settings(db: Session, user: Optional[User]) -> Dict[str, Any]:
     settings = load_work_order_execution_settings(db)
+    visible_work_order_types = _resolve_type_list_for_user(
+        settings,
+        WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY,
+        user,
+    )
+    editable_work_order_types = _intersect_type_lists(
+        _resolve_type_list_for_user(settings, WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY, user),
+        visible_work_order_types,
+    )
     return {
         'enabled': _resolve_bool_for_user(settings, WORK_ORDER_EXECUTION_CAPABILITY_ENABLED, user),
         'allow_photo_upload': _resolve_bool_for_user(settings, WORK_ORDER_EXECUTION_CAPABILITY_PHOTO_UPLOAD, user),
@@ -220,7 +293,99 @@ def get_effective_work_order_execution_settings(db: Session, user: Optional[User
             WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO,
             user,
         ),
-        'allowed_work_order_types': _resolve_type_list_for_user(settings, user),
+        'visible_work_order_types': visible_work_order_types,
+        'editable_work_order_types': editable_work_order_types,
+    }
+
+
+def resolve_web_work_order_access_mode(
+    db: Session,
+    user: Optional[User],
+    *,
+    work_order_type: Any = None,
+) -> str:
+    if user is None:
+        return WEB_WORK_ORDER_ACCESS_HIDDEN
+    if not user_has_permission(user, WEB_LOGIN_PERMISSION_CODE):
+        return WEB_WORK_ORDER_ACCESS_HIDDEN
+    if not user_has_permission(user, WORK_ORDER_WEB_EXECUTION_PERMISSION_CODE):
+        return WEB_WORK_ORDER_ACCESS_HIDDEN
+
+    effective = get_effective_work_order_execution_settings(db, user)
+    if not bool(effective.get('enabled')):
+        return WEB_WORK_ORDER_ACCESS_HIDDEN
+
+    normalized_type = _normalize_work_order_type(work_order_type)
+    visible_types = set(effective.get(WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY) or [])
+    editable_types = set(effective.get(WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY) or [])
+
+    if normalized_type:
+        if normalized_type not in visible_types:
+            return WEB_WORK_ORDER_ACCESS_HIDDEN
+        if normalized_type in editable_types:
+            return WEB_WORK_ORDER_ACCESS_EDITABLE
+        return WEB_WORK_ORDER_ACCESS_READONLY
+
+    if editable_types:
+        return WEB_WORK_ORDER_ACCESS_EDITABLE
+    if visible_types:
+        return WEB_WORK_ORDER_ACCESS_READONLY
+    return WEB_WORK_ORDER_ACCESS_HIDDEN
+
+
+def get_work_order_execution_access_summary(db: Session, user: Optional[User]) -> Dict[str, Any]:
+    effective = get_effective_work_order_execution_settings(db, user)
+    settings = load_work_order_execution_settings(db)
+    global_enabled = bool(
+        (settings.get(WORK_ORDER_EXECUTION_CAPABILITY_ENABLED) or {}).get('default', False)
+    )
+    has_web_login_permission = bool(user and user_has_permission(user, WEB_LOGIN_PERMISSION_CODE))
+    has_execute_permission = bool(user and user_has_permission(user, WORK_ORDER_WEB_EXECUTION_PERMISSION_CODE))
+    is_user_active = bool(user and getattr(user, 'is_active', True))
+    has_any_visible_type = bool(effective.get(WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY))
+    has_any_editable_type = bool(effective.get(WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY))
+    can_open_entry = bool(
+        is_user_active
+        and has_web_login_permission
+        and has_execute_permission
+        and global_enabled
+        and has_any_visible_type
+    )
+
+    reasons: list[str] = []
+    if not is_user_active:
+        reasons.append('用户已被禁用，无法登录 Web 管理端执行工单')
+    if not has_web_login_permission:
+        reasons.append('当前角色未授予 Web 登录权限（auth:web-login）')
+    if not has_execute_permission:
+        reasons.append('当前角色未授予 Web 工单执行权限（workorder:execute:web）')
+    if not global_enabled:
+        reasons.append('Web 工单执行总开关已关闭，角色和用户覆盖不会生效')
+    if global_enabled and not has_any_visible_type:
+        reasons.append('当前没有放开任何可在 Web 端查看的工单类型')
+    if global_enabled and has_any_visible_type and not has_any_editable_type:
+        reasons.append('当前只放开了 Web 只读查看，填写和提交仍需在 App 处理')
+
+    return {
+        'can_open_entry': can_open_entry,
+        'is_user_active': is_user_active,
+        'has_web_login_permission': has_web_login_permission,
+        'has_execute_permission': has_execute_permission,
+        'global_enabled': global_enabled,
+        'allow_photo_upload': bool(effective.get('allow_photo_upload')),
+        'allow_device_binding': bool(effective.get('allow_device_binding')),
+        'allow_submit': bool(effective.get('allow_submit')),
+        'allow_recall': bool(effective.get('allow_recall')),
+        'allow_local_upload_without_geo': bool(effective.get('allow_local_upload_without_geo')),
+        'visible_work_order_types': normalize_work_order_type_list(
+            effective.get(WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY) or []
+        ),
+        'editable_work_order_types': normalize_work_order_type_list(
+            effective.get(WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY) or []
+        ),
+        'has_any_visible_type': has_any_visible_type,
+        'has_any_editable_type': has_any_editable_type,
+        'reasons': reasons,
     }
 
 
@@ -235,8 +400,13 @@ def can_use_web_work_order_execution(
     *,
     work_order_type: Any = None,
     capability: str = WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+    require_editable_type: Optional[bool] = None,
 ) -> bool:
     if user is None:
+        return False
+    if not bool(getattr(user, 'is_active', True)):
+        return False
+    if not user_has_permission(user, WEB_LOGIN_PERMISSION_CODE):
         return False
     if not user_has_permission(user, WORK_ORDER_WEB_EXECUTION_PERMISSION_CODE):
         return False
@@ -245,8 +415,20 @@ def can_use_web_work_order_execution(
     if not bool(effective.get('enabled')):
         return False
 
+    if require_editable_type is None:
+        require_editable_type = capability != WORK_ORDER_EXECUTION_CAPABILITY_ENABLED
+
     normalized_type = _normalize_work_order_type(work_order_type)
-    if normalized_type and normalized_type not in set(effective.get('allowed_work_order_types') or []):
+    allowed_type_key = (
+        WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY
+        if require_editable_type
+        else WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY
+    )
+    allowed_types = normalize_work_order_type_list(effective.get(allowed_type_key) or [])
+    if normalized_type:
+        if normalized_type not in set(allowed_types):
+            return False
+    elif not allowed_types:
         return False
 
     if capability == WORK_ORDER_EXECUTION_CAPABILITY_ENABLED:
@@ -261,12 +443,25 @@ def ensure_web_work_order_execution_allowed(
     *,
     work_order_type: Any = None,
     capability: str = WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+    require_editable_type: Optional[bool] = None,
     detail: Optional[str] = None,
 ) -> None:
     if not is_web_admin_request(request):
         return
 
-    if user is None or not user_has_permission(user, WORK_ORDER_WEB_EXECUTION_PERMISSION_CODE):
+    if user is None or not bool(getattr(user, 'is_active', True)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='当前用户状态不允许在 Web 端执行工单',
+        )
+
+    if not user_has_permission(user, WEB_LOGIN_PERMISSION_CODE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='当前用户没有 Web 登录权限',
+        )
+
+    if not user_has_permission(user, WORK_ORDER_WEB_EXECUTION_PERMISSION_CODE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='当前用户没有 Web 工单执行权限',
@@ -277,6 +472,7 @@ def ensure_web_work_order_execution_allowed(
         user,
         work_order_type=work_order_type,
         capability=capability,
+        require_editable_type=require_editable_type,
     ):
         if detail:
             message = detail

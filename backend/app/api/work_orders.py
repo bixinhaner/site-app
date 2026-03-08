@@ -69,10 +69,17 @@ from app.services.authz_service import user_has_any_role_or_permission
 from app.services.data_scope_service import get_user_data_scope
 from app.services.work_order_execution_settings_service import (
     WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+    WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY,
     WORK_ORDER_EXECUTION_CAPABILITY_RECALL,
     WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT,
+    WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY,
+    WEB_WORK_ORDER_ACCESS_EDITABLE,
+    WEB_WORK_ORDER_ACCESS_HIDDEN,
+    WEB_WORK_ORDER_ACCESS_READONLY,
     ensure_web_work_order_execution_allowed,
     get_effective_work_order_execution_settings,
+    is_web_admin_request,
+    resolve_web_work_order_access_mode,
 )
 from app.utils.timezone import to_utc_iso
 
@@ -536,11 +543,16 @@ def _get_template_id_from_extra_data(extra_data):
 
 @router.get("/search", response_model=WorkOrderListResponse)
 async def search_work_orders(
+    request: Request,
     keyword: Optional[str] = Query(None, description="搜索工单标题/描述/站点名称/编码"),
     status: Optional[WorkOrderStatusEnum] = Query(None),
     status_in: Optional[str] = Query(None, description="多状态筛选，逗号分隔，如 SUBMITTED,UNDER_REVIEW"),
     type: Optional[WorkOrderTypeEnum] = Query(None),
     type_in: Optional[str] = Query(None, description="多类型筛选，逗号分隔，如 site_survey,opening_inspection"),
+    web_execution_scope: Optional[str] = Query(
+        None,
+        description="Web 执行工单口径：visible|editable，仅 Web 管理端执行入口使用",
+    ),
     assigned_to: Optional[int] = Query(None),
     priority: Optional[WorkOrderPriorityEnum] = Query(None),
     site_id: Optional[int] = Query(None),
@@ -555,7 +567,7 @@ async def search_work_orders(
     current_user: User = Depends(get_current_user)
 ):
     """搜索工单（带分页和筛选）"""
-    from sqlalchemy import or_, and_
+    from sqlalchemy import false, or_
     import math
 
     # 权限说明：
@@ -614,6 +626,27 @@ async def search_work_orders(
         query = query.filter(WorkOrder.type == type)
     elif type_values:
         query = query.filter(WorkOrder.type.in_(type_values))
+
+    execution_scope = str(web_execution_scope or '').strip().lower()
+    if execution_scope:
+        if execution_scope not in ('visible', 'editable'):
+            raise HTTPException(status_code=400, detail='web_execution_scope 仅支持 visible 或 editable')
+        if not is_web_admin_request(request):
+            raise HTTPException(status_code=400, detail='web_execution_scope 仅支持 Web 管理端请求')
+        if resolve_web_work_order_access_mode(db, current_user) == WEB_WORK_ORDER_ACCESS_HIDDEN:
+            query = query.filter(false())
+        else:
+            effective_settings = get_effective_work_order_execution_settings(db, current_user)
+            allowed_type_key = (
+                WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY
+                if execution_scope == 'visible'
+                else WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY
+            )
+            allowed_types = effective_settings.get(allowed_type_key) or []
+            if not allowed_types:
+                query = query.filter(false())
+            else:
+                query = query.filter(WorkOrder.type.in_([WorkOrderTypeEnum(item) for item in allowed_types]))
 
     # 分配人筛选与角色可见范围
     if is_field_worker:
@@ -1407,6 +1440,7 @@ async def accept_work_order(
         current_user,
         work_order_type=wo.type,
         capability=WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+        require_editable_type=True,
         detail="当前未启用 Web 工单填写",
     )
 
@@ -1689,6 +1723,7 @@ async def get_work_order_inspection(
         current_user,
         work_order_type=wo.type,
         capability=WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+        require_editable_type=False,
         detail="当前未启用 Web 工单填写",
     )
     
@@ -1730,6 +1765,7 @@ async def get_work_order_execution_context(
         current_user,
         work_order_type=wo.type,
         capability=WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+        require_editable_type=False,
         detail="当前未启用 Web 工单填写",
     )
 
@@ -1744,8 +1780,15 @@ async def get_work_order_execution_context(
         inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
 
     effective_settings = get_effective_work_order_execution_settings(db, current_user)
+    access_mode = resolve_web_work_order_access_mode(
+        db,
+        current_user,
+        work_order_type=wo.type,
+    )
+    can_edit_in_web = access_mode == WEB_WORK_ORDER_ACCESS_EDITABLE
     can_recall = (
         bool(effective_settings.get('allow_recall'))
+        and can_edit_in_web
         and wo.status in (WorkOrderStatusEnum.SUBMITTED, WorkOrderStatusEnum.UNDER_REVIEW)
         and (
             wo.assigned_to == current_user.id
@@ -1781,14 +1824,21 @@ async def get_work_order_execution_context(
         },
         "effective_settings": effective_settings,
         "permissions": {
-            "can_accept": wo.status == WorkOrderStatusEnum.PENDING and wo.assigned_to == current_user.id,
+            "access_mode": access_mode,
+            "is_readonly_type": access_mode == WEB_WORK_ORDER_ACCESS_READONLY,
+            "can_accept": (
+                can_edit_in_web
+                and wo.status == WorkOrderStatusEnum.PENDING
+                and wo.assigned_to == current_user.id
+            ),
             "can_edit": (
-                wo.assigned_to == current_user.id
+                can_edit_in_web
                 and wo.status in (WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED)
                 and inspection is not None
             ),
             "can_submit": (
-                bool(effective_settings.get('allow_submit'))
+                can_edit_in_web
+                and bool(effective_settings.get('allow_submit'))
                 and wo.assigned_to == current_user.id
                 and wo.status in (WorkOrderStatusEnum.ACTIVE, WorkOrderStatusEnum.REJECTED)
                 and inspection is not None
@@ -2713,6 +2763,7 @@ async def submit_work_order(
         current_user,
         work_order_type=wo.type,
         capability=WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT,
+        require_editable_type=True,
         detail="当前未启用 Web 端提交工单",
     )
     
@@ -2834,6 +2885,7 @@ def recall_work_order(
         current_user,
         work_order_type=wo.type,
         capability=WORK_ORDER_EXECUTION_CAPABILITY_RECALL,
+        require_editable_type=True,
         detail="当前未启用 Web 端撤回工单",
     )
 

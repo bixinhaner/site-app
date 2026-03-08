@@ -53,6 +53,10 @@ from app.services.equipment_unbind_service import (
     is_device_level_check_item,
     rollback_equipment_status_after_unbind,
 )
+from app.services.warehouse_access_service import (
+    get_managed_warehouse_ids as get_inventory_managed_warehouse_ids,
+    has_global_inventory_scope,
+)
 from app.utils.file_handler import save_uploaded_file, validate_image_on_disk, ImageValidationError
 from app.utils.timezone import to_utc_iso
 
@@ -82,6 +86,30 @@ def _ensure_stock_operator(current_user: User) -> None:
     else:
         raise HTTPException(status_code=403, detail="权限不足")
 
+
+def _ensure_inventory_operator(
+    current_user: User,
+    *,
+    permission_codes: Optional[List[str]] = None,
+    detail: str = "权限不足",
+) -> None:
+    """库存管理类操作：要求具备显式库存管理权限。"""
+    codes = permission_codes or [
+        "inventory:stock-in:write",
+        "inventory:stock-out:write",
+        "inventory:warehouse:write",
+        "inventory:flow-settings:write",
+        "inventory:user-ownership:read",
+        "inventory:history:read",
+    ]
+    if user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "warehouse_manager", "manager"],
+        permission_codes=codes,
+    ):
+        return
+    raise HTTPException(status_code=403, detail=detail)
+
 def _ensure_warehouse_operator(current_user: User) -> None:
     # 仓库侧操作：仅仓管/管理员，或授予仓库写操作权限的自定义角色
     if not user_has_any_role_or_permission(
@@ -93,36 +121,71 @@ def _ensure_warehouse_operator(current_user: User) -> None:
             "inventory:return:write",
             "inventory:warehouse:write",
         ],
-    ):
+        ):
         raise HTTPException(status_code=403, detail="权限不足")
 
 
 def _get_managed_warehouse_ids(db: Session, current_user: User) -> Optional[set]:
     """返回当前用户可管理的仓库ID集合；管理员返回 None 表示全部仓库。"""
-    if user_has_any_role_or_permission(
-        current_user,
-        role_codes=["admin"],
-        permission_codes=["inventory:warehouse:write"],
-    ):
-        return None
-    ids = db.query(Warehouse.id).filter(Warehouse.manager_id == current_user.id).all()
-    return {row[0] for row in ids}
+    return get_inventory_managed_warehouse_ids(db, current_user)
 
 
 def _is_warehouse_side_user(current_user: User, *, include_manager: bool = False) -> bool:
     role_codes = ["admin", "warehouse_manager"]
     if include_manager:
         role_codes.append("manager")
+    return user_has_any_role_or_permission(current_user, role_codes=role_codes)
+
+
+def _has_inventory_workbench_scope(db: Session, current_user: User) -> bool:
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    return managed_ids is None or bool(managed_ids)
+
+
+def _ensure_inventory_workbench_scope(
+    db: Session,
+    current_user: User,
+    *,
+    detail: str = "当前账号未绑定可管理仓库",
+) -> Optional[set]:
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids is None or managed_ids:
+        return managed_ids
+    raise HTTPException(status_code=403, detail=detail)
+
+
+def _warehouse_in_scope(db: Session, current_user: User, warehouse_id: Optional[int]) -> bool:
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids is None:
+        return True
+    if warehouse_id is None:
+        return False
+    return int(warehouse_id) in managed_ids
+
+
+def _ensure_transaction_in_scope(
+    db: Session,
+    current_user: User,
+    trans: Optional[StockTransaction],
+    *,
+    detail: str = "无权限操作该仓库的出入库记录",
+) -> None:
+    if not trans:
+        raise HTTPException(status_code=404, detail="出入库记录不存在")
+    if not _warehouse_in_scope(db, current_user, getattr(trans, "warehouse_id", None)):
+        raise HTTPException(status_code=403, detail=detail)
+
+
+def _can_view_inventory_history(db: Session, current_user: User) -> bool:
+    if has_global_inventory_scope(current_user):
+        return True
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids:
+        return True
     return user_has_any_role_or_permission(
         current_user,
-        role_codes=role_codes,
-        permission_codes=[
-            "inventory:stock-out:write",
-            "inventory:issue-draft:write",
-            "inventory:return:write",
-            "inventory:material-request:write",
-            "inventory:warehouse:write",
-        ],
+        role_codes=["admin", "manager", "warehouse_manager"],
+        permission_codes=["inventory:history:read"],
     )
 
 
@@ -1620,7 +1683,7 @@ async def scan_return_receive(
     current_user: User = Depends(get_current_user),
 ):
     """仓库收货确认：整单回滚库存 + 主设备实例回库 + 标记领料已归还。"""
-    _ensure_warehouse_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法处理退库收货")
 
     return_transaction_id = payload.get("return_transaction_id")
     sn_input = (payload.get("sn_input") or "").strip()
@@ -1759,7 +1822,7 @@ async def scan_return_reject(
     current_user: User = Depends(get_current_user),
 ):
     """仓库拒收：不回滚库存，仅更新退库单状态与原因。"""
-    _ensure_warehouse_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法处理退库拒收")
 
     return_transaction_id = payload.get("return_transaction_id")
     reason = (payload.get("reason") or "").strip()
@@ -1814,7 +1877,7 @@ async def list_return_requests(
     current_user: User = Depends(get_current_user),
 ):
     """退库收货工作台列表：仅仓库侧可用，默认只返回待收货退库单。"""
-    _ensure_warehouse_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法查看退库工作台")
 
     managed_ids = _get_managed_warehouse_ids(db, current_user)
 
@@ -2040,9 +2103,16 @@ async def create_stock_in(
     current_user: User = Depends(get_current_user)
 ):
     """创建入库单"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:stock-in:write", "inventory:warehouse:write"],
+        detail="权限不足，无法执行入库操作",
+    )
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法执行入库操作")
     
     warehouse_id = stock_in_data.get("warehouse_id", 1)  # 默认仓库
+    if not _warehouse_in_scope(db, current_user, warehouse_id):
+        raise HTTPException(status_code=403, detail="无权限操作该仓库")
     items = stock_in_data.get("items", [])
     offline_document_id = stock_in_data.get("offline_document_id")
     offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
@@ -2174,6 +2244,9 @@ async def get_stock_transactions(
     current_user: User = Depends(get_current_user)
 ):
     """获取出入库记录"""
+    if not _can_view_inventory_history(db, current_user):
+        raise HTTPException(status_code=403, detail="无权限查看出入库记录")
+
     query = db.query(StockTransaction)
     
     if transaction_type:
@@ -2189,15 +2262,21 @@ async def get_stock_transactions(
             StockTransaction.operation_time <= datetime.fromisoformat(end_date.replace("Z", "+00:00"))
         )
     
-    # 非仓库管理角色且未授予历史查看权限的用户，仅能查看自己记录
-    can_view_all = user_has_any_role_or_permission(
-        current_user,
-        role_codes=["admin", "warehouse_manager", "manager"],
-        permission_codes=["inventory:history:read"],
-    )
-    if not can_view_all:
-        query = query.filter(StockTransaction.operator_id == current_user.id)
-    
+    if has_global_inventory_scope(current_user):
+        pass
+    else:
+        managed_ids = _get_managed_warehouse_ids(db, current_user)
+        if managed_ids:
+            query = query.filter(
+                or_(
+                    StockTransaction.operator_id == current_user.id,
+                    StockTransaction.warehouse_id.in_(list(managed_ids)),
+                )
+            )
+        else:
+            query = query.filter(StockTransaction.operator_id == current_user.id)
+
+    total = query.count()
     transactions = query.order_by(desc(StockTransaction.operation_time)).offset(skip).limit(limit).all()
     
     result = []
@@ -2271,7 +2350,7 @@ async def get_stock_transactions(
             "package_name": trans.package.package_name if trans.package else None
         })
     
-    return {"transactions": result, "total": len(result)}
+    return {"transactions": result, "total": total}
 
 # ===== 线下票据（可复用） =====
 
@@ -2791,7 +2870,12 @@ async def import_sn_batch(
     import base64
     from datetime import datetime
     
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:stock-in:write", "inventory:warehouse:write"],
+        detail="权限不足，无法导入 SN",
+    )
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法导入 SN")
 
     offline_document_id = None
     if isinstance(file_data, dict):
@@ -2806,6 +2890,8 @@ async def import_sn_batch(
         file_name = file_data["file_name"]
         equipment_type_id = file_data["equipment_type_id"]
         warehouse_id = file_data["warehouse_id"]
+        if not _warehouse_in_scope(db, current_user, warehouse_id):
+            raise HTTPException(status_code=403, detail="无权限操作该仓库")
         
         # 读取Excel文件
         excel_data = pd.read_excel(io.BytesIO(file_content))
@@ -3435,7 +3521,11 @@ async def update_stock_transaction_notes(
     current_user: User = Depends(get_current_user),
 ):
     """编辑出入库单据备注（需填写原因，用于审计）"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:stock-in:write", "inventory:stock-out:write", "inventory:warehouse:write"],
+        detail="权限不足，无法编辑出入库备注",
+    )
 
     reason = (payload.get("reason") or "").strip()
     if not reason:
@@ -3445,8 +3535,7 @@ async def update_stock_transaction_notes(
     new_notes = "" if new_notes is None else str(new_notes)
 
     trans = db.query(StockTransaction).filter(StockTransaction.id == transaction_id).first()
-    if not trans:
-        raise HTTPException(status_code=404, detail="出入库记录不存在")
+    _ensure_transaction_in_scope(db, current_user, trans, detail="无权限编辑该仓库的出入库备注")
 
     old_notes = trans.notes or ""
     trans.notes = new_notes
@@ -3473,7 +3562,11 @@ async def update_stock_transaction_item_info(
     current_user: User = Depends(get_current_user),
 ):
     """编辑出入库明细行信息（批次号/供应商/备注等；需填写原因，用于审计）"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:stock-in:write", "inventory:stock-out:write", "inventory:warehouse:write"],
+        detail="权限不足，无法编辑出入库明细",
+    )
 
     reason = (payload.get("reason") or "").strip()
     if not reason:
@@ -3486,6 +3579,7 @@ async def update_stock_transaction_item_info(
     trans = item.transaction
     if not trans:
         raise HTTPException(status_code=404, detail="关联出入库单不存在")
+    _ensure_transaction_in_scope(db, current_user, trans, detail="无权限编辑该仓库的出入库明细")
 
     old = {
         "batch_number": item.batch_number,
@@ -4130,11 +4224,16 @@ async def list_material_requests(
         joinedload(MaterialRequest.requester),
     )
 
-    is_warehouse_side = _is_warehouse_side_user(current_user)
-    if is_warehouse_side:
-        managed_ids = _get_managed_warehouse_ids(db, current_user)
-        if managed_ids is not None:
-            query = query.filter(MaterialRequest.warehouse_id.in_(list(managed_ids)))
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if managed_ids is None:
+        pass
+    elif managed_ids:
+        query = query.filter(
+            or_(
+                MaterialRequest.requester_id == current_user.id,
+                MaterialRequest.warehouse_id.in_(list(managed_ids)),
+            )
+        )
     else:
         query = query.filter(MaterialRequest.requester_id == current_user.id)
 
@@ -4193,9 +4292,8 @@ async def create_material_request(
         raise HTTPException(status_code=400, detail="请选择申请人")
 
     if requester_id != current_user.id:
-        _ensure_stock_operator(current_user)
-        managed_ids = _get_managed_warehouse_ids(db, current_user)
-        if managed_ids is not None and warehouse_id not in managed_ids:
+        _ensure_inventory_workbench_scope(db, current_user, detail="无权限为该仓库代创建申请单")
+        if not _warehouse_in_scope(db, current_user, warehouse_id):
             raise HTTPException(status_code=403, detail="无权限为该仓库代创建申请单")
 
         requester_user = db.query(User).filter(User.id == requester_id).first()
@@ -4276,13 +4374,8 @@ async def get_material_request_detail(
     if not req:
         raise HTTPException(status_code=404, detail="申请单不存在")
 
-    is_warehouse_side = _is_warehouse_side_user(current_user)
-    if not is_warehouse_side and req.requester_id != current_user.id:
+    if req.requester_id != current_user.id and not _warehouse_in_scope(db, current_user, req.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限查看该申请单")
-    if is_warehouse_side:
-        managed_ids = _get_managed_warehouse_ids(db, current_user)
-        if managed_ids is not None and req.warehouse_id not in managed_ids:
-            raise HTTPException(status_code=403, detail="无权限查看该仓库的申请单")
 
     return {"request": _serialize_material_request(db, req)}
 
@@ -4304,8 +4397,7 @@ async def update_material_request(
     if _enum_value(req.status) != MaterialRequestStatusEnum.DRAFT.value:
         raise HTTPException(status_code=400, detail="仅草稿可编辑")
 
-    is_warehouse_side = _is_warehouse_side_user(current_user)
-    if not is_warehouse_side and req.requester_id != current_user.id:
+    if req.requester_id != current_user.id and not _warehouse_in_scope(db, current_user, req.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限编辑该申请单")
 
     warehouse_id = payload.get("warehouse_id") if isinstance(payload, dict) else None
@@ -4317,10 +4409,8 @@ async def update_material_request(
     except Exception:
         raise HTTPException(status_code=400, detail="请选择仓库")
     _ensure_active_warehouse(db, warehouse_id)
-    if is_warehouse_side and req.requester_id != current_user.id:
-        managed_ids = _get_managed_warehouse_ids(db, current_user)
-        if managed_ids is not None and warehouse_id not in managed_ids:
-            raise HTTPException(status_code=403, detail="无权限编辑该仓库的申请单")
+    if req.requester_id != current_user.id and not _warehouse_in_scope(db, current_user, warehouse_id):
+        raise HTTPException(status_code=403, detail="无权限编辑该仓库的申请单")
 
     merged_items = _merge_request_items(items)
     if not merged_items:
@@ -4382,12 +4472,9 @@ async def submit_material_request(
     if _enum_value(req.status) != MaterialRequestStatusEnum.DRAFT.value:
         raise HTTPException(status_code=400, detail="当前状态不可提交")
     if req.requester_id != current_user.id:
-        # 允许仓库侧代提交（兜底）
-        is_warehouse_side = _is_warehouse_side_user(current_user)
-        if not is_warehouse_side:
-            raise HTTPException(status_code=403, detail="无权限提交该申请单")
-        managed_ids = _get_managed_warehouse_ids(db, current_user)
-        if managed_ids is not None and req.warehouse_id not in managed_ids:
+        # 允许管理仓代提交（兜底）
+        _ensure_inventory_workbench_scope(db, current_user, detail="无权限提交该申请单")
+        if not _warehouse_in_scope(db, current_user, req.warehouse_id):
             raise HTTPException(status_code=403, detail="无权限提交该仓库的申请单")
 
     req.submitted_at = datetime.now()
@@ -4436,13 +4523,8 @@ async def cancel_material_request(
     if _enum_value(req.status) not in {MaterialRequestStatusEnum.DRAFT.value, MaterialRequestStatusEnum.SUBMITTED.value}:
         raise HTTPException(status_code=400, detail="当前状态不可取消")
 
-    is_warehouse_side = _is_warehouse_side_user(current_user)
-    if not is_warehouse_side and req.requester_id != current_user.id:
+    if req.requester_id != current_user.id and not _warehouse_in_scope(db, current_user, req.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限取消该申请单")
-    if is_warehouse_side and req.requester_id != current_user.id:
-        managed_ids = _get_managed_warehouse_ids(db, current_user)
-        if managed_ids is not None and req.warehouse_id not in managed_ids:
-            raise HTTPException(status_code=403, detail="无权限取消该仓库的申请单")
 
     req.status = MaterialRequestStatusEnum.CANCELED
     if reason:
@@ -4481,13 +4563,8 @@ async def abandon_material_request(
     }:
         raise HTTPException(status_code=400, detail="当前状态不可放弃领货")
 
-    is_warehouse_side = _is_warehouse_side_user(current_user)
-    if not is_warehouse_side and req.requester_id != current_user.id:
+    if req.requester_id != current_user.id and not _warehouse_in_scope(db, current_user, req.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限放弃该申请单")
-    if is_warehouse_side and req.requester_id != current_user.id:
-        managed_ids = _get_managed_warehouse_ids(db, current_user)
-        if managed_ids is not None and req.warehouse_id not in managed_ids:
-            raise HTTPException(status_code=403, detail="无权限放弃该仓库的申请单")
 
     has_issued = any(int(getattr(it, "issued_qty", 0) or 0) > 0 for it in (req.items or []))
     if has_issued:
@@ -4569,15 +4646,14 @@ async def approve_material_request(
     current_user: User = Depends(get_current_user),
 ):
     _ensure_material_request_enabled(db)
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法审批申请单")
 
     req = db.query(MaterialRequest).options(joinedload(MaterialRequest.items)).filter(MaterialRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="申请单不存在")
     if _enum_value(req.status) != MaterialRequestStatusEnum.SUBMITTED.value:
         raise HTTPException(status_code=400, detail="当前状态不可审批")
-    managed_ids = _get_managed_warehouse_ids(db, current_user)
-    if managed_ids is not None and req.warehouse_id not in managed_ids:
+    if not _warehouse_in_scope(db, current_user, req.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限审批该仓库的申请单")
 
     items_payload = payload.get("items") if isinstance(payload, dict) else []
@@ -4642,7 +4718,7 @@ async def reject_material_request(
     current_user: User = Depends(get_current_user),
 ):
     _ensure_material_request_enabled(db)
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法驳回申请单")
 
     reason = (payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
     if not reason:
@@ -4653,8 +4729,7 @@ async def reject_material_request(
         raise HTTPException(status_code=404, detail="申请单不存在")
     if _enum_value(req.status) != MaterialRequestStatusEnum.SUBMITTED.value:
         raise HTTPException(status_code=400, detail="当前状态不可驳回")
-    managed_ids = _get_managed_warehouse_ids(db, current_user)
-    if managed_ids is not None and req.warehouse_id not in managed_ids:
+    if not _warehouse_in_scope(db, current_user, req.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限驳回该仓库的申请单")
 
     req.status = MaterialRequestStatusEnum.REJECTED
@@ -4747,14 +4822,10 @@ def _ensure_issue_draft_access(
     draft: IssueDraft,
     current_user: User,
 ) -> None:
-    is_warehouse_side = _is_warehouse_side_user(current_user, include_manager=True)
-    if is_warehouse_side:
-        managed_ids = _get_managed_warehouse_ids(db, current_user)
-        if managed_ids is not None and draft.warehouse_id not in managed_ids:
-            raise HTTPException(status_code=403, detail="无权限处理该仓库的领料单")
+    if draft.requester_id == current_user.id:
         return
-    if draft.requester_id != current_user.id:
-        raise HTTPException(status_code=403, detail="无权限访问该领料单")
+    if not _warehouse_in_scope(db, current_user, draft.warehouse_id):
+        raise HTTPException(status_code=403, detail="无权限处理该仓库的领料单")
 
 
 @router.post("/issue-drafts")
@@ -4871,7 +4942,7 @@ async def list_issue_drafts(
     current_user: User = Depends(get_current_user),
 ):
     _ensure_material_request_enabled(db)
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法查看待确认出库")
 
     try:
         skip = int(skip or 0)
@@ -5422,7 +5493,7 @@ async def _confirm_issue_draft_impl(
 ):
     _ensure_material_request_enabled(db)
     if not skip_role_check:
-        _ensure_stock_operator(current_user)
+        _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法确认出库")
     _ensure_not_surveyor(current_user)
 
     draft = (
@@ -5455,8 +5526,7 @@ async def _confirm_issue_draft_impl(
         raise HTTPException(status_code=400, detail="当前状态不可确认出库")
 
     req = draft.request
-    managed_ids = _get_managed_warehouse_ids(db, current_user)
-    if not skip_role_check and managed_ids is not None and draft.warehouse_id not in managed_ids:
+    if not skip_role_check and not _warehouse_in_scope(db, current_user, draft.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限处理该仓库的领料单")
 
     serial_ids = payload.get("serial_ids") if isinstance(payload, dict) else []
@@ -5706,7 +5776,7 @@ async def reject_issue_draft(
     current_user: User = Depends(get_current_user),
 ):
     _ensure_material_request_enabled(db)
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法驳回领料单")
 
     reason = (payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
     if not reason:
@@ -5744,7 +5814,7 @@ async def reject_issue_draft_remaining(
     current_user: User = Depends(get_current_user),
 ):
     _ensure_material_request_enabled(db)
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法收口领料单")
 
     reason = (payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
     if not reason:
@@ -10129,7 +10199,7 @@ async def list_return_workbench(
     current_user: User = Depends(get_current_user),
 ):
     """仓库侧退库收货工作台（新方案）。"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法查看退库工作台")
 
     try:
         skip = int(skip or 0)
@@ -10224,7 +10294,7 @@ async def list_return_workbench_batches(
     current_user: User = Depends(get_current_user),
 ):
     """仓库侧退库批次工作台（批次维度展示，单据维度操作）。"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法查看退库工作台")
 
     try:
         skip = int(skip or 0)
@@ -10446,7 +10516,7 @@ async def get_return_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法查看退库单")
 
     t = db.query(StockTransaction).options(
         joinedload(StockTransaction.warehouse),
@@ -10475,7 +10545,7 @@ async def receive_return_items(
     current_user: User = Depends(get_current_user),
 ):
     """仓库收货确认（支持部分收货）。"""
-    _ensure_warehouse_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法处理退库收货")
 
     main_sns = payload.get("main_sns") if isinstance(payload, dict) else []
     aux_items = payload.get("aux_items") if isinstance(payload, dict) else []
@@ -10711,7 +10781,7 @@ async def reject_return_request(
     current_user: User = Depends(get_current_user),
 ):
     """仓库拒收：仅 pending_receive 且未发生部分收货。"""
-    _ensure_warehouse_operator(current_user)
+    _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法处理退库拒收")
 
     reason = (payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
     if not reason:

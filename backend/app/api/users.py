@@ -20,6 +20,7 @@ from app.services.authz_service import (
     user_has_any_role_or_permission,
     user_has_permission,
 )
+from app.services.warehouse_access_service import build_inventory_access_profile
 
 router = APIRouter()
 
@@ -43,15 +44,20 @@ def _assert_access(
     )
 
 
-def _with_authz_payload(user: User) -> User:
+def _with_authz_payload(db: Session, user: User) -> User:
     if not user:
         return user
     try:
         permissions = get_user_permission_codes(user)
         data_scopes = get_user_data_scopes(user)
+        inventory_profile = build_inventory_access_profile(db, user)
         setattr(user, 'permissions', permissions)
         setattr(user, 'permission_codes', permissions)
         setattr(user, 'data_scopes', data_scopes)
+        setattr(user, 'inventory_scope', str(inventory_profile.get('inventory_scope') or 'self'))
+        setattr(user, 'managed_warehouse_ids', list(inventory_profile.get('managed_warehouse_ids') or []))
+        setattr(user, 'managed_warehouse_count', int(inventory_profile.get('managed_warehouse_count') or 0))
+        setattr(user, 'has_managed_warehouses', bool(inventory_profile.get('has_managed_warehouses')))
     except Exception:
         pass
     return user
@@ -116,7 +122,7 @@ async def search_users(
     pages = math.ceil(total / limit) if total > 0 else 0
 
     return UserListResponse(
-        users=[UserResponse.from_orm(_with_authz_payload(user)) for user in users],
+        users=[UserResponse.from_orm(_with_authz_payload(db, user)) for user in users],
         total=total,
         page=page,
         size=limit,
@@ -138,7 +144,7 @@ async def get_users(
     )
 
     users = db.query(User).offset(skip).limit(limit).all()
-    return [UserResponse.from_orm(_with_authz_payload(user)) for user in users]
+    return [UserResponse.from_orm(_with_authz_payload(db, user)) for user in users]
 
 
 @router.post('/', response_model=UserResponse)
@@ -190,7 +196,7 @@ async def create_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     db.refresh(db_user)
-    return UserResponse.from_orm(_with_authz_payload(db_user))
+    return UserResponse.from_orm(_with_authz_payload(db, db_user))
 
 
 @router.get('/{user_id}', response_model=UserResponse)
@@ -217,7 +223,7 @@ async def get_user(
             detail='User not found'
         )
 
-    return UserResponse.from_orm(_with_authz_payload(user))
+    return UserResponse.from_orm(_with_authz_payload(db, user))
 
 
 @router.put('/{user_id}', response_model=UserResponse)
@@ -289,7 +295,7 @@ async def update_user(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
         db.refresh(user)
 
-    return UserResponse.from_orm(_with_authz_payload(user))
+    return UserResponse.from_orm(_with_authz_payload(db, user))
 
 
 @router.delete('/{user_id}')

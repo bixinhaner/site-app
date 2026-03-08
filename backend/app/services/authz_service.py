@@ -16,6 +16,11 @@ from app.models.authz import Permission, Role, RoleDataScope, RolePermission, Us
 from app.models.user import User
 from app.services.data_scope_service import get_user_effective_data_scopes
 
+LEGACY_DISABLED_PERMISSION_CODES = {
+    "system:workorder-execution-settings:read",
+    "system:workorder-execution-settings:write",
+}
+
 
 def ensure_builtin_roles_and_permissions(db: Session) -> None:
     role_by_code: Dict[str, Role] = {r.code: r for r in db.query(Role).all()}
@@ -64,6 +69,11 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
             perm.description = item.get("description")
             if perm.is_active is False:
                 perm.is_active = True
+
+    for code in LEGACY_DISABLED_PERMISSION_CODES:
+        perm = perm_by_code.get(code)
+        if perm is not None:
+            perm.is_active = False
 
     db.flush()
 

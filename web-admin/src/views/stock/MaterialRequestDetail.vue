@@ -351,14 +351,12 @@ const approveRows = ref([])
 const approveComments = ref('')
 
 const requestId = computed(() => String(route.params.id || '').trim())
-const isWarehouseOperator = computed(() =>
-  userStore.hasAnyRole(['admin', 'manager', 'warehouse_manager']) ||
-  userStore.hasPermission('inventory:material-request:write')
-)
+const isWarehouseOperator = computed(() => userStore.hasManagedInventoryAccess)
 const currentUserId = computed(() => Number(userStore.user?.id || 0))
+const isRequester = computed(() => currentUserId.value > 0 && currentUserId.value === Number(requestData.value?.requester_id || 0))
 const isDraft = computed(() => requestData.value?.status === 'draft')
 const canApprove = computed(() => isWarehouseOperator.value && requestData.value?.status === 'submitted')
-const canCancel = computed(() => isWarehouseOperator.value && ['draft', 'submitted'].includes(requestData.value?.status))
+const canCancel = computed(() => (isWarehouseOperator.value || isRequester.value) && ['draft', 'submitted'].includes(requestData.value?.status))
 const issuedTotal = computed(() => {
   const items = requestData.value?.items || []
   return items.reduce((s, i) => s + Number(i.issued_qty || 0), 0)
@@ -368,7 +366,7 @@ const canAbandon = computed(() => {
   if (!['approved', 'partially_approved'].includes(status)) return false
   if (issuedTotal.value > 0) return false
   if (isWarehouseOperator.value) return true
-  return currentUserId.value > 0 && currentUserId.value === Number(requestData.value?.requester_id || 0)
+  return isRequester.value
 })
 const showReason = computed(() => {
   const status = String(requestData.value?.status || '')

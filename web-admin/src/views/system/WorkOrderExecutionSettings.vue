@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1>Web工单执行配置</h1>
-        <div class="page-subtitle">控制 Web 管理端是否允许接受、填写、上传照片、绑定设备、提交与撤回工单。</div>
+        <div class="page-subtitle">仅权限管理员可配置。总开关决定 Web 执行入口是否开放；角色和用户覆盖只影响可见类型、可编辑类型，以及照片上传、设备绑定、提交、撤回等细项能力，且不能绕过总开关。</div>
       </div>
       <div class="header-actions">
         <el-button @click="loadConfig" :loading="loading">
@@ -14,15 +14,6 @@
         </el-button>
       </div>
     </div>
-
-    <el-alert
-      v-if="!canEdit"
-      class="mb16"
-      type="warning"
-      :closable="false"
-      show-icon
-      title="当前用户仅可查看配置，修改需要 Web 工单执行配置管理权限"
-    />
 
     <el-card class="mb16" v-loading="loading">
       <template #header>
@@ -58,12 +49,21 @@
         </div>
       </div>
       <div class="mt12">
-        <div class="effective-label">允许的工单类型</div>
+        <div class="effective-label">Web可见工单类型</div>
         <el-space wrap>
-          <el-tag v-for="type in effective.allowed_work_order_types" :key="type" effect="plain">
+          <el-tag v-for="type in effective.visible_work_order_types" :key="`visible-${type}`" effect="plain">
             {{ getTypeLabel(type) }}
           </el-tag>
-          <span v-if="!effective.allowed_work_order_types.length" class="hint">当前未放开任何工单类型。</span>
+          <span v-if="!effective.visible_work_order_types.length" class="hint">当前未放开任何可见工单类型。</span>
+        </el-space>
+      </div>
+      <div class="mt12">
+        <div class="effective-label">Web可编辑工单类型</div>
+        <el-space wrap>
+          <el-tag v-for="type in effective.editable_work_order_types" :key="`editable-${type}`" type="success" effect="plain">
+            {{ getTypeLabel(type) }}
+          </el-tag>
+          <span v-if="!effective.editable_work_order_types.length" class="hint">当前没有可在 Web 端编辑的工单类型。</span>
         </el-space>
       </div>
     </el-card>
@@ -77,6 +77,7 @@
       <el-form label-width="160px" :disabled="!canEdit">
         <el-form-item label="Web工单执行">
           <el-switch v-model="form.enabled.default" active-text="启用" inactive-text="关闭" />
+          <div class="hint mt8">这里是总开关。关闭后，角色和用户覆盖仍会保留，但不会开放 Web 执行入口。</div>
         </el-form-item>
         <el-form-item label="照片上传">
           <el-switch v-model="form.allow_photo_upload.default" active-text="允许" inactive-text="禁止" />
@@ -93,9 +94,9 @@
         <el-form-item label="工单撤回">
           <el-switch v-model="form.allow_recall.default" active-text="允许" inactive-text="禁止" />
         </el-form-item>
-        <el-form-item label="允许工单类型">
+        <el-form-item label="Web可见工单类型">
           <el-select
-            v-model="form.allowed_work_order_types.default"
+            v-model="form.visible_work_order_types.default"
             multiple
             filterable
             collapse-tags
@@ -104,7 +105,20 @@
           >
             <el-option v-for="type in workOrderTypeOptions" :key="type.value" :label="type.label" :value="type.value" />
           </el-select>
-          <div class="hint mt8">全局关闭时，下面所有角色/用户覆盖都不会开放执行入口。</div>
+          <div class="hint mt8">这些类型会出现在“我的执行工单”里，即使它们在 Web 端只能只读查看。</div>
+        </el-form-item>
+        <el-form-item label="Web可编辑工单类型">
+          <el-select
+            v-model="form.editable_work_order_types.default"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            style="width: 100%"
+          >
+            <el-option v-for="type in visibleTypeOptionsForDefault" :key="type.value" :label="type.label" :value="type.value" />
+          </el-select>
+          <div class="hint mt8">可编辑类型必须是可见类型的子集；未选中的可见类型会在 Web 端以“仅App执行”只读展示。</div>
         </el-form-item>
       </el-form>
     </el-card>
@@ -117,18 +131,6 @@
       </template>
       <el-table :data="roleRows" border size="small">
         <el-table-column prop="label" label="角色" width="140" fixed="left" />
-        <el-table-column label="执行入口" width="120">
-          <template #default="{ row }">
-            <el-select
-              :model-value="toMode(form.enabled.per_role[row.key])"
-              :disabled="!canEdit"
-              style="width: 100%"
-              @change="value => applyRoleBoolOverride('enabled', row.key, value)"
-            >
-              <el-option v-for="option in boolModeOptions" :key="option.value" :label="option.label" :value="option.value" />
-            </el-select>
-          </template>
-        </el-table-column>
         <el-table-column label="照片上传" width="120">
           <template #default="{ row }">
             <el-select
@@ -189,10 +191,10 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="允许工单类型" min-width="280">
+        <el-table-column label="Web可见类型" min-width="260">
           <template #default="{ row }">
             <el-select
-              :model-value="form.allowed_work_order_types.per_role[row.key] || []"
+              :model-value="form.visible_work_order_types.per_role[row.key] || []"
               multiple
               filterable
               collapse-tags
@@ -201,14 +203,37 @@
               :disabled="!canEdit"
               style="width: 100%"
               placeholder="留空表示跟随全局"
-              @change="value => applyRoleTypeOverride(row.key, value)"
+              @change="value => applyRoleTypeOverride('visible_work_order_types', row.key, value)"
             >
               <el-option v-for="type in workOrderTypeOptions" :key="type.value" :label="type.label" :value="type.value" />
             </el-select>
           </template>
         </el-table-column>
+        <el-table-column label="Web可编辑类型" min-width="260">
+          <template #default="{ row }">
+            <el-select
+              :model-value="form.editable_work_order_types.per_role[row.key] || []"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              clearable
+              :disabled="!canEdit"
+              style="width: 100%"
+              placeholder="留空表示跟随全局/角色可见类型"
+              @change="value => applyRoleTypeOverride('editable_work_order_types', row.key, value)"
+            >
+              <el-option
+                v-for="type in editableTypeOptionsForRole(row.key)"
+                :key="type.value"
+                :label="type.label"
+                :value="type.value"
+              />
+            </el-select>
+          </template>
+        </el-table-column>
       </el-table>
-      <div class="hint mt12">角色覆盖只影响 Web 管理端执行页，不影响 App 现有工单填写流程。</div>
+      <div class="hint mt12">角色覆盖只影响 Web 管理端的细项能力，不影响 App 现有工单填写流程，也不能绕过上面的总开关。</div>
     </el-card>
 
     <el-card v-loading="loading">
@@ -239,13 +264,6 @@
           <template #default="{ row }">
             <div>{{ row.user_label || `用户 #${row.user_id}` }}</div>
             <div class="hint">ID: {{ row.user_id }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="执行入口" width="120">
-          <template #default="{ row }">
-            <el-select v-model="row.enabled" :disabled="!canEdit" style="width: 100%">
-              <el-option v-for="option in boolModeOptions" :key="option.value" :label="option.label" :value="option.value" />
-            </el-select>
           </template>
         </el-table-column>
         <el-table-column label="照片上传" width="120">
@@ -283,10 +301,10 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="允许工单类型" min-width="280">
+        <el-table-column label="Web可见类型" min-width="260">
           <template #default="{ row }">
             <el-select
-              v-model="row.allowed_work_order_types"
+              v-model="row.visible_work_order_types"
               multiple
               filterable
               collapse-tags
@@ -300,12 +318,35 @@
             </el-select>
           </template>
         </el-table-column>
+        <el-table-column label="Web可编辑类型" min-width="260">
+          <template #default="{ row }">
+            <el-select
+              v-model="row.editable_work_order_types"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              clearable
+              :disabled="!canEdit"
+              style="width: 100%"
+              placeholder="留空表示跟随全局/角色可见类型"
+            >
+              <el-option
+                v-for="type in editableTypeOptionsForUser(row)"
+                :key="type.value"
+                :label="type.label"
+                :value="type.value"
+              />
+            </el-select>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ $index }">
             <el-button type="danger" text :disabled="!canEdit" @click="removeUserRule($index)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
+      <div class="hint mt12">用户覆盖只用于例外场景，比如临时禁止提交或单独放开照片上传，仍不能绕过总开关。</div>
     </el-card>
   </div>
 </template>
@@ -365,7 +406,11 @@ const createDefaultForm = () => ({
   allow_submit: createBoolRule(true),
   allow_recall: createBoolRule(true),
   allow_local_upload_without_geo: createBoolRule(false),
-  allowed_work_order_types: {
+  visible_work_order_types: {
+    default: workOrderTypeOptions.map(item => item.value),
+    per_role: {},
+  },
+  editable_work_order_types: {
     default: workOrderTypeOptions.map(item => item.value),
     per_role: {},
   },
@@ -381,16 +426,17 @@ const effective = reactive({
   allow_submit: true,
   allow_recall: true,
   allow_local_upload_without_geo: false,
-  allowed_work_order_types: [],
+  visible_work_order_types: [],
+  editable_work_order_types: [],
 })
 
 const newUserRule = reactive({
   user_id: '',
 })
 
-const canEdit = computed(() => userStore.hasPermission('system:workorder-execution-settings:write'))
+const canEdit = computed(() => userStore.hasPermission('authz:manage:all'))
 
-const boolKeys = [
+const defaultBoolKeys = [
   'enabled',
   'allow_photo_upload',
   'allow_device_binding',
@@ -399,7 +445,14 @@ const boolKeys = [
   'allow_local_upload_without_geo',
 ]
 
+const overridableBoolKeys = defaultBoolKeys.filter(key => key !== 'enabled')
+
 const getTypeLabel = (value) => workOrderTypeOptions.find(item => item.value === value)?.label || value
+
+const buildTypeOptions = (types = []) => normalizeTypeList(types).map(type => ({
+  value: type,
+  label: getTypeLabel(type),
+}))
 
 const toMode = (value) => {
   if (value === true) return 'allow'
@@ -423,6 +476,26 @@ const normalizeTypeList = (list = []) => {
   return out
 }
 
+const intersectTypeList = (list = [], scope = []) => {
+  const scopeSet = new Set(normalizeTypeList(scope))
+  return normalizeTypeList(list).filter(item => scopeSet.has(item))
+}
+
+const visibleTypeOptionsForDefault = computed(() => buildTypeOptions(form.visible_work_order_types.default))
+const editableTypeOptionsForRole = (roleKey) => {
+  const visible = form.visible_work_order_types.per_role[roleKey]?.length
+    ? form.visible_work_order_types.per_role[roleKey]
+    : form.visible_work_order_types.default
+  return buildTypeOptions(visible)
+}
+
+const editableTypeOptionsForUser = (row) => {
+  const visible = row.visible_work_order_types?.length
+    ? row.visible_work_order_types
+    : form.visible_work_order_types.default
+  return buildTypeOptions(visible)
+}
+
 const resetForm = () => {
   Object.assign(form, createDefaultForm())
 }
@@ -430,13 +503,13 @@ const resetForm = () => {
 const buildUserOverrideRow = (userId, label = '') => ({
   user_id: String(userId || '').trim(),
   user_label: label || '',
-  enabled: '',
   allow_photo_upload: '',
   allow_device_binding: '',
   allow_submit: '',
   allow_recall: '',
   allow_local_upload_without_geo: '',
-  allowed_work_order_types: [],
+  visible_work_order_types: [],
+  editable_work_order_types: [],
 })
 
 const hydrateUserLabels = async (userIds = []) => {
@@ -463,13 +536,29 @@ const applyRoleBoolOverride = (key, roleKey, value) => {
   form[key].per_role[roleKey] = boolValue
 }
 
-const applyRoleTypeOverride = (roleKey, values) => {
+const applyRoleTypeOverride = (key, roleKey, values) => {
   const list = normalizeTypeList(values)
   if (!list.length) {
-    delete form.allowed_work_order_types.per_role[roleKey]
+    delete form[key].per_role[roleKey]
+    if (key === 'visible_work_order_types') {
+      const editable = form.editable_work_order_types.per_role[roleKey] || []
+      form.editable_work_order_types.per_role[roleKey] = intersectTypeList(
+        editable,
+        form.visible_work_order_types.default,
+      )
+    }
     return
   }
-  form.allowed_work_order_types.per_role[roleKey] = list
+  if (key === 'editable_work_order_types') {
+    form[key].per_role[roleKey] = intersectTypeList(
+      list,
+      editableTypeOptionsForRole(roleKey).map(item => item.value),
+    )
+    return
+  }
+  form[key].per_role[roleKey] = list
+  const editable = form.editable_work_order_types.per_role[roleKey] || []
+  form.editable_work_order_types.per_role[roleKey] = intersectTypeList(editable, list)
 }
 
 const loadEffective = async () => {
@@ -477,7 +566,8 @@ const loadEffective = async () => {
     const data = await workOrderExecutionSettingsApi.getEffectiveSettings()
     Object.assign(effective, {
       ...data,
-      allowed_work_order_types: normalizeTypeList(data?.allowed_work_order_types || []),
+      visible_work_order_types: normalizeTypeList(data?.visible_work_order_types || []),
+      editable_work_order_types: normalizeTypeList(data?.editable_work_order_types || []),
     })
   } catch (error) {
     console.error(error)
@@ -491,20 +581,35 @@ const loadConfig = async () => {
     const data = await workOrderExecutionSettingsApi.getSettings()
     form.config_version = Number(data?.config_version || 1)
 
-    boolKeys.forEach((key) => {
+    defaultBoolKeys.forEach((key) => {
       form[key].default = Boolean(data?.[key]?.default ?? form[key].default)
-      form[key].per_role = { ...(data?.[key]?.per_role || {}) }
+      form[key].per_role = key === 'enabled' ? {} : { ...(data?.[key]?.per_role || {}) }
     })
 
-    form.allowed_work_order_types.default = normalizeTypeList(
-      data?.allowed_work_order_types?.default || form.allowed_work_order_types.default,
+    form.visible_work_order_types.default = normalizeTypeList(
+      data?.visible_work_order_types?.default || form.visible_work_order_types.default,
     )
-    form.allowed_work_order_types.per_role = { ...(data?.allowed_work_order_types?.per_role || {}) }
+    form.visible_work_order_types.per_role = { ...(data?.visible_work_order_types?.per_role || {}) }
+    form.editable_work_order_types.default = intersectTypeList(
+      data?.editable_work_order_types?.default || form.editable_work_order_types.default,
+      form.visible_work_order_types.default,
+    )
+    form.editable_work_order_types.per_role = Object.entries(
+      data?.editable_work_order_types?.per_role || {},
+    ).reduce((accumulator, [roleKey, list]) => {
+      accumulator[roleKey] = intersectTypeList(
+        list || [],
+        form.visible_work_order_types.per_role[roleKey]?.length
+          ? form.visible_work_order_types.per_role[roleKey]
+          : form.visible_work_order_types.default,
+      )
+      return accumulator
+    }, {})
 
     const userIdSet = new Set()
     const rows = []
 
-    boolKeys.forEach((key) => {
+    overridableBoolKeys.forEach((key) => {
       const perUser = data?.[key]?.per_user || {}
       Object.entries(perUser).forEach(([userId, value]) => {
         userIdSet.add(String(userId))
@@ -517,14 +622,27 @@ const loadConfig = async () => {
       })
     })
 
-    Object.entries(data?.allowed_work_order_types?.per_user || {}).forEach(([userId, value]) => {
+    Object.entries(data?.visible_work_order_types?.per_user || {}).forEach(([userId, value]) => {
       userIdSet.add(String(userId))
       let row = rows.find(item => item.user_id === String(userId))
       if (!row) {
         row = buildUserOverrideRow(userId)
         rows.push(row)
       }
-      row.allowed_work_order_types = normalizeTypeList(value || [])
+      row.visible_work_order_types = normalizeTypeList(value || [])
+    })
+
+    Object.entries(data?.editable_work_order_types?.per_user || {}).forEach(([userId, value]) => {
+      userIdSet.add(String(userId))
+      let row = rows.find(item => item.user_id === String(userId))
+      if (!row) {
+        row = buildUserOverrideRow(userId)
+        rows.push(row)
+      }
+      const visible = row.visible_work_order_types?.length
+        ? row.visible_work_order_types
+        : form.visible_work_order_types.default
+      row.editable_work_order_types = intersectTypeList(value || [], visible)
     })
 
     form.user_overrides = rows
@@ -541,41 +659,65 @@ const loadConfig = async () => {
 const buildPayload = () => {
   const payload = {
     config_version: form.config_version,
-    allowed_work_order_types: {
-      default: normalizeTypeList(form.allowed_work_order_types.default),
+    visible_work_order_types: {
+      default: normalizeTypeList(form.visible_work_order_types.default),
+      per_role: {},
+      per_user: {},
+    },
+    editable_work_order_types: {
+      default: intersectTypeList(
+        form.editable_work_order_types.default,
+        form.visible_work_order_types.default,
+      ),
       per_role: {},
       per_user: {},
     },
   }
 
-  boolKeys.forEach((key) => {
+  defaultBoolKeys.forEach((key) => {
     payload[key] = {
       default: Boolean(form[key].default),
       per_role: {},
       per_user: {},
     }
 
-    Object.entries(form[key].per_role || {}).forEach(([roleKey, value]) => {
-      if (typeof value === 'boolean') payload[key].per_role[roleKey] = value
-    })
+    if (key !== 'enabled') {
+      Object.entries(form[key].per_role || {}).forEach(([roleKey, value]) => {
+        if (typeof value === 'boolean') payload[key].per_role[roleKey] = value
+      })
+    }
   })
 
-  Object.entries(form.allowed_work_order_types.per_role || {}).forEach(([roleKey, list]) => {
+  Object.entries(form.visible_work_order_types.per_role || {}).forEach(([roleKey, list]) => {
     const normalized = normalizeTypeList(list || [])
-    if (normalized.length) payload.allowed_work_order_types.per_role[roleKey] = normalized
+    if (normalized.length) payload.visible_work_order_types.per_role[roleKey] = normalized
+  })
+
+  Object.entries(form.editable_work_order_types.per_role || {}).forEach(([roleKey, list]) => {
+    const visible = payload.visible_work_order_types.per_role[roleKey]?.length
+      ? payload.visible_work_order_types.per_role[roleKey]
+      : payload.visible_work_order_types.default
+    const normalized = intersectTypeList(list || [], visible)
+    if (normalized.length) payload.editable_work_order_types.per_role[roleKey] = normalized
   })
 
   ;(form.user_overrides || []).forEach((row) => {
     const userId = String(row.user_id || '').trim()
     if (!userId) return
 
-    boolKeys.forEach((key) => {
+    overridableBoolKeys.forEach((key) => {
       const value = fromMode(row[key])
       if (typeof value === 'boolean') payload[key].per_user[userId] = value
     })
 
-    const types = normalizeTypeList(row.allowed_work_order_types || [])
-    if (types.length) payload.allowed_work_order_types.per_user[userId] = types
+    const visibleTypes = normalizeTypeList(row.visible_work_order_types || [])
+    if (visibleTypes.length) payload.visible_work_order_types.per_user[userId] = visibleTypes
+
+    const editableTypes = intersectTypeList(
+      row.editable_work_order_types || [],
+      visibleTypes.length ? visibleTypes : payload.visible_work_order_types.default,
+    )
+    if (editableTypes.length) payload.editable_work_order_types.per_user[userId] = editableTypes
   })
 
   return payload

@@ -2829,6 +2829,7 @@ async def update_inspection_item(
         current_user,
         work_order_type=work_order.type if work_order else None,
         capability=WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
+        require_editable_type=True,
         detail="当前未启用 Web 工单填写",
     )
 

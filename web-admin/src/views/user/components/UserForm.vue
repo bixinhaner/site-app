@@ -103,6 +103,122 @@
         </el-col>
       </el-row>
 
+      <el-row :gutter="20" v-if="showExecutionPreview">
+        <el-col :span="24">
+          <el-card class="execution-preview-card" shadow="never" v-loading="executionPreviewLoading">
+            <template #header>
+              <div class="execution-preview-header">
+                <span>Web工单执行生效预览</span>
+                <el-button link @click="loadExecutionPreview">刷新</el-button>
+              </div>
+            </template>
+
+            <el-alert
+              v-if="executionPreviewDirty"
+              class="execution-preview-alert"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="你已经修改了角色，但下面的结果仍按当前已保存角色计算；保存后再刷新就会更新。"
+            />
+
+            <div class="execution-preview-grid">
+              <div class="execution-preview-item">
+                <div class="preview-label">执行入口</div>
+                <el-tag :key="`execution-entry-${executionPreview.can_open_entry}`" :type="executionPreview.can_open_entry ? 'success' : 'info'">
+                  {{ executionPreview.can_open_entry ? '可进入' : '不可进入' }}
+                </el-tag>
+              </div>
+              <div class="execution-preview-item">
+                <div class="preview-label">Web 登录</div>
+                <el-tag :key="`execution-web-login-${executionPreview.has_web_login_permission}`" :type="executionPreview.has_web_login_permission ? 'success' : 'warning'">
+                  {{ executionPreview.has_web_login_permission ? '已具备' : '未授予' }}
+                </el-tag>
+              </div>
+              <div class="execution-preview-item">
+                <div class="preview-label">执行权限</div>
+                <el-tag :key="`execution-permission-${executionPreview.has_execute_permission}`" :type="executionPreview.has_execute_permission ? 'success' : 'warning'">
+                  {{ executionPreview.has_execute_permission ? '已具备' : '未授予' }}
+                </el-tag>
+              </div>
+              <div class="execution-preview-item">
+                <div class="preview-label">总开关</div>
+                <el-tag :key="`execution-global-${executionPreview.global_enabled}`" :type="executionPreview.global_enabled ? 'success' : 'danger'">
+                  {{ executionPreview.global_enabled ? '已开启' : '已关闭' }}
+                </el-tag>
+              </div>
+              <div class="execution-preview-item">
+                <div class="preview-label">照片上传</div>
+                <el-tag :key="`execution-photo-${executionPreview.allow_photo_upload}`" :type="executionPreview.allow_photo_upload ? 'success' : 'info'">
+                  {{ executionPreview.allow_photo_upload ? '允许' : '禁止' }}
+                </el-tag>
+              </div>
+              <div class="execution-preview-item">
+                <div class="preview-label">设备绑定</div>
+                <el-tag :key="`execution-binding-${executionPreview.allow_device_binding}`" :type="executionPreview.allow_device_binding ? 'success' : 'info'">
+                  {{ executionPreview.allow_device_binding ? '允许' : '禁止' }}
+                </el-tag>
+              </div>
+              <div class="execution-preview-item">
+                <div class="preview-label">提交</div>
+                <el-tag :key="`execution-submit-${executionPreview.allow_submit}`" :type="executionPreview.allow_submit ? 'success' : 'info'">
+                  {{ executionPreview.allow_submit ? '允许' : '禁止' }}
+                </el-tag>
+              </div>
+              <div class="execution-preview-item">
+                <div class="preview-label">撤回</div>
+                <el-tag :key="`execution-recall-${executionPreview.allow_recall}`" :type="executionPreview.allow_recall ? 'success' : 'info'">
+                  {{ executionPreview.allow_recall ? '允许' : '禁止' }}
+                </el-tag>
+              </div>
+            </div>
+
+            <div class="execution-preview-section">
+              <div class="preview-label">Web可见工单类型</div>
+              <el-space wrap>
+                <el-tag
+                  v-for="type in executionPreview.visible_work_order_types"
+                  :key="type"
+                  effect="plain"
+                >
+                  {{ getWorkOrderTypeLabel(type) }}
+                </el-tag>
+                <span v-if="!executionPreview.visible_work_order_types.length" class="preview-muted">当前未放开任何可在 Web 端查看的工单类型</span>
+              </el-space>
+            </div>
+
+            <div class="execution-preview-section">
+              <div class="preview-label">Web可编辑工单类型</div>
+              <el-space wrap>
+                <el-tag
+                  v-for="type in executionPreview.editable_work_order_types"
+                  :key="`editable-${type}`"
+                  type="success"
+                  effect="plain"
+                >
+                  {{ getWorkOrderTypeLabel(type) }}
+                </el-tag>
+                <span v-if="!executionPreview.editable_work_order_types.length" class="preview-muted">当前没有可在 Web 端填写的工单类型，进入后会以只读方式查看</span>
+              </el-space>
+            </div>
+
+            <div class="execution-preview-section" v-if="executionPreview.reasons.length">
+              <div class="preview-label">当前限制</div>
+              <el-space wrap>
+                <el-tag
+                  v-for="reason in executionPreview.reasons"
+                  :key="reason"
+                  type="warning"
+                  effect="plain"
+                >
+                  {{ reason }}
+                </el-tag>
+              </el-space>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+
       <el-row :gutter="20">
         <el-col :span="12">
           <el-form-item label="职位" prop="position">
@@ -159,6 +275,7 @@ const userStore = useUserStore()
 const loading = ref(false)
 const formRef = ref()
 const roleOptions = ref([])
+const executionPreviewLoading = ref(false)
 
 // 表单数据
 const form = reactive({
@@ -174,6 +291,47 @@ const form = reactive({
   is_active: true
 })
 
+const createDefaultExecutionPreview = () => ({
+  can_open_entry: false,
+  is_user_active: true,
+  has_web_login_permission: false,
+  has_execute_permission: false,
+  global_enabled: false,
+  allow_photo_upload: true,
+  allow_device_binding: true,
+  allow_submit: true,
+  allow_recall: true,
+  allow_local_upload_without_geo: false,
+  visible_work_order_types: [],
+  editable_work_order_types: [],
+  has_any_visible_type: false,
+  has_any_editable_type: false,
+  reasons: []
+})
+
+const executionPreviewState = ref(createDefaultExecutionPreview())
+const executionPreview = computed(() => {
+  const preview = executionPreviewState.value || createDefaultExecutionPreview()
+  return {
+    ...createDefaultExecutionPreview(),
+    can_open_entry: Boolean(preview.can_open_entry),
+    is_user_active: preview.is_user_active !== false,
+    has_web_login_permission: Boolean(preview.has_web_login_permission),
+    has_execute_permission: Boolean(preview.has_execute_permission),
+    global_enabled: Boolean(preview.global_enabled),
+    allow_photo_upload: preview.allow_photo_upload !== false,
+    allow_device_binding: preview.allow_device_binding !== false,
+    allow_submit: preview.allow_submit !== false,
+    allow_recall: preview.allow_recall !== false,
+    allow_local_upload_without_geo: Boolean(preview.allow_local_upload_without_geo),
+    visible_work_order_types: normalizeCodeList(preview.visible_work_order_types),
+    editable_work_order_types: normalizeCodeList(preview.editable_work_order_types),
+    has_any_visible_type: Boolean(preview.has_any_visible_type),
+    has_any_editable_type: Boolean(preview.has_any_editable_type),
+    reasons: normalizeReasonList(preview.reasons),
+  }
+})
+
 // 计算属性
 const isEditing = computed(() => !!props.user)
 const canChangeRole = computed(() => userStore.hasPermission('authz:manage:all'))
@@ -181,6 +339,13 @@ const canChangeStatus = computed(() => {
   if (!userStore.hasPermission('users:delete:write')) return false
   if (isEditing.value && props.user?.id === userStore.currentUser?.id) return false
   return true
+})
+const showExecutionPreview = computed(() => isEditing.value && canChangeRole.value && !!props.user?.id)
+const executionPreviewDirty = computed(() => {
+  if (!showExecutionPreview.value) return false
+  const originalRoles = normalizeCodeList(props.user?.roles || (props.user?.role ? [props.user.role] : []))
+  const currentRoles = normalizeCodeList(form.roles)
+  return originalRoles.join('|') !== currentRoles.join('|')
 })
 
 // 表单验证规则
@@ -274,6 +439,71 @@ const initForm = () => {
   }
 }
 
+const normalizeCodeList = (value) => {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map(item => String(item || '').trim()).filter(Boolean))].sort()
+}
+
+const normalizeReasonList = (value) => {
+  if (!Array.isArray(value)) return []
+  return value.map(item => String(item || '').trim()).filter(Boolean)
+}
+
+const getWorkOrderTypeLabel = (value) => {
+  const typeMap = {
+    site_survey: '站点勘查',
+    opening_inspection: '新站安装',
+    equipment_replacement: '设备更换',
+    ssv: 'SSV验收',
+    maintenance: '维护检查',
+    power_issue: '断电问题',
+    transmission_issue: '传输问题',
+    gps_issue: 'GPS问题',
+    signal_issue: '信号问题'
+  }
+  return typeMap[value] || value
+}
+
+const resetExecutionPreview = () => {
+  executionPreviewState.value = createDefaultExecutionPreview()
+}
+
+const loadExecutionPreview = async () => {
+  if (!showExecutionPreview.value) {
+    resetExecutionPreview()
+    return
+  }
+
+  executionPreviewLoading.value = true
+  try {
+    const data = await authzApi.getUserEffectivePermissions(props.user.id)
+    const preview = data?.work_order_execution || {}
+    executionPreviewState.value = {
+      ...createDefaultExecutionPreview(),
+      can_open_entry: Boolean(preview.can_open_entry),
+      is_user_active: preview.is_user_active !== false,
+      has_web_login_permission: Boolean(preview.has_web_login_permission),
+      has_execute_permission: Boolean(preview.has_execute_permission),
+      global_enabled: Boolean(preview.global_enabled),
+      allow_photo_upload: preview.allow_photo_upload !== false,
+      allow_device_binding: preview.allow_device_binding !== false,
+      allow_submit: preview.allow_submit !== false,
+      allow_recall: preview.allow_recall !== false,
+      allow_local_upload_without_geo: Boolean(preview.allow_local_upload_without_geo),
+      visible_work_order_types: normalizeCodeList(preview.visible_work_order_types),
+      editable_work_order_types: normalizeCodeList(preview.editable_work_order_types),
+      has_any_visible_type: Boolean(preview.has_any_visible_type),
+      has_any_editable_type: Boolean(preview.has_any_editable_type),
+      reasons: normalizeReasonList(preview.reasons),
+    }
+  } catch (error) {
+    resetExecutionPreview()
+    ElMessage.error(error.response?.data?.detail || '加载 Web 工单执行预览失败')
+  } finally {
+    executionPreviewLoading.value = false
+  }
+}
+
 // 重置表单
 const resetForm = () => {
   form.username = ''
@@ -348,6 +578,13 @@ const handleCancel = () => {
 
 // 监听props变化
 watch(() => props.user, initForm, { immediate: true })
+watch(
+  () => [props.user?.id, showExecutionPreview.value],
+  () => {
+    loadExecutionPreview()
+  },
+  { immediate: true }
+)
 
 // 组件挂载
 onMounted(() => {
@@ -386,5 +623,48 @@ const loadRoleOptions = async () => {
   margin-top: 20px;
   padding-top: 20px;
   border-top: 1px solid #ebeef5;
+}
+
+.execution-preview-card {
+  margin-bottom: 4px;
+  border-radius: 12px;
+}
+
+.execution-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.execution-preview-alert {
+  margin-bottom: 12px;
+}
+
+.execution-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.execution-preview-item {
+  padding: 12px 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.execution-preview-section {
+  margin-top: 14px;
+}
+
+.preview-label {
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.preview-muted {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

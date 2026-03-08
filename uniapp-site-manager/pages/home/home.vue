@@ -137,6 +137,12 @@
 						<text class="action-label">{{ $t('stock.issueConfirmEntry') }}</text>
 					</view>
 
+					<!-- 退库收货 - 仓库角色 -->
+						<view class="action-item u-pressable" v-if="canOpenReturnReceiving" @click="goToReturnReceivingList">
+						<view class="action-icon">📥</view>
+						<text class="action-label">{{ $t('stock.returnReceivingEntry') }}</text>
+					</view>
+
 					<!-- 退库申请（新流程） - 勘察员不可用 -->
 						<view class="action-item u-pressable" v-if="canOpenReturnRequests" @click="goToReturnRequests">
 						<view class="action-icon">↩️</view>
@@ -288,6 +294,7 @@
 		const canOpenMaterialRequests = computed(() => userStore.can('material_request'))
 		const canOpenMaterialApproval = computed(() => userStore.can('material_approval'))
 		const canOpenIssueConfirm = computed(() => userStore.can('issue_confirm'))
+		const canOpenReturnReceiving = computed(() => userStore.can('return_receiving'))
 		const canOpenReturnRequests = computed(() => userStore.can('return_request'))
 		const canOpenManualStockOut = computed(() => userStore.can('manual_stock_out'))
 		const ensureHomeAccess = () => guardFeatureAccess({
@@ -455,6 +462,10 @@
 
 	const goToIssueConfirmList = () => {
 		uni.navigateTo({ url: '/pages/stock/issue-drafts/confirm-list' })
+	}
+
+	const goToReturnReceivingList = () => {
+		uni.navigateTo({ url: '/pages/stock/returns/receive-list' })
 	}
 
 	const goToReturnRequests = () => {
