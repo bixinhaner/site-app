@@ -100,10 +100,22 @@ SSV_IN_PROGRESS_STATUSES = (
     WorkOrderStatusEnum.APPROVED,
     WorkOrderStatusEnum.ACTIVATED,
 )
+REPLACEMENT_IN_PROGRESS_STATUSES = (
+    WorkOrderStatusEnum.PENDING,
+    WorkOrderStatusEnum.ACTIVE,
+    WorkOrderStatusEnum.SUBMITTED,
+    WorkOrderStatusEnum.UNDER_REVIEW,
+    WorkOrderStatusEnum.APPROVED,
+    WorkOrderStatusEnum.ACTIVATED,
+)
 
 
 def _enum_value(value):
     return getattr(value, "value", value)
+
+
+def _normalize_site_status(status_value: Optional[str]) -> str:
+    return str(status_value or "").strip()
 
 
 def _has_access(
@@ -303,6 +315,127 @@ def _count_other_opening_work_orders(
     return query.count()
 
 
+def _count_other_replacement_work_orders(
+    db: Session,
+    site_id: int,
+    *,
+    exclude_ids: List[str],
+) -> int:
+    query = db.query(WorkOrder).filter(
+        WorkOrder.site_id == site_id,
+        WorkOrder.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
+        WorkOrder.status.in_(REPLACEMENT_IN_PROGRESS_STATUSES),
+    )
+    if exclude_ids:
+        query = query.filter(~WorkOrder.id.in_(exclude_ids))
+    return query.count()
+
+
+def _get_latest_maintenance_origin_status(db: Session, site_id: int) -> Optional[str]:
+    row = (
+        db.query(AuditEvent.from_status)
+        .filter(
+            AuditEvent.resource_type == "site",
+            AuditEvent.resource_id == str(site_id),
+            AuditEvent.action == "status_change",
+            AuditEvent.to_status == "maintenance",
+        )
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .first()
+    )
+    origin_status = _normalize_site_status(row[0] if row else None)
+    if origin_status and origin_status != "maintenance":
+        return origin_status
+    return None
+
+
+def _infer_site_status_after_replacement(db: Session, site: Site) -> str:
+    summary = summarize_site_omc_state(db, site.id)
+    if bool(summary.get("all_ever_activated")):
+        return "operational"
+
+    opening_statuses = [
+        status_value
+        for status_value, in db.query(WorkOrder.status)
+        .filter(
+            WorkOrder.site_id == site.id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+        )
+        .all()
+    ]
+
+    if any(status_value == WorkOrderStatusEnum.COMPLETED for status_value in opening_statuses):
+        return "operational"
+    if bool(summary.get("all_ever_online")):
+        return "online_pending_activation"
+    if any(
+        status_value in (WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED)
+        for status_value in opening_statuses
+    ):
+        return "pending_online"
+    if opening_statuses:
+        return "construction"
+    return "operational"
+
+
+def _resolve_replacement_origin_status(
+    db: Session,
+    site: Site,
+    *,
+    preferred_status: Optional[str] = None,
+) -> str:
+    normalized_preferred = _normalize_site_status(preferred_status)
+    if normalized_preferred and normalized_preferred != "maintenance":
+        return normalized_preferred
+
+    current_status = _normalize_site_status(getattr(site, "status", None))
+    if current_status and current_status != "maintenance":
+        return current_status
+
+    audit_origin_status = _get_latest_maintenance_origin_status(db, site.id)
+    if audit_origin_status:
+        return audit_origin_status
+
+    return _infer_site_status_after_replacement(db, site)
+
+
+def _restore_site_status_after_replacement(
+    db: Session,
+    site_id: int,
+    *,
+    preferred_status: Optional[str] = None,
+    exclude_work_order_ids: Optional[List[str]] = None,
+    reason: str,
+) -> bool:
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site or _normalize_site_status(site.status) != "maintenance":
+        return False
+
+    exclude_ids = list(dict.fromkeys(exclude_work_order_ids or []))
+    remaining_replacement_orders = _count_other_replacement_work_orders(
+        db,
+        site_id,
+        exclude_ids=exclude_ids,
+    )
+    if remaining_replacement_orders > 0:
+        return False
+
+    target_status = _resolve_replacement_origin_status(
+        db,
+        site,
+        preferred_status=preferred_status,
+    )
+    target_status = _normalize_site_status(target_status)
+    if not target_status or target_status == "maintenance" or target_status == site.status:
+        return False
+
+    old_site_status = site.status
+    site.status = target_status
+    _audit_site_status_change(db, site_id, old_site_status, site.status, reason)
+    return True
+
+
 def _apply_void_work_order(
     db: Session,
     wo: WorkOrder,
@@ -373,18 +506,13 @@ def _apply_void_work_order(
             )
 
     if old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
-        site = db.query(Site).filter(Site.id == old_site_id).first()
-        before = str(site_status_before or "").strip()
-        if site and before and site.status == "maintenance" and site.status != before:
-            old_site_status = site.status
-            site.status = before
-            _audit_site_status_change(
-                db,
-                old_site_id,
-                old_site_status,
-                site.status,
-                f"{site_reason_prefix}设备更换工单，站点状态回滚",
-            )
+        _restore_site_status_after_replacement(
+            db,
+            old_site_id,
+            preferred_status=site_status_before,
+            exclude_work_order_ids=[wo.id],
+            reason=f"{site_reason_prefix}设备更换工单，站点状态回滚",
+        )
 
     db.add(
         AuditEvent(
@@ -1338,18 +1466,13 @@ async def delete_work_order(
 
         # 设备更换工单：删除时回滚站点状态到 site_status_before
         if old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
-            site = db.query(Site).filter(Site.id == old_site_id).first()
-            before = str(site_status_before or "").strip()
-            if site and before and site.status == "maintenance" and site.status != before:
-                old_site_status = site.status
-                site.status = before
-                _audit_site_status_change(
-                    db,
-                    old_site_id,
-                    old_site_status,
-                    site.status,
-                    "删除设备更换工单，站点状态回滚",
-                )
+            _restore_site_status_after_replacement(
+                db,
+                old_site_id,
+                preferred_status=site_status_before,
+                exclude_work_order_ids=[wo.id],
+                reason="删除设备更换工单，站点状态回滚",
+            )
 
         db.commit()
 
@@ -1475,8 +1598,13 @@ async def accept_work_order(
         site = db.query(Site).filter(Site.id == wo.site_id).first()
         if site:
             extra = wo.extra_data or {}
-            if not extra.get("site_status_before"):
-                extra["site_status_before"] = site.status
+            origin_status = _resolve_replacement_origin_status(
+                db,
+                site,
+                preferred_status=extra.get("site_status_before"),
+            )
+            if origin_status and origin_status != "maintenance":
+                extra["site_status_before"] = origin_status
             if site.status != "maintenance":
                 old_site_status = site.status
                 site.status = "maintenance"
@@ -1953,19 +2081,14 @@ async def complete_work_order(
     # 自动更新站点状态
     if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
         try:
-            site = db.query(Site).filter(Site.id == wo.site_id).first()
             extra = wo.extra_data or {}
-            before = (extra.get("site_status_before") or "").strip()
-            if site and before and site.status != before:
-                old_site_status = site.status
-                site.status = before
-                _audit_site_status_change(
-                    db,
-                    site.id,
-                    old_site_status,
-                    site.status,
-                    "手工标记设备更换工单完成，站点状态回滚",
-                )
+            _restore_site_status_after_replacement(
+                db,
+                wo.site_id,
+                preferred_status=extra.get("site_status_before"),
+                exclude_work_order_ids=[wo.id],
+                reason="手工标记设备更换工单完成，站点状态回滚",
+            )
         except Exception as exc:  # pragma: no cover
             print(f"[WARN] 标记完成时回滚站点状态失败: {exc}")
     else:
@@ -2517,19 +2640,14 @@ async def final_review(
         # 设备更换工单：驳回时回滚站点状态
         if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
             try:
-                site = db.query(Site).filter(Site.id == wo.site_id).first()
                 extra = wo.extra_data or {}
-                before = (extra.get("site_status_before") or "").strip()
-                if site and before and site.status != before:
-                    old_site_status = site.status
-                    site.status = before
-                    _audit_site_status_change(
-                        db,
-                        site.id,
-                        old_site_status,
-                        site.status,
-                        "设备更换工单驳回，站点状态回滚",
-                    )
+                _restore_site_status_after_replacement(
+                    db,
+                    wo.site_id,
+                    preferred_status=extra.get("site_status_before"),
+                    exclude_work_order_ids=[wo.id],
+                    reason="设备更换工单驳回，站点状态回滚",
+                )
             except Exception as exc:  # pragma: no cover
                 print(f"[WARN] 设备更换工单驳回回滚站点状态失败: {exc}")
 
@@ -3027,19 +3145,14 @@ async def review_work_order(
         # 设备更换工单：驳回时回滚站点状态
         if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
             try:
-                site = db.query(Site).filter(Site.id == wo.site_id).first()
                 extra = wo.extra_data or {}
-                before = (extra.get("site_status_before") or "").strip()
-                if site and before and site.status != before:
-                    old_site_status = site.status
-                    site.status = before
-                    _audit_site_status_change(
-                        db,
-                        site.id,
-                        old_site_status,
-                        site.status,
-                        "设备更换工单驳回，站点状态回滚",
-                    )
+                _restore_site_status_after_replacement(
+                    db,
+                    wo.site_id,
+                    preferred_status=extra.get("site_status_before"),
+                    exclude_work_order_ids=[wo.id],
+                    reason="设备更换工单驳回，站点状态回滚",
+                )
             except Exception as exc:  # pragma: no cover
                 print(f"[WARN] 设备更换工单驳回回滚站点状态失败: {exc}")
     
@@ -3309,18 +3422,13 @@ async def batch_work_order_operation(
                     old_wo_type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT
                     and old_site_id not in rolled_back_replacement_site_ids
                 ):
-                    site = db.query(Site).filter(Site.id == old_site_id).first()
-                    before = str(site_status_before or "").strip()
-                    if site and before and site.status == "maintenance" and site.status != before:
-                        old_site_status = site.status
-                        site.status = before
-                        _audit_site_status_change(
-                            db,
-                            old_site_id,
-                            old_site_status,
-                            site.status,
-                            "批量删除设备更换工单，站点状态回滚",
-                        )
+                    _restore_site_status_after_replacement(
+                        db,
+                        old_site_id,
+                        preferred_status=site_status_before,
+                        exclude_work_order_ids=operation.work_order_ids,
+                        reason="批量删除设备更换工单，站点状态回滚",
+                    )
                     rolled_back_replacement_site_ids.add(old_site_id)
 
                 _audit(db, "work_order", wo.id, "batch_delete", current_user.id,
