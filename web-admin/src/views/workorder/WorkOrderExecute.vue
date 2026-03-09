@@ -151,7 +151,7 @@
             </div>
           </template>
 
-          <el-scrollbar class="sidebar-scroll">
+          <el-scrollbar class="sidebar-scroll" max-height="var(--sidebar-scroll-max-height)">
             <div v-for="group in groupedItems" :key="group.key" class="sidebar-group">
               <div class="sidebar-group__title">
                 <span>{{ group.label }}</span>
@@ -1265,7 +1265,7 @@ onMounted(() => {
 }
 
 .sidebar-scroll {
-  max-height: calc(100vh - 290px);
+  --sidebar-scroll-max-height: calc(100vh - 290px);
 }
 
 .sidebar-group + .sidebar-group {
@@ -1486,6 +1486,10 @@ onMounted(() => {
 
   .execute-sidebar {
     position: static;
+  }
+
+  .sidebar-scroll {
+    --sidebar-scroll-max-height: none;
   }
 }
 
