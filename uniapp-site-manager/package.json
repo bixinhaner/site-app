@@ -24,6 +24,7 @@
   "devDependencies": {
     "@dcloudio/uni-cli": "^3.0.0-alpha-4020020240930001",
     "@dcloudio/vite-plugin-uni": "^3.0.0-alpha-4020020240930001",
+    "sass": "^1.92.0",
     "vite": "^4.4.9"
   },
   "browserslist": [

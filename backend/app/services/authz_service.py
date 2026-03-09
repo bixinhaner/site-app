@@ -8,6 +8,7 @@ from app.core.permissions import (
     BUILTIN_PERMISSION_DEFINITIONS,
     BUILTIN_ROLE_DEFINITIONS,
     LEGACY_BUILTIN_ROLE_APP_PERMISSION_VARIANTS,
+    LEGACY_BUILTIN_ROLE_PERMISSION_VARIANTS,
     TERMINAL_LOGIN_PERMISSION_CODES,
     BUILTIN_ROLE_PERMISSION_TEMPLATE,
     permission_matches,
@@ -92,6 +93,10 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
         code = perm_code_by_id.get(int(permission_id))
         if code:
             role_permission_codes[int(role_id)].add(code)
+    initial_role_permission_codes: Dict[int, Set[str]] = {
+        int(role_id): set(codes)
+        for role_id, codes in role_permission_codes.items()
+    }
 
     def grant_permission(role_id: int, perm_id: int) -> None:
         key = (int(role_id), int(perm_id))
@@ -199,6 +204,50 @@ def ensure_builtin_roles_and_permissions(db: Session) -> None:
                 if not perm:
                     continue
                 grant_permission(role.id, perm.id)
+
+    # 内置角色历史模板修复：仅当数据库中的系统角色权限集合完全命中已知旧模板时，
+    # 才自动修正为当前模板，避免覆盖人工调整过的系统角色。
+    for role_code, desired_codes in BUILTIN_ROLE_PERMISSION_TEMPLATE.items():
+        role = role_by_code.get(role_code)
+        if not role or not bool(getattr(role, "is_system", False)):
+            continue
+
+        legacy_variants = [
+            {
+                str(code).strip()
+                for code in variant or []
+                if str(code).strip()
+            }
+            for variant in LEGACY_BUILTIN_ROLE_PERMISSION_VARIANTS.get(role_code, [])
+        ]
+        if not legacy_variants:
+            continue
+
+        initial_codes = set(initial_role_permission_codes.get(int(role.id), set()))
+        if not any(variant and initial_codes == variant for variant in legacy_variants):
+            continue
+
+        desired_codes_set = {
+            str(code).strip()
+            for code in desired_codes or []
+            if str(code).strip() and str(code).strip() in perm_by_code
+        }
+        current_codes = set(role_permission_codes.get(int(role.id), set()))
+
+        stale_codes = current_codes - desired_codes_set
+        for code in sorted(stale_codes):
+            perm = perm_by_code.get(code)
+            if not perm:
+                continue
+            revoke_permission(role.id, perm.id)
+
+        current_codes = set(role_permission_codes.get(int(role.id), set()))
+        missing_codes = desired_codes_set - current_codes
+        for code in sorted(missing_codes):
+            perm = perm_by_code.get(code)
+            if not perm:
+                continue
+            grant_permission(role.id, perm.id)
 
     role_scope_map: Dict[tuple[int, str], str] = {
         (int(row.role_id), str(row.resource_code).strip()): str(row.scope_code).strip()

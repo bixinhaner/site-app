@@ -5,18 +5,32 @@
 
 import { useLoggerStore } from '@/stores/logger'
 
-// 保存原始的uni.request方法
-const originalRequest = uni.request
+const getUniApi = () => {
+	if (typeof uni === 'undefined') {
+		return null
+	}
+	return uni
+}
+
+let originalRequest = null
 
 // 包装uni.request以添加日志记录
 const createRequestInterceptor = () => {
-	uni.request = (options) => {
+	const uniApi = getUniApi()
+	if (!uniApi || typeof uniApi.request !== 'function') {
+		return
+	}
+	if (!originalRequest) {
+		originalRequest = uniApi.request
+	}
+
+	uniApi.request = (options) => {
 		let logger
 		try {
 			logger = useLoggerStore()
 		} catch (error) {
 			// 如果logger store还未初始化，直接调用原始请求
-			return originalRequest.call(uni, options)
+			return originalRequest.call(uniApi, options)
 		}
 		const startTime = Date.now()
 		
@@ -115,12 +129,16 @@ const createRequestInterceptor = () => {
 		}
 		
 		// 调用原始请求方法
-		return originalRequest.call(uni, options)
+		return originalRequest.call(uniApi, options)
 	}
 }
 
 // 添加全局错误处理
 const setupGlobalErrorHandling = () => {
+	const uniApi = getUniApi()
+	if (!uniApi) {
+		return
+	}
 	let logger
 	try {
 		logger = useLoggerStore()
@@ -130,7 +148,7 @@ const setupGlobalErrorHandling = () => {
 	}
 	
 	// 监听应用错误
-	uni.onError = (error) => {
+	uniApi.onError = (error) => {
 		logger.logError(new Error(error), {
 			context: 'global_app_error',
 			timestamp: new Date().toISOString()
@@ -138,7 +156,7 @@ const setupGlobalErrorHandling = () => {
 	}
 	
 	// 监听页面未找到错误
-	uni.onPageNotFound = (options) => {
+	uniApi.onPageNotFound = (options) => {
 		logger.logError(new Error('Page not found'), {
 			context: 'page_not_found',
 			path: options.path,
@@ -149,7 +167,7 @@ const setupGlobalErrorHandling = () => {
 	
 	// 监听网络状态变化
 	try {
-		uni.onNetworkStatusChange((result) => {
+		uniApi.onNetworkStatusChange((result) => {
 			logger.logAction('NETWORK_STATUS_CHANGE', {
 				isConnected: result.isConnected,
 				networkType: result.networkType,
@@ -163,6 +181,10 @@ const setupGlobalErrorHandling = () => {
 
 // 添加页面路由拦截
 const setupPageInterceptor = () => {
+	const uniApi = getUniApi()
+	if (!uniApi) {
+		return
+	}
 	let logger
 	try {
 		logger = useLoggerStore()
@@ -172,51 +194,55 @@ const setupPageInterceptor = () => {
 	}
 	
 	// 保存原始页面跳转方法
-	const originalNavigateTo = uni.navigateTo
-	const originalRedirectTo = uni.redirectTo
-	const originalReLaunch = uni.reLaunch
-	const originalNavigateBack = uni.navigateBack
+	const originalNavigateTo = uniApi.navigateTo
+	const originalRedirectTo = uniApi.redirectTo
+	const originalReLaunch = uniApi.reLaunch
+	const originalNavigateBack = uniApi.navigateBack
 	
 	// 包装页面跳转方法（保留日志记录，但不再单独包装 switchTab）
-	uni.navigateTo = (options) => {
+	uniApi.navigateTo = (options) => {
 		logger.logAction('PAGE_NAVIGATE', {
 			type: 'navigateTo',
 			url: options.url,
 			timestamp: new Date().toISOString()
 		})
-		return originalNavigateTo.call(uni, options)
+		return originalNavigateTo.call(uniApi, options)
 	}
 	
-	uni.redirectTo = (options) => {
+	uniApi.redirectTo = (options) => {
 		logger.logAction('PAGE_NAVIGATE', {
 			type: 'redirectTo',
 			url: options.url,
 			timestamp: new Date().toISOString()
 		})
-		return originalRedirectTo.call(uni, options)
+		return originalRedirectTo.call(uniApi, options)
 	}
 	
-	uni.reLaunch = (options) => {
+	uniApi.reLaunch = (options) => {
 		logger.logAction('PAGE_NAVIGATE', {
 			type: 'reLaunch',
 			url: options.url,
 			timestamp: new Date().toISOString()
 		})
-		return originalReLaunch.call(uni, options)
+		return originalReLaunch.call(uniApi, options)
 	}
 	
-	uni.navigateBack = (options = {}) => {
+	uniApi.navigateBack = (options = {}) => {
 		logger.logAction('PAGE_NAVIGATE', {
 			type: 'navigateBack',
 			delta: options.delta || 1,
 			timestamp: new Date().toISOString()
 		})
-		return originalNavigateBack.call(uni, options)
+		return originalNavigateBack.call(uniApi, options)
 	}
 }
 
 // 添加用户交互事件监听
 const setupInteractionLogging = () => {
+	const uniApi = getUniApi()
+	if (!uniApi) {
+		return
+	}
 	let logger
 	try {
 		logger = useLoggerStore()
@@ -226,10 +252,10 @@ const setupInteractionLogging = () => {
 	}
 	
 	// 监听应用生命周期
-	const originalOnShow = uni.onAppShow
-	const originalOnHide = uni.onAppHide
+	const originalOnShow = uniApi.onAppShow
+	const originalOnHide = uniApi.onAppHide
 	
-	uni.onAppShow = (options) => {
+	uniApi.onAppShow = (options) => {
 		logger.logAction('APP_FOREGROUND', {
 			path: options.path,
 			query: options.query,
@@ -239,7 +265,7 @@ const setupInteractionLogging = () => {
 		if (originalOnShow) originalOnShow(options)
 	}
 	
-	uni.onAppHide = () => {
+	uniApi.onAppHide = () => {
 		logger.logAction('APP_BACKGROUND', {
 			timestamp: new Date().toISOString()
 		})
@@ -274,6 +300,10 @@ export const initInterceptors = () => {
 
 // 恢复原始方法（用于调试或特殊情况）
 export const restoreOriginalMethods = () => {
-	uni.request = originalRequest
+	const uniApi = getUniApi()
+	if (!uniApi || !originalRequest) {
+		return
+	}
+	uniApi.request = originalRequest
 	console.log('已恢复原始API方法')
 }

@@ -2,13 +2,37 @@ import { defineStore } from 'pinia'
 
 let i18nInstance = null
 
+const safeGetStorageSync = (key, fallback = '') => {
+  try {
+    if (typeof uni === 'undefined' || typeof uni.getStorageSync !== 'function') {
+      return fallback
+    }
+    const value = uni.getStorageSync(key)
+    return value === undefined || value === null || value === '' ? fallback : value
+  } catch (error) {
+    return fallback
+  }
+}
+
+const hasTabBarRuntime = () => {
+  try {
+    if (typeof uni === 'undefined' || typeof uni.setTabBarItem !== 'function') {
+      return false
+    }
+    const tabBarList = globalThis?.__uniConfig?.tabBar?.list
+    return Array.isArray(tabBarList) && tabBarList.length > 0
+  } catch (error) {
+    return false
+  }
+}
+
 export const setI18nInstance = (instance) => {
   i18nInstance = instance
 }
 
 export const useLanguageStore = defineStore('language', {
   state: () => ({
-    currentLocale: uni.getStorageSync('locale') || 'zh',
+    currentLocale: safeGetStorageSync('locale', 'zh'),
     supportedLocales: [
       { code: 'zh', name: '中文' },
       { code: 'en', name: 'English' },
@@ -43,7 +67,7 @@ export const useLanguageStore = defineStore('language', {
 
   actions: {
     updateTabBarText() {
-      if (!i18nInstance) return
+      if (!i18nInstance || !hasTabBarRuntime()) return
       
       const t = i18nInstance.global.t.bind(i18nInstance.global)
       
@@ -56,6 +80,7 @@ export const useLanguageStore = defineStore('language', {
       ]
       
       tabBarItems.forEach(item => {
+        if (!globalThis.__uniConfig?.tabBar?.list?.[item.index]) return
         uni.setTabBarItem({
           index: item.index,
           text: item.text
@@ -145,7 +170,7 @@ export const useLanguageStore = defineStore('language', {
     },
 
     initLocale() {
-      const savedLocale = uni.getStorageSync('locale')
+      const savedLocale = safeGetStorageSync('locale')
       if (savedLocale && this.supportedLocales.some(l => l.code === savedLocale)) {
         this.currentLocale = savedLocale
         if (i18nInstance) {
@@ -160,7 +185,9 @@ export const useLanguageStore = defineStore('language', {
           this.updatePageTitle(currentPage.route)
         }
       } else {
-        const systemLocale = uni.getSystemInfoSync().language || 'zh'
+        const systemLocale = typeof uni?.getSystemInfoSync === 'function'
+          ? (uni.getSystemInfoSync().language || 'zh')
+          : 'zh'
         let locale = 'zh'  // 默认中文
         if (systemLocale.startsWith('en')) {
           locale = 'en'

@@ -16,6 +16,18 @@ import {
     formatFileSize
 } from '@/utils/upgrade.js'
 
+const safeGetStorageSync = (key, fallback = null) => {
+    try {
+        if (typeof uni === 'undefined' || typeof uni.getStorageSync !== 'function') {
+            return fallback
+        }
+        const value = uni.getStorageSync(key)
+        return value === undefined || value === null || value === '' ? fallback : value
+    } catch (error) {
+        return fallback
+    }
+}
+
 export const useUpgradeStore = defineStore('upgrade', () => {
     const userStore = useUserStore()
 
@@ -34,12 +46,12 @@ export const useUpgradeStore = defineStore('upgrade', () => {
     const downloadedFile = ref(null)
 
     // 上次检测时间
-    const lastCheckTime = ref(uni.getStorageSync('upgrade_last_check') || null)
+    const lastCheckTime = ref(safeGetStorageSync('upgrade_last_check', null))
 
     // 用户跳过的版本码
-    const skippedVersion = ref(uni.getStorageSync('upgrade_skipped_version') || null)
+    const skippedVersion = ref(safeGetStorageSync('upgrade_skipped_version', null))
     // 跳过时间戳（用于24小时过期判断）
-    const skippedTime = ref(uni.getStorageSync('upgrade_skipped_time') || null)
+    const skippedTime = ref(safeGetStorageSync('upgrade_skipped_time', null))
 
     // 下载日志ID（用于统计）
     const downloadLogId = ref(null)

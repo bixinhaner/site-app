@@ -1,17 +1,6 @@
-import { getCurrentInstance } from 'vue/dist/vue.runtime.esm-bundler.js'
+import * as UniH5Vue from '@dcloudio/uni-h5-vue/dist/vue.runtime.esm.js'
 
-export * from 'vue/dist/vue.runtime.esm-bundler.js'
+export * from '@dcloudio/uni-h5-vue/dist/vue.runtime.esm.js'
 
-// @dcloudio/uni-app 在 CLI 构建时会从 vue 读取该符号；
-// 官方 vue ESM 入口未导出，给出客户端场景下的稳定兜底值。
-export const isInSSRComponentSetup = false
-
-// 兼容 uni-app 对私有 API injectHook 的依赖。
-// 仅用于 CLI 构建链，按组件实例生命周期桶注册回调。
-export const injectHook = (type, hook, target = getCurrentInstance(), prepend = false) => {
-  if (!target || !type || typeof hook !== 'function') return
-  const hooks = target[type] || (target[type] = [])
-  if (prepend) hooks.unshift(hook)
-  else hooks.push(hook)
-  return hook
-}
+// H5 fallback 启动链仍按 `createSSRApp` 读取入口，这里显式对齐到 uni-h5 的 createVueApp。
+export const createSSRApp = UniH5Vue.createVueApp

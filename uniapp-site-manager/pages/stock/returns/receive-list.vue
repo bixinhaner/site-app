@@ -16,7 +16,7 @@
 				<view class="hero-inner">
 					<view class="hero-left">
 						<text class="hero-title">{{ $t('stock.returnReceivingHeroTitle') }}</text>
-						<text class="hero-sub">{{ $t('stock.returnReceivingHeroSub') }}</text>
+						<text class="hero-sub">{{ heroSubText }}</text>
 					</view>
 				</view>
 
@@ -192,6 +192,15 @@
 	const expandedDocsMap = ref({})
 
 	const hasMore = computed(() => records.value.length < total.value)
+	const heroSubText = computed(() => {
+		if (userStore.inventoryScope === 'all') {
+			return $t('stock.returnReceivingHeroSubAll')
+		}
+		if (userStore.inventoryScope === 'managed') {
+			return $t('stock.returnReceivingHeroSubManaged')
+		}
+		return $t('stock.returnReceivingHeroSubSelf')
+	})
 	const loadMoreText = computed(() => ({
 		contentdown: ' ',
 		contentrefresh: ' ',

@@ -1,5 +1,9 @@
 import { createSSRApp } from 'vue'
 import { createPinia } from 'pinia'
+// #ifdef H5
+import './pages-json-js.js'
+import { plugin as uniH5Plugin, setupApp as setupUniH5App } from '@dcloudio/uni-h5'
+// #endif
 import App from './App.vue'
 import CustomNavbar from './components/CustomNavbar.vue'
 import CustomTabbar from './components/custom-tabbar/custom-tabbar.vue'
@@ -14,70 +18,97 @@ import { useUserStore } from './stores/user.js'
 import { guardRouteAccess, isPublicRoute, normalizeRoutePath } from './utils/feature-access.js'
 import { formatPercentInt, toPercentInt } from './utils/number.js'
 
-// 统一拦截 showToast
-// 解决 UniApp 原生 toast 带图标时文字长度限制问题（通常最多7个汉字）
-// 自动转换为纯文本模式 + Emoji，确保长文本完整显示
-const originalShowToast = uni.showToast
-uni.showToast = function (options = {}) {
-	const title = options.title || ''
-	const icon = options.icon || 'success'
-	const image = options.image
-
-	// 如果已经指定了 none 或者使用了自定义图片，则不处理
-	if (icon === 'none' || image) {
-		return originalShowToast.call(uni, options)
+const getUniApi = () => {
+	if (typeof globalThis === 'undefined') {
+		return null
 	}
-
-	// 检查文本长度（简单按字符数判断，汉字占1，英文占1，保守阈值设为7）
-	// 实测带图标时超过7-8个字就会被截断
-	if (title.length > 7) {
-		// 映射图标到 Emoji
-		let prefix = ''
-		if (icon === 'success') prefix = '✅ '
-		else if (icon === 'error' || icon === 'fail') prefix = '❌ '
-		else if (icon === 'exception') prefix = '❗ '
-		else if (icon === 'loading') prefix = '⏳ '
-
-		// 强制转换为纯文本模式
-		options.icon = 'none'
-		options.title = prefix + title
-	}
-
-	return originalShowToast.call(uni, options)
+	return globalThis.uni || null
 }
 
-// 统一拦截 showModal
-// 修复不同语言下默认按钮文案仍为中文（如“确定/取消”）的问题
-const originalShowModal = uni.showModal
-uni.showModal = function (options = {}) {
-	try {
-		const t = i18n?.global?.t?.bind(i18n.global)
-		if (!t) return originalShowModal.call(uni, options)
+const installUniUiHooks = () => {
+	const uniApi = getUniApi()
+	if (!uniApi || uniApi.__baicellsUiHooksInstalled) {
+		return false
+	}
 
-		const nextOptions = { ...options }
-		const showCancel = nextOptions.showCancel !== false
+	const originalShowToast = typeof uniApi.showToast === 'function' ? uniApi.showToast.bind(uniApi) : null
+	if (originalShowToast) {
+		uniApi.showToast = function (options = {}) {
+			const title = options.title || ''
+			const icon = options.icon || 'success'
+			const image = options.image
 
-		if (showCancel) {
-			if (nextOptions.confirmText === undefined || nextOptions.confirmText === null || nextOptions.confirmText === '') {
-				nextOptions.confirmText = t('common.confirm')
+			// 如果已经指定了 none 或者使用了自定义图片，则不处理
+			if (icon === 'none' || image) {
+				return originalShowToast(options)
 			}
-			if (nextOptions.cancelText === undefined || nextOptions.cancelText === null || nextOptions.cancelText === '') {
-				nextOptions.cancelText = t('common.cancel')
+
+			// 检查文本长度（简单按字符数判断，汉字占1，英文占1，保守阈值设为7）
+			// 实测带图标时超过7-8个字就会被截断
+			if (title.length > 7) {
+				// 映射图标到 Emoji
+				let prefix = ''
+				if (icon === 'success') prefix = '✅ '
+				else if (icon === 'error' || icon === 'fail') prefix = '❌ '
+				else if (icon === 'exception') prefix = '❗ '
+				else if (icon === 'loading') prefix = '⏳ '
+
+				// 强制转换为纯文本模式
+				options.icon = 'none'
+				options.title = prefix + title
 			}
-		} else {
-			if (nextOptions.confirmText === undefined || nextOptions.confirmText === null || nextOptions.confirmText === '') {
-				nextOptions.confirmText = t('common.ok')
+
+			return originalShowToast(options)
+		}
+	}
+
+	const originalShowModal = typeof uniApi.showModal === 'function' ? uniApi.showModal.bind(uniApi) : null
+	if (originalShowModal) {
+		uniApi.showModal = function (options = {}) {
+			try {
+				const t = i18n?.global?.t?.bind(i18n.global)
+				if (!t) return originalShowModal(options)
+
+				const nextOptions = { ...options }
+				const showCancel = nextOptions.showCancel !== false
+
+				if (showCancel) {
+					if (nextOptions.confirmText === undefined || nextOptions.confirmText === null || nextOptions.confirmText === '') {
+						nextOptions.confirmText = t('common.confirm')
+					}
+					if (nextOptions.cancelText === undefined || nextOptions.cancelText === null || nextOptions.cancelText === '') {
+						nextOptions.cancelText = t('common.cancel')
+					}
+				} else {
+					if (nextOptions.confirmText === undefined || nextOptions.confirmText === null || nextOptions.confirmText === '') {
+						nextOptions.confirmText = t('common.ok')
+					}
+				}
+
+				return originalShowModal(nextOptions)
+			} catch (e) {
+				return originalShowModal(options)
 			}
 		}
-
-		return originalShowModal.call(uni, nextOptions)
-	} catch (e) {
-		return originalShowModal.call(uni, options)
 	}
+
+	uniApi.__baicellsUiHooksInstalled = true
+	return true
+}
+
+const ensureUniUiHooks = (retries = 5) => {
+	if (installUniUiHooks() || retries <= 0 || typeof setTimeout !== 'function') {
+		return
+	}
+	setTimeout(() => ensureUniUiHooks(retries - 1), 0)
 }
 
 export function createApp() {
-	const app = createSSRApp(App)
+	let rootComponent = App
+	// #ifdef H5
+	rootComponent = setupUniH5App(App)
+	// #endif
+	const app = createSSRApp(rootComponent)
 	const pinia = createPinia()
 
 	app.use(pinia)
@@ -93,6 +124,7 @@ export function createApp() {
 	app.component('DocumentPhotoPicker', DocumentPhotoPicker)
 	app.config.globalProperties.$formatPercentInt = formatPercentInt
 	app.config.globalProperties.$toPercentInt = toPercentInt
+	ensureUniUiHooks()
 
 	// 设置i18n实例给语言store使用
 	setI18nInstance(i18n)
@@ -135,3 +167,27 @@ export function createApp() {
 		app
 	}
 }
+
+// #ifdef H5
+const bootstrapH5 = () => {
+	if (typeof window === 'undefined') {
+		return
+	}
+	if (window.__baicellsH5Bootstrapped) {
+		return
+	}
+	window.__baicellsH5Bootstrapped = true
+	try {
+		const { app } = createApp()
+		app.use(uniH5Plugin)
+		app.mount('#app')
+		window.__baicellsH5BootstrapStatus = 'mounted'
+	} catch (error) {
+		window.__baicellsH5BootstrapStatus = 'failed'
+		window.__baicellsH5BootstrapError = error instanceof Error ? (error.stack || error.message) : String(error)
+		throw error
+	}
+}
+
+bootstrapH5()
+// #endif

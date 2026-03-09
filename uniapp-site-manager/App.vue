@@ -1,5 +1,8 @@
 <template>
 	<view id="app">
+		<!-- #ifdef H5 -->
+		<RouterView />
+		<!-- #endif -->
 		<!-- 全局加载提示 -->
 		<uni-load-more v-if="globalLoading" status="loading" :content-text="loadingText"></uni-load-more>
 	</view>
@@ -7,6 +10,9 @@
 
 <script setup>
 	import { ref } from 'vue'
+	// #ifdef H5
+	import { RouterView } from 'vue-router'
+	// #endif
 	import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
 	import { useUserStore } from '@/stores/user'
 	import { useOfflineStore } from '@/stores/offline'

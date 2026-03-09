@@ -85,10 +85,22 @@ const permissionMatches = (targetPermission, grantedPermissions = []) => {
 	return false
 }
 
+const safeGetStorageSync = (key, fallback = '') => {
+	try {
+		if (typeof uni === 'undefined' || typeof uni.getStorageSync !== 'function') {
+			return fallback
+		}
+		const value = uni.getStorageSync(key)
+		return value === undefined || value === null || value === '' ? fallback : value
+	} catch (error) {
+		return fallback
+	}
+}
+
 export const useUserStore = defineStore('user', () => {
-	const token = ref(uni.getStorageSync('token') || '')
-	const refreshToken = ref(uni.getStorageSync('refreshToken') || '')
-	const userInfo = ref(normalizeUserInfo(uni.getStorageSync('userInfo')) || null)
+	const token = ref(safeGetStorageSync('token', ''))
+	const refreshToken = ref(safeGetStorageSync('refreshToken', ''))
+	const userInfo = ref(normalizeUserInfo(safeGetStorageSync('userInfo', null)) || null)
 	// 旧流程：我的设备-扫码领货开关（默认关闭；登录后从 /api/system/mobile-settings/effective 刷新）
 	const legacyScanPickupEnabled = ref(false)
 	const isLoggedIn = computed(() => !!token.value)

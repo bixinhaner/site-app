@@ -1175,7 +1175,10 @@ const messages = {
       issueConfirmNoPermission: '无权限处理出库确认',
       returnReceivingEntry: '退库收货',
       returnReceivingHeroTitle: '退库收货工作台',
-      returnReceivingHeroSub: '只显示你管理仓库下的退库批次，可继续按单据执行收货或拒收。',
+      returnReceivingHeroSub: '按你的库存范围显示可处理的退库批次，可继续按单据执行收货或拒收。',
+      returnReceivingHeroSubSelf: '仅显示你本人可处理的退库批次。',
+      returnReceivingHeroSubManaged: '只显示你管理仓库下的退库批次，可继续按单据执行收货或拒收。',
+      returnReceivingHeroSubAll: '显示全部仓库的待收货退库批次，可继续按单据执行收货或拒收。',
       returnReceivingListEmptyTip: '暂无待处理的退库批次',
       returnReceivingNoPermission: '无权限处理退库收货',
       returnReceivingAction: '去收货',
@@ -2608,7 +2611,10 @@ const messages = {
       issueConfirmNoPermission: 'No permission to handle stock-out confirmation',
       returnReceivingEntry: 'Return Receiving',
       returnReceivingHeroTitle: 'Return receiving workbench',
-      returnReceivingHeroSub: 'Only return batches under your managed warehouses are shown. You can continue receiving or rejecting by document.',
+      returnReceivingHeroSub: 'Return batches are shown according to your inventory scope. You can continue receiving or rejecting by document.',
+      returnReceivingHeroSubSelf: 'Only return batches that you can handle personally are shown.',
+      returnReceivingHeroSubManaged: 'Only return batches under your managed warehouses are shown. You can continue receiving or rejecting by document.',
+      returnReceivingHeroSubAll: 'Pending return batches from all warehouses are shown. You can continue receiving or rejecting by document.',
       returnReceivingListEmptyTip: 'No return batches to process',
       returnReceivingNoPermission: 'No permission to handle return receiving',
       returnReceivingAction: 'Receive',
@@ -3792,7 +3798,10 @@ const messages = {
 	      issueConfirmNoPermission: 'Tidak memiliki izin untuk konfirmasi pengeluaran',
 	      returnReceivingEntry: 'Penerimaan Retur',
 	      returnReceivingHeroTitle: 'Meja kerja penerimaan retur',
-	      returnReceivingHeroSub: 'Hanya batch retur dari gudang yang Anda kelola yang ditampilkan. Anda dapat melanjutkan penerimaan atau penolakan per dokumen.',
+	      returnReceivingHeroSub: 'Batch retur ditampilkan sesuai cakupan inventaris Anda. Anda dapat melanjutkan penerimaan atau penolakan per dokumen.',
+	      returnReceivingHeroSubSelf: 'Hanya batch retur yang dapat Anda tangani sendiri yang ditampilkan.',
+	      returnReceivingHeroSubManaged: 'Hanya batch retur dari gudang yang Anda kelola yang ditampilkan. Anda dapat melanjutkan penerimaan atau penolakan per dokumen.',
+	      returnReceivingHeroSubAll: 'Batch retur tertunda dari semua gudang akan ditampilkan. Anda dapat melanjutkan penerimaan atau penolakan per dokumen.',
 	      returnReceivingListEmptyTip: 'Tidak ada batch retur yang perlu diproses',
 	      returnReceivingNoPermission: 'Tidak memiliki izin untuk penerimaan retur',
 	      returnReceivingAction: 'Terima',
@@ -4212,8 +4221,19 @@ const messages = {
   }
 }
 
+const getInitialLocale = () => {
+  try {
+    if (typeof uni === 'undefined' || typeof uni.getStorageSync !== 'function') {
+      return 'zh'
+    }
+    return uni.getStorageSync('locale') || 'zh'
+  } catch (error) {
+    return 'zh'
+  }
+}
+
 const i18n = createI18n({
-  locale: uni.getStorageSync('locale') || 'zh',
+  locale: getInitialLocale(),
   fallbackLocale: 'zh',
   messages
 })

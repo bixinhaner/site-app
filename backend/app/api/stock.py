@@ -64,29 +64,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _ensure_stock_operator(current_user: User) -> None:
-    if user_has_any_role_or_permission(
-        current_user,
-        role_codes=["admin", "warehouse_manager", "manager"],
-        permission_codes=[
-            "inventory:stock-in:write",
-            "inventory:stock-out:write",
-            "inventory:material-request:write",
-            "inventory:issue-draft:write",
-            "inventory:return:write",
-            "inventory:flow-settings:write",
-        ],
-    ):
-        return
-    if user_has_any_role_or_permission(
-        current_user,
-        permission_codes=["inventory:warehouse:write"],
-    ):
-        return
-    else:
-        raise HTTPException(status_code=403, detail="权限不足")
-
-
 def _ensure_inventory_operator(
     current_user: User,
     *,
@@ -97,7 +74,6 @@ def _ensure_inventory_operator(
     codes = permission_codes or [
         "inventory:stock-in:write",
         "inventory:stock-out:write",
-        "inventory:warehouse:write",
         "inventory:flow-settings:write",
         "inventory:user-ownership:read",
         "inventory:history:read",
@@ -109,20 +85,6 @@ def _ensure_inventory_operator(
     ):
         return
     raise HTTPException(status_code=403, detail=detail)
-
-def _ensure_warehouse_operator(current_user: User) -> None:
-    # 仓库侧操作：仅仓管/管理员，或授予仓库写操作权限的自定义角色
-    if not user_has_any_role_or_permission(
-        current_user,
-        role_codes=["admin", "warehouse_manager"],
-        permission_codes=[
-            "inventory:stock-out:write",
-            "inventory:issue-draft:write",
-            "inventory:return:write",
-            "inventory:warehouse:write",
-        ],
-        ):
-        raise HTTPException(status_code=403, detail="权限不足")
 
 
 def _get_managed_warehouse_ids(db: Session, current_user: User) -> Optional[set]:
@@ -173,6 +135,17 @@ def _ensure_transaction_in_scope(
     if not trans:
         raise HTTPException(status_code=404, detail="出入库记录不存在")
     if not _warehouse_in_scope(db, current_user, getattr(trans, "warehouse_id", None)):
+        raise HTTPException(status_code=403, detail=detail)
+
+
+def _ensure_warehouse_id_in_scope(
+    db: Session,
+    current_user: User,
+    warehouse_id: Optional[int],
+    *,
+    detail: str = "无权限操作该仓库",
+) -> None:
+    if not _warehouse_in_scope(db, current_user, warehouse_id):
         raise HTTPException(status_code=403, detail=detail)
 
 
@@ -2105,7 +2078,7 @@ async def create_stock_in(
     """创建入库单"""
     _ensure_inventory_operator(
         current_user,
-        permission_codes=["inventory:stock-in:write", "inventory:warehouse:write"],
+        permission_codes=["inventory:stock-in:write"],
         detail="权限不足，无法执行入库操作",
     )
     _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法执行入库操作")
@@ -2148,7 +2121,7 @@ async def create_stock_in(
     
     # 创建入库记录
     transaction_id = str(uuid.uuid4())
-    document_number = f"IN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user.id}"
+    document_number = _build_request_no("IN", current_user.id)
     
     transaction = StockTransaction(
         id=transaction_id,
@@ -2872,7 +2845,7 @@ async def import_sn_batch(
     
     _ensure_inventory_operator(
         current_user,
-        permission_codes=["inventory:stock-in:write", "inventory:warehouse:write"],
+        permission_codes=["inventory:stock-in:write"],
         detail="权限不足，无法导入 SN",
     )
     _ensure_inventory_workbench_scope(db, current_user, detail="当前账号未绑定可管理仓库，无法导入 SN")
@@ -3523,7 +3496,7 @@ async def update_stock_transaction_notes(
     """编辑出入库单据备注（需填写原因，用于审计）"""
     _ensure_inventory_operator(
         current_user,
-        permission_codes=["inventory:stock-in:write", "inventory:stock-out:write", "inventory:warehouse:write"],
+        permission_codes=["inventory:stock-in:write", "inventory:stock-out:write"],
         detail="权限不足，无法编辑出入库备注",
     )
 
@@ -3564,7 +3537,7 @@ async def update_stock_transaction_item_info(
     """编辑出入库明细行信息（批次号/供应商/备注等；需填写原因，用于审计）"""
     _ensure_inventory_operator(
         current_user,
-        permission_codes=["inventory:stock-in:write", "inventory:stock-out:write", "inventory:warehouse:write"],
+        permission_codes=["inventory:stock-in:write", "inventory:stock-out:write"],
         detail="权限不足，无法编辑出入库明细",
     )
 
@@ -3628,7 +3601,11 @@ async def adjust_stock_transaction_item_quantity(
     current_user: User = Depends(get_current_user),
 ):
     """更正辅材数量：不修改原入库明细，通过生成一条“调整”记录体现（支持正负差量）"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:stock-in:write", "inventory:stock-out:write"],
+        detail="权限不足，无法更正出入库数量",
+    )
 
     reason = (payload.get("reason") or "").strip()
     if not reason:
@@ -3657,6 +3634,7 @@ async def adjust_stock_transaction_item_quantity(
     trans = item.transaction
     if not trans:
         raise HTTPException(status_code=404, detail="关联出入库单不存在")
+    _ensure_transaction_in_scope(db, current_user, trans, detail="无权限更正该仓库的出入库明细")
 
     warehouse_id = trans.warehouse_id
     inventory = db.query(Inventory).filter(
@@ -3729,7 +3707,11 @@ async def void_equipment_instances(
     current_user: User = Depends(get_current_user),
 ):
     """撤销入库（作废设备实例，释放 SN 以便重导），并生成一条“调整”记录"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:stock-in:write"],
+        detail="权限不足，无法撤销入库实例",
+    )
 
     reason = (payload.get("reason") or "").strip()
     if not reason:
@@ -3766,6 +3748,9 @@ async def void_equipment_instances(
 
         if not inst.warehouse_id:
             results.append({"instance_id": instance_id, "success": False, "error": "缺少仓库信息，无法撤销"})
+            continue
+        if not _warehouse_in_scope(db, current_user, inst.warehouse_id):
+            results.append({"instance_id": instance_id, "success": False, "error": "无权限撤销该仓库实例"})
             continue
 
         valid_instances.append(inst)
@@ -3893,7 +3878,11 @@ async def update_equipment_instance_info(
     current_user: User = Depends(get_current_user),
 ):
     """编辑设备实例信息（不允许修改 SN；需填写原因，用于审计）"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:stock-in:write"],
+        detail="权限不足，无法编辑设备实例",
+    )
 
     reason = (payload.get("reason") or "").strip()
     if not reason:
@@ -3905,6 +3894,7 @@ async def update_equipment_instance_info(
     inst = db.query(EquipmentInstance).filter(EquipmentInstance.id == instance_id).first()
     if not inst:
         raise HTTPException(status_code=404, detail="设备实例不存在")
+    _ensure_warehouse_id_in_scope(db, current_user, inst.warehouse_id, detail="无权限编辑该仓库的设备实例")
 
     if bool(getattr(inst, "is_voided", False)):
         raise HTTPException(status_code=400, detail="已撤销实例不可编辑")
@@ -4035,7 +4025,11 @@ async def update_stock_flow_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:flow-settings:write"],
+        detail="权限不足，无法修改库存流程设置",
+    )
     settings = payload.get("settings") if isinstance(payload, dict) else {}
     saved = _save_flow_settings(db, settings)
     return {"settings": saved}
@@ -5892,7 +5886,11 @@ async def manual_stock_out(
 ):
     """快速出库（无申请）：主设备按SN逐台、辅料按数量。"""
     _ensure_quick_stock_out_enabled(db)
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:stock-out:write"],
+        detail="权限不足，无法执行快速出库",
+    )
 
     warehouse_id = payload.get("warehouse_id") if isinstance(payload, dict) else None
     main_sns = payload.get("main_sns") if isinstance(payload, dict) else []
@@ -6375,7 +6373,11 @@ async def get_stock_out_detail(
     current_user: User = Depends(get_current_user),
 ):
     """获取出库单详情（管理员/仓库侧）。"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:history:read", "inventory:stock-out:write", "inventory:user-ownership:read"],
+        detail="权限不足，无法查看出库单详情",
+    )
 
     out_id = (out_transaction_id or "").strip()
     if not out_id:
@@ -6393,6 +6395,7 @@ async def get_stock_out_detail(
     )
     if not out_trans:
         raise HTTPException(status_code=404, detail="出库单不存在")
+    _ensure_transaction_in_scope(db, current_user, out_trans, detail="无权限查看该仓库的出库单")
 
     has_main = False
     has_aux = False
@@ -6419,6 +6422,7 @@ def _list_issued_items_for_user(
     db: Session,
     *,
     receiver_user_id: int,
+    visible_warehouse_ids: Optional[set] = None,
     item_type: str = "main",
     status_group: Optional[str] = None,
     q: Optional[str] = None,
@@ -6465,8 +6469,10 @@ def _list_issued_items_for_user(
             StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
             StockTransaction.issued_to == receiver_user_id,
         )
-        .all()
     )
+    if visible_warehouse_ids is not None:
+        direct_out_rows = direct_out_rows.filter(StockTransaction.warehouse_id.in_(list(visible_warehouse_ids)))
+    direct_out_rows = direct_out_rows.all()
     for row in direct_out_rows:
         if row and row[0]:
             assigned_out_ids.add(str(row[0]))
@@ -6482,8 +6488,10 @@ def _list_issued_items_for_user(
             StockTransaction.issued_to.is_(None),
         )
         .group_by(PickupRecord.transaction_id)
-        .subquery()
     )
+    if visible_warehouse_ids is not None:
+        pick_latest_subq = pick_latest_subq.filter(StockTransaction.warehouse_id.in_(list(visible_warehouse_ids)))
+    pick_latest_subq = pick_latest_subq.subquery()
     pick_out_rows = (
         db.query(StockTransaction.id.label("out_id"))
         .join(pick_latest_subq, pick_latest_subq.c.out_id == StockTransaction.id)
@@ -6991,6 +6999,57 @@ def _list_issued_items_for_user(
     }
 
 
+def _collect_user_ownership_user_ids(
+    db: Session,
+    *,
+    visible_warehouse_ids: Optional[set] = None,
+) -> set[int]:
+    user_ids: set[int] = set()
+
+    direct_query = db.query(StockTransaction.issued_to).filter(
+        StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+        StockTransaction.issued_to.isnot(None),
+    )
+    if visible_warehouse_ids is not None:
+        direct_query = direct_query.filter(StockTransaction.warehouse_id.in_(list(visible_warehouse_ids)))
+    for row in direct_query.distinct().all():
+        uid = int(getattr(row, "issued_to", 0) or 0)
+        if uid > 0:
+            user_ids.add(uid)
+
+    pick_latest_subq = (
+        db.query(
+            PickupRecord.transaction_id.label("out_id"),
+            func.max(PickupRecord.pickup_time).label("max_time"),
+        )
+        .join(StockTransaction, StockTransaction.id == PickupRecord.transaction_id)
+        .filter(
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            StockTransaction.issued_to.is_(None),
+        )
+    )
+    if visible_warehouse_ids is not None:
+        pick_latest_subq = pick_latest_subq.filter(StockTransaction.warehouse_id.in_(list(visible_warehouse_ids)))
+    pick_latest_subq = pick_latest_subq.group_by(PickupRecord.transaction_id).subquery()
+
+    pick_query = (
+        db.query(PickupRecord.picker_id)
+        .join(
+            pick_latest_subq,
+            and_(
+                PickupRecord.transaction_id == pick_latest_subq.c.out_id,
+                PickupRecord.pickup_time == pick_latest_subq.c.max_time,
+            ),
+        )
+    )
+    for row in pick_query.distinct().all():
+        uid = int(getattr(row, "picker_id", 0) or 0)
+        if uid > 0:
+            user_ids.add(uid)
+
+    return user_ids
+
+
 @router.get("/users/{user_id}/issued-items")
 async def list_user_issued_items(
     user_id: int,
@@ -7003,7 +7062,16 @@ async def list_user_issued_items(
     current_user: User = Depends(get_current_user),
 ):
     """web-admin：查看指定用户的“我的设备/辅料”扁平列表。"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:user-ownership:read"],
+        detail="权限不足，无法查看人员领用台账",
+    )
+    visible_warehouse_ids = _ensure_inventory_workbench_scope(
+        db,
+        current_user,
+        detail="当前账号未绑定可管理仓库，无法查看人员领用台账",
+    )
 
     target = db.query(User).filter(User.id == int(user_id)).first()
     if not target:
@@ -7012,6 +7080,7 @@ async def list_user_issued_items(
     return _list_issued_items_for_user(
         db,
         receiver_user_id=int(user_id),
+        visible_warehouse_ids=visible_warehouse_ids,
         item_type=item_type,
         status_group=status_group,
         q=q,
@@ -7031,7 +7100,16 @@ async def export_user_issued_items(
     current_user: User = Depends(get_current_user),
 ):
     """web-admin：导出指定用户的“主设备/辅料”归属明细（按当前 Tab 单 Sheet）。"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:user-ownership:read"],
+        detail="权限不足，无法导出人员领用台账",
+    )
+    visible_warehouse_ids = _ensure_inventory_workbench_scope(
+        db,
+        current_user,
+        detail="当前账号未绑定可管理仓库，无法导出人员领用台账",
+    )
 
     target = db.query(User).filter(User.id == int(user_id)).first()
     if not target:
@@ -7040,6 +7118,7 @@ async def export_user_issued_items(
     resp = _list_issued_items_for_user(
         db,
         receiver_user_id=int(user_id),
+        visible_warehouse_ids=visible_warehouse_ids,
         item_type=item_type,
         status_group=status_group,
         q=q,
@@ -7145,11 +7224,28 @@ async def export_user_ownership(
     current_user: User = Depends(get_current_user),
 ):
     """web-admin：导出全部人员物料归属（跟随页面用户关键字筛选，单 Sheet）。"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:user-ownership:read"],
+        detail="权限不足，无法导出人员领用台账",
+    )
+    visible_warehouse_ids = _ensure_inventory_workbench_scope(
+        db,
+        current_user,
+        detail="当前账号未绑定可管理仓库，无法导出人员领用台账",
+    )
 
     kw = str(keyword or "").strip()
+    visible_user_ids = _collect_user_ownership_user_ids(
+        db,
+        visible_warehouse_ids=visible_warehouse_ids,
+    )
 
     user_query = db.query(User)
+    if visible_user_ids:
+        user_query = user_query.filter(User.id.in_(list(visible_user_ids)))
+    else:
+        user_query = user_query.filter(User.id == -1)
     if kw:
         user_query = user_query.filter(
             or_(
@@ -7182,8 +7278,10 @@ async def export_user_ownership(
                 StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
                 StockTransaction.issued_to.in_(user_ids),
             )
-            .all()
         )
+        if visible_warehouse_ids is not None:
+            direct_out_rows = direct_out_rows.filter(StockTransaction.warehouse_id.in_(list(visible_warehouse_ids)))
+        direct_out_rows = direct_out_rows.all()
         for out_id, issued_to in direct_out_rows:
             if not out_id or not issued_to:
                 continue
@@ -7202,9 +7300,10 @@ async def export_user_ownership(
                 StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
                 StockTransaction.issued_to.is_(None),
             )
-            .group_by(PickupRecord.transaction_id)
-            .subquery()
         )
+        if visible_warehouse_ids is not None:
+            pick_latest_subq = pick_latest_subq.filter(StockTransaction.warehouse_id.in_(list(visible_warehouse_ids)))
+        pick_latest_subq = pick_latest_subq.group_by(PickupRecord.transaction_id).subquery()
 
         pick_assign_rows = (
             db.query(
@@ -7686,7 +7785,16 @@ async def get_user_ownership_summary(
     current_user: User = Depends(get_current_user),
 ):
     """web-admin：分页返回用户 + 主/辅料状态汇总 + 最近出库时间。"""
-    _ensure_stock_operator(current_user)
+    _ensure_inventory_operator(
+        current_user,
+        permission_codes=["inventory:user-ownership:read"],
+        detail="权限不足，无法查看人员领用台账",
+    )
+    visible_warehouse_ids = _ensure_inventory_workbench_scope(
+        db,
+        current_user,
+        detail="当前账号未绑定可管理仓库，无法查看人员领用台账",
+    )
 
     try:
         skip = int(skip or 0)
@@ -7701,8 +7809,16 @@ async def get_user_ownership_summary(
     limit = max(1, min(limit, 200))
 
     kw = str(keyword or "").strip()
+    visible_user_ids = _collect_user_ownership_user_ids(
+        db,
+        visible_warehouse_ids=visible_warehouse_ids,
+    )
 
     user_query = db.query(User)
+    if visible_user_ids:
+        user_query = user_query.filter(User.id.in_(list(visible_user_ids)))
+    else:
+        user_query = user_query.filter(User.id == -1)
     if kw:
         user_query = user_query.filter(
             or_(
@@ -7750,8 +7866,10 @@ async def get_user_ownership_summary(
                 StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
                 StockTransaction.issued_to.in_(user_ids),
             )
-            .all()
         )
+        if visible_warehouse_ids is not None:
+            direct_out_rows = direct_out_rows.filter(StockTransaction.warehouse_id.in_(list(visible_warehouse_ids)))
+        direct_out_rows = direct_out_rows.all()
         for out_id, issued_to, op_time in direct_out_rows:
             if not out_id or not issued_to:
                 continue
@@ -7776,9 +7894,10 @@ async def get_user_ownership_summary(
                 StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
                 StockTransaction.issued_to.is_(None),
             )
-            .group_by(PickupRecord.transaction_id)
-            .subquery()
         )
+        if visible_warehouse_ids is not None:
+            pick_latest_subq = pick_latest_subq.filter(StockTransaction.warehouse_id.in_(list(visible_warehouse_ids)))
+        pick_latest_subq = pick_latest_subq.group_by(PickupRecord.transaction_id).subquery()
         pick_assign_rows = (
             db.query(
                 StockTransaction.id.label("out_id"),
