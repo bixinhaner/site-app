@@ -5,48 +5,90 @@ import { containsCJK, isEnglishLocale, translateLegacyText } from './translator'
 const ATTR_NAMES = ['placeholder', 'title', 'aria-label', 'alt']
 const TEXT_BLACKLIST = new Set(['SCRIPT', 'STYLE'])
 
-const toDatasetKey = (attr) => `i18nOrig${attr.replace(/-([a-z])/g, (_, c) => c.toUpperCase()).replace(/^([a-z])/, (_, c) => c.toUpperCase())}`
+const toDatasetKey = (attr, prefix = 'i18nOrig') => `${prefix}${attr.replace(/-([a-z])/g, (_, c) => c.toUpperCase()).replace(/^([a-z])/, (_, c) => c.toUpperCase())}`
+const toOriginalDatasetKey = (attr) => toDatasetKey(attr, 'i18nOrig')
+const toTranslatedDatasetKey = (attr) => toDatasetKey(attr, 'i18nTranslated')
 
 const translateElementAttributes = (element, english) => {
   if (!(element instanceof HTMLElement)) return
 
   for (const attr of ATTR_NAMES) {
-    const datasetKey = toDatasetKey(attr)
-    const currentValue = element.getAttribute(attr)
-    const storedOriginal = element.dataset[datasetKey] || ''
-    const originalValue = storedOriginal || currentValue || ''
+    const originalKey = toOriginalDatasetKey(attr)
+    const translatedKey = toTranslatedDatasetKey(attr)
+    const hasAttr = element.hasAttribute(attr)
+    const currentValue = hasAttr ? (element.getAttribute(attr) || '') : ''
+    const storedOriginal = element.dataset[originalKey] || ''
+    const storedTranslated = element.dataset[translatedKey] || ''
+    const currentHasCJK = containsCJK(currentValue)
 
-    if (!originalValue || !containsCJK(originalValue)) continue
-
-    if (!english) {
-      if (currentValue && containsCJK(currentValue)) {
-        element.dataset[datasetKey] = currentValue
-        continue
-      }
-
-      if (storedOriginal && storedOriginal !== currentValue) {
-        element.setAttribute(attr, storedOriginal)
-      }
+    if (!hasAttr) {
+      delete element.dataset[originalKey]
+      delete element.dataset[translatedKey]
       continue
     }
 
-    if (currentValue && containsCJK(currentValue)) {
-      element.dataset[datasetKey] = currentValue
-    } else if (!element.dataset[datasetKey]) {
-      element.dataset[datasetKey] = originalValue
+    if (!english) {
+      if (currentHasCJK) {
+        element.dataset[originalKey] = currentValue
+        delete element.dataset[translatedKey]
+        continue
+      }
+
+      if (storedOriginal && storedTranslated && currentValue === storedTranslated && containsCJK(storedOriginal)) {
+        element.setAttribute(attr, storedOriginal)
+        element.dataset[originalKey] = storedOriginal
+        delete element.dataset[translatedKey]
+        continue
+      }
+
+      if (currentValue) {
+        element.dataset[originalKey] = currentValue
+      } else {
+        delete element.dataset[originalKey]
+      }
+      delete element.dataset[translatedKey]
+      continue
     }
 
-    let nextValue = element.dataset[datasetKey]
-    const translated = translateLegacyText(element.dataset[datasetKey])
+    if (currentHasCJK) {
+      element.dataset[originalKey] = currentValue
+    } else if (storedTranslated && currentValue !== storedTranslated) {
+      // A component just rendered a fresh non-CJK value, so drop stale bridge cache.
+      if (currentValue) {
+        element.dataset[originalKey] = currentValue
+      } else {
+        delete element.dataset[originalKey]
+      }
+      delete element.dataset[translatedKey]
+      continue
+    } else if (!storedOriginal && currentValue) {
+      element.dataset[originalKey] = currentValue
+    }
+
+    const sourceValue = element.dataset[originalKey] || currentValue || ''
+    if (!sourceValue || !containsCJK(sourceValue)) {
+      delete element.dataset[translatedKey]
+      continue
+    }
+
+    let nextValue = sourceValue
+    const translated = translateLegacyText(sourceValue)
     // If a component has already rendered an English value via i18n,
     // avoid forcing it back to the original Chinese text.
-    if (translated === element.dataset[datasetKey] && currentValue && !containsCJK(currentValue)) {
+    if (translated === sourceValue && currentValue && !containsCJK(currentValue)) {
+      delete element.dataset[translatedKey]
       continue
     }
     nextValue = translated
 
     if (nextValue !== currentValue) {
       element.setAttribute(attr, nextValue)
+    }
+
+    if (nextValue !== sourceValue) {
+      element.dataset[translatedKey] = nextValue
+    } else {
+      delete element.dataset[translatedKey]
     }
   }
 }
@@ -57,6 +99,7 @@ const translateTextNode = (node, english) => {
 
   const currentText = node.nodeValue || ''
   const storedOriginal = node.__i18nOriginalText || ''
+  const storedTranslated = node.__i18nTranslatedText || ''
   const originalText = storedOriginal || currentText || ''
   const currentHasCJK = containsCJK(currentText)
   const originalHasCJK = containsCJK(originalText)
@@ -65,23 +108,44 @@ const translateTextNode = (node, english) => {
   if (!english) {
     if (currentHasCJK) {
       node.__i18nOriginalText = currentText
+      node.__i18nTranslatedText = ''
       return
     }
 
-    if (storedOriginal && storedOriginal !== currentText) {
+    if (storedOriginal && storedTranslated && currentText === storedTranslated && containsCJK(storedOriginal)) {
       node.nodeValue = storedOriginal
+      node.__i18nOriginalText = storedOriginal
+      node.__i18nTranslatedText = ''
+      return
     }
+
+    node.__i18nOriginalText = currentText
+    node.__i18nTranslatedText = ''
     return
   }
 
-  if (currentHasCJK || !storedOriginal) {
+  if (currentHasCJK) {
+    node.__i18nOriginalText = currentText
+  } else if (storedTranslated && currentText !== storedTranslated) {
+    // A component produced a fresh non-CJK value while in EN mode.
+    // Sync it to avoid stale Chinese source text overriding new UI.
+    node.__i18nOriginalText = currentText
+    node.__i18nTranslatedText = ''
+  } else if (!storedOriginal) {
     node.__i18nOriginalText = currentText
   }
 
-  let targetText = node.__i18nOriginalText
-  const translated = translateLegacyText(node.__i18nOriginalText)
+  const sourceText = node.__i18nOriginalText || currentText || ''
+  if (!sourceText || !containsCJK(sourceText)) {
+    node.__i18nTranslatedText = ''
+    return
+  }
+
+  let targetText = sourceText
+  const translated = translateLegacyText(sourceText)
   // If Vue i18n already produced an English text node, keep it.
-  if (translated === node.__i18nOriginalText && node.nodeValue && !containsCJK(node.nodeValue)) {
+  if (translated === sourceText && node.nodeValue && !containsCJK(node.nodeValue)) {
+    node.__i18nTranslatedText = ''
     return
   }
   targetText = translated
@@ -89,8 +153,13 @@ const translateTextNode = (node, english) => {
   if (targetText !== node.nodeValue) {
     node.nodeValue = targetText
   }
-}
 
+  if (targetText !== sourceText) {
+    node.__i18nTranslatedText = targetText
+  } else {
+    node.__i18nTranslatedText = ''
+  }
+}
 const applyTranslation = (root, english) => {
   if (!root) return
 
