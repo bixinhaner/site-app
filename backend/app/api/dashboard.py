@@ -11,6 +11,7 @@ from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeE
 from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
 from app.models.survey_archive import SiteSurveyArchive
+from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
 from app.models.equipment import Inventory, Equipment, StockTransaction
 from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
@@ -31,7 +32,7 @@ async def get_dashboard_summary(
     - inventory: { low_stock_count, main_device_total_stock, recent_transactions }
     - installed_sites: { count, node }
     - sites: { approx: false, status }
-    - site_progress: { total, survey_done, planning_done, installed, online, activated, ssv_passed }
+    - site_progress: { total, survey_done, planning_done, install_started, installed, online, activated, ssv_passed }
     - inspections: { pending_review_count }
     - surveys: { last7d_new }
     - time_range: { from, to }
@@ -72,7 +73,20 @@ async def get_dashboard_summary(
     site_rows = db.query(Site.status, func.count(Site.id)).group_by(Site.status).all()
     site_status = {str(s or "unknown"): int(c) for s, c in site_rows}
 
-    # 安装站点统计（按“相片全部提交”节点）：
+    # 安装开始站点统计（按“首次开始绑定设备SN”口径）：
+    # 只要站点出现过 bind/rebind 记录即记为已开始，按站点去重统计。
+    install_started_site_count = int(
+        db.query(func.count(func.distinct(EquipmentBindingHistory.site_id)))
+        .filter(
+            EquipmentBindingHistory.action.in_(
+                [BindingActionEnum.BIND, BindingActionEnum.REBIND]
+            )
+        )
+        .scalar()
+        or 0
+    )
+
+    # 安装完成站点统计（按“相片全部提交”节点）：
     # 开站工单达到已提交及以上阶段（含已完成），按站点去重统计。
     installed_site_count = int(
         db.query(func.count(func.distinct(WorkOrder.site_id)))
@@ -126,6 +140,7 @@ async def get_dashboard_summary(
         "total": total_sites,
         "survey_done": survey_done,
         "planning_done": planning_done,
+        "install_started": install_started_site_count,
         "installed": installed_site_count,
         "online": online,
         "activated": activated,

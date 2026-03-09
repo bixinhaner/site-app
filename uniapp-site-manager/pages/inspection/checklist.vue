@@ -2667,10 +2667,14 @@
 									const hasPlanCoords = isValidCoordinatePair(planLat, planLon)
 									const distanceToPlan = Number(gpsExtra?.distanceToPlanM)
 									const hasDistanceToPlan = isFinite(distanceToPlan) && distanceToPlan >= 0
+									const distanceExceeded = gpsExtra?.distanceExceeded === true
 
-									if (hasPlanCoords) {
+									if (hasPlanCoords && !distanceExceeded) {
 										const distanceText = hasDistanceToPlan ? ` | 距离:${distanceToPlan.toFixed(1)}m` : ''
 										return `实拍:${shotLat.toFixed(precision)},${shotLon.toFixed(precision)} | 规划:${planLat.toFixed(precision)},${planLon.toFixed(precision)}${distanceText}`
+									}
+									if (hasPlanCoords && distanceExceeded) {
+										return `${shotLat.toFixed(precision)}, ${shotLon.toFixed(precision)}`
 									}
 
 									if (gpsExtra?.planCoordinateMissing === true) {

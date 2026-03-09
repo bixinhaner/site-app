@@ -691,8 +691,9 @@ export class WatermarkTool {
         const distanceToPlan = Number(gps.distanceToPlanM)
         const hasDistanceToPlan = isFinite(distanceToPlan) && distanceToPlan >= 0
         const planCoordinateMissing = gps.planCoordinateMissing === true
+        const distanceExceeded = gps.distanceExceeded === true
 
-        if (hasPlannedCoords) {
+        if (hasPlannedCoords && !distanceExceeded) {
           const distanceText = hasDistanceToPlan ? ` | 距离:${distanceToPlan.toFixed(1)}m` : ''
           lines.push(
             buildLine(
@@ -700,6 +701,9 @@ export class WatermarkTool {
               `实拍:${latitude.toFixed(coordinatePrecision)},${longitude.toFixed(coordinatePrecision)} | 规划:${plannedLatitude.toFixed(coordinatePrecision)},${plannedLongitude.toFixed(coordinatePrecision)}${distanceText}`,
             ),
           )
+        } else if (hasPlannedCoords && distanceExceeded) {
+          // 超阈值场景仅保留实拍坐标，避免修改原有业务结果表达
+          lines.push(buildLine('📍', `${latitude.toFixed(coordinatePrecision)}, ${longitude.toFixed(coordinatePrecision)}`))
         } else if (planCoordinateMissing) {
           lines.push(
             buildLine(
