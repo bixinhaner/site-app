@@ -13,24 +13,37 @@ const translateElementAttributes = (element, english) => {
   for (const attr of ATTR_NAMES) {
     const datasetKey = toDatasetKey(attr)
     const currentValue = element.getAttribute(attr)
-    const originalValue = element.dataset[datasetKey] || currentValue || ''
+    const storedOriginal = element.dataset[datasetKey] || ''
+    const originalValue = storedOriginal || currentValue || ''
 
     if (!originalValue || !containsCJK(originalValue)) continue
 
-    if (!element.dataset[datasetKey]) {
+    if (!english) {
+      if (currentValue && containsCJK(currentValue)) {
+        element.dataset[datasetKey] = currentValue
+        continue
+      }
+
+      if (storedOriginal && storedOriginal !== currentValue) {
+        element.setAttribute(attr, storedOriginal)
+      }
+      continue
+    }
+
+    if (currentValue && containsCJK(currentValue)) {
+      element.dataset[datasetKey] = currentValue
+    } else if (!element.dataset[datasetKey]) {
       element.dataset[datasetKey] = originalValue
     }
 
     let nextValue = element.dataset[datasetKey]
-    if (english) {
-      const translated = translateLegacyText(element.dataset[datasetKey])
-      // If a component has already rendered an English value via i18n,
-      // avoid forcing it back to the original Chinese text.
-      if (translated === element.dataset[datasetKey] && currentValue && !containsCJK(currentValue)) {
-        continue
-      }
-      nextValue = translated
+    const translated = translateLegacyText(element.dataset[datasetKey])
+    // If a component has already rendered an English value via i18n,
+    // avoid forcing it back to the original Chinese text.
+    if (translated === element.dataset[datasetKey] && currentValue && !containsCJK(currentValue)) {
+      continue
     }
+    nextValue = translated
 
     if (nextValue !== currentValue) {
       element.setAttribute(attr, nextValue)
@@ -42,22 +55,36 @@ const translateTextNode = (node, english) => {
   const parentTag = node.parentElement?.tagName
   if (parentTag && TEXT_BLACKLIST.has(parentTag)) return
 
-  const originalText = node.__i18nOriginalText || node.nodeValue || ''
-  if (!containsCJK(originalText)) return
+  const currentText = node.nodeValue || ''
+  const storedOriginal = node.__i18nOriginalText || ''
+  const originalText = storedOriginal || currentText || ''
+  const currentHasCJK = containsCJK(currentText)
+  const originalHasCJK = containsCJK(originalText)
+  if (!currentHasCJK && !originalHasCJK) return
 
-  if (!node.__i18nOriginalText) {
-    node.__i18nOriginalText = originalText
+  if (!english) {
+    if (currentHasCJK) {
+      node.__i18nOriginalText = currentText
+      return
+    }
+
+    if (storedOriginal && storedOriginal !== currentText) {
+      node.nodeValue = storedOriginal
+    }
+    return
+  }
+
+  if (currentHasCJK || !storedOriginal) {
+    node.__i18nOriginalText = currentText
   }
 
   let targetText = node.__i18nOriginalText
-  if (english) {
-    const translated = translateLegacyText(node.__i18nOriginalText)
-    // If Vue i18n already produced an English text node, keep it.
-    if (translated === node.__i18nOriginalText && node.nodeValue && !containsCJK(node.nodeValue)) {
-      return
-    }
-    targetText = translated
+  const translated = translateLegacyText(node.__i18nOriginalText)
+  // If Vue i18n already produced an English text node, keep it.
+  if (translated === node.__i18nOriginalText && node.nodeValue && !containsCJK(node.nodeValue)) {
+    return
   }
+  targetText = translated
 
   if (targetText !== node.nodeValue) {
     node.nodeValue = targetText
