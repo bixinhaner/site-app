@@ -835,7 +835,18 @@ async def search_work_orders(
     pages = math.ceil(total / limit) if limit else 1
 
     return WorkOrderListResponse(
-        work_orders=[_enrich_work_order_response(db, wo) for wo in work_orders],
+        work_orders=[
+            _enrich_work_order_response(
+                db,
+                wo,
+                web_access_mode=(
+                    resolve_web_work_order_access_mode(db, current_user, work_order_type=wo.type)
+                    if execution_scope
+                    else None
+                ),
+            )
+            for wo in work_orders
+        ],
         total=total,
         page=page,
         size=limit,
@@ -843,7 +854,12 @@ async def search_work_orders(
     )
 
 
-def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
+def _enrich_work_order_response(
+    db: Session,
+    wo: WorkOrder,
+    *,
+    web_access_mode: Optional[str] = None,
+) -> dict:
     from datetime import datetime
     
     # Build the response manually to avoid validation issues
@@ -862,6 +878,7 @@ def _enrich_work_order_response(db: Session, wo: WorkOrder) -> dict:
         "reviewer_id": wo.reviewer_id,
         "review_comments": wo.review_comments,
         "review_comments_i18n": getattr(wo, "review_comments_i18n", None),
+        "web_access_mode": web_access_mode,
         "has_duplicate_photos": False,
         "duplicate_photo_count": 0,
         "has_similar_photos": False,

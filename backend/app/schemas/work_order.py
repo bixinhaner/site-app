@@ -204,6 +204,7 @@ class WorkOrderResponse(BaseModel):
     void_reason: Optional[str] = None
     voided_by: Optional[int] = None
     voided_by_name: Optional[str] = None
+    web_access_mode: Optional[str] = None
     has_duplicate_photos: bool = False
     duplicate_photo_count: int = 0
     has_similar_photos: bool = False

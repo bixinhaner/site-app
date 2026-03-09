@@ -88,7 +88,7 @@
             <div>
               <div class="table-title">{{ activeGroupMeta.label }}</div>
             </div>
-            <el-tag :type="activeGroupMeta.tagType" effect="plain">{{ total }} 条</el-tag>
+            <el-tag :type="activeGroupMeta.tagType" effect="plain">{{ displayTotal }} 条</el-tag>
           </div>
         </template>
 
@@ -108,7 +108,7 @@
             <template #default="{ row }">
               <div class="type-cell">
                 <span>{{ typeText(row.type) }}</span>
-                <el-tag v-if="isReadonlyType(row.type)" size="small" type="info" effect="plain">仅App执行</el-tag>
+                <el-tag v-if="isReadonlyType(row)" size="small" type="info" effect="plain">仅App执行</el-tag>
               </div>
             </template>
           </el-table-column>
@@ -150,7 +150,7 @@
             v-model:current-page="currentPage"
             v-model:page-size="pageSize"
             :page-sizes="[10, 20, 50, 100]"
-            :total="total"
+            :total="displayTotal"
             layout="total, sizes, prev, pager, next, jumper"
             @current-change="loadList"
             @size-change="handlePageSizeChange"
@@ -234,6 +234,8 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const items = ref([])
+const listRequestSerial = ref(0)
+const countRequestSerial = ref(0)
 const summary = ref({
   pending: 0,
   active: 0,
@@ -258,6 +260,21 @@ const allowedTypeOptions = computed(() => visibleTypes.value.map((type) => ({
 })))
 
 const activeGroupMeta = computed(() => GROUPS.find(group => group.key === activeGroup.value) || GROUPS[0])
+const displayTotal = computed(() => {
+  if (total.value > 0) return total.value
+  return items.value.length
+})
+
+const normalizeWorkOrderType = (type) => String((type?.value ?? type) || '').trim().toLowerCase()
+const normalizeWorkOrderStatus = (status) => String((status?.value ?? status) || '').trim().toUpperCase()
+const normalizeWebAccessMode = (mode) => String(mode || '').trim().toLowerCase()
+
+const normalizeWorkOrderRow = (row) => ({
+  ...row,
+  type: normalizeWorkOrderType(row?.type),
+  status: normalizeWorkOrderStatus(row?.status),
+  web_access_mode: normalizeWebAccessMode(row?.web_access_mode),
+})
 
 const emptyDescription = computed(() => {
   if (keyword.value || typeFilter.value) return '当前筛选条件下没有可查看工单'
@@ -290,24 +307,42 @@ const formatDateTime = (value) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-const typeText = (type) => TYPE_LABEL_MAP[type] || type
-const statusText = (status) => STATUS_LABEL_MAP[status] || status
+const typeText = (type) => {
+  const normalized = normalizeWorkOrderType(type)
+  return TYPE_LABEL_MAP[normalized] || normalized || type
+}
+
+const statusText = (status) => {
+  const normalized = normalizeWorkOrderStatus(status)
+  return STATUS_LABEL_MAP[normalized] || normalized || status
+}
 
 const statusTagType = (status) => {
-  if (status === 'REJECTED') return 'danger'
-  if (status === 'SUBMITTED' || status === 'UNDER_REVIEW') return 'success'
-  if (status === 'PENDING') return 'warning'
+  const normalized = normalizeWorkOrderStatus(status)
+  if (normalized === 'REJECTED') return 'danger'
+  if (normalized === 'SUBMITTED' || normalized === 'UNDER_REVIEW') return 'success'
+  if (normalized === 'PENDING') return 'warning'
   return 'primary'
 }
 
+const accessModeOf = (row) => {
+  const explicitMode = normalizeWebAccessMode(row?.web_access_mode)
+  if (explicitMode) return explicitMode
+
+  const type = normalizeWorkOrderType(row?.type ?? row)
+  if (editableTypes.value.includes(type)) return 'editable'
+  if (visibleTypes.value.includes(type)) return 'readonly'
+  return 'hidden'
+}
+
 const executeActionText = (row) => {
-  if (isReadonlyType(row.type)) return '只读查看'
+  if (accessModeOf(row) === 'readonly') return '只读查看'
   if (row.status === 'PENDING') return '接受并执行'
   if (row.status === 'SUBMITTED' || row.status === 'UNDER_REVIEW') return '查看执行'
   return '进入执行'
 }
 
-const isReadonlyType = (type) => visibleTypes.value.includes(type) && !editableTypes.value.includes(type)
+const isReadonlyType = (row) => accessModeOf(row) === 'readonly'
 
 const loadEffectiveSettings = async () => {
   const data = await userStore.refreshAuthzProfile()
@@ -318,8 +353,12 @@ const loadEffectiveSettings = async () => {
     allow_device_binding: Boolean(preview?.allow_device_binding),
     allow_submit: Boolean(preview?.allow_submit),
     allow_recall: Boolean(preview?.allow_recall),
-    visible_work_order_types: Array.isArray(preview?.visible_work_order_types) ? preview.visible_work_order_types : [],
-    editable_work_order_types: Array.isArray(preview?.editable_work_order_types) ? preview.editable_work_order_types : [],
+    visible_work_order_types: Array.isArray(preview?.visible_work_order_types)
+      ? preview.visible_work_order_types.map(normalizeWorkOrderType).filter(Boolean)
+      : [],
+    editable_work_order_types: Array.isArray(preview?.editable_work_order_types)
+      ? preview.editable_work_order_types.map(normalizeWorkOrderType).filter(Boolean)
+      : [],
     reasons: Array.isArray(preview?.reasons) ? preview.reasons : [],
   }
 
@@ -347,6 +386,8 @@ const loadEffectiveSettings = async () => {
 }
 
 const loadCounts = async () => {
+  const requestId = countRequestSerial.value + 1
+  countRequestSerial.value = requestId
   countLoading.value = true
   try {
     const results = await Promise.all(
@@ -356,35 +397,45 @@ const loadCounts = async () => {
         limit: 1,
       })),
     )
+    if (requestId !== countRequestSerial.value) return
     summary.value = GROUPS.reduce((accumulator, group, index) => {
       accumulator[group.key] = Number(results[index]?.total || 0)
       return accumulator
     }, {})
   } catch (error) {
+    if (requestId !== countRequestSerial.value) return
     console.error(error)
     ElMessage.error(error.response?.data?.detail || '加载工单分组统计失败')
   } finally {
+    if (requestId !== countRequestSerial.value) return
     countLoading.value = false
   }
 }
 
-const loadList = async () => {
+const loadList = async (groupKey = activeGroup.value) => {
+  const requestId = listRequestSerial.value + 1
+  listRequestSerial.value = requestId
   listLoading.value = true
   try {
     const sortConfig = sortOptions.find(option => option.value === sortMode.value) || sortOptions[0]
     const response = await workOrderAPI.searchWorkOrders({
-      ...buildCommonParams(activeGroup.value),
+      ...buildCommonParams(groupKey),
       skip: (currentPage.value - 1) * pageSize.value,
       limit: pageSize.value,
       sort_by: sortConfig.sortBy,
       sort_order: sortConfig.sortOrder,
     })
-    items.value = Array.isArray(response?.work_orders) ? response.work_orders : []
+    if (requestId !== listRequestSerial.value) return
+    items.value = Array.isArray(response?.work_orders) ? response.work_orders.map(normalizeWorkOrderRow) : []
     total.value = Number(response?.total || 0)
   } catch (error) {
+    if (requestId !== listRequestSerial.value) return
     console.error(error)
+    items.value = []
+    total.value = 0
     ElMessage.error(error.response?.data?.detail || '加载我的执行工单失败')
   } finally {
+    if (requestId !== listRequestSerial.value) return
     listLoading.value = false
   }
 }
@@ -438,7 +489,7 @@ const changeGroup = async (groupKey) => {
   if (groupKey === activeGroup.value) return
   activeGroup.value = groupKey
   currentPage.value = 1
-  await loadList()
+  await loadList(groupKey)
 }
 
 const openExecute = (row) => {
