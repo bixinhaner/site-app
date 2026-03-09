@@ -206,6 +206,12 @@ def _ensure_surveyor_wo_type(wo: WorkOrder, u: User):
         raise HTTPException(status_code=403, detail="仅可操作勘察工单")
 
 
+def _ensure_web_execution_assignee(wo: WorkOrder, current_user: User, detail: str = "无权限访问此工单"):
+    """Web 工单执行入口固定只允许访问当前登录人名下的工单。"""
+    if wo.assigned_to != current_user.id:
+        raise HTTPException(status_code=403, detail=detail)
+
+
 def _has_bound_device_check_items(db: Session, wo: WorkOrder) -> bool:
     """判断工单是否仍存在“设备级”检查项绑定（equipment_sn 未解绑）。
 
@@ -775,14 +781,15 @@ async def search_work_orders(
                 query = query.filter(false())
             else:
                 query = query.filter(WorkOrder.type.in_([WorkOrderTypeEnum(item) for item in allowed_types]))
+        # “我的执行工单”入口无论角色如何，都只返回当前登录人被指派的工单。
+        query = query.filter(WorkOrder.assigned_to == current_user.id)
 
     # 分配人筛选与角色可见范围
     if is_field_worker:
-        query = query.filter(WorkOrder.assigned_to == current_user.id)
         query = query.filter(WorkOrder.status != WorkOrderStatusEnum.VOIDED)
         if _is_surveyor(current_user):
             query = query.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
-    elif is_admin_or_manager and assigned_to:
+    elif is_admin_or_manager and assigned_to and not execution_scope:
         query = query.filter(WorkOrder.assigned_to == assigned_to)
 
     # 优先级筛选
@@ -1855,9 +1862,7 @@ async def get_work_order_inspection(
         detail="当前未启用 Web 工单填写",
     )
     
-    # 权限检查
-    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
-        raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_web_execution_assignee(wo, current_user)
     _ensure_surveyor_wo_type(wo, current_user)
     
     if not wo.inspection_id:
@@ -1897,8 +1902,7 @@ async def get_work_order_execution_context(
         detail="当前未启用 Web 工单填写",
     )
 
-    if _is_field_worker(current_user) and wo.assigned_to != current_user.id:
-        raise HTTPException(status_code=403, detail="无权限访问此工单")
+    _ensure_web_execution_assignee(wo, current_user)
     _ensure_surveyor_wo_type(wo, current_user)
 
     from app.utils.work_order_progress import WorkOrderProgressCalculator
