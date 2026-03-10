@@ -1,6 +1,12 @@
 <template>
   <div class="site-progress">
-    <h2 class="section-title">站点概况</h2>
+    <div class="section-head">
+      <h2 class="section-title">站点概况</h2>
+      <el-button v-if="canViewSiteMap" class="map-jump-btn" type="primary" plain size="small" @click="goToSiteMap">
+        <el-icon><MapLocation /></el-icon>
+        查看站点地图
+      </el-button>
+    </div>
     <div class="cards">
       <div class="card" v-for="card in cards" :key="card.key" @click="onClick(card.route)">
         <div class="card-header">
@@ -20,13 +26,16 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Tickets, Finished, Promotion, MagicStick, SuccessFilled, OfficeBuilding } from '@element-plus/icons-vue'
+import { Tickets, Finished, Promotion, MagicStick, SuccessFilled, OfficeBuilding, MapLocation } from '@element-plus/icons-vue'
+import { useUserStore } from '@/stores/user'
 
 const props = defineProps({ progress: { type: Object, default: null } })
 const emit = defineEmits(['goto'])
+const userStore = useUserStore()
 
 const total = computed(() => Number(props.progress?.total || 0))
 const val = (k) => Number(props.progress?.[k] || 0)
+const canViewSiteMap = computed(() => userStore.hasPermission('sites:list:read'))
 
 const cards = computed(() => [
   { key: 'survey', title: '勘察站点', value: `${val('survey_done')}/${total.value}`, desc: '完成勘察 / 总站点', icon: Tickets, type: 'info', route: { name: 'SurveyArchives' } },
@@ -39,17 +48,40 @@ const cards = computed(() => [
 ])
 
 const onClick = (route) => emit('goto', route)
+const goToSiteMap = () => emit('goto', { name: 'SiteMap' })
 </script>
 
 <style scoped lang="scss">
 .site-progress {
   margin-bottom: 20px;
 }
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
 .section-title {
-  margin: 0 0 10px 0;
+  margin: 0;
   font-size: 18px;
   font-weight: 700;
   color: var(--text-primary);
+}
+.map-jump-btn {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-color: #1d4ed8;
+  color: #fff;
+  border-radius: 999px;
+  padding-inline: 14px;
+  font-weight: 600;
+}
+
+.map-jump-btn:hover,
+.map-jump-btn:focus {
+  background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  border-color: #1e40af;
+  color: #fff;
 }
 .cards {
   display: grid;
@@ -77,4 +109,15 @@ const onClick = (route) => emit('goto', route)
 .card-body { display:flex; align-items:baseline; gap:10px; }
 .value { font-size: 28px; font-weight: 700; color: var(--text-primary); }
 .desc { color: var(--text-light); font-size: 13px; }
+
+@media (max-width: 768px) {
+  .section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .map-jump-btn {
+    width: 100%;
+  }
+}
 </style>
