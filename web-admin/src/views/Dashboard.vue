@@ -13,6 +13,9 @@
     <!-- 站点概况（新卡组，置顶） -->
     <SiteProgressOverview :progress="topStats?.site_progress" @goto="handleGoto" />
 
+    <!-- 站点事件趋势（按日/周/月 + 新增/累计） -->
+    <SiteProgressTrend ref="siteProgressTrendRef" class="mt-24 mb-24" />
+
     <!-- 顶部概览（保留原工单/库存等卡片） -->
     <StatsOverview :data="topStats" :loading="loading" @card-click="handleCardClick" />
 
@@ -71,6 +74,7 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import StatsOverview from '@/components/dashboard/StatsOverview.vue'
 import SiteProgressOverview from '@/components/dashboard/SiteProgressOverview.vue'
+import SiteProgressTrend from '@/components/dashboard/SiteProgressTrend.vue'
 import MyTodos from '@/components/dashboard/MyTodos.vue'
 import RisksPanel from '@/components/dashboard/RisksPanel.vue'
 import ActivityFeed from '@/components/dashboard/ActivityFeed.vue'
@@ -82,6 +86,7 @@ const topStats = ref(null)
 const todos = ref(null)
 const risks = ref(null)
 const activity = ref(null)
+const siteProgressTrendRef = ref(null)
 
 const loadAll = async () => {
   try {
@@ -105,7 +110,10 @@ const loadAll = async () => {
 }
 
 const refresh = async () => {
-  await loadAll()
+  await Promise.all([
+    loadAll(),
+    siteProgressTrendRef.value?.refresh?.() || Promise.resolve(),
+  ])
   ElMessage.success('数据已刷新')
 }
 
@@ -142,6 +150,7 @@ onMounted(loadAll)
 }
 
 .mt-24 { margin-top: 24px; }
+.mb-24 { margin-bottom: 24px; }
 
 .quick-actions {
   border-radius: 12px;

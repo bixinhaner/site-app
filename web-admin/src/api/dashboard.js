@@ -8,6 +8,11 @@ export async function fetchTopStats() {
   return request.get('/api/dashboard/summary')
 }
 
+// 站点阶段趋势（按日/周/月）
+export async function fetchSiteProgressTrend(params = {}) {
+  return request.get('/api/dashboard/site-progress-trend', { params })
+}
+
 // 我的待办（工单、检查）
 export async function fetchTodos() {
   const userStore = useUserStore()
