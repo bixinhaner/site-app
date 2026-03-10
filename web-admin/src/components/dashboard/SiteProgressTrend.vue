@@ -4,22 +4,22 @@
       <div class="trend-header">
         <span class="trend-title">
           <el-icon><TrendCharts /></el-icon>
-          站点事件趋势
+          {{ t('dashboard.siteTrend.title') }}
         </span>
         <div class="trend-actions">
           <el-radio-group v-model="granularity" size="small" @change="loadTrend">
-            <el-radio-button label="day">按日</el-radio-button>
-            <el-radio-button label="week">按周</el-radio-button>
-            <el-radio-button label="month">按月</el-radio-button>
+            <el-radio-button label="day">{{ t('dashboard.siteTrend.granularity.day') }}</el-radio-button>
+            <el-radio-button label="week">{{ t('dashboard.siteTrend.granularity.week') }}</el-radio-button>
+            <el-radio-button label="month">{{ t('dashboard.siteTrend.granularity.month') }}</el-radio-button>
           </el-radio-group>
           <el-radio-group v-model="valueMode" size="small" @change="renderChart">
-            <el-radio-button label="incremental">新增量</el-radio-button>
-            <el-radio-button label="cumulative">累计值</el-radio-button>
+            <el-radio-button label="incremental">{{ t('dashboard.siteTrend.valueMode.incremental') }}</el-radio-button>
+            <el-radio-button label="cumulative">{{ t('dashboard.siteTrend.valueMode.cumulative') }}</el-radio-button>
           </el-radio-group>
           <el-radio-group v-model="chartMode" size="small" @change="renderChart">
-            <el-radio-button label="auto">自动(推荐)</el-radio-button>
-            <el-radio-button label="bar">柱状图</el-radio-button>
-            <el-radio-button label="line">折线图</el-radio-button>
+            <el-radio-button label="auto">{{ t('dashboard.siteTrend.chartMode.auto') }}</el-radio-button>
+            <el-radio-button label="bar">{{ t('dashboard.siteTrend.chartMode.bar') }}</el-radio-button>
+            <el-radio-button label="line">{{ t('dashboard.siteTrend.chartMode.line') }}</el-radio-button>
           </el-radio-group>
         </div>
       </div>
@@ -30,12 +30,14 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { TrendCharts } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 import * as echarts from 'echarts'
 import { fetchSiteProgressTrend } from '@/api/dashboard'
 
+const { t, locale } = useI18n()
 const chartRef = ref(null)
 const loading = ref(false)
 const granularity = ref('day')
@@ -67,7 +69,7 @@ const SERIES_STYLE = {
   ssv: { color: '#9467bd', lineType: 'dashed', symbol: 'roundRect' },
 }
 
-const emptyOption = {
+const buildEmptyOption = () => ({
   tooltip: { trigger: 'axis' },
   xAxis: { type: 'category', data: [] },
   yAxis: { type: 'value' },
@@ -77,11 +79,18 @@ const emptyOption = {
     left: 'center',
     top: 'middle',
     style: {
-      text: '暂无趋势数据',
+      text: t('dashboard.siteTrend.empty'),
       fill: '#9ca3af',
       fontSize: 14,
     },
   },
+})
+
+const resolveSeriesLabel = (key, fallback = '') => {
+  const keyPath = `dashboard.siteTrend.series.${key}`
+  const translated = t(keyPath)
+  if (translated && translated !== keyPath) return translated
+  return fallback || key
 }
 
 const ensureChart = () => {
@@ -122,7 +131,7 @@ const renderChart = () => {
 
   const buckets = Array.isArray(trendData.value?.buckets) ? trendData.value.buckets : []
   if (!buckets.length) {
-    chartInstance.setOption(emptyOption, true)
+    chartInstance.setOption(buildEmptyOption(), true)
     return
   }
 
@@ -135,7 +144,7 @@ const renderChart = () => {
     const source = trendData.value?.series?.[key]
     if (!source) return
 
-    const name = source.label || key
+    const name = resolveSeriesLabel(key, source.label || key)
     const style = SERIES_STYLE[key] || { color: '#3b82f6', lineType: 'solid', symbol: 'circle' }
     legend.push(name)
 
@@ -222,7 +231,7 @@ const loadTrend = async () => {
     renderChart()
   } catch (e) {
     console.error(e)
-    ElMessage.error('加载站点趋势失败')
+    ElMessage.error(t('dashboard.siteTrend.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -235,6 +244,10 @@ const resizeChart = () => {
 onMounted(async () => {
   await loadTrend()
   window.addEventListener('resize', resizeChart)
+})
+
+watch(() => locale.value, () => {
+  renderChart()
 })
 
 onBeforeUnmount(() => {

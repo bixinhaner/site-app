@@ -81,6 +81,7 @@ from app.services.work_order_execution_settings_service import (
     is_web_admin_request,
     resolve_web_work_order_access_mode,
 )
+from app.services.photo_duplicate_guard import delete_registry_records_by_source
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -1452,6 +1453,22 @@ async def delete_work_order(
             if insp.id not in seen_inspection_ids:
                 inspections_to_delete.append(insp)
                 seen_inspection_ids.add(insp.id)
+
+        inspection_ids_to_delete = [insp.id for insp in inspections_to_delete if insp and insp.id]
+        if inspection_ids_to_delete:
+            photo_ids_to_delete = [
+                row[0]
+                for row in db.query(InspectionPhoto.id)
+                .filter(InspectionPhoto.inspection_id.in_(inspection_ids_to_delete))
+                .all()
+                if row and row[0]
+            ]
+            if photo_ids_to_delete:
+                delete_registry_records_by_source(
+                    db,
+                    source_type="inspection_photo",
+                    source_ids=photo_ids_to_delete,
+                )
 
         # 删除/解绑与工单相关的勘察草稿（SiteSurvey）
         surveys = db.query(SiteSurvey).filter(SiteSurvey.work_order_id == wo.id).all()
@@ -3407,6 +3424,22 @@ async def batch_work_order_operation(
                     if insp.id not in seen_inspection_ids:
                         inspections_to_delete.append(insp)
                         seen_inspection_ids.add(insp.id)
+
+                inspection_ids_to_delete = [insp.id for insp in inspections_to_delete if insp and insp.id]
+                if inspection_ids_to_delete:
+                    photo_ids_to_delete = [
+                        row[0]
+                        for row in db.query(InspectionPhoto.id)
+                        .filter(InspectionPhoto.inspection_id.in_(inspection_ids_to_delete))
+                        .all()
+                        if row and row[0]
+                    ]
+                    if photo_ids_to_delete:
+                        delete_registry_records_by_source(
+                            db,
+                            source_type="inspection_photo",
+                            source_ids=photo_ids_to_delete,
+                        )
 
                 if inspections_to_delete:
                     for insp in inspections_to_delete:

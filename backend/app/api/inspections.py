@@ -47,6 +47,7 @@ from app.utils.gps_utils import reverse_geocode, validate_gps_accuracy
 from app.services.template_resolver import create_resolver, ResolveContext
 from app.services.cell_generator import CellGenerator
 from app.services.photo_duplicate_guard import (
+    delete_registry_records_by_source,
     detect_duplicate_detail,
     register_first_upload_record,
 )
@@ -1610,6 +1611,7 @@ async def upload_inspection_photo(
             existing_photos_query = existing_photos_query.filter(InspectionPhoto.field_id == normalized_field_id)
 
         existing_photos = existing_photos_query.all()
+        deleted_photo_ids: List[str] = []
         
         # 删除旧照片文件和数据库记录
         for old_photo in existing_photos:
@@ -1619,9 +1621,17 @@ async def upload_inspection_photo(
                     os.remove(old_photo.file_path)
                 # 删除数据库记录
                 db.delete(old_photo)
+                deleted_photo_ids.append(str(old_photo.id))
                 print(f"替换模式：删除旧检查照片 {old_photo.id}")
             except Exception as e:
                 print(f"替换模式：删除旧检查照片失败 {old_photo.id}: {e}")
+
+        if deleted_photo_ids:
+            delete_registry_records_by_source(
+                db,
+                source_type="inspection_photo",
+                source_ids=deleted_photo_ids,
+            )
         
         print(f"检查照片替换模式：should_replace={should_replace}，已清理旧照片")
     else:
@@ -1847,6 +1857,11 @@ async def delete_inspection_photo(
     
     # 删除数据库记录
     db.delete(photo)
+    delete_registry_records_by_source(
+        db,
+        source_type="inspection_photo",
+        source_ids=[photo_id],
+    )
     db.commit()
     
     # 记录审计日志
@@ -2126,6 +2141,11 @@ async def batch_inspection_photo_operations(
                 
                 # 删除数据库记录
                 db.delete(photo)
+                delete_registry_records_by_source(
+                    db,
+                    source_type="inspection_photo",
+                    source_ids=[photo_id],
+                )
                 results.append({"index": i, "action": "delete", "success": True, "photo_id": photo_id})
                 
             elif action == "replace":
@@ -2552,6 +2572,7 @@ async def cleanup_duplicate_inspection_photos(
     deleted_count = 0
     kept_count = 0
     affected_check_item_ids = set()
+    deleted_photo_ids: List[str] = []
     
     for (item_id, field_id_key), item_photos in photos_by_item.items():
         if len(item_photos) <= 1:
@@ -2569,6 +2590,7 @@ async def cleanup_duplicate_inspection_photos(
                     os.remove(old_photo.file_path)
                 # 删除数据库记录
                 db.delete(old_photo)
+                deleted_photo_ids.append(str(old_photo.id))
                 deleted_count += 1
                 print(f"清理累积检查照片: {old_photo.id} (检查项: {item_id}, 字段: {field_id_key})")
             except Exception as e:
@@ -2589,6 +2611,13 @@ async def cleanup_duplicate_inspection_photos(
             ).first()
             if check_item:
                 _touch_check_item_and_clear_review(check_item, now)
+
+    if deleted_photo_ids:
+        delete_registry_records_by_source(
+            db,
+            source_type="inspection_photo",
+            source_ids=deleted_photo_ids,
+        )
     
     db.commit()
     

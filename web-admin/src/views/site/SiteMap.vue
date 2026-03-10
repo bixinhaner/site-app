@@ -2,13 +2,13 @@
   <div class="site-map-page">
     <div class="page-header">
       <div class="page-title-wrap">
-        <h1>站点地图</h1>
-        <p>按区域与状态查看站点分布，支持筛选、联动定位与快速跳转详情。</p>
+        <h1>{{ t('siteMap.page.title') }}</h1>
+        <p>{{ t('siteMap.page.subtitle') }}</p>
       </div>
       <div class="header-tags">
-        <el-tag type="info">已加载 {{ rawSites.length }} 个站点</el-tag>
-        <el-tag type="success">有坐标 {{ sitesWithCoordinates.length }} 个</el-tag>
-        <el-tag v-if="sitesWithoutCoordinates.length" type="warning">无坐标 {{ sitesWithoutCoordinates.length }} 个</el-tag>
+        <el-tag type="info">{{ t('siteMap.headerTags.loaded', { count: rawSites.length }) }}</el-tag>
+        <el-tag type="success">{{ t('siteMap.headerTags.withCoordinates', { count: sitesWithCoordinates.length }) }}</el-tag>
+        <el-tag v-if="sitesWithoutCoordinates.length" type="warning">{{ t('siteMap.headerTags.withoutCoordinates', { count: sitesWithoutCoordinates.length }) }}</el-tag>
       </div>
     </div>
 
@@ -16,7 +16,7 @@
       <div class="toolbar-grid">
         <el-input
           v-model="keyword"
-          placeholder="搜索站点名称/编码/城市（自动检索）"
+          :placeholder="t('siteMap.filters.keywordPlaceholder')"
           clearable
         >
           <template #prefix>
@@ -24,7 +24,7 @@
           </template>
         </el-input>
 
-        <el-select v-model="statusFilter" placeholder="站点状态" clearable filterable>
+        <el-select v-model="statusFilter" :placeholder="t('siteMap.filters.statusPlaceholder')" clearable filterable>
           <el-option
             v-for="item in statusOptions"
             :key="item.value"
@@ -33,7 +33,7 @@
           />
         </el-select>
 
-        <el-select v-model="siteTypeFilter" placeholder="站点类型" clearable filterable>
+        <el-select v-model="siteTypeFilter" :placeholder="t('siteMap.filters.siteTypePlaceholder')" clearable filterable>
           <el-option
             v-for="item in siteTypeOptions"
             :key="item"
@@ -42,7 +42,7 @@
           />
         </el-select>
 
-        <el-select v-model="provinceFilter" placeholder="省份" clearable filterable>
+        <el-select v-model="provinceFilter" :placeholder="t('siteMap.filters.provincePlaceholder')" clearable filterable>
           <el-option
             v-for="item in provinceOptions"
             :key="item"
@@ -51,7 +51,7 @@
           />
         </el-select>
 
-        <el-select v-model="cityFilter" placeholder="城市" clearable filterable :disabled="!cityOptions.length">
+        <el-select v-model="cityFilter" :placeholder="t('siteMap.filters.cityPlaceholder')" clearable filterable :disabled="!cityOptions.length">
           <el-option
             v-for="item in cityOptions"
             :key="item"
@@ -60,7 +60,7 @@
           />
         </el-select>
 
-        <el-select v-model="districtFilter" placeholder="区县" clearable filterable :disabled="!districtOptions.length">
+        <el-select v-model="districtFilter" :placeholder="t('siteMap.filters.districtPlaceholder')" clearable filterable :disabled="!districtOptions.length">
           <el-option
             v-for="item in districtOptions"
             :key="item"
@@ -69,35 +69,35 @@
           />
         </el-select>
 
-        <el-select v-model="coordinateFilter" placeholder="坐标状态">
-          <el-option label="仅看有坐标" value="with" />
-          <el-option label="仅看无坐标" value="without" />
-          <el-option label="全部" value="all" />
+        <el-select v-model="coordinateFilter" :placeholder="t('siteMap.filters.coordinatePlaceholder')">
+          <el-option :label="t('siteMap.filters.coordinateOptions.with')" value="with" />
+          <el-option :label="t('siteMap.filters.coordinateOptions.without')" value="without" />
+          <el-option :label="t('siteMap.filters.coordinateOptions.all')" value="all" />
         </el-select>
 
-        <el-select v-model="ssvFilter" placeholder="SSV状态">
-          <el-option label="全部 SSV" value="all" />
-          <el-option label="仅已通过" value="passed" />
-          <el-option label="仅未通过" value="failed" />
+        <el-select v-model="ssvFilter" :placeholder="t('siteMap.filters.ssvPlaceholder')">
+          <el-option :label="t('siteMap.filters.ssvOptions.all')" value="all" />
+          <el-option :label="t('siteMap.filters.ssvOptions.passed')" value="passed" />
+          <el-option :label="t('siteMap.filters.ssvOptions.failed')" value="failed" />
         </el-select>
 
-        <el-checkbox v-model="onlyInView" class="in-view-check">仅看当前地图视野</el-checkbox>
+        <el-checkbox v-model="onlyInView" class="in-view-check">{{ t('siteMap.filters.onlyInView') }}</el-checkbox>
 
         <div class="toolbar-actions">
           <el-button @click="resetFilters">
             <el-icon><Delete /></el-icon>
-            重置
+            {{ t('siteMap.filters.reset') }}
           </el-button>
           <el-button type="primary" :loading="loading" @click="reloadSites">
             <el-icon><RefreshRight /></el-icon>
-            刷新站点
+            {{ t('siteMap.filters.refresh') }}
           </el-button>
         </div>
       </div>
 
       <div class="toolbar-tip">
-        <span>关键词、状态、类型走后端检索；区域、SSV、坐标状态和视野筛选走本地秒级过滤。</span>
-        <span v-if="hasTruncated" class="warning-text">数据量较大，当前仅加载前 {{ MAX_FETCH_LIMIT }} 个站点，请继续缩小筛选范围。</span>
+        <span>{{ t('siteMap.tips.filterHint') }}</span>
+        <span v-if="hasTruncated" class="warning-text">{{ t('siteMap.tips.truncatedHint', { count: MAX_FETCH_LIMIT }) }}</span>
       </div>
     </el-card>
 
@@ -105,20 +105,20 @@
       <template #header>
         <div class="map-card-header">
           <div class="map-card-title">
-            <span>站点分布图</span>
-            <el-tag size="small" type="info">筛选结果 {{ filteredSites.length }}</el-tag>
-            <el-tag size="small" type="success">地图点位 {{ mapSites.length }}</el-tag>
+            <span>{{ t('siteMap.mapCard.title') }}</span>
+            <el-tag size="small" type="info">{{ t('siteMap.mapCard.filteredCount', { count: filteredSites.length }) }}</el-tag>
+            <el-tag size="small" type="success">{{ t('siteMap.mapCard.markerCount', { count: mapSites.length }) }}</el-tag>
           </div>
           <div class="map-card-actions">
             <el-button size="small" :disabled="!sitesWithCoordinates.length" @click="fitAllMarkers">
               <el-icon><Aim /></el-icon>
-              适配全部点位
+              {{ t('siteMap.mapCard.fitAll') }}
             </el-button>
             <el-button size="small" @click="toggleListPanel">
               <el-icon>
                 <component :is="listCollapsed ? 'ArrowRightBold' : 'ArrowLeftBold'" />
               </el-icon>
-              {{ listCollapsed ? '展开列表' : '收起列表' }}
+              {{ listCollapsed ? t('siteMap.mapCard.expandList') : t('siteMap.mapCard.collapseList') }}
             </el-button>
           </div>
         </div>
@@ -127,13 +127,13 @@
       <div class="map-layout" :class="{ 'list-collapsed': listCollapsed }">
         <aside class="site-list-panel">
           <div class="list-header">
-            <span>站点列表</span>
+            <span>{{ t('siteMap.mapCard.siteList') }}</span>
             <span>{{ filteredSites.length }}</span>
           </div>
 
           <el-scrollbar class="site-list-scroll">
             <div v-if="!filteredSites.length" class="list-empty">
-              <el-empty description="当前筛选无站点" />
+              <el-empty :description="t('siteMap.mapCard.empty')" />
             </div>
             <div v-else class="site-items">
               <div
@@ -162,25 +162,25 @@
 
                 <div class="site-tags">
                   <el-tag size="small" :type="site.ssv_passed ? 'success' : 'info'" effect="plain">
-                    {{ site.ssv_passed ? 'SSV已通过' : 'SSV未通过' }}
+                    {{ site.ssv_passed ? t('siteMap.mapCard.ssvPassed') : t('siteMap.mapCard.ssvFailed') }}
                   </el-tag>
                   <el-tag size="small" :type="hasCoordinates(site) ? 'primary' : 'warning'" effect="plain">
-                    {{ hasCoordinates(site) ? '有坐标' : '缺坐标' }}
+                    {{ hasCoordinates(site) ? t('siteMap.mapCard.hasCoordinates') : t('siteMap.mapCard.noCoordinates') }}
                   </el-tag>
                 </div>
 
                 <div class="site-actions">
                   <el-button link type="primary" size="small" @click.stop="focusSite(site, true)">
                     <el-icon><Location /></el-icon>
-                    定位
+                    {{ t('siteMap.mapCard.locate') }}
                   </el-button>
                   <el-button link type="success" size="small" @click.stop="openSiteDetail(site)">
                     <el-icon><View /></el-icon>
-                    详情
+                    {{ t('siteMap.mapCard.detail') }}
                   </el-button>
                   <el-button link type="warning" size="small" @click.stop="openSitePlanning(site)">
                     <el-icon><Operation /></el-icon>
-                    规划
+                    {{ t('siteMap.mapCard.planning') }}
                   </el-button>
                 </div>
               </div>
@@ -192,7 +192,7 @@
           <div ref="mapRef" class="map-canvas" />
 
           <div class="map-legend">
-            <div class="legend-title">状态图例</div>
+            <div class="legend-title">{{ t('siteMap.mapCard.legendTitle') }}</div>
             <div class="legend-grid">
               <div
                 v-for="item in legendItems"
@@ -209,9 +209,7 @@
             </div>
           </div>
 
-          <div v-if="sitesWithoutCoordinates.length" class="coord-hint">
-            当前筛选下有 {{ sitesWithoutCoordinates.length }} 个站点缺少坐标，仅在左侧列表展示。
-          </div>
+          <div v-if="sitesWithoutCoordinates.length" class="coord-hint">{{ t('siteMap.mapCard.noCoordinateHint', { count: sitesWithoutCoordinates.length }) }}</div>
         </section>
       </div>
     </el-card>
@@ -222,6 +220,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
@@ -236,6 +235,7 @@ L.Icon.Default.mergeOptions({
 })
 
 const router = useRouter()
+const { t, locale } = useI18n()
 
 const MAX_FETCH_LIMIT = 5000
 const SERVER_PAGE_SIZE = 100
@@ -243,20 +243,15 @@ const DEFAULT_MAP_CENTER = [34.26, 108.95]
 const DEFAULT_MAP_ZOOM = 4
 
 const STATUS_META = {
-  survey_pending: { label: '勘察中', color: '#64748b', textColor: '#ffffff', shape: 'bar' },
-  planning: { label: '规划中', color: '#0ea5e9', textColor: '#ffffff', shape: 'circle' },
-  planned: { label: '规划完成', color: '#4f46e5', textColor: '#ffffff', shape: 'square' },
-  construction: { label: '施工中', color: '#f97316', textColor: '#ffffff', shape: 'diamond' },
-  pending_online: { label: '待上线', color: '#c026d3', textColor: '#ffffff', shape: 'triangle' },
-  online_pending_activation: { label: '已上线待激活', color: '#dc2626', textColor: '#ffffff', shape: 'hexagon' },
-  operational: { label: '已开通', color: '#16a34a', textColor: '#ffffff', shape: 'pentagon' },
-  maintenance: { label: '维护中', color: '#a16207', textColor: '#ffffff', shape: 'star' },
+  survey_pending: { labelKey: 'siteMap.status.survey_pending', color: '#64748b', textColor: '#ffffff', shape: 'bar' },
+  planning: { labelKey: 'siteMap.status.planning', color: '#0ea5e9', textColor: '#ffffff', shape: 'circle' },
+  planned: { labelKey: 'siteMap.status.planned', color: '#4f46e5', textColor: '#ffffff', shape: 'square' },
+  construction: { labelKey: 'siteMap.status.construction', color: '#f97316', textColor: '#ffffff', shape: 'diamond' },
+  pending_online: { labelKey: 'siteMap.status.pending_online', color: '#c026d3', textColor: '#ffffff', shape: 'triangle' },
+  online_pending_activation: { labelKey: 'siteMap.status.online_pending_activation', color: '#dc2626', textColor: '#ffffff', shape: 'hexagon' },
+  operational: { labelKey: 'siteMap.status.operational', color: '#16a34a', textColor: '#ffffff', shape: 'pentagon' },
+  maintenance: { labelKey: 'siteMap.status.maintenance', color: '#a16207', textColor: '#ffffff', shape: 'star' },
 }
-
-const statusOptions = Object.keys(STATUS_META).map((status) => ({
-  value: status,
-  label: STATUS_META[status].label,
-}))
 
 const keyword = ref('')
 const statusFilter = ref('')
@@ -288,7 +283,19 @@ const normalizeStatus = (status) => normalizeText(status)
 
 const getStatusMeta = (status) => {
   const normalized = normalizeStatus(status)
-  return STATUS_META[normalized] || { label: normalized || '未知状态', color: '#334155', textColor: '#ffffff', shape: 'circle' }
+  const source = STATUS_META[normalized]
+  if (!source) {
+    return {
+      label: normalized || t('siteMap.status.unknown'),
+      color: '#334155',
+      textColor: '#ffffff',
+      shape: 'circle',
+    }
+  }
+  return {
+    ...source,
+    label: t(source.labelKey),
+  }
 }
 
 const hasCoordinates = (site) => {
@@ -311,8 +318,15 @@ const formatArea = (site) => {
   const parts = [site?.province, site?.city, site?.district]
     .map((item) => normalizeText(item))
     .filter(Boolean)
-  return parts.length ? parts.join('/') : '区域未设置'
+  return parts.length ? parts.join('/') : t('siteMap.popup.regionUnset')
 }
+
+const sortLocale = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-Hans-CN'))
+
+const statusOptions = computed(() => Object.keys(STATUS_META).map((status) => ({
+  value: status,
+  label: getStatusMeta(status).label,
+})))
 
 const filteredSites = computed(() => {
   const list = rawSites.value.filter((site) => {
@@ -333,7 +347,7 @@ const filteredSites = computed(() => {
   return [...list].sort((a, b) => {
     const aCode = normalizeText(a.site_code)
     const bCode = normalizeText(b.site_code)
-    return aCode.localeCompare(bCode, 'zh-Hans-CN')
+    return aCode.localeCompare(bCode, sortLocale.value)
   })
 })
 
@@ -361,7 +375,7 @@ const siteTypeOptions = computed(() => {
     const type = normalizeText(site.site_type)
     if (type) set.add(type)
   })
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+  return Array.from(set).sort((a, b) => a.localeCompare(b, sortLocale.value))
 })
 
 const provinceOptions = computed(() => {
@@ -370,7 +384,7 @@ const provinceOptions = computed(() => {
     const value = normalizeText(site.province)
     if (value) set.add(value)
   })
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+  return Array.from(set).sort((a, b) => a.localeCompare(b, sortLocale.value))
 })
 
 const cityOptions = computed(() => {
@@ -380,7 +394,7 @@ const cityOptions = computed(() => {
     const value = normalizeText(site.city)
     if (value) set.add(value)
   })
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+  return Array.from(set).sort((a, b) => a.localeCompare(b, sortLocale.value))
 })
 
 const districtOptions = computed(() => {
@@ -391,13 +405,13 @@ const districtOptions = computed(() => {
     const value = normalizeText(site.district)
     if (value) set.add(value)
   })
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+  return Array.from(set).sort((a, b) => a.localeCompare(b, sortLocale.value))
 })
 
 const legendItems = computed(() => {
   return Object.keys(STATUS_META).map((value) => ({
     value,
-    label: STATUS_META[value].label,
+    label: getStatusMeta(value).label,
     color: STATUS_META[value].color,
     shape: STATUS_META[value].shape,
   }))
@@ -432,12 +446,12 @@ const buildPopupContent = (site) => {
   return `
     <div class="site-popup">
       <div class="popup-title">${siteName}</div>
-      <div class="popup-line"><span>站点编码：</span>${siteCode}</div>
-      <div class="popup-line"><span>站点状态：</span>${escapeHtml(status.label)}</div>
-      <div class="popup-line"><span>站点类型：</span>${siteType}</div>
-      <div class="popup-line"><span>区域：</span>${area}</div>
-      <div class="popup-line"><span>SSV：</span>${site.ssv_passed ? '已通过' : '未通过'}</div>
-      <div class="popup-line"><span>地址：</span>${address}</div>
+      <div class="popup-line"><span>${escapeHtml(t('siteMap.popup.siteCode'))}</span>${siteCode}</div>
+      <div class="popup-line"><span>${escapeHtml(t('siteMap.popup.siteStatus'))}</span>${escapeHtml(status.label)}</div>
+      <div class="popup-line"><span>${escapeHtml(t('siteMap.popup.siteType'))}</span>${siteType}</div>
+      <div class="popup-line"><span>${escapeHtml(t('siteMap.popup.region'))}</span>${area}</div>
+      <div class="popup-line"><span>${escapeHtml(t('siteMap.popup.ssv'))}</span>${site.ssv_passed ? escapeHtml(t('siteMap.popup.passed')) : escapeHtml(t('siteMap.popup.failed'))}</div>
+      <div class="popup-line"><span>${escapeHtml(t('siteMap.popup.address'))}</span>${address}</div>
     </div>
   `
 }
@@ -575,11 +589,11 @@ const loadSites = async ({ fitBounds = false, silent = false } = {}) => {
     renderMarkers({ fitBounds })
 
     if (!silent) {
-      ElMessage.success(`已加载 ${rawSites.value.length} 个站点`)
+      ElMessage.success(t('siteMap.messages.loadedSuccess', { count: rawSites.value.length }))
     }
   } catch (error) {
     console.error(error)
-    ElMessage.error('站点地图加载失败')
+    ElMessage.error(t('siteMap.messages.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -599,13 +613,13 @@ const focusSite = (site, forcePopup = false) => {
   selectedSiteId.value = site.id
 
   if (!hasCoordinates(site)) {
-    ElMessage.warning('该站点暂无经纬度，无法在地图定位')
+    ElMessage.warning(t('siteMap.messages.noCoordinateWarning'))
     return
   }
 
   const marker = markerMap.get(site.id)
   if (!marker || !mapInstance) {
-    ElMessage.warning('当前站点不在地图视野，请调整筛选条件')
+    ElMessage.warning(t('siteMap.messages.outOfViewWarning'))
     return
   }
 
@@ -681,6 +695,10 @@ watch(cityFilter, () => {
 })
 
 watch(mapSites, () => {
+  renderMarkers()
+})
+
+watch(() => locale.value, () => {
   renderMarkers()
 })
 

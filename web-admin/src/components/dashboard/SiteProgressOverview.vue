@@ -1,10 +1,10 @@
 <template>
   <div class="site-progress">
     <div class="section-head">
-      <h2 class="section-title">站点概况</h2>
+      <h2 class="section-title">{{ t('dashboard.siteOverview.title') }}</h2>
       <el-button v-if="canViewSiteMap" class="map-jump-btn" type="primary" plain size="small" @click="goToSiteMap">
         <el-icon><MapLocation /></el-icon>
-        查看站点地图
+        {{ t('dashboard.siteOverview.mapButton') }}
       </el-button>
     </div>
     <div class="cards">
@@ -27,24 +27,26 @@
 <script setup>
 import { computed } from 'vue'
 import { Tickets, Finished, Promotion, MagicStick, SuccessFilled, OfficeBuilding, MapLocation } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 
 const props = defineProps({ progress: { type: Object, default: null } })
 const emit = defineEmits(['goto'])
 const userStore = useUserStore()
+const { t } = useI18n()
 
 const total = computed(() => Number(props.progress?.total || 0))
 const val = (k) => Number(props.progress?.[k] || 0)
 const canViewSiteMap = computed(() => userStore.hasPermission('sites:list:read'))
 
 const cards = computed(() => [
-  { key: 'survey', title: '勘察站点', value: `${val('survey_done')}/${total.value}`, desc: '完成勘察 / 总站点', icon: Tickets, type: 'info', route: { name: 'SurveyArchives' } },
-  { key: 'planning', title: '规划站点', value: `${val('planning_done')}/${total.value}`, desc: '完成规划 / 总站点', icon: Finished, type: 'primary', route: { name: 'SitePlanningLld' } },
-  { key: 'install_started', title: '安装开始站点', value: `${val('install_started')}/${total.value}`, desc: '已开始绑定 / 总站点', icon: OfficeBuilding, type: 'install-start', route: { name: 'WorkOrderList' } },
-  { key: 'installed', title: '安装完成站点', value: `${val('installed')}/${total.value}`, desc: '已提交及以上 / 总站点', icon: OfficeBuilding, type: 'install', route: { name: 'WorkOrderList', query: { preset: 'installed_sites' } } },
-  { key: 'online', title: '上线站点', value: `${val('online')}/${total.value}`, desc: '上线及以上 / 总站点', icon: Promotion, type: 'success', route: { name: 'SiteList' } },
-  { key: 'activated', title: '激活站点', value: `${val('activated')}/${total.value}`, desc: '激活及以上 / 总站点', icon: MagicStick, type: 'warning', route: { name: 'SiteList' } },
-  { key: 'ssv', title: 'SSV 站点', value: `${val('ssv_passed')}/${total.value}`, desc: '通过 SSV / 总站点', icon: SuccessFilled, type: 'success', route: { name: 'SiteList' } },
+  { key: 'survey', title: t('dashboard.siteOverview.cards.survey.title'), value: `${val('survey_done')}/${total.value}`, desc: t('dashboard.siteOverview.cards.survey.desc'), icon: Tickets, type: 'info', route: { name: 'SurveyArchives' } },
+  { key: 'planning', title: t('dashboard.siteOverview.cards.planning.title'), value: `${val('planning_done')}/${total.value}`, desc: t('dashboard.siteOverview.cards.planning.desc'), icon: Finished, type: 'primary', route: { name: 'SitePlanningLld' } },
+  { key: 'install_started', title: t('dashboard.siteOverview.cards.installStarted.title'), value: `${val('install_started')}/${total.value}`, desc: t('dashboard.siteOverview.cards.installStarted.desc'), icon: OfficeBuilding, type: 'install-start', route: { name: 'WorkOrderList' } },
+  { key: 'installed', title: t('dashboard.siteOverview.cards.installed.title'), value: `${val('installed')}/${total.value}`, desc: t('dashboard.siteOverview.cards.installed.desc'), icon: OfficeBuilding, type: 'install', route: { name: 'WorkOrderList', query: { preset: 'installed_sites' } } },
+  { key: 'online', title: t('dashboard.siteOverview.cards.online.title'), value: `${val('online')}/${total.value}`, desc: t('dashboard.siteOverview.cards.online.desc'), icon: Promotion, type: 'success', route: { name: 'SiteList' } },
+  { key: 'activated', title: t('dashboard.siteOverview.cards.activated.title'), value: `${val('activated')}/${total.value}`, desc: t('dashboard.siteOverview.cards.activated.desc'), icon: MagicStick, type: 'warning', route: { name: 'SiteList' } },
+  { key: 'ssv', title: t('dashboard.siteOverview.cards.ssv.title'), value: `${val('ssv_passed')}/${total.value}`, desc: t('dashboard.siteOverview.cards.ssv.desc'), icon: SuccessFilled, type: 'success', route: { name: 'SiteList' } },
 ])
 
 const onClick = (route) => emit('goto', route)

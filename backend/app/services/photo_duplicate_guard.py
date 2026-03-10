@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.inspection import GlobalPhotoHashRegistry
+from app.models.inspection import GlobalPhotoHashRegistry, InspectionPhoto
 from app.utils.timezone import to_utc_iso
 
 
@@ -24,16 +24,67 @@ def normalize_content_hash(content_hash: Optional[str]) -> str:
     return str(content_hash or "").strip().lower()
 
 
+def _normalize_source_type(source_type: Optional[str]) -> str:
+    return str(source_type or "").strip()
+
+
+def _normalize_source_id(source_id: Optional[str]) -> str:
+    return str(source_id or "").strip()
+
+
+def _source_exists(db: Session, record: GlobalPhotoHashRegistry) -> bool:
+    source_type = _normalize_source_type(record.source_type)
+    source_id = _normalize_source_id(record.source_id)
+    if not source_id:
+        return False
+    # 目前只对工单巡检照片做“来源是否仍存在”的强校验，避免误清理档案临时上传来源。
+    if source_type != "inspection_photo":
+        return True
+    return (
+        db.query(InspectionPhoto.id)
+        .filter(InspectionPhoto.id == source_id)
+        .first()
+        is not None
+    )
+
+
+def delete_registry_records_by_source(
+    db: Session,
+    *,
+    source_type: str,
+    source_ids: Iterable[str],
+) -> int:
+    normalized_type = _normalize_source_type(source_type)
+    normalized_ids = [_normalize_source_id(item) for item in source_ids]
+    normalized_ids = [item for item in normalized_ids if item]
+    if not normalized_type or not normalized_ids:
+        return 0
+    return (
+        db.query(GlobalPhotoHashRegistry)
+        .filter(
+            GlobalPhotoHashRegistry.source_type == normalized_type,
+            GlobalPhotoHashRegistry.source_id.in_(normalized_ids),
+        )
+        .delete(synchronize_session=False)
+    )
+
+
 def get_first_upload_record(db: Session, content_hash: Optional[str]) -> Optional[GlobalPhotoHashRegistry]:
     normalized_hash = normalize_content_hash(content_hash)
     if not normalized_hash:
         return None
-    return (
+    records = (
         db.query(GlobalPhotoHashRegistry)
         .filter(GlobalPhotoHashRegistry.content_hash == normalized_hash)
         .order_by(GlobalPhotoHashRegistry.id.asc())
-        .first()
+        .all()
     )
+    for record in records:
+        if not _source_exists(db, record):
+            db.delete(record)
+            continue
+        return record
+    return None
 
 
 def _build_duplicate_site_display(site_name: Optional[str], site_id: Optional[int]) -> str:
@@ -105,18 +156,36 @@ def detect_duplicate_detail(
     exclude_source_type: Optional[str] = None,
     exclude_source_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    record = get_first_upload_record(db, content_hash)
-    if not record:
+    normalized_hash = normalize_content_hash(content_hash)
+    if not normalized_hash:
         return None
-    if exclude_source_id is not None:
-        record_source_id = str(record.source_id or "").strip()
-        current_source_id = str(exclude_source_id or "").strip()
-        source_type_match = True
-        if exclude_source_type is not None:
-            source_type_match = str(record.source_type or "").strip() == str(exclude_source_type or "").strip()
-        if source_type_match and record_source_id and record_source_id == current_source_id:
-            return None
-    return build_duplicate_detail(record, block_upload=block_upload)
+    records = (
+        db.query(GlobalPhotoHashRegistry)
+        .filter(GlobalPhotoHashRegistry.content_hash == normalized_hash)
+        .order_by(GlobalPhotoHashRegistry.id.asc())
+        .all()
+    )
+    if not records:
+        return None
+
+    exclude_type = _normalize_source_type(exclude_source_type)
+    exclude_id = _normalize_source_id(exclude_source_id)
+
+    for record in records:
+        if not _source_exists(db, record):
+            db.delete(record)
+            continue
+
+        if exclude_id:
+            record_source_id = _normalize_source_id(record.source_id)
+            source_type_match = True
+            if exclude_type:
+                source_type_match = _normalize_source_type(record.source_type) == exclude_type
+            if source_type_match and record_source_id and record_source_id == exclude_id:
+                return None
+        return build_duplicate_detail(record, block_upload=block_upload)
+
+    return None
 
 
 def register_first_upload_record(
