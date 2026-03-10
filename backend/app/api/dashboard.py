@@ -201,14 +201,18 @@ async def get_dashboard_summary(
     site_status = {str(s or "unknown"): int(c) for s, c in site_rows}
 
     # 安装开始站点统计（按“首次开始绑定设备SN”口径）：
-    # 只要站点出现过 bind/rebind 记录即记为已开始，按站点去重统计。
+    # 仅统计仍关联“有效开站工单”的绑定记录，保证工单删除后可回退。
+    install_started_filter = (
+        EquipmentBindingHistory.site_id.isnot(None),
+        EquipmentBindingHistory.action.in_([BindingActionEnum.BIND, BindingActionEnum.REBIND]),
+        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+    )
     install_started_site_count = int(
         db.query(func.count(func.distinct(EquipmentBindingHistory.site_id)))
-        .filter(
-            EquipmentBindingHistory.action.in_(
-                [BindingActionEnum.BIND, BindingActionEnum.REBIND]
-            )
-        )
+        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
+        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
+        .filter(*install_started_filter)
         .scalar()
         or 0
     )
@@ -343,15 +347,20 @@ async def get_site_progress_trend(
         WorkOrder.status != WorkOrderStatusEnum.VOIDED,
     )
 
+    install_started_filter = (
+        EquipmentBindingHistory.site_id.isnot(None),
+        EquipmentBindingHistory.action.in_([BindingActionEnum.BIND, BindingActionEnum.REBIND]),
+        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+    )
     install_started_rows = (
         db.query(
             EquipmentBindingHistory.site_id,
             func.min(EquipmentBindingHistory.operated_at).label("event_at"),
         )
-        .filter(
-            EquipmentBindingHistory.site_id.isnot(None),
-            EquipmentBindingHistory.action.in_([BindingActionEnum.BIND, BindingActionEnum.REBIND]),
-        )
+        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
+        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
+        .filter(*install_started_filter)
         .group_by(EquipmentBindingHistory.site_id)
         .all()
     )

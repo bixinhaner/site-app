@@ -32,6 +32,7 @@ from app.models.survey_archive import SiteSurveyArchive
 from app.models.opening_archive import SiteOpeningArchive
 from app.models.ssv_archive import SiteSSVArchive
 from app.models.equipment import StockTransaction, PickupRecord
+from app.models.equipment_binding_history import EquipmentBindingHistory
 from app.schemas.work_order import (
     WorkOrderCreate,
     WorkOrderUpdate,
@@ -556,6 +557,14 @@ def _detach_stock_records_from_work_order(db: Session, wo: WorkOrder) -> None:
     pickup_records = db.query(PickupRecord).filter(PickupRecord.work_order_id == wo.id).all()
     for pr in pickup_records:
         pr.work_order_id = f"MANUAL-{pr.picker_id}"
+
+
+def _delete_binding_history_by_inspection_ids(db: Session, inspection_ids: List[str]) -> None:
+    if not inspection_ids:
+        return
+    db.query(EquipmentBindingHistory).filter(
+        EquipmentBindingHistory.inspection_id.in_(inspection_ids)
+    ).delete(synchronize_session=False)
 
 
 def _touch_inspection_item_and_clear_review(item: InspectionCheckItem, now: datetime) -> bool:
@@ -1469,6 +1478,8 @@ async def delete_work_order(
                     source_type="inspection_photo",
                     source_ids=photo_ids_to_delete,
                 )
+            # 删除检查记录时同步清理绑定历史，避免仪表盘统计保留“已删除工单”的残留数据
+            _delete_binding_history_by_inspection_ids(db, inspection_ids_to_delete)
 
         # 删除/解绑与工单相关的勘察草稿（SiteSurvey）
         surveys = db.query(SiteSurvey).filter(SiteSurvey.work_order_id == wo.id).all()
@@ -3440,6 +3451,8 @@ async def batch_work_order_operation(
                             source_type="inspection_photo",
                             source_ids=photo_ids_to_delete,
                         )
+                    # 删除检查记录时同步清理绑定历史，避免仪表盘统计保留“已删除工单”的残留数据
+                    _delete_binding_history_by_inspection_ids(db, inspection_ids_to_delete)
 
                 if inspections_to_delete:
                     for insp in inspections_to_delete:

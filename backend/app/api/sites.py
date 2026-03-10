@@ -1339,9 +1339,13 @@ async def get_site_milestones(
 
     install_started_at = (
         db.query(func.min(EquipmentBindingHistory.operated_at))
+        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
+        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
         .filter(
             EquipmentBindingHistory.site_id == site_id,
             EquipmentBindingHistory.action.in_([BindingActionEnum.BIND, BindingActionEnum.REBIND]),
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
         )
         .scalar()
     )
