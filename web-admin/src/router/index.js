@@ -138,6 +138,7 @@ const routes = [
         meta: { title: '站点管理', icon: 'Location' },
         children: [
           { path: 'list', name: 'SiteList', component: () => import('../views/site/SiteList.vue'), meta: { title: '站点列表', icon: 'Location' } },
+          { path: 'map', name: 'SiteMap', component: () => import('../views/site/SiteMap.vue'), meta: { title: '站点地图', icon: 'MapLocation' } },
           { path: 'planning-lld-global', name: 'SitePlanningLldGlobal', component: () => import('../views/site/SitePlanningLldGlobal.vue'), meta: { title: 'LLD 规划总览', icon: 'DataAnalysis', roles: ['admin', 'manager', 'planner'] } },
           { path: 'detail/:id', name: 'SiteDetail', component: () => import('../views/site/SiteDetail.vue'), meta: { title: '站点详情', hidden: true } },
           { path: 'survey-stage-batch', name: 'SiteSurveyStageBatch', component: () => import('../views/site/SiteSurveyStageBatch.vue'), meta: { title: '勘察阶段批量设置', hidden: true, roles: ['admin', 'manager'] } },
@@ -312,6 +313,7 @@ const ROUTE_PERMISSION_MAP = {
   EquipmentInstances: ['inventory:stock:read'],
   EquipmentLifecycle: ['inventory:history:read'],
   SiteList: ['sites:list:read'],
+  SiteMap: ['sites:list:read'],
   SitePlanningLldGlobal: ['sites:lld:read'],
   SiteDetail: ['sites:detail:read'],
   SiteSurveyStageBatch: ['sites:survey-stage:write'],
