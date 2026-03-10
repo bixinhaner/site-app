@@ -881,6 +881,30 @@ const updateFieldValue = (fieldId, value) => {
   }
 }
 
+const extractApiErrorMessage = (error, fallback = '操作失败') => {
+  const detail = error?.response?.data?.detail
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (!item) return ''
+        if (typeof item === 'string') return item
+        const path = Array.isArray(item.loc) ? item.loc.join('.') : ''
+        const message = item.msg || item.message || ''
+        if (path && message) return `${path}: ${message}`
+        return message || path
+      })
+      .filter(Boolean)
+    if (parts.length) return parts.join('；')
+  }
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (detail && typeof detail === 'object') {
+    const objectMessage = detail.message || detail.error || detail.detail
+    if (typeof objectMessage === 'string' && objectMessage.trim()) return objectMessage
+  }
+  if (typeof error?.message === 'string' && error.message.trim()) return error.message
+  return fallback
+}
+
 const saveSelectedItem = async (targetStatus) => {
   if (!selectedItem.value || !inspection.value?.inspection_id) return
   itemSaving.value = targetStatus
@@ -899,7 +923,7 @@ const saveSelectedItem = async (targetStatus) => {
     await loadPage()
   } catch (error) {
     console.error(error)
-    ElMessage.error(error.response?.data?.detail || '保存检查项失败')
+    ElMessage.error(extractApiErrorMessage(error, '保存检查项失败'))
   } finally {
     itemSaving.value = ''
   }

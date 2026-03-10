@@ -68,7 +68,9 @@ export const serializeDataValue = (fields = [], fieldValues = {}) => {
   const unionKeys = [...new Set([...fieldIds, ...Object.keys(fieldValues || {})])]
   return unionKeys.map((fieldId) => ({
     field_name: fieldId,
-    value: fieldValues[fieldId],
+    // 后端更新模型要求每个 data_value 项必须包含 value 字段；
+    // undefined 会在 JSON 序列化时被移除并触发 422，因此显式转为 null。
+    value: fieldValues[fieldId] === undefined ? null : fieldValues[fieldId],
   }))
 }
 
