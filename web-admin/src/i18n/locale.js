@@ -1,5 +1,5 @@
 export const DEFAULT_LOCALE = 'zh-CN'
-export const SUPPORTED_LOCALES = ['zh-CN', 'en-US']
+export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'id-ID']
 export const LOCALE_STORAGE_KEY = 'siteapp.webadmin.locale'
 
 const hasWindow = typeof window !== 'undefined'
@@ -8,6 +8,7 @@ export const normalizeLocale = (input) => {
   const value = String(input || '').toLowerCase()
   if (!value) return DEFAULT_LOCALE
   if (value.startsWith('en')) return 'en-US'
+  if (value.startsWith('id') || value.startsWith('in')) return 'id-ID'
   if (value.startsWith('zh')) return 'zh-CN'
   return DEFAULT_LOCALE
 }

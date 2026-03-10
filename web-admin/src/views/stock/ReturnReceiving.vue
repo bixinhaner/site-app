@@ -860,7 +860,8 @@ onMounted(async () => {
   margin-bottom: 8px;
 }
 
-html[lang='en-US'] .return-op-actions :deep(.el-button) {
+html[lang='en-US'] .return-op-actions :deep(.el-button),
+html[lang='id-ID'] .return-op-actions :deep(.el-button) {
   min-width: 132px;
   justify-content: center;
 }

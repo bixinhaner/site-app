@@ -441,7 +441,7 @@ const loading = ref(false)
 const site = ref(null)
 const userStore = useUserStore()
 const userOptions = ref([])
-const dateLocale = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
+const dateLocale = computed(() => (locale.value === 'zh-CN' ? 'zh-CN' : locale.value))
 const placeholderText = computed(() => t('siteDetail.basic.placeholder'))
 const canManageSite = computed(() => userStore.hasPermission('sites:update:write'))
 const canSkipSurvey = computed(() =>

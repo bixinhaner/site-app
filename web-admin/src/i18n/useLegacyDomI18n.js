@@ -1,6 +1,6 @@
 import { nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { containsCJK, isEnglishLocale, translateLegacyText } from './translator'
+import { containsCJK, isLegacyLocale, translateLegacyText } from './translator'
 
 const ATTR_NAMES = ['placeholder', 'title', 'aria-label', 'alt']
 const TEXT_BLACKLIST = new Set(['SCRIPT', 'STYLE'])
@@ -9,7 +9,7 @@ const toDatasetKey = (attr, prefix = 'i18nOrig') => `${prefix}${attr.replace(/-(
 const toOriginalDatasetKey = (attr) => toDatasetKey(attr, 'i18nOrig')
 const toTranslatedDatasetKey = (attr) => toDatasetKey(attr, 'i18nTranslated')
 
-const translateElementAttributes = (element, english) => {
+const translateElementAttributes = (element, legacyMode) => {
   if (!(element instanceof HTMLElement)) return
 
   for (const attr of ATTR_NAMES) {
@@ -27,7 +27,7 @@ const translateElementAttributes = (element, english) => {
       continue
     }
 
-    if (!english) {
+    if (!legacyMode) {
       if (currentHasCJK) {
         element.dataset[originalKey] = currentValue
         delete element.dataset[translatedKey]
@@ -93,7 +93,7 @@ const translateElementAttributes = (element, english) => {
   }
 }
 
-const translateTextNode = (node, english) => {
+const translateTextNode = (node, legacyMode) => {
   const parentTag = node.parentElement?.tagName
   if (parentTag && TEXT_BLACKLIST.has(parentTag)) return
 
@@ -105,7 +105,7 @@ const translateTextNode = (node, english) => {
   const originalHasCJK = containsCJK(originalText)
   if (!currentHasCJK && !originalHasCJK) return
 
-  if (!english) {
+  if (!legacyMode) {
     if (currentHasCJK) {
       node.__i18nOriginalText = currentText
       node.__i18nTranslatedText = ''
@@ -160,21 +160,21 @@ const translateTextNode = (node, english) => {
     node.__i18nTranslatedText = ''
   }
 }
-const applyTranslation = (root, english) => {
+const applyTranslation = (root, legacyMode) => {
   if (!root) return
 
   if (root instanceof HTMLElement) {
-    translateElementAttributes(root, english)
+    translateElementAttributes(root, legacyMode)
     const elements = root.querySelectorAll('*')
     for (const element of elements) {
-      translateElementAttributes(element, english)
+      translateElementAttributes(element, legacyMode)
     }
   }
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   let textNode = walker.nextNode()
   while (textNode) {
-    translateTextNode(textNode, english)
+    translateTextNode(textNode, legacyMode)
     textNode = walker.nextNode()
   }
 }
@@ -188,7 +188,7 @@ export const useLegacyDomI18n = (getRoot = () => document.body) => {
   const run = () => {
     const root = getRoot()
     if (!root) return
-    applyTranslation(root, isEnglishLocale())
+    applyTranslation(root, isLegacyLocale())
   }
 
   const schedule = () => {

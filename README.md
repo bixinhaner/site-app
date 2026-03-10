@@ -100,11 +100,12 @@ npm install
 npm run dev                    # 默认运行在 5173 端口
 npm run build                  # 生产构建
 ```
-- **中英文切换（2026-03）**：
+- **多语言切换（2026-03）**：
 - 登录页右上角提供语言切换器；进入后台后，语言切换器在顶部导航栏（用户信息左侧）。
-- 语言菜单固定英文文案：`Language / Chinese / English`。
-- 默认语言优先级：用户上次选择 > 浏览器语言（`en*` 自动英文，其它默认中文）。
+- 语言菜单支持三种语言：`中文 / English / Bahasa Indonesia`。
+- 默认语言优先级：用户上次选择 > 浏览器语言（`en*` 自动英文、`id* / in*` 自动印尼语，其它默认中文）。
 - 切换后即时生效，并持久化到浏览器本地存储。
+- 为兼容历史页面中的中文硬编码，遗留文案桥接层已支持英文和印尼语两种目标语言（含执行工单及关联页面）。
 - **站点模块国际化补齐（2026-03）**：
 - 已补齐“仪表盘-站点概况”“仪表盘-站点事件趋势”“站点地图”以及路由 `SiteMap` 的中英文词条；切换英文后不再出现中英混杂（包括站点趋势图例、站点地图页面标题/筛选项/按钮/图例/提示文案）。
 - **站点地图图例标签修复（2026-03-10）**：
@@ -524,14 +525,14 @@ const config = {
 - **CORS 配置**: 允许所有来源访问（开发环境）
 - **移动端访问**: 需要使用局域网 IP 地址
 
-## 🌐 WebAdmin 国际化说明（中文/英文）
+## 🌐 WebAdmin 国际化说明（中文/英文/印尼语）
 
 ### 已实现范围
-- `web-admin` 已接入 `vue-i18n`，支持 `zh-CN` 和 `en-US`。
+- `web-admin` 已接入 `vue-i18n`，支持 `zh-CN`、`en-US`、`id-ID`。
 - 登录页、主框架（顶部标题、菜单、面包屑、路由标题、退出提示）已按 i18n key 驱动。
 - Element Plus 组件内置文案（分页、日期等）会跟随语言切换。
-- 为了兼容历史页面中大量中文硬编码，增加了遗留文案桥接层：切换英文时会自动把页面中的中文文本、placeholder、title 等映射为英文。
-- 为运行时动态文案（含变量拼接）增加了“动态句式翻译规则”，避免英文模式下出现 `确定要删除 XXX 吗` 这类残留中文。
+- 为了兼容历史页面中大量中文硬编码，增加了遗留文案桥接层：切换英文/印尼语时会自动把页面中的中文文本、placeholder、title 等映射到对应语言。
+- 为运行时动态文案（含变量拼接）增加了“动态句式翻译规则”，避免英文/印尼语模式下出现 `确定要删除 XXX 吗` 这类残留中文。
 - 对高频英文文案增加人工校准规则（删除确认、批量提示、导出文件名、状态提示），避免机器翻译生硬。
 - 英文 UI 协调性专项优化（2026-03）：统一 `Actions/Direction/Document` 等关键列名与短语；收敛操作列按钮布局；修复侧栏英文菜单在窄屏下过度省略；优化标签与表格单元格英文换行策略，避免单词被拆字母换行。
 - 英文窄屏可用性专项优化（2026-03-03）：`MaterialRequests/IssueDrafts/ReturnReceiving/StockHistory` 筛选栏改为响应式断点布局，移动端自动分行；列表页增加紧凑列模式（窄屏隐藏次要列）；移动端侧栏默认折叠，避免首屏被菜单覆盖。
@@ -542,14 +543,22 @@ const config = {
 - `web-admin/src/i18n/index.js`：i18n 初始化与消息注册。
 - `web-admin/src/i18n/messages/zh-CN.js`：中文主词条。
 - `web-admin/src/i18n/messages/en-US.js`：英文主词条。
+- `web-admin/src/i18n/messages/id-ID.js`：印尼语主词条。
 - `web-admin/src/i18n/translator.js`：语言切换、路由标题解析、遗留词库懒加载。
 - `web-admin/src/i18n/useLegacyDomI18n.js`：遗留中文 DOM 自动翻译桥接。
 - `web-admin/src/i18n/legacy-en-map.js`：中文短语 -> 英文映射词库（自动生成）。
+- `web-admin/src/i18n/legacy-id-map.js`：中文短语 -> 印尼语映射词库（自动生成）。
 - `web-admin/src/i18n/legacy-dynamic-patterns.js`：动态句式自动翻译规则（自动生成）。
+- `web-admin/src/i18n/legacy-dynamic-patterns-id.js`：印尼语动态句式翻译规则（自动生成）。
 - `web-admin/src/i18n/legacy-dynamic-overrides.js`：人工校准规则（优先级高于自动规则）。
 - `web-admin/src/components/common/LocaleSwitcher.vue`：语言切换组件（登录页右上角 + 后台顶部导航复用）。
 - `temp/generate_webadmin_legacy_i18n_map.mjs`：词库生成脚本（从现有代码提取中文并自动翻译）。
 - `temp/generate_webadmin_dynamic_i18n_patterns.mjs`：动态句式规则生成脚本（提取模板字符串并生成正则翻译规则）。
+- `temp/refresh_webadmin_legacy_en_map.mjs`：基于现有词库做增量补齐（只翻译新增中文词条）。
+- `temp/refresh_webadmin_dynamic_patterns_en.mjs`：基于现有动态规则做增量补齐（只翻译新增模板句式）。
+- `temp/generate_webadmin_id_messages.mjs`：从英文词条生成印尼语主词条。
+- `temp/generate_webadmin_legacy_id_from_en_map.mjs`：从英文 legacy 词库生成印尼语 legacy 词库。
+- `temp/generate_webadmin_dynamic_patterns_id_from_en.mjs`：从英文动态句式规则生成印尼语动态句式规则。
 - `temp/scan_visible_cjk_routes.sh`：英文模式可见中文巡检（用于定位漏翻译）。
 - `temp/scan_horizontal_overflow_routes.sh`：英文模式水平截断巡检（分别支持 desktop/mobile）。
 - `temp/scan_en_ui_harmony.sh`：英文 UI 协调性巡检（词内断行 + ellipsis 裁剪）。
@@ -557,12 +566,17 @@ const config = {
 - `temp/scan_bad_en_terms.sh`：英文坏味道术语巡检（如 `operate`、`Documents/documents`、`to confirm`）。
 
 ### 新增/修改文案时怎么做
-1. 新功能文案优先写到 `messages/zh-CN.js` 与 `messages/en-US.js`，页面里使用 `$t('...')`。
-2. 历史页面若仍有中文硬编码，可先保持不动，桥接层会在英文模式下自动翻译。
+1. 新功能文案优先写到 `messages/zh-CN.js`、`messages/en-US.js`、`messages/id-ID.js`，页面里使用 `$t('...')`。
+2. 历史页面若仍有中文硬编码，可先保持不动，桥接层会在英文/印尼语模式下自动翻译。
 3. 当历史中文变更多、翻译命中下降时，执行：
 ```bash
 node temp/generate_webadmin_legacy_i18n_map.mjs
 node temp/generate_webadmin_dynamic_i18n_patterns.mjs
+node temp/refresh_webadmin_legacy_en_map.mjs
+node temp/refresh_webadmin_dynamic_patterns_en.mjs
+node temp/generate_webadmin_id_messages.mjs
+node temp/generate_webadmin_legacy_id_from_en_map.mjs
+node temp/generate_webadmin_dynamic_patterns_id_from_en.mjs
 ```
 4. 重新构建验证：
 ```bash

@@ -143,7 +143,8 @@ body {
 }
 
 // English locale readability and overflow improvements.
-html[lang='en-US'] {
+html[lang='en-US'],
+html[lang='id-ID'] {
   .el-table {
     .cell {
       white-space: normal !important;
@@ -250,7 +251,8 @@ html[lang='en-US'] {
 
 // 响应式设计
 @media (max-width: 768px) {
-  html[lang='en-US'] {
+  html[lang='en-US'],
+  html[lang='id-ID'] {
     .el-dialog {
       width: calc(100vw - 20px) !important;
       margin-top: 5vh !important;

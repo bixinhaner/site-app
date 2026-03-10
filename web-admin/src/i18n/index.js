@@ -1,6 +1,7 @@
 import { createI18n } from 'vue-i18n'
 import zhCN from './messages/zh-CN'
 import enUS from './messages/en-US'
+import idID from './messages/id-ID'
 import { DEFAULT_LOCALE, getInitialLocale } from './locale'
 
 const i18n = createI18n({
@@ -11,6 +12,7 @@ const i18n = createI18n({
   messages: {
     'zh-CN': zhCN,
     'en-US': enUS,
+    'id-ID': idID,
   },
   fallbackWarn: false,
   missingWarn: false,

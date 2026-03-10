@@ -321,7 +321,7 @@ const formatArea = (site) => {
   return parts.length ? parts.join('/') : t('siteMap.popup.regionUnset')
 }
 
-const sortLocale = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-Hans-CN'))
+const sortLocale = computed(() => (locale.value === 'zh-CN' ? 'zh-Hans-CN' : locale.value))
 
 const statusOptions = computed(() => Object.keys(STATUS_META).map((status) => ({
   value: status,

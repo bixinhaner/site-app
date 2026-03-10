@@ -147,7 +147,7 @@ const syncSidebarByViewport = () => {
 const displayUserName = computed(() => {
   const fullName = userStore.user?.full_name
   const username = userStore.user?.username
-  if (locale.value === 'en-US' && fullName && containsCJK(fullName) && username) {
+  if (locale.value !== 'zh-CN' && fullName && containsCJK(fullName) && username) {
     return username
   }
   return fullName || username || t('common.userFallback')
@@ -436,7 +436,8 @@ onBeforeUnmount(() => {
   }
 }
 
-html[lang='en-US'] {
+html[lang='en-US'],
+html[lang='id-ID'] {
   .layout-sidebar {
     .sidebar-menu {
       .el-menu-item {
