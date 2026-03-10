@@ -1,16 +1,16 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>站点信息导入</h1>
+      <h1>站点信息维护</h1>
       <div class="header-actions">
         <el-button @click="goBack"><el-icon><Back /></el-icon>返回</el-button>
-        <el-button v-if="canEdit" type="info" @click="gotoHistory"><el-icon><Document /></el-icon>导入历史</el-button>
+        <el-button v-if="canAnyBatch" type="info" @click="gotoHistory"><el-icon><Document /></el-icon>导入历史</el-button>
       </div>
     </div>
 
     <el-card class="mb16">
       <el-tabs v-model="mode" type="card">
-        <el-tab-pane label="单个信息" name="single">
+        <el-tab-pane v-if="canCreate" label="单个信息" name="single">
           <div class="form-grid">
             <el-form :model="form" :rules="rules" ref="formRef" label-width="110px" status-icon>
               <el-form-item label="站点编码" prop="site_code">
@@ -61,17 +61,36 @@
             </el-form>
           </div>
         </el-tab-pane>
-        <el-tab-pane label="批量导入" name="batch">
+        <el-tab-pane v-if="canCreate" label="批量导入（新建）" name="batchImport">
           <div class="import-row">
             <el-button @click="downloadTemplate"><el-icon><Download /></el-icon>下载模板</el-button>
-            <template v-if="canEdit">
-              <el-switch v-model="dryRun" active-text="试运行(dry run)" />
-              <el-upload :show-file-list="false" :before-upload="() => true" :http-request="onUpload">
-                <el-button type="success"><el-icon><Upload /></el-icon>{{ dryRun ? '试运行导入' : '导入并创建' }}</el-button>
+            <template v-if="canCreate">
+              <el-switch v-model="dryRunImport" active-text="试运行(dry run)" />
+              <el-upload :show-file-list="false" :before-upload="() => true" :http-request="onImportUpload">
+                <el-button type="success"><el-icon><Upload /></el-icon>{{ dryRunImport ? '试运行导入' : '导入并创建' }}</el-button>
               </el-upload>
             </template>
             <span v-if="summaryText" class="import-info">{{ summaryText }}</span>
             <el-tag v-if="batchId" type="info">批次ID: {{ batchId }}</el-tag>
+          </div>
+          <div class="tips">
+            说明：该模式用于“新增站点”，若编码已存在会报错，不会覆盖原数据。
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane v-if="canUpdate" label="批量更新（Excel回写）" name="batchUpdate">
+          <div class="import-row">
+            <el-button @click="goSiteListExport"><el-icon><View /></el-icon>去站点列表导出数据</el-button>
+            <el-button @click="downloadUpdateTemplate"><el-icon><Download /></el-icon>下载更新模板</el-button>
+            <el-switch v-model="dryRunUpdate" active-text="试运行(dry run)" />
+            <el-upload :show-file-list="false" :before-upload="() => true" :http-request="onUpdateUpload">
+              <el-button type="warning"><el-icon><Upload /></el-icon>{{ dryRunUpdate ? '试运行更新' : '执行更新' }}</el-button>
+            </el-upload>
+            <span v-if="summaryText" class="import-info">{{ summaryText }}</span>
+            <el-tag v-if="batchId" type="info">批次ID: {{ batchId }}</el-tag>
+          </div>
+          <div class="tips">
+            推荐流程：先在站点列表按筛选条件导出 Excel，编辑后回传；支持按 site_id 或 site_code 定位站点，先试运行再正式执行。
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -110,25 +129,49 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, reactive, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import siteBasicApi from '../../api/siteBasic'
 import { useUserStore } from '../../stores/user'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const loading = ref(false)
 const saving = ref(false)
-const mode = ref('single')
-const dryRun = ref(true)
+const canCreate = computed(() => userStore.hasPermission('sites:create:write'))
+const canUpdate = computed(() => userStore.hasPermission('sites:update:write'))
+const canAnyBatch = computed(() => canCreate.value || canUpdate.value)
+const mode = ref(canCreate.value ? 'single' : (canUpdate.value ? 'batchUpdate' : 'single'))
+const dryRunImport = ref(true)
+const dryRunUpdate = ref(true)
 const results = ref([])
 const batchId = ref('')
 const summaryText = ref('')
-const canEdit = computed(() => userStore.hasPermission('sites:create:write'))
 
 const goBack = () => router.back()
 const gotoHistory = () => router.push({ name: 'SiteBasicImportHistory' })
+const goSiteListExport = () => router.push({ name: 'SiteList' })
+
+const applyModeFromQuery = () => {
+  const availableModes = []
+  if (canCreate.value) {
+    availableModes.push('single')
+    availableModes.push('batchImport')
+  }
+  if (canUpdate.value) {
+    availableModes.push('batchUpdate')
+  }
+  const queryMode = String(route.query.mode || '').trim()
+  if (queryMode && availableModes.includes(queryMode)) {
+    mode.value = queryMode
+    return
+  }
+  if (!availableModes.includes(mode.value)) {
+    mode.value = availableModes[0] || 'single'
+  }
+}
 
 const downloadTemplate = async () => {
   try {
@@ -147,18 +190,56 @@ const downloadTemplate = async () => {
   }
 }
 
-const onUpload = async (opts) => {
+const downloadUpdateTemplate = async () => {
+  try {
+    const res = await siteBasicApi.downloadUpdateTemplate()
+    const blob = new Blob([res])
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'site_basic_update_template.xlsx'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    ElMessage.error('下载更新模板失败')
+  }
+}
+
+const applyUploadResult = (res) => {
+  results.value = res.results || []
+  batchId.value = res.batch_id || ''
+  summaryText.value = `共 ${res.total_rows} 行，成功 ${res.success_count} 行，失败 ${res.failed_count} 行`
+}
+
+const onImportUpload = async (opts) => {
   try {
     loading.value = true
     summaryText.value = '正在解析...'
     batchId.value = ''
-    const res = await siteBasicApi.batchUpload(opts.file, dryRun.value)
-    results.value = res.results || []
-    batchId.value = res.batch_id || ''
-    summaryText.value = `共 ${res.total_rows} 行，成功 ${res.success_count} 行，失败 ${res.failed_count} 行`
+    const res = await siteBasicApi.batchUpload(opts.file, dryRunImport.value)
+    applyUploadResult(res)
     opts.onSuccess(res)
   } catch (e) {
     const msg = e?.response?.data?.detail || '导入失败'
+    summaryText.value = msg
+    opts.onError(e)
+  } finally {
+    loading.value = false
+  }
+}
+
+const onUpdateUpload = async (opts) => {
+  try {
+    loading.value = true
+    summaryText.value = '正在解析...'
+    batchId.value = ''
+    const res = await siteBasicApi.batchUpdateUpload(opts.file, dryRunUpdate.value)
+    applyUploadResult(res)
+    opts.onSuccess(res)
+  } catch (e) {
+    const msg = e?.response?.data?.detail || '更新失败'
     summaryText.value = msg
     opts.onError(e)
   } finally {
@@ -194,7 +275,7 @@ const resetForm = () => {
   })
 }
 const saveSingle = async () => {
-  if (!canEdit.value) {
+  if (!canCreate.value) {
     ElMessage.warning('无权限')
     return
   }
@@ -213,6 +294,10 @@ const saveSingle = async () => {
     saving.value = false
   }
 }
+
+onMounted(() => {
+  applyModeFromQuery()
+})
 </script>
 
 <style scoped>
@@ -222,6 +307,7 @@ const saveSingle = async () => {
 .mb16 { margin-bottom: 16px; }
 .import-row { display:flex; align-items:center; gap: 12px; }
 .import-info { color: #666; }
+.tips { margin-top: 10px; color: #666; }
 .form-grid { max-width: 760px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
 .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; width: 100%; }

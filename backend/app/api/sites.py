@@ -15,6 +15,9 @@ from app.schemas.site import (
     SiteCreate,
     SiteUpdate,
     SiteResponse,
+    SiteBatchUpdateRequest,
+    SiteBatchUpdateReport,
+    SiteBatchUpdateRowResult,
     BasicBatchImportReport,
     BasicImportRowResult,
     BasicImportHistoryItem,
@@ -46,6 +49,7 @@ from app.services.omc_monitor import (
     advance_opening_work_orders_by_ever,
     advance_replacement_work_orders_by_ever,
 )
+from sqlalchemy.exc import SQLAlchemyError
 
 router = APIRouter()
 
@@ -788,6 +792,322 @@ async def download_basic_template():
     return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers=headers)
 
 
+@router.get("/basic/batch-update-template")
+async def download_basic_update_template():
+    """下载基础信息批量更新模板（支持从站点导出表回写）。"""
+    sites_df = pd.DataFrame([
+        {
+            "site_id": 1,
+            "site_code": "SITE001",
+            "site_name": "样例站点A-更新",
+            "site_type": "macro",
+            "province": "北京",
+            "city": "北京",
+            "district": "朝阳区",
+            "address": "某路100号",
+            "latitude": 39.901,
+            "longitude": 116.301,
+            "priority": "normal",
+            "contact_person": "李四",
+            "contact_phone": "13811112222",
+            "description": "更新备注示例",
+        }
+    ])
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        sites_df.to_excel(writer, sheet_name="Sites", index=False)
+    output.seek(0)
+    headers = {"Content-Disposition": "attachment; filename=site_basic_update_template.xlsx"}
+    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers=headers)
+
+
+def _is_excel_blank(value) -> bool:
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except Exception:
+        pass
+    return isinstance(value, str) and not value.strip()
+
+
+def _to_optional_str(value) -> Optional[str]:
+    if _is_excel_blank(value):
+        return None
+    return str(value).strip()
+
+
+def _same_site_field_value(old_value, new_value) -> bool:
+    if old_value is None and new_value is None:
+        return True
+    if isinstance(old_value, (int, float)) and isinstance(new_value, (int, float)):
+        return abs(float(old_value) - float(new_value)) < 1e-9
+    return old_value == new_value
+
+
+@router.post("/basic/batch-update-upload", response_model=BasicBatchImportReport)
+async def basic_batch_update_upload(
+    file: UploadFile = File(...),
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量更新站点基础信息（支持 dry-run）。"""
+    _ensure_site_manage_access(current_user)
+
+    content = await file.read()
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 Excel(.xlsx/.xls)")
+
+    excel = pd.ExcelFile(io.BytesIO(content))
+    if "Sites" not in excel.sheet_names:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少工作表: Sites")
+
+    df = excel.parse("Sites")
+    df.columns = [str(col).strip() for col in df.columns]
+
+    has_site_id_col = "site_id" in df.columns
+    has_site_code_col = "site_code" in df.columns
+    if not has_site_id_col and not has_site_code_col:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少标识列: site_id 或 site_code")
+
+    editable_columns = [
+        "site_name",
+        "site_type",
+        "province",
+        "city",
+        "district",
+        "address",
+        "latitude",
+        "longitude",
+        "priority",
+        "contact_person",
+        "contact_phone",
+        "description",
+    ]
+    effective_editable_columns = [c for c in editable_columns if c in df.columns]
+    if not effective_editable_columns:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未找到可更新字段列")
+
+    results: List[BasicImportRowResult] = []
+    success_count = 0
+    failed_count = 0
+    total_rows = int(len(df.index))
+    batch_id = uuid.uuid4().hex
+
+    for i, row in enumerate(df.itertuples(index=False), start=2):
+        row_dict = row._asdict() if hasattr(row, "_asdict") else dict(zip(df.columns.tolist(), list(row)))
+        errors: List[str] = []
+        warnings: List[str] = []
+        site_id: Optional[int] = None
+        site_code = _to_optional_str(row_dict.get("site_code"))
+
+        site_id_raw = row_dict.get("site_id")
+        if has_site_id_col and not _is_excel_blank(site_id_raw):
+            try:
+                site_id_num = float(site_id_raw)
+                if not site_id_num.is_integer():
+                    errors.append("site_id 必须为整数")
+                else:
+                    site_id = int(site_id_num)
+            except Exception:
+                errors.append("site_id 格式错误")
+
+        if site_id is None and not site_code:
+            errors.append("缺少站点标识: site_id 或 site_code 至少填写一个")
+
+        site = None
+        if not errors:
+            if site_id is not None:
+                site = db.query(Site).filter(Site.id == site_id).first()
+                if site is None:
+                    errors.append(f"站点不存在: site_id={site_id}")
+                elif site_code and site.site_code != site_code:
+                    errors.append(f"site_id 与 site_code 不匹配: {site_code}")
+            elif site_code:
+                site = db.query(Site).filter(Site.site_code == site_code).first()
+                if site is None:
+                    errors.append(f"站点不存在: site_code={site_code}")
+
+        if errors:
+            results.append(
+                BasicImportRowResult(
+                    row_index=i,
+                    site_code=site_code,
+                    success=False,
+                    action=None,
+                    site_id=site_id,
+                    warnings=warnings,
+                    errors=errors,
+                )
+            )
+            failed_count += 1
+            continue
+
+        update_candidate: Dict[str, object] = {}
+
+        if "site_name" in effective_editable_columns:
+            site_name_val = _to_optional_str(row_dict.get("site_name"))
+            if site_name_val is None:
+                errors.append("site_name 不能为空")
+            else:
+                update_candidate["site_name"] = site_name_val
+
+        for col in ["site_type", "province", "city", "district", "address", "contact_person", "contact_phone", "description"]:
+            if col in effective_editable_columns:
+                update_candidate[col] = _to_optional_str(row_dict.get(col))
+
+        if "priority" in effective_editable_columns:
+            priority_val = _to_optional_str(row_dict.get("priority"))
+            if priority_val is not None:
+                priority_val = priority_val.lower()
+                if priority_val not in ["high", "normal", "low"]:
+                    errors.append("priority 仅支持 high/normal/low")
+            update_candidate["priority"] = priority_val
+
+        if "latitude" in effective_editable_columns:
+            lat_raw = row_dict.get("latitude")
+            if _is_excel_blank(lat_raw):
+                update_candidate["latitude"] = None
+            else:
+                try:
+                    lat_val = float(lat_raw)
+                    if not (-90 <= lat_val <= 90):
+                        errors.append("纬度超出范围[-90,90]")
+                    else:
+                        update_candidate["latitude"] = lat_val
+                except Exception:
+                    errors.append("纬度格式错误")
+
+        if "longitude" in effective_editable_columns:
+            lon_raw = row_dict.get("longitude")
+            if _is_excel_blank(lon_raw):
+                update_candidate["longitude"] = None
+            else:
+                try:
+                    lon_val = float(lon_raw)
+                    if not (-180 <= lon_val <= 180):
+                        errors.append("经度超出范围[-180,180]")
+                    else:
+                        update_candidate["longitude"] = lon_val
+                except Exception:
+                    errors.append("经度格式错误")
+
+        if errors:
+            results.append(
+                BasicImportRowResult(
+                    row_index=i,
+                    site_code=site.site_code if site else site_code,
+                    success=False,
+                    action=None,
+                    site_id=getattr(site, "id", site_id),
+                    warnings=warnings,
+                    errors=errors,
+                )
+            )
+            failed_count += 1
+            continue
+
+        update_data: Dict[str, object] = {}
+        for field, new_value in update_candidate.items():
+            old_value = getattr(site, field, None)
+            if not _same_site_field_value(old_value, new_value):
+                update_data[field] = new_value
+
+        if not update_data:
+            success_count += 1
+            results.append(
+                BasicImportRowResult(
+                    row_index=i,
+                    site_code=site.site_code,
+                    success=True,
+                    action="noop",
+                    site_id=site.id,
+                    warnings=warnings,
+                    errors=[],
+                )
+            )
+            continue
+
+        if dry_run:
+            success_count += 1
+            results.append(
+                BasicImportRowResult(
+                    row_index=i,
+                    site_code=site.site_code,
+                    success=True,
+                    action="would_update",
+                    site_id=site.id,
+                    warnings=warnings,
+                    errors=[],
+                )
+            )
+            continue
+
+        try:
+            for field, value in update_data.items():
+                setattr(site, field, value)
+            db.commit()
+            db.refresh(site)
+            success_count += 1
+            results.append(
+                BasicImportRowResult(
+                    row_index=i,
+                    site_code=site.site_code,
+                    success=True,
+                    action="updated",
+                    site_id=site.id,
+                    warnings=warnings,
+                    errors=[],
+                )
+            )
+        except Exception as e:
+            db.rollback()
+            failed_count += 1
+            results.append(
+                BasicImportRowResult(
+                    row_index=i,
+                    site_code=site.site_code if site else site_code,
+                    success=False,
+                    action=None,
+                    site_id=getattr(site, "id", site_id),
+                    warnings=warnings,
+                    errors=[f"执行异常: {str(e)}"],
+                )
+            )
+
+    try:
+        evt = AuditEvent(
+            id=batch_id,
+            resource_type="site_basic_update",
+            resource_id=batch_id,
+            action=("dry_run" if dry_run else "update"),
+            operator_id=current_user.id,
+            comments=f"{file.filename}",
+            details={
+                "file_name": file.filename,
+                "total_rows": total_rows,
+                "success_count": success_count,
+                "failed_count": failed_count,
+            },
+        )
+        db.add(evt)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return BasicBatchImportReport(
+        batch_id=batch_id,
+        dry_run=dry_run,
+        total_rows=total_rows,
+        success_count=success_count,
+        failed_count=failed_count,
+        results=results,
+    )
+
+
 @router.post("/basic/batch-upload", response_model=BasicBatchImportReport)
 async def basic_batch_upload(
     file: UploadFile = File(...),
@@ -1200,6 +1520,124 @@ async def check_site_delete(
         can_delete=total_related == 0,
         total_related=total_related,
         counts=counts,
+    )
+
+
+@router.put("/batch-update", response_model=SiteBatchUpdateReport)
+async def batch_update_sites(
+    payload: SiteBatchUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_site_manage_access(current_user)
+
+    updates = list(payload.updates or [])
+    if not updates:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未提供批量更新数据")
+
+    seen_site_ids = set()
+    results: List[SiteBatchUpdateRowResult] = []
+    success_count = 0
+    failed_count = 0
+
+    for idx, row in enumerate(updates, start=1):
+        row_errors: List[str] = []
+        site_id = int(row.site_id)
+        update_data = row.dict(exclude_unset=True, exclude={"site_id"})
+        site = None
+
+        if site_id in seen_site_ids:
+            row_errors.append("site_id 重复")
+        else:
+            seen_site_ids.add(site_id)
+
+        if not update_data:
+            row_errors.append("未提供可更新字段")
+
+        if "site_name" in update_data:
+            site_name = str(update_data.get("site_name") or "").strip()
+            if not site_name:
+                row_errors.append("站点名称不能为空")
+            else:
+                update_data["site_name"] = site_name
+
+        if "latitude" in update_data and update_data["latitude"] is not None:
+            lat_val = float(update_data["latitude"])
+            if lat_val < -90 or lat_val > 90:
+                row_errors.append("纬度必须在 -90 到 90 之间")
+
+        if "longitude" in update_data and update_data["longitude"] is not None:
+            lng_val = float(update_data["longitude"])
+            if lng_val < -180 or lng_val > 180:
+                row_errors.append("经度必须在 -180 到 180 之间")
+
+        if not row_errors:
+            site = db.query(Site).filter(Site.id == site_id).first()
+            if site is None:
+                row_errors.append("站点不存在")
+
+        if row_errors:
+            failed_count += 1
+            results.append(
+                SiteBatchUpdateRowResult(
+                    row_index=idx,
+                    site_id=site_id,
+                    site_code=getattr(site, "site_code", None),
+                    site_name=getattr(site, "site_name", None),
+                    success=False,
+                    errors=row_errors,
+                )
+            )
+            continue
+
+        try:
+            for field, value in update_data.items():
+                setattr(site, field, value)
+            db.commit()
+            db.refresh(site)
+            success_count += 1
+            results.append(
+                SiteBatchUpdateRowResult(
+                    row_index=idx,
+                    site_id=site.id,
+                    site_code=site.site_code,
+                    site_name=site.site_name,
+                    success=True,
+                    errors=[],
+                )
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            failed_count += 1
+            results.append(
+                SiteBatchUpdateRowResult(
+                    row_index=idx,
+                    site_id=site_id,
+                    site_code=getattr(site, "site_code", None),
+                    site_name=getattr(site, "site_name", None),
+                    success=False,
+                    errors=["数据库写入失败"],
+                )
+            )
+        except Exception:
+            db.rollback()
+            failed_count += 1
+            results.append(
+                SiteBatchUpdateRowResult(
+                    row_index=idx,
+                    site_id=site_id,
+                    site_code=getattr(site, "site_code", None),
+                    site_name=getattr(site, "site_name", None),
+                    success=False,
+                    errors=["更新失败，请稍后重试"],
+                )
+            )
+
+    return SiteBatchUpdateReport(
+        total_rows=len(updates),
+        success_count=success_count,
+        failed_count=failed_count,
+        results=results,
     )
 
 @router.put("/{site_id}", response_model=SiteResponse)

@@ -38,6 +38,49 @@ class SiteUpdate(BaseModel):
     contact_phone: Optional[str] = None
     assigned_to: Optional[int] = None
 
+
+class SiteBatchUpdateItem(BaseModel):
+    site_id: int
+    site_name: Optional[str] = None
+    site_type: Optional[str] = None
+    address: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
+    district: Optional[str] = None
+    priority: Optional[str] = None
+    description: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact_phone: Optional[str] = None
+
+    class Config:
+        extra = "forbid"
+
+
+class SiteBatchUpdateRequest(BaseModel):
+    updates: List[SiteBatchUpdateItem]
+
+    class Config:
+        extra = "forbid"
+
+
+class SiteBatchUpdateRowResult(BaseModel):
+    row_index: int
+    site_id: Optional[int] = None
+    site_code: Optional[str] = None
+    site_name: Optional[str] = None
+    success: bool
+    errors: Optional[List[str]] = []
+
+
+class SiteBatchUpdateReport(BaseModel):
+    total_rows: int
+    success_count: int
+    failed_count: int
+    results: List[SiteBatchUpdateRowResult]
+
+
 class SiteResponse(SiteBase):
     id: int
     status: str
