@@ -1266,7 +1266,7 @@ async def list_work_orders(
 
     # 按创建时间降序排序，这样最新的工单在最前面
     # 注意：使用created_at而不是assigned_at，因为assigned_at可能晚于created_at导致排序混乱
-    orders = q.order_by(WorkOrder.created_at.desc()).offset(skip).limit(limit).all()
+    orders = q.order_by(WorkOrder.created_at.desc(), WorkOrder.id.desc()).offset(skip).limit(limit).all()
     return [_enrich_work_order_response(db, o) for o in orders]
 
 

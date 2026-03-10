@@ -11,70 +11,106 @@ export const useWorkOrderStore = defineStore('workorder', () => {
   const focusedWorkOrderId = ref(null)
 
   const userStore = useUserStore()
+  const DEFAULT_PAGE_SIZE = 100
+  const MAX_AUTO_PAGES = 500
+
+  const appendQueryParams = (baseUrl, queryParams = []) => {
+    if (!queryParams.length) return baseUrl
+    return `${baseUrl}?${queryParams.join('&')}`
+  }
+
+  const fetchPagedWorkOrders = async ({
+    path,
+    baseParams = [],
+    pageSize = DEFAULT_PAGE_SIZE,
+    parseItems,
+    failureMessage
+  }) => {
+    const aggregated = []
+    const seenIds = new Set()
+    let skip = 0
+
+    for (let pageIndex = 0; pageIndex < MAX_AUTO_PAGES; pageIndex += 1) {
+      const queryParams = [...baseParams, `skip=${skip}`, `limit=${pageSize}`]
+      const url = appendQueryParams(buildApiUrl(path), queryParams)
+      const response = await uni.request({
+        url,
+        ...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
+      })
+
+      if (response.statusCode !== 200) {
+        throw new Error(response.data?.detail || failureMessage)
+      }
+
+      const pageItems = parseItems(response.data)
+      if (!pageItems.length) break
+
+      for (const item of pageItems) {
+        const itemId = item?.id
+        if (itemId === undefined || itemId === null || !seenIds.has(itemId)) {
+          if (itemId !== undefined && itemId !== null) seenIds.add(itemId)
+          aggregated.push(item)
+        }
+      }
+
+      if (pageItems.length < pageSize) break
+      skip += pageItems.length
+    }
+
+    return aggregated
+  }
 
   const getMyWorkOrders = async (status, keyword) => {
     if (!userStore.token) return { success: false, error: '未登录' }
     loading.value = true
     try {
       const workOrderScope = userStore.getDataScope('work_orders')
+      const assigneeId = userStore.userInfo?.id
 
       // 如果有搜索关键词，使用搜索端点
       if (keyword && keyword.trim()) {
-        const queryParams = []
-        queryParams.push(`keyword=${encodeURIComponent(keyword.trim())}`)
-        if (userStore.userInfo?.id && ['assigned', 'assigned_survey_only'].includes(workOrderScope)) {
-          queryParams.push(`assigned_to=${userStore.userInfo.id}`)
+        const queryParams = [`keyword=${encodeURIComponent(keyword.trim())}`]
+        if (assigneeId && ['assigned', 'assigned_survey_only'].includes(workOrderScope)) {
+          queryParams.push(`assigned_to=${encodeURIComponent(assigneeId)}`)
         }
         if (workOrderScope === 'assigned_survey_only') {
           queryParams.push('type=site_survey')
         }
         if (status) {
-          queryParams.push(`status=${status}`)
+          queryParams.push(`status=${encodeURIComponent(status)}`)
         }
 
-        // 使用搜索端点
-        let url = buildApiUrl(`${API_ENDPOINTS.WORK_ORDERS.LIST}/search`)
-        if (queryParams.length > 0) {
-          url += '?' + queryParams.join('&')
-        }
-
-        const response = await uni.request({
-          url,
-          ...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
+        const data = await fetchPagedWorkOrders({
+          path: `${API_ENDPOINTS.WORK_ORDERS.LIST}/search`,
+          baseParams: queryParams,
+          pageSize: DEFAULT_PAGE_SIZE,
+          parseItems: (payload) => Array.isArray(payload?.work_orders) ? payload.work_orders : [],
+          failureMessage: '搜索工单失败'
         })
-        if (response.statusCode === 200) {
-          list.value = response.data.work_orders || []
-          return { success: true, data: response.data.work_orders || [] }
-        }
-        throw new Error(response.data?.detail || '搜索工单失败')
+        list.value = data
+        return { success: true, data }
       } else {
         // 没有搜索关键词，使用普通列表端点
         const queryParams = []
-        if (userStore.userInfo?.id && ['assigned', 'assigned_survey_only'].includes(workOrderScope)) {
-          queryParams.push(`assigned_to=${userStore.userInfo.id}`)
+        if (assigneeId && ['assigned', 'assigned_survey_only'].includes(workOrderScope)) {
+          queryParams.push(`assigned_to=${encodeURIComponent(assigneeId)}`)
         }
         if (status) {
-          queryParams.push(`status_filter=${status}`)
+          queryParams.push(`status_filter=${encodeURIComponent(status)}`)
         }
         if (workOrderScope === 'assigned_survey_only') {
           queryParams.push('type_filter=site_survey')
         }
 
-        // 构建完整URL
-        let url = buildApiUrl(API_ENDPOINTS.WORK_ORDERS.LIST)
-        if (queryParams.length > 0) {
-          url += '?' + queryParams.join('&')
-        }
-
-        const response = await uni.request({
-          url,
-          ...createRequestConfig({ method: 'GET', headers: getAuthHeaders(userStore.token) })
+        const data = await fetchPagedWorkOrders({
+          path: API_ENDPOINTS.WORK_ORDERS.LIST,
+          baseParams: queryParams,
+          pageSize: DEFAULT_PAGE_SIZE,
+          parseItems: (payload) => Array.isArray(payload) ? payload : [],
+          failureMessage: '获取工单失败'
         })
-        if (response.statusCode === 200) {
-          list.value = response.data
-          return { success: true, data: response.data }
-        }
-        throw new Error(response.data?.detail || '获取工单失败')
+        list.value = data
+        return { success: true, data }
       }
     } catch (e) {
       console.error('getMyWorkOrders error:', e)

@@ -217,7 +217,8 @@ async def get_sites(
     if assigned_to and _can_view_all_sites(current_user):
         query = query.filter(Site.assigned_to == assigned_to)
 
-    sites = query.offset(skip).limit(limit).all()
+    # 固定排序后再分页，避免跨页重复/漏项
+    sites = query.order_by(Site.id.asc()).offset(skip).limit(limit).all()
     return [SiteResponse.from_orm(site) for site in sites]
 
 

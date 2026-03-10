@@ -9,6 +9,60 @@ export const useSiteStore = defineStore('site', () => {
 	const loading = ref(false)
 	
 	const userStore = useUserStore()
+	const DEFAULT_PAGE_SIZE = 100
+	const MAX_AUTO_PAGES = 500
+
+	const normalizeInteger = (value) => {
+		if (value === undefined || value === null || value === '') return null
+		const parsed = Number(value)
+		if (!Number.isFinite(parsed)) return null
+		return Math.floor(parsed)
+	}
+
+	const buildSiteListQueryParams = (filters = {}) => {
+		const params = []
+
+		if (filters.status) params.push(`status=${encodeURIComponent(filters.status)}`)
+		if (filters.site_type) params.push(`site_type=${encodeURIComponent(filters.site_type)}`)
+		if (filters.assigned_to) params.push(`assigned_to=${encodeURIComponent(filters.assigned_to)}`)
+
+		const skip = normalizeInteger(filters.skip)
+		if (skip !== null && skip >= 0) {
+			params.push(`skip=${skip}`)
+		}
+
+		const rawLimit = filters.limit ?? filters.page_size
+		const limit = normalizeInteger(rawLimit)
+		if (limit !== null && limit > 0) {
+			params.push(`limit=${limit}`)
+		}
+
+		return params
+	}
+
+	const requestSitesPage = async (filters = {}) => {
+		let url = buildApiUrl(API_ENDPOINTS.SITES.LIST)
+		const params = buildSiteListQueryParams(filters)
+		if (params.length > 0) {
+			url += '?' + params.join('&')
+		}
+
+		const response = await uni.request({
+			url,
+			...createRequestConfig({
+				method: 'GET',
+				headers: getAuthHeaders(userStore.token)
+			})
+		})
+
+		if (response.statusCode === 200) {
+			return Array.isArray(response.data) ? response.data : []
+		}
+		if (response.statusCode === 401) {
+			throw new Error('__TOKEN_EXPIRED__')
+		}
+		throw new Error(response.data?.detail || '获取站点列表失败')
+	}
 	
 	// 获取站点列表
 	const getSites = async (filters = {}) => {
@@ -16,40 +70,57 @@ export const useSiteStore = defineStore('site', () => {
 		
 		loading.value = true
 		try {
-			let url = buildApiUrl(API_ENDPOINTS.SITES.LIST)
-			const params = []
-			
-			if (filters.status) params.push(`status=${encodeURIComponent(filters.status)}`)
-			if (filters.site_type) params.push(`site_type=${encodeURIComponent(filters.site_type)}`)
-			if (filters.assigned_to) params.push(`assigned_to=${encodeURIComponent(filters.assigned_to)}`)
-			
-			if (params.length > 0) {
-				url += '?' + params.join('&')
+			const hasExplicitPagination =
+				Object.prototype.hasOwnProperty.call(filters, 'skip') ||
+				Object.prototype.hasOwnProperty.call(filters, 'limit') ||
+				Object.prototype.hasOwnProperty.call(filters, 'page_size')
+
+			// 传了分页参数：按调用方要求请求单页（例如检查页站点选择器）
+			if (hasExplicitPagination) {
+				const pageData = await requestSitesPage(filters)
+				sites.value = pageData
+				return { success: true, data: pageData }
 			}
-			
-			const response = await uni.request({
-				url,
-				...createRequestConfig({
-					method: 'GET',
-					headers: getAuthHeaders(userStore.token)
+
+			// 未传分页参数：自动翻页拉全量，避免被后端默认 limit=100 截断
+			const { skip: _skip, limit: _limit, page_size: _pageSize, ...baseFilters } = filters || {}
+			const pageSize = DEFAULT_PAGE_SIZE
+			const aggregated = []
+			const seenIds = new Set()
+			let currentSkip = 0
+
+			for (let pageIndex = 0; pageIndex < MAX_AUTO_PAGES; pageIndex += 1) {
+				const pageData = await requestSitesPage({
+					...baseFilters,
+					skip: currentSkip,
+					limit: pageSize
 				})
-			})
-			
-			if (response.statusCode === 200) {
-				sites.value = response.data
-				return { success: true, data: response.data }
-			} else if (response.statusCode === 401) {
-				// 直接处理401错误
-				const userStore = useUserStore()
-				userStore.logout()
-				return { success: false, error: 'Token已过期，请重新登录' }
-			} else {
-				throw new Error(response.data.detail || '获取站点列表失败')
+
+				if (!pageData.length) break
+
+				for (const site of pageData) {
+					const siteId = site?.id
+					if (siteId === undefined || siteId === null || !seenIds.has(siteId)) {
+						if (siteId !== undefined && siteId !== null) seenIds.add(siteId)
+						aggregated.push(site)
+					}
+				}
+
+				if (pageData.length < pageSize) break
+				currentSkip += pageData.length
 			}
+
+			if (aggregated.length > 0 || currentSkip === 0) {
+				sites.value = aggregated
+				return { success: true, data: aggregated }
+			}
+
+			sites.value = []
+			return { success: true, data: [] }
 		} catch (error) {
 			console.error('Get sites error:', error)
 			// 如果是401错误，可能token已过期
-			if (error.message && error.message.includes('Could not validate credentials')) {
+			if (error.message === '__TOKEN_EXPIRED__' || (error.message && error.message.includes('Could not validate credentials'))) {
 				// 清除用户登录状态
 				const userStore = useUserStore()
 				userStore.logout()
