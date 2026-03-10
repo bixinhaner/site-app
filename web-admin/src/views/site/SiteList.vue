@@ -50,6 +50,15 @@
           <el-icon><Download /></el-icon>
           导出Excel
         </el-button>
+        <el-button v-if="canBatchEditSite" type="warning" :disabled="selectedSites.length === 0" @click="openBatchEdit">
+          <el-icon><Edit /></el-icon>
+          批量编辑
+          <span v-if="selectedSites.length">({{ selectedSites.length }})</span>
+        </el-button>
+        <el-button v-if="canBatchEditSite" @click="openBatchExcelUpdate">
+          <el-icon><Upload /></el-icon>
+          Excel回写
+        </el-button>
         <!-- <el-select v-model="assigneeFilter" placeholder="指派给" clearable style="width: 200px" filterable @visible-change="v=> v && loadUsers()" @change="reload">
           <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
         </el-select> -->
@@ -66,7 +75,8 @@
     </div>
 
     <el-card>
-      <el-table :data="displayedSites" v-loading="loading" stripe>
+      <el-table ref="siteTableRef" :data="displayedSites" v-loading="loading" stripe @selection-change="handleSelectionChange">
+        <el-table-column v-if="canBatchEditSite" type="selection" width="48" />
         <el-table-column prop="site_code" label="站点编码" width="140" />
         <el-table-column prop="site_name" label="站点名称" min-width="180" />
         <el-table-column prop="site_type" label="类型" width="120" />
@@ -129,6 +139,124 @@
         <el-button type="primary" :loading="assigning" @click="confirmAssign">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="batchEditVisible"
+      title="批量编辑站点信息"
+      width="92%"
+      top="4vh"
+      :close-on-click-modal="false"
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        title="支持逐条编辑不同值：每行一个站点，直接修改后统一提交。"
+      />
+      <el-table :data="batchRows" border size="small" max-height="460" style="margin-top: 12px;">
+        <el-table-column prop="site_code" label="站点编码" width="140" fixed="left" />
+        <el-table-column label="站点名称" width="180" fixed="left">
+          <template #default="{ row }">
+            <el-input v-model="row.site_name" placeholder="必填" />
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="140">
+          <template #default="{ row }">
+            <el-input v-model="row.site_type" />
+          </template>
+        </el-table-column>
+        <el-table-column label="省份" width="140">
+          <template #default="{ row }">
+            <el-input v-model="row.province" />
+          </template>
+        </el-table-column>
+        <el-table-column label="城市" width="140">
+          <template #default="{ row }">
+            <el-input v-model="row.city" />
+          </template>
+        </el-table-column>
+        <el-table-column label="区县" width="140">
+          <template #default="{ row }">
+            <el-input v-model="row.district" />
+          </template>
+        </el-table-column>
+        <el-table-column label="地址" min-width="220">
+          <template #default="{ row }">
+            <el-input v-model="row.address" />
+          </template>
+        </el-table-column>
+        <el-table-column label="纬度" width="140">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="row.latitude"
+              :min="-90"
+              :max="90"
+              :step="0.000001"
+              :controls="false"
+              style="width: 100%"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="经度" width="140">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="row.longitude"
+              :min="-180"
+              :max="180"
+              :step="0.000001"
+              :controls="false"
+              style="width: 100%"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="优先级" width="120">
+          <template #default="{ row }">
+            <el-select v-model="row.priority" style="width: 100%">
+              <el-option label="高" value="high" />
+              <el-option label="普通" value="normal" />
+              <el-option label="低" value="low" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="联系人" width="140">
+          <template #default="{ row }">
+            <el-input v-model="row.contact_person" />
+          </template>
+        </el-table-column>
+        <el-table-column label="联系电话" width="160">
+          <template #default="{ row }">
+            <el-input v-model="row.contact_phone" />
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="220">
+          <template #default="{ row }">
+            <el-input v-model="row.description" />
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="batchResult" class="batch-result">
+        <el-alert
+          :type="failedBatchResults.length ? 'warning' : 'success'"
+          :closable="false"
+          :title="batchResultTitle"
+        />
+        <el-table v-if="failedBatchResults.length" :data="failedBatchResults" border size="small" max-height="220" style="margin-top: 8px;">
+          <el-table-column prop="row_index" label="行号" width="80" />
+          <el-table-column prop="site_id" label="站点ID" width="100" />
+          <el-table-column prop="site_code" label="站点编码" width="140" />
+          <el-table-column label="失败原因" min-width="280">
+            <template #default="{ row }">
+              {{ (row.errors || []).join('；') || '未知错误' }}
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <template #footer>
+        <el-button @click="batchEditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchSubmitting" @click="submitBatchEdit">提交批量修改</el-button>
+      </template>
+    </el-dialog>
   </div>
   
 </template>
@@ -146,6 +274,8 @@ const userStore = useUserStore()
 const canManagePlanning = computed(() => userStore.hasPermission('sites:lld:write'))
 const canCreateSite = computed(() => userStore.hasPermission('sites:create:write'))
 const canManageSurveyStage = computed(() => userStore.hasPermission('sites:survey-stage:write'))
+const canBatchEditSite = computed(() => userStore.hasPermission('sites:update:write'))
+const siteTableRef = ref(null)
 const loading = ref(false)
 const sites = ref([])
 const total = ref(0)
@@ -165,6 +295,11 @@ const assignVisible = ref(false)
 const assigning = ref(false)
 const selectedAssignee = ref(null)
 const siteToAssign = ref(null)
+const selectedSites = ref([])
+const batchEditVisible = ref(false)
+const batchSubmitting = ref(false)
+const batchRows = ref([])
+const batchResult = ref(null)
 
 const trackSearchDebounced = createDebouncedTracker(800)
 const trackSearch = () => {
@@ -202,6 +337,8 @@ const reload = async () => {
     const list = Array.isArray(res?.sites) ? res.sites : []
     sites.value = list
     total.value = typeof res?.total === 'number' ? res.total : list.length
+    selectedSites.value = []
+    if (siteTableRef.value?.clearSelection) siteTableRef.value.clearSelection()
   } catch (e) {
     console.error(e)
     ElMessage.error('加载站点失败')
@@ -230,6 +367,106 @@ const openBatchPlanning = () => {
 
 const openSurveyStageBatch = () => {
   router.push({ name: 'SiteSurveyStageBatch' })
+}
+
+const openBatchExcelUpdate = () => {
+  router.push({ name: 'SiteBasicBatch', query: { mode: 'batchUpdate' } })
+}
+
+const handleSelectionChange = (rows) => {
+  selectedSites.value = Array.isArray(rows) ? rows : []
+}
+
+const openBatchEdit = () => {
+  if (!selectedSites.value.length) {
+    ElMessage.warning('请先选择要编辑的站点')
+    return
+  }
+  batchRows.value = selectedSites.value.map((site) => ({
+    id: site.id,
+    site_code: site.site_code || '',
+    site_name: site.site_name || '',
+    site_type: site.site_type || '',
+    address: site.address || '',
+    latitude: site.latitude ?? null,
+    longitude: site.longitude ?? null,
+    province: site.province || '',
+    city: site.city || '',
+    district: site.district || '',
+    priority: site.priority || 'normal',
+    description: site.description || '',
+    contact_person: site.contact_person || '',
+    contact_phone: site.contact_phone || '',
+  }))
+  batchResult.value = null
+  batchEditVisible.value = true
+}
+
+const validateBatchRows = () => {
+  for (let i = 0; i < batchRows.value.length; i += 1) {
+    const row = batchRows.value[i]
+    if (!String(row.site_name || '').trim()) {
+      ElMessage.warning(`第 ${i + 1} 行站点名称不能为空`)
+      return false
+    }
+    if (row.latitude !== null && row.latitude !== undefined && (row.latitude < -90 || row.latitude > 90)) {
+      ElMessage.warning(`第 ${i + 1} 行纬度超出范围（-90 到 90）`)
+      return false
+    }
+    if (row.longitude !== null && row.longitude !== undefined && (row.longitude < -180 || row.longitude > 180)) {
+      ElMessage.warning(`第 ${i + 1} 行经度超出范围（-180 到 180）`)
+      return false
+    }
+  }
+  return true
+}
+
+const buildBatchPayload = () => ({
+  updates: batchRows.value.map((row) => ({
+    site_id: row.id,
+    site_name: String(row.site_name || '').trim(),
+    site_type: row.site_type || null,
+    address: row.address || null,
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
+    province: row.province || null,
+    city: row.city || null,
+    district: row.district || null,
+    priority: row.priority || 'normal',
+    description: row.description || null,
+    contact_person: row.contact_person || null,
+    contact_phone: row.contact_phone || null,
+  })),
+})
+
+const submitBatchEdit = async () => {
+  if (!batchRows.value.length) {
+    ElMessage.warning('没有可提交的站点数据')
+    return
+  }
+  if (!validateBatchRows()) return
+
+  try {
+    batchSubmitting.value = true
+    const res = await request.put('/api/sites/batch-update', buildBatchPayload())
+    batchResult.value = res
+    const successCount = Number(res?.success_count || 0)
+    const failedCount = Number(res?.failed_count || 0)
+    if (failedCount === 0) {
+      ElMessage.success(`批量修改完成，共成功 ${successCount} 条`)
+      batchEditVisible.value = false
+      await reload()
+      return
+    }
+    ElMessage.warning(`批量修改完成：成功 ${successCount} 条，失败 ${failedCount} 条`)
+    await reload()
+  } catch (e) {
+    console.error(e)
+    const msg = await extractErrorDetail(e)
+    ElMessage.error('批量修改失败: ' + msg)
+  } finally {
+    batchSubmitting.value = false
+  }
 }
 
 const formatExportDate = () => {
@@ -335,6 +572,14 @@ const loadUsers = async () => {
 }
 
 const displayedSites = computed(() => sites.value)
+const failedBatchResults = computed(() => {
+  const rows = Array.isArray(batchResult.value?.results) ? batchResult.value.results : []
+  return rows.filter(row => !row.success)
+})
+const batchResultTitle = computed(() => {
+  if (!batchResult.value) return ''
+  return `提交完成：成功 ${batchResult.value.success_count || 0} 条，失败 ${batchResult.value.failed_count || 0} 条`
+})
 
 const userName = (id) => {
   const u = userOptions.value.find(u => u.id === id)
@@ -359,14 +604,21 @@ watch([sortBy, sortOrder], () => {
   trackSearch()
   reload()
 })
+
+watch(batchEditVisible, (visible) => {
+  if (visible) return
+  batchRows.value = []
+  batchResult.value = null
+})
 </script>
 
 <style scoped>
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
-.header-actions { display:flex; gap: 12px; }
+.header-actions { display:flex; gap: 12px; flex-wrap: wrap; }
 .pagination { margin-top: 12px; display:flex; justify-content: flex-end; }
 .sort-panel :deep(.el-radio-group) { width: 100%; }
 .sort-panel :deep(.el-radio-button) { width: 50%; }
 .sort-panel :deep(.el-radio-button__inner) { width: 100%; text-align: center; }
+.batch-result { margin-top: 12px; }
 </style>
