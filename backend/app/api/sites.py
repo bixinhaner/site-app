@@ -112,6 +112,14 @@ class SiteSurveyRequireRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class SiteMilestonesResponse(BaseModel):
+    install_started_at: Optional[str] = None
+    install_completed_at: Optional[str] = None
+    online_at: Optional[str] = None
+    activated_at: Optional[str] = None
+    ssv_at: Optional[str] = None
+
+
 class SurveyStageRowResult(BaseModel):
     row_index: int
     site_code: Optional[str] = None
@@ -991,6 +999,71 @@ async def get_site(
     _ensure_site_visible(site_id, db, current_user)
 
     return SiteResponse.from_orm(site)
+
+
+@router.get("/{site_id}/milestones", response_model=SiteMilestonesResponse)
+async def get_site_milestones(
+    site_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if site is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Site not found"
+        )
+
+    _ensure_site_visible(site_id, db, current_user)
+
+    install_started_at = (
+        db.query(func.min(EquipmentBindingHistory.operated_at))
+        .filter(
+            EquipmentBindingHistory.site_id == site_id,
+            EquipmentBindingHistory.action.in_([BindingActionEnum.BIND, BindingActionEnum.REBIND]),
+        )
+        .scalar()
+    )
+
+    opening_filter = (
+        WorkOrder.site_id == site_id,
+        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+    )
+    install_completed_at = (
+        db.query(func.min(WorkOrder.submitted_at))
+        .filter(*opening_filter, WorkOrder.submitted_at.isnot(None))
+        .scalar()
+    )
+    online_at = (
+        db.query(func.min(WorkOrder.activated_at))
+        .filter(*opening_filter, WorkOrder.activated_at.isnot(None))
+        .scalar()
+    )
+    activated_at = (
+        db.query(func.min(WorkOrder.completed_at))
+        .filter(*opening_filter, WorkOrder.completed_at.isnot(None))
+        .scalar()
+    )
+
+    ssv_at = (
+        db.query(func.min(WorkOrder.completed_at))
+        .filter(
+            WorkOrder.site_id == site_id,
+            WorkOrder.type == WorkOrderTypeEnum.SSV,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+            WorkOrder.completed_at.isnot(None),
+        )
+        .scalar()
+    )
+
+    return SiteMilestonesResponse(
+        install_started_at=to_utc_iso(install_started_at) if install_started_at else None,
+        install_completed_at=to_utc_iso(install_completed_at) if install_completed_at else None,
+        online_at=to_utc_iso(online_at) if online_at else None,
+        activated_at=to_utc_iso(activated_at) if activated_at else None,
+        ssv_at=to_utc_iso(ssv_at) if ssv_at else None,
+    )
 
 
 @router.post("/{site_id}/survey/skip", response_model=SiteResponse)

@@ -1,30 +1,30 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>站点详情</h1>
+      <h1>{{ t('siteDetail.pageTitle') }}</h1>
       <div class="header-actions">
-        <el-button @click="$router.back()"><el-icon><Back /></el-icon>返回</el-button>
-        <el-button @click="openSurveys"><el-icon><PictureFilled /></el-icon>勘察档案</el-button>
-        <el-button @click="openOpeningArchives"><el-icon><DocumentAdd /></el-icon>开站档案</el-button>
+        <el-button @click="$router.back()"><el-icon><Back /></el-icon>{{ t('siteDetail.actions.back') }}</el-button>
+        <el-button @click="openSurveys"><el-icon><PictureFilled /></el-icon>{{ t('siteDetail.actions.surveyArchive') }}</el-button>
+        <el-button @click="openOpeningArchives"><el-icon><DocumentAdd /></el-icon>{{ t('siteDetail.actions.openingArchive') }}</el-button>
         <template v-if="site && site.survey_required === false">
           <el-tooltip
             v-if="!canManageSite"
-            content="该站点已跳过勘察，仅管理员/经理可发起补勘工单"
+            :content="t('siteDetail.actions.createResurveyDisabledTip')"
             placement="top"
           >
             <span>
-              <el-button type="success" disabled><el-icon><Plus /></el-icon>新建补勘</el-button>
+              <el-button type="success" disabled><el-icon><Plus /></el-icon>{{ t('siteDetail.actions.createResurvey') }}</el-button>
             </span>
           </el-tooltip>
-          <el-button v-else type="success" @click="createResurvey"><el-icon><Plus /></el-icon>新建补勘</el-button>
+          <el-button v-else type="success" @click="createResurvey"><el-icon><Plus /></el-icon>{{ t('siteDetail.actions.createResurvey') }}</el-button>
         </template>
-        <el-button v-else type="success" @click="createSurvey"><el-icon><Plus /></el-icon>新建勘察</el-button>
+        <el-button v-else type="success" @click="createSurvey"><el-icon><Plus /></el-icon>{{ t('siteDetail.actions.createSurvey') }}</el-button>
       </div>
     </div>
     <el-card v-loading="loading">
       <template #header>
         <div class="card-header">
-          <span>站点基本信息</span>
+          <span>{{ t('siteDetail.basic.title') }}</span>
           <div v-if="canManageSite" class="card-actions">
             <el-button
               v-if="canSkipSurvey"
@@ -32,7 +32,7 @@
               type="warning"
               @click="skipSurveyStage"
             >
-              跳过勘察
+              {{ t('siteDetail.basic.skipSurvey') }}
             </el-button>
             <el-tooltip
               v-if="showRequireSurvey && !canRequireSurvey"
@@ -40,7 +40,7 @@
               placement="top"
             >
               <span>
-                <el-button size="small" type="warning" disabled>恢复需要勘察</el-button>
+                <el-button size="small" type="warning" disabled>{{ t('siteDetail.basic.requireSurvey') }}</el-button>
               </span>
             </el-tooltip>
             <el-button
@@ -49,16 +49,16 @@
               type="warning"
               @click="requireSurveyStage"
             >
-              恢复需要勘察
+              {{ t('siteDetail.basic.requireSurvey') }}
             </el-button>
-            <el-button size="small" type="primary" @click="openEdit">编辑</el-button>
+            <el-button size="small" type="primary" @click="openEdit">{{ t('siteDetail.basic.edit') }}</el-button>
             <el-tooltip
               v-if="deleteCheckLoaded && !deleteCheck.can_delete"
               :content="deleteDisableTip"
               placement="top"
             >
               <span>
-                <el-button size="small" type="danger" disabled>删除站点</el-button>
+                <el-button size="small" type="danger" disabled>{{ t('siteDetail.basic.delete') }}</el-button>
               </span>
             </el-tooltip>
             <el-button
@@ -69,69 +69,127 @@
               :disabled="!deleteCheckLoaded || !deleteCheck.can_delete"
               @click="openDelete"
             >
-              删除站点
+              {{ t('siteDetail.basic.delete') }}
             </el-button>
           </div>
         </div>
       </template>
-      <div class="info-grid" v-if="site">
-        <div class="item"><span class="label">站点名称</span><span class="value">{{ site.site_name }}</span></div>
-        <div class="item"><span class="label">站点编码</span><span class="value">{{ site.site_code }}</span></div>
-        <div class="item"><span class="label">类型</span><span class="value">{{ site.site_type || '-' }}</span></div>
-        <div class="item"><span class="label">状态</span><span class="value">{{ siteStatusText(site.status) }}</span></div>
-        <div class="item">
-          <span class="label">勘察要求</span>
-          <span class="value">
-            <el-tag :type="site.survey_required === false ? 'info' : 'warning'">
-              {{ site.survey_required === false ? '无需勘察' : '需要勘察' }}
-            </el-tag>
-          </span>
+      <div class="site-summary" v-if="site">
+        <div class="summary-grid">
+          <div class="summary-card summary-card-main">
+            <div class="summary-label">{{ t('siteDetail.basic.siteName') }}</div>
+            <div class="summary-primary">{{ site.site_name || placeholderText }}</div>
+            <div class="summary-secondary">{{ t('siteDetail.basic.siteCode') }}: {{ site.site_code || placeholderText }}</div>
+          </div>
+
+          <div class="summary-card">
+            <div class="summary-label">{{ t('siteDetail.basic.siteStatus') }}</div>
+            <div class="summary-primary">
+              <el-tag>{{ siteStatusText(site.status) }}</el-tag>
+            </div>
+            <div class="summary-secondary">{{ t('siteDetail.basic.siteType') }}: {{ site.site_type || placeholderText }}</div>
+          </div>
+
+          <div class="summary-card">
+            <div class="summary-label">{{ t('siteDetail.basic.surveyRequirement') }}</div>
+            <div class="summary-primary">
+              <el-tag :type="site.survey_required === false ? 'info' : 'warning'">
+                {{ site.survey_required === false ? t('siteDetail.basic.surveyNotRequired') : t('siteDetail.basic.surveyRequired') }}
+              </el-tag>
+            </div>
+            <div class="summary-secondary">
+              {{ t('siteDetail.basic.ssvStatus') }}:
+              <el-tag :type="site.ssv_passed ? 'success' : 'info'" effect="plain" size="small" class="inline-tag">
+                {{ site.ssv_passed ? t('siteDetail.basic.ssvPassed') : t('siteDetail.basic.ssvNotPassed') }}
+              </el-tag>
+            </div>
+          </div>
+
+          <div class="summary-card summary-card-wide">
+            <div class="summary-label">{{ t('siteDetail.basic.address') }}</div>
+            <div class="summary-primary">{{ site.address || placeholderText }}</div>
+            <div class="summary-secondary">{{ t('siteDetail.basic.region') }}: {{ formatRegion(site) }}</div>
+          </div>
         </div>
-        <div
-          v-if="site.survey_skipped_at || site.survey_skip_reason || site.survey_skipped_by"
-          class="item"
-        >
-          <span class="label">跳过记录</span>
-          <span class="value">
-            <el-tag type="info">曾跳过</el-tag>
-            <span v-if="site.survey_skipped_at" style="margin-left: 8px;">时间：{{ formatDate(site.survey_skipped_at) }}</span>
-            <span v-if="site.survey_skipped_by" style="margin-left: 8px;">操作人：{{ getUserName(site.survey_skipped_by) }}</span>
-            <span v-if="site.survey_skip_reason" style="margin-left: 8px;">原因：{{ site.survey_skip_reason }}</span>
-          </span>
+
+        <div v-if="hasSurveySkipRecord" class="skip-record">
+          <div class="skip-record-head">
+            <span>{{ t('siteDetail.basic.skipRecordTitle') }}</span>
+            <el-tag type="info" effect="plain" size="small">{{ t('siteDetail.basic.skippedTag') }}</el-tag>
+          </div>
+          <div class="skip-record-grid">
+            <div class="skip-record-item">
+              <span class="skip-label">{{ t('siteDetail.basic.skippedAt') }}</span>
+              <span class="skip-value">{{ site.survey_skipped_at ? formatDate(site.survey_skipped_at) : placeholderText }}</span>
+            </div>
+            <div class="skip-record-item">
+              <span class="skip-label">{{ t('siteDetail.basic.skippedBy') }}</span>
+              <span class="skip-value">{{ site.survey_skipped_by ? getUserName(site.survey_skipped_by) : placeholderText }}</span>
+            </div>
+            <div class="skip-record-item skip-record-item-wide">
+              <span class="skip-label">{{ t('siteDetail.basic.skippedReason') }}</span>
+              <span class="skip-value">{{ site.survey_skip_reason || t('siteDetail.basic.noReason') }}</span>
+            </div>
+          </div>
         </div>
-        <div class="item"><span class="label">SSV</span><span class="value"><el-tag :type="site.ssv_passed ? 'success' : 'info'">{{ site.ssv_passed ? '已通过' : '未通过' }}</el-tag></span></div>
-        <div class="item"><span class="label">地址</span><span class="value">{{ site.address || '-' }}</span></div>
+      </div>
+
+      <div v-if="site" class="milestone-panel">
+        <div class="milestone-header">
+          <span class="milestone-title">{{ t('siteDetail.milestones.title') }}</span>
+          <el-tag size="small" :type="milestoneReachedCount ? 'success' : 'info'">
+            {{ t('siteDetail.milestones.reachedCount', { count: milestoneReachedCount }) }}
+          </el-tag>
+        </div>
+        <div class="milestone-subtitle">{{ t('siteDetail.milestones.subtitle') }}</div>
+        <div class="milestone-grid">
+          <div
+            v-for="item in milestoneItems"
+            :key="item.key"
+            class="milestone-item"
+            :class="{ reached: !!item.time }"
+          >
+            <div class="milestone-item-head">
+              <span class="milestone-dot" :style="{ '--dot-color': item.color }" />
+              <span class="milestone-name">{{ item.label }}</span>
+              <el-tag size="small" effect="plain" :type="item.time ? 'success' : 'info'">
+                {{ item.time ? t('siteDetail.milestones.reached') : t('siteDetail.milestones.pending') }}
+              </el-tag>
+            </div>
+            <div class="milestone-desc">{{ item.desc }}</div>
+            <div class="milestone-time">{{ item.time ? formatDate(item.time) : t('siteDetail.milestones.pending') }}</div>
+          </div>
+        </div>
       </div>
     </el-card>
 
-    <!-- 编辑站点基本信息 -->
     <el-dialog
       v-model="editVisible"
-      title="编辑站点基本信息"
+      :title="t('siteDetail.editDialog.title')"
       width="720px"
       :close-on-click-modal="false"
     >
       <el-form label-width="110px">
-        <el-form-item label="站点编码">
+        <el-form-item :label="t('siteDetail.editDialog.siteCode')">
           <el-input :model-value="editForm.site_code" disabled />
         </el-form-item>
-        <el-form-item label="站点名称" required>
-          <el-input v-model="editForm.site_name" placeholder="必填" />
+        <el-form-item :label="t('siteDetail.editDialog.siteName')" required>
+          <el-input v-model="editForm.site_name" :placeholder="t('siteDetail.editDialog.requiredPlaceholder')" />
         </el-form-item>
-        <el-form-item label="类型">
-          <el-input v-model="editForm.site_type" placeholder="macro/indoor..." />
+        <el-form-item :label="t('siteDetail.editDialog.siteType')">
+          <el-input v-model="editForm.site_type" :placeholder="t('siteDetail.editDialog.siteTypePlaceholder')" />
         </el-form-item>
-        <el-form-item label="省市区">
+        <el-form-item :label="t('siteDetail.editDialog.region')">
           <div class="row3">
-            <el-input v-model="editForm.province" placeholder="省" />
-            <el-input v-model="editForm.city" placeholder="市" />
-            <el-input v-model="editForm.district" placeholder="区/县" />
+            <el-input v-model="editForm.province" :placeholder="t('siteDetail.editDialog.province')" />
+            <el-input v-model="editForm.city" :placeholder="t('siteDetail.editDialog.city')" />
+            <el-input v-model="editForm.district" :placeholder="t('siteDetail.editDialog.district')" />
           </div>
         </el-form-item>
-        <el-form-item label="地址">
-          <el-input v-model="editForm.address" placeholder="详细地址" />
+        <el-form-item :label="t('siteDetail.editDialog.address')">
+          <el-input v-model="editForm.address" :placeholder="t('siteDetail.editDialog.addressPlaceholder')" />
         </el-form-item>
-        <el-form-item label="经纬度">
+        <el-form-item :label="t('siteDetail.editDialog.coordinates')">
           <div class="row2">
             <el-input-number
               v-model="editForm.latitude"
@@ -139,7 +197,7 @@
               :max="90"
               :step="0.000001"
               :controls="false"
-              placeholder="纬度 -90~90"
+              :placeholder="t('siteDetail.editDialog.latitudePlaceholder')"
               style="width: 100%"
             />
             <el-input-number
@@ -148,123 +206,120 @@
               :max="180"
               :step="0.000001"
               :controls="false"
-              placeholder="经度 -180~180"
+              :placeholder="t('siteDetail.editDialog.longitudePlaceholder')"
               style="width: 100%"
             />
           </div>
         </el-form-item>
-        <el-form-item label="优先级">
-          <el-select v-model="editForm.priority" placeholder="优先级" style="width: 100%">
-            <el-option label="high" value="high" />
-            <el-option label="normal" value="normal" />
-            <el-option label="low" value="low" />
+        <el-form-item :label="t('siteDetail.editDialog.priority')">
+          <el-select v-model="editForm.priority" :placeholder="t('siteDetail.editDialog.priority')" style="width: 100%">
+            <el-option :label="t('siteDetail.editDialog.priorityOptions.high')" value="high" />
+            <el-option :label="t('siteDetail.editDialog.priorityOptions.normal')" value="normal" />
+            <el-option :label="t('siteDetail.editDialog.priorityOptions.low')" value="low" />
           </el-select>
         </el-form-item>
-        <el-form-item label="联系人">
+        <el-form-item :label="t('siteDetail.editDialog.contact')">
           <div class="row2">
-            <el-input v-model="editForm.contact_person" placeholder="姓名" />
-            <el-input v-model="editForm.contact_phone" placeholder="电话" />
+            <el-input v-model="editForm.contact_person" :placeholder="t('siteDetail.editDialog.contactName')" />
+            <el-input v-model="editForm.contact_phone" :placeholder="t('siteDetail.editDialog.contactPhone')" />
           </div>
         </el-form-item>
-        <el-form-item label="备注">
+        <el-form-item :label="t('siteDetail.editDialog.remark')">
           <el-input v-model="editForm.description" type="textarea" :rows="3" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" :loading="editSubmitting" @click="submitEdit">保存</el-button>
+        <el-button @click="editVisible = false">{{ t('siteDetail.common.cancel') }}</el-button>
+        <el-button type="primary" :loading="editSubmitting" @click="submitEdit">{{ t('siteDetail.common.save') }}</el-button>
       </template>
     </el-dialog>
 
-    <!-- 删除站点 -->
     <el-dialog
       v-model="deleteVisible"
-      title="删除站点"
+      :title="t('siteDetail.deleteDialog.title')"
       width="520px"
       :close-on-click-modal="false"
     >
       <el-alert
         type="warning"
         :closable="false"
-        title="删除为物理删除，且仅允许删除无关联数据的站点。删除后不可恢复。"
+        :title="t('siteDetail.deleteDialog.warning')"
       />
       <div style="margin-top: 12px;">
-        <div>站点名称：{{ site?.site_name || '-' }}</div>
-        <div>站点编码：{{ site?.site_code || '-' }}</div>
+        <div>{{ t('siteDetail.deleteDialog.siteName') }}：{{ site?.site_name || placeholderText }}</div>
+        <div>{{ t('siteDetail.deleteDialog.siteCode') }}：{{ site?.site_code || placeholderText }}</div>
       </div>
       <el-form label-width="110px" style="margin-top: 12px;">
-        <el-form-item label="确认站点编码" required>
-          <el-input v-model="deleteConfirmCode" placeholder="请输入站点编码以确认删除" />
+        <el-form-item :label="t('siteDetail.deleteDialog.confirmCode')" required>
+          <el-input v-model="deleteConfirmCode" :placeholder="t('siteDetail.deleteDialog.confirmCodePlaceholder')" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="deleteVisible = false">取消</el-button>
+        <el-button @click="deleteVisible = false">{{ t('siteDetail.common.cancel') }}</el-button>
         <el-button
           type="danger"
           :loading="deleteSubmitting"
           :disabled="deleteConfirmCode !== (site?.site_code || '')"
           @click="submitDelete"
         >
-          确认删除
+          {{ t('siteDetail.deleteDialog.confirmDelete') }}
         </el-button>
       </template>
     </el-dialog>
 
-    <!-- 当前工单 -->
     <el-card class="mt16" v-loading="workOrdersLoading">
       <template #header>
         <div class="card-header">
-          <span>当前工单</span>
+          <span>{{ t('siteDetail.workOrder.title') }}</span>
           <el-button type="primary" size="small" @click="showHistoryDialog">
-            <el-icon><Document /></el-icon>查看历史工单
+            <el-icon><Document /></el-icon>{{ t('siteDetail.workOrder.historyButton') }}
           </el-button>
         </div>
       </template>
-      <el-empty v-if="!currentWorkOrders.length" description="暂无进行中的工单" />
+      <el-empty v-if="!currentWorkOrders.length" :description="t('siteDetail.workOrder.empty')" />
       <el-table v-else :data="currentWorkOrders" stripe>
-        <el-table-column prop="title" label="工单标题" min-width="180" />
-        <el-table-column prop="type" label="类型" width="120">
+        <el-table-column prop="title" :label="t('siteDetail.workOrder.columns.title')" min-width="180" />
+        <el-table-column prop="type" :label="t('siteDetail.workOrder.columns.type')" width="120">
           <template #default="{ row }">
             <el-tag>{{ formatWorkOrderType(row.type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="status" :label="t('siteDetail.workOrder.columns.status')" width="120">
           <template #default="{ row }">
             <el-tag :type="getStatusTagType(row.status)">{{ formatWorkOrderStatus(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="100">
+        <el-table-column prop="priority" :label="t('siteDetail.workOrder.columns.priority')" width="100">
           <template #default="{ row }">
             <el-tag :type="getPriorityTagType(row.priority)">{{ formatPriority(row.priority) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="指派给" width="120">
+        <el-table-column :label="t('siteDetail.workOrder.columns.assignee')" width="120">
           <template #default="{ row }">
             {{ getUserName(row.assigned_to) }}
           </template>
         </el-table-column>
-        <el-table-column prop="assigned_at" label="分配时间" width="160">
+        <el-table-column prop="assigned_at" :label="t('siteDetail.workOrder.columns.assignedAt')" width="160">
           <template #default="{ row }">
             {{ formatDate(row.assigned_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100">
+        <el-table-column :label="t('siteDetail.workOrder.columns.action')" width="100">
           <template #default="{ row }">
-            <el-button link type="primary" @click="viewWorkOrder(row)">查看</el-button>
+            <el-button link type="primary" @click="viewWorkOrder(row)">{{ t('siteDetail.workOrder.view') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <!-- 设备在线/激活状态 -->
     <el-card class="mt16" v-loading="deviceStatusLoading">
       <template #header>
         <div class="card-header">
-          <span>设备在线 / 激活状态</span>
+          <span>{{ t('siteDetail.device.title') }}</span>
           <div>
-	            <span v-if="deviceStatusCheckedAt" style="margin-right: 12px; color: #909399;">
-	              最近检查时间：{{ formatDate(deviceStatusCheckedAt) }}
-	            </span>
+            <span v-if="deviceStatusCheckedAt" class="device-check-at">
+              {{ t('siteDetail.device.checkedAt', { time: formatDate(deviceStatusCheckedAt) }) }}
+            </span>
 	            <el-button
 	              size="small"
 	              type="primary"
@@ -272,26 +327,26 @@
 	              @click="loadDeviceStatus(true)"
             >
               <span v-if="deviceRefreshCooldown > 0">
-                刷新状态 ({{ deviceRefreshCooldown }}s)
+                {{ t('siteDetail.device.refreshCooldown', { seconds: deviceRefreshCooldown }) }}
               </span>
               <span v-else>
-                刷新状态
+                {{ t('siteDetail.device.refresh') }}
               </span>
             </el-button>
           </div>
         </div>
       </template>
-      <el-empty v-if="!devices.length && !deviceStatusLoading" description="暂无绑定设备记录" />
+      <el-empty v-if="!devices.length && !deviceStatusLoading" :description="t('siteDetail.device.empty')" />
       <el-table v-else :data="devices" size="small" stripe>
-        <el-table-column prop="sn" label="设备 SN" min-width="180" />
-        <el-table-column prop="equipment_type" label="设备类型" width="120" />
-        <el-table-column prop="equipment_model" label="设备型号" min-width="160" />
-        <el-table-column label="扇区信息" min-width="160">
+        <el-table-column prop="sn" :label="t('siteDetail.device.columns.sn')" min-width="180" />
+        <el-table-column prop="equipment_type" :label="t('siteDetail.device.columns.type')" width="120" />
+        <el-table-column prop="equipment_model" :label="t('siteDetail.device.columns.model')" min-width="160" />
+        <el-table-column :label="t('siteDetail.device.columns.sectorInfo')" min-width="160">
           <template #default="{ row }">
-            扇区 {{ row.sector_id || '-' }} / Band {{ row.band || '-' }} / Cell {{ row.cell_id || '-' }}
+            {{ t('siteDetail.device.sectorInfoValue', { sector: row.sector_id || placeholderText, band: row.band || placeholderText, cell: row.cell_id || placeholderText }) }}
           </template>
         </el-table-column>
-        <el-table-column label="在线状态" width="200">
+        <el-table-column :label="t('siteDetail.device.columns.onlineStatus')" width="200">
           <template #default="{ row }">
             <div class="status-cell">
               <el-tag :type="onlineRealtimeTagType(row.online)" size="small" class="mr4">
@@ -303,7 +358,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="激活状态" width="220">
+        <el-table-column :label="t('siteDetail.device.columns.activeStatus')" width="220">
           <template #default="{ row }">
             <div class="status-cell">
               <el-tag :type="activeRealtimeTagType(row.activated)" size="small" class="mr4">
@@ -315,12 +370,12 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="安装人" width="140">
+        <el-table-column :label="t('siteDetail.device.columns.installer')" width="140">
           <template #default="{ row }">
-            {{ row.installer_name || row.installer_id || '-' }}
+            {{ row.installer_name || row.installer_id || placeholderText }}
           </template>
         </el-table-column>
-        <el-table-column prop="bound_at" label="绑定时间" width="180">
+        <el-table-column prop="bound_at" :label="t('siteDetail.device.columns.boundAt')" width="180">
           <template #default="{ row }">
             {{ formatDate(row.bound_at) }}
           </template>
@@ -328,43 +383,42 @@
       </el-table>
     </el-card>
 
-    <!-- 历史工单对话框 -->
-    <el-dialog v-model="historyDialogVisible" title="历史工单" width="80%" :close-on-click-modal="false">
+    <el-dialog v-model="historyDialogVisible" :title="t('siteDetail.workOrder.historyTitle')" width="80%" :close-on-click-modal="false">
       <el-table :data="historyWorkOrders" v-loading="historyLoading" stripe max-height="500">
-        <el-table-column prop="title" label="工单标题" min-width="180" />
-        <el-table-column prop="type" label="类型" width="120">
+        <el-table-column prop="title" :label="t('siteDetail.workOrder.columns.title')" min-width="180" />
+        <el-table-column prop="type" :label="t('siteDetail.workOrder.columns.type')" width="120">
           <template #default="{ row }">
             <el-tag>{{ formatWorkOrderType(row.type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="status" :label="t('siteDetail.workOrder.columns.status')" width="120">
           <template #default="{ row }">
             <el-tag :type="getStatusTagType(row.status)">{{ formatWorkOrderStatus(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="100">
+        <el-table-column prop="priority" :label="t('siteDetail.workOrder.columns.priority')" width="100">
           <template #default="{ row }">
             <el-tag :type="getPriorityTagType(row.priority)">{{ formatPriority(row.priority) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="指派给" width="120">
+        <el-table-column :label="t('siteDetail.workOrder.columns.assignee')" width="120">
           <template #default="{ row }">
             {{ getUserName(row.assigned_to) }}
           </template>
         </el-table-column>
-        <el-table-column prop="completed_at" label="完成时间" width="160">
+        <el-table-column prop="completed_at" :label="t('siteDetail.workOrder.columns.completedAt')" width="160">
           <template #default="{ row }">
             {{ formatDate(row.completed_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100">
+        <el-table-column :label="t('siteDetail.workOrder.columns.action')" width="100">
           <template #default="{ row }">
-            <el-button link type="primary" @click="viewWorkOrder(row)">查看</el-button>
+            <el-button link type="primary" @click="viewWorkOrder(row)">{{ t('siteDetail.workOrder.view') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
       <template #footer>
-        <el-button @click="historyDialogVisible = false">关闭</el-button>
+        <el-button @click="historyDialogVisible = false">{{ t('siteDetail.workOrder.close') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -373,6 +427,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../../stores/user'
@@ -381,10 +436,13 @@ import { openingArchivesApi } from '@/api/openingArchives'
 
 const route = useRoute()
 const router = useRouter()
+const { t, locale } = useI18n()
 const loading = ref(false)
 const site = ref(null)
 const userStore = useUserStore()
 const userOptions = ref([])
+const dateLocale = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
+const placeholderText = computed(() => t('siteDetail.basic.placeholder'))
 const canManageSite = computed(() => userStore.hasPermission('sites:update:write'))
 const canSkipSurvey = computed(() =>
   canManageSite.value &&
@@ -406,9 +464,13 @@ const canRequireSurvey = computed(() =>
 
 const requireSurveyDisableTip = computed(() => {
   if (!showRequireSurvey.value) return ''
-  if (site.value?.status !== 'planning') return '仅在规划阶段（planning）可恢复需要勘察'
-  return '仅在未形成规划版本时可恢复需要勘察'
+  if (site.value?.status !== 'planning') return t('siteDetail.requireSurveyDisableTip.statusOnly')
+  return t('siteDetail.requireSurveyDisableTip.noPlanningVersion')
 })
+
+const hasSurveySkipRecord = computed(() => (
+  !!site.value && !!(site.value.survey_skipped_at || site.value.survey_skip_reason || site.value.survey_skipped_by)
+))
 
 const deleteCheckLoading = ref(false)
 const deleteCheckLoaded = ref(false)
@@ -447,12 +509,90 @@ const historyWorkOrders = ref([])
 const deviceStatusLoading = ref(false)
 const devices = ref([])
 const deviceStatusCheckedAt = ref(null)
+const milestoneData = ref({
+  install_started_at: null,
+  install_completed_at: null,
+  online_at: null,
+  activated_at: null,
+  ssv_at: null,
+})
+
+const formatRegion = (record) => {
+  if (!record) return placeholderText.value
+  const segments = [record.province, record.city, record.district]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+  return segments.length ? segments.join('/') : placeholderText.value
+}
+
+const milestoneItems = computed(() => [
+  {
+    key: 'install_started',
+    label: t('siteDetail.milestones.installStarted.label'),
+    desc: t('siteDetail.milestones.installStarted.desc'),
+    time: milestoneData.value.install_started_at,
+    color: '#0ea5e9',
+  },
+  {
+    key: 'install_completed',
+    label: t('siteDetail.milestones.installCompleted.label'),
+    desc: t('siteDetail.milestones.installCompleted.desc'),
+    time: milestoneData.value.install_completed_at,
+    color: '#f97316',
+  },
+  {
+    key: 'online',
+    label: t('siteDetail.milestones.online.label'),
+    desc: t('siteDetail.milestones.online.desc'),
+    time: milestoneData.value.online_at,
+    color: '#22c55e',
+  },
+  {
+    key: 'activated',
+    label: t('siteDetail.milestones.activated.label'),
+    desc: t('siteDetail.milestones.activated.desc'),
+    time: milestoneData.value.activated_at,
+    color: '#ef4444',
+  },
+  {
+    key: 'ssv',
+    label: t('siteDetail.milestones.ssv.label'),
+    desc: t('siteDetail.milestones.ssv.desc'),
+    time: milestoneData.value.ssv_at,
+    color: '#8b5cf6',
+  },
+])
+
+const milestoneReachedCount = computed(() => milestoneItems.value.filter((item) => !!item.time).length)
+
+const loadMilestones = async () => {
+  try {
+    const res = await request.get(`/api/sites/${route.params.id}/milestones`)
+    milestoneData.value = {
+      install_started_at: res?.install_started_at || null,
+      install_completed_at: res?.install_completed_at || null,
+      online_at: res?.online_at || null,
+      activated_at: res?.activated_at || null,
+      ssv_at: res?.ssv_at || null,
+    }
+  } catch (e) {
+    console.error(e)
+    milestoneData.value = {
+      install_started_at: null,
+      install_completed_at: null,
+      online_at: null,
+      activated_at: null,
+      ssv_at: null,
+    }
+  }
+}
 
 const load = async () => {
   try {
     loading.value = true
     const res = await request.get(`/api/sites/${route.params.id}`)
     site.value = res
+    await loadMilestones()
     if (canManageSite.value) {
       await loadDeleteCheck()
     }
@@ -460,37 +600,37 @@ const load = async () => {
     await loadDeviceStatus(false)
   } catch (e) {
     console.error(e)
-    ElMessage.error('加载站点详情失败')
+    ElMessage.error(t('siteDetail.messages.loadSiteFailed'))
   } finally {
     loading.value = false
   }
 }
 
 const extractErrorDetail = (error) => {
-  return error?.response?.data?.detail || error?.message || '网络错误'
+  return error?.response?.data?.detail || error?.message || t('siteDetail.messages.networkError')
 }
 
 const skipSurveyStage = async () => {
   if (!site.value) return
   try {
     const { value } = await ElMessageBox.prompt(
-      '将站点标记为无需勘察，并进入规划阶段。原因（可选）：',
-      '跳过勘察',
+      t('siteDetail.prompts.skipSurveyMessage'),
+      t('siteDetail.prompts.skipSurveyTitle'),
       {
-        confirmButtonText: '确认跳过',
-        cancelButtonText: '取消',
+        confirmButtonText: t('siteDetail.prompts.confirmSkip'),
+        cancelButtonText: t('siteDetail.prompts.cancel'),
         inputType: 'textarea',
-        inputPlaceholder: '可不填',
+        inputPlaceholder: t('siteDetail.prompts.optionalPlaceholder'),
         inputValue: ''
       }
     )
     await request.post(`/api/sites/${route.params.id}/survey/skip`, { reason: value })
-    ElMessage.success('已跳过勘察阶段')
+    ElMessage.success(t('siteDetail.messages.surveySkipSuccess'))
     await load()
   } catch (e) {
     if (e === 'cancel' || e === 'close') return
     console.error(e)
-    ElMessage.error('操作失败：' + extractErrorDetail(e))
+    ElMessage.error(t('siteDetail.messages.operationFailed', { detail: extractErrorDetail(e) }))
   }
 }
 
@@ -498,23 +638,23 @@ const requireSurveyStage = async () => {
   if (!site.value) return
   try {
     const { value } = await ElMessageBox.prompt(
-      '将站点恢复为需要勘察，并回退到勘察阶段（survey_pending）。原因（可选）：',
-      '恢复需要勘察',
+      t('siteDetail.prompts.requireSurveyMessage'),
+      t('siteDetail.prompts.requireSurveyTitle'),
       {
-        confirmButtonText: '确认恢复',
-        cancelButtonText: '取消',
+        confirmButtonText: t('siteDetail.prompts.confirmRequire'),
+        cancelButtonText: t('siteDetail.prompts.cancel'),
         inputType: 'textarea',
-        inputPlaceholder: '可不填',
+        inputPlaceholder: t('siteDetail.prompts.optionalPlaceholder'),
         inputValue: ''
       }
     )
     await request.post(`/api/sites/${route.params.id}/survey/require`, { reason: value })
-    ElMessage.success('已恢复为需要勘察')
+    ElMessage.success(t('siteDetail.messages.surveyRequireSuccess'))
     await load()
   } catch (e) {
     if (e === 'cancel' || e === 'close') return
     console.error(e)
-    ElMessage.error('操作失败：' + extractErrorDetail(e))
+    ElMessage.error(t('siteDetail.messages.operationFailed', { detail: extractErrorDetail(e) }))
   }
 }
 
@@ -537,25 +677,25 @@ const loadDeleteCheck = async () => {
 const deleteDisableTip = computed(() => {
   const counts = deleteCheck.value?.counts || {}
   const labelMap = {
-    work_orders: '工单',
-    site_inspections: '检查记录',
-    inspections: '旧版检查记录',
-    site_surveys: '勘察记录',
-    site_survey_archives: '勘察档案',
-    site_opening_archives: '开站档案',
-    site_ssv_archives: 'SSV档案',
-    equipment_binding_history: '设备绑定历史',
-    site_planning: '规划版本',
-    site_planning_cells: '规划小区',
-    base_station_devices: '基站设备',
-    template_bindings: '模板绑定',
+    work_orders: t('siteDetail.deleteCheck.counts.work_orders'),
+    site_inspections: t('siteDetail.deleteCheck.counts.site_inspections'),
+    inspections: t('siteDetail.deleteCheck.counts.inspections'),
+    site_surveys: t('siteDetail.deleteCheck.counts.site_surveys'),
+    site_survey_archives: t('siteDetail.deleteCheck.counts.site_survey_archives'),
+    site_opening_archives: t('siteDetail.deleteCheck.counts.site_opening_archives'),
+    site_ssv_archives: t('siteDetail.deleteCheck.counts.site_ssv_archives'),
+    equipment_binding_history: t('siteDetail.deleteCheck.counts.equipment_binding_history'),
+    site_planning: t('siteDetail.deleteCheck.counts.site_planning'),
+    site_planning_cells: t('siteDetail.deleteCheck.counts.site_planning_cells'),
+    base_station_devices: t('siteDetail.deleteCheck.counts.base_station_devices'),
+    template_bindings: t('siteDetail.deleteCheck.counts.template_bindings'),
   }
   const pairs = Object.entries(counts)
     .filter(([, v]) => Number(v) > 0)
     .slice(0, 6)
     .map(([k, v]) => `${labelMap[k] || k} ${v}`)
-  if (!pairs.length) return '存在关联数据，禁止删除'
-  return `存在关联数据，禁止删除（${pairs.join('，')}）`
+  if (!pairs.length) return t('siteDetail.deleteCheck.blockedPrefix')
+  return `${t('siteDetail.deleteCheck.blockedPrefix')}（${pairs.join('，')}）`
 })
 
 const openEdit = () => {
@@ -581,7 +721,7 @@ const openEdit = () => {
 const submitEdit = async () => {
   if (!site.value) return
   if (!editForm.value.site_name?.trim()) {
-    ElMessage.warning('请填写站点名称')
+    ElMessage.warning(t('siteDetail.messages.siteNameRequired'))
     return
   }
   try {
@@ -601,12 +741,12 @@ const submitEdit = async () => {
       description: editForm.value.description || null,
     }
     await request.put(`/api/sites/${route.params.id}`, payload)
-    ElMessage.success('保存成功')
+    ElMessage.success(t('siteDetail.messages.saveSuccess'))
     editVisible.value = false
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+    ElMessage.error(e?.response?.data?.detail || t('siteDetail.messages.saveFailed'))
   } finally {
     editSubmitting.value = false
   }
@@ -621,26 +761,26 @@ const openDelete = () => {
 const submitDelete = async () => {
   if (!site.value) return
   if (!deleteCheck.value?.can_delete) {
-    ElMessage.error('站点存在关联数据，禁止删除')
+    ElMessage.error(t('siteDetail.messages.relatedDataCannotDelete'))
     return
   }
   if (deleteConfirmCode.value !== site.value.site_code) {
-    ElMessage.warning('站点编码不匹配')
+    ElMessage.warning(t('siteDetail.messages.codeMismatch'))
     return
   }
   try {
     deleteSubmitting.value = true
     await request.delete(`/api/sites/${route.params.id}`)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('siteDetail.messages.deleteSuccess'))
     deleteVisible.value = false
     router.push({ name: 'SiteList' })
   } catch (e) {
     console.error(e)
     const detail = e?.response?.data?.detail
     if (detail && typeof detail === 'object') {
-      ElMessage.error(detail.message || '删除失败')
+      ElMessage.error(detail.message || t('siteDetail.messages.deleteFailed'))
     } else {
-      ElMessage.error(detail || '删除失败')
+      ElMessage.error(detail || t('siteDetail.messages.deleteFailed'))
     }
     await loadDeleteCheck()
   } finally {
@@ -673,7 +813,7 @@ const loadWorkOrders = async () => {
     )
   } catch (e) {
     console.error(e)
-    ElMessage.error('加载工单失败')
+    ElMessage.error(t('siteDetail.workOrder.loadFailed'))
   } finally {
     workOrdersLoading.value = false
   }
@@ -696,68 +836,68 @@ const showHistoryDialog = async () => {
     )
   } catch (e) {
     console.error(e)
-    ElMessage.error('加载历史工单失败')
+    ElMessage.error(t('siteDetail.workOrder.loadHistoryFailed'))
   } finally {
     historyLoading.value = false
   }
 }
 
 const getUserName = (userId) => {
-  if (!userId) return '-'
+  if (!userId) return placeholderText.value
   const user = userOptions.value.find(u => u.id === userId)
   return user ? (user.full_name || user.username) : userId
 }
 
 const formatDate = (dateStr) => {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleString('zh-CN')
+  if (!dateStr) return placeholderText.value
+  return new Date(dateStr).toLocaleString(dateLocale.value)
 }
 
 const formatWorkOrderType = (type) => {
   const map = {
-    'INSPECTION': '检查',
-    'INSTALLATION': '安装',
-    'MAINTENANCE': '维护',
-    'REPAIR': '维修'
+    INSPECTION: t('siteDetail.workOrder.typeMap.INSPECTION'),
+    INSTALLATION: t('siteDetail.workOrder.typeMap.INSTALLATION'),
+    MAINTENANCE: t('siteDetail.workOrder.typeMap.MAINTENANCE'),
+    REPAIR: t('siteDetail.workOrder.typeMap.REPAIR'),
   }
   return map[type] || type
 }
 
 const formatWorkOrderStatus = (status) => {
   const map = {
-    'PENDING': '待分配',
-    'ASSIGNED': '已分配',
-    'ACCEPTED': '已接受',
-    'IN_PROGRESS': '进行中',
-    'SUBMITTED': '已提交',
-    'UNDER_REVIEW': '审核中',
-    'APPROVED': '已批准',
-    'REJECTED': '已拒绝',
-    'COMPLETED': '已完成',
-    'CANCELLED': '已取消'
+    PENDING: t('siteDetail.workOrder.statusMap.PENDING'),
+    ASSIGNED: t('siteDetail.workOrder.statusMap.ASSIGNED'),
+    ACCEPTED: t('siteDetail.workOrder.statusMap.ACCEPTED'),
+    IN_PROGRESS: t('siteDetail.workOrder.statusMap.IN_PROGRESS'),
+    SUBMITTED: t('siteDetail.workOrder.statusMap.SUBMITTED'),
+    UNDER_REVIEW: t('siteDetail.workOrder.statusMap.UNDER_REVIEW'),
+    APPROVED: t('siteDetail.workOrder.statusMap.APPROVED'),
+    REJECTED: t('siteDetail.workOrder.statusMap.REJECTED'),
+    COMPLETED: t('siteDetail.workOrder.statusMap.COMPLETED'),
+    CANCELLED: t('siteDetail.workOrder.statusMap.CANCELLED'),
   }
   return map[status] || status
 }
 
 const siteStatusText = (status) => {
   const map = {
-    survey_pending: '勘察中',
-    planning: '规划中',
-    planned: '规划完成',
-    construction: '施工中',
-    pending_online: '待上线',
-    online_pending_activation: '已上线待激活',
-    operational: '已开通',
-    maintenance: '维护中'
+    survey_pending: t('siteMap.status.survey_pending'),
+    planning: t('siteMap.status.planning'),
+    planned: t('siteMap.status.planned'),
+    construction: t('siteMap.status.construction'),
+    pending_online: t('siteMap.status.pending_online'),
+    online_pending_activation: t('siteMap.status.online_pending_activation'),
+    operational: t('siteMap.status.operational'),
+    maintenance: t('siteMap.status.maintenance'),
   }
   return map[status] || status
 }
 
 const formatPriority = (priority) => {
   const map = {
-    'HIGH': '高',
-    'NORMAL': '普通',
-    'LOW': '低'
+    HIGH: t('siteDetail.priorityMap.HIGH'),
+    NORMAL: t('siteDetail.priorityMap.NORMAL'),
+    LOW: t('siteDetail.priorityMap.LOW'),
   }
   return map[priority] || priority
 }
@@ -788,9 +928,9 @@ const getPriorityTagType = (priority) => {
 }
 
 const onlineRealtimeText = (val) => {
-  if (val === true) return '当前在线'
-  if (val === false) return '当前离线'
-  return '待检测'
+  if (val === true) return t('siteDetail.device.onlineCurrent')
+  if (val === false) return t('siteDetail.device.onlineOffline')
+  return t('siteDetail.device.pendingCheck')
 }
 const onlineRealtimeTagType = (val) => {
   if (val === true) return 'success'
@@ -798,12 +938,12 @@ const onlineRealtimeTagType = (val) => {
   return 'info'
 }
 const everOnlineTagType = (val) => (val ? 'success' : 'info')
-const everOnlineText = (val) => (val ? '曾上线' : '未曾上线')
+const everOnlineText = (val) => (val ? t('siteDetail.device.everOnline') : t('siteDetail.device.neverOnline'))
 
 const activeRealtimeText = (val) => {
-  if (val === true) return '当前已激活'
-  if (val === false) return '当前未激活'
-  return '待检测'
+  if (val === true) return t('siteDetail.device.activeCurrent')
+  if (val === false) return t('siteDetail.device.activeInactive')
+  return t('siteDetail.device.pendingCheck')
 }
 const activeRealtimeTagType = (val) => {
   if (val === true) return 'success'
@@ -811,14 +951,14 @@ const activeRealtimeTagType = (val) => {
   return 'info'
 }
 const everActiveTagType = (val) => (val ? 'success' : 'info')
-const everActiveText = (val) => (val ? '曾激活' : '未曾激活')
+const everActiveText = (val) => (val ? t('siteDetail.device.everActive') : t('siteDetail.device.neverActive'))
 
 const deviceRefreshCooldown = ref(0)
 let deviceCooldownTimer = null
 
 const loadDeviceStatus = async (refresh = false) => {
   if (refresh && deviceRefreshCooldown.value > 0) {
-    ElMessage.warning(`请等待 ${deviceRefreshCooldown.value}s 后再刷新设备状态`)
+    ElMessage.warning(t('siteDetail.device.refreshWait', { seconds: deviceRefreshCooldown.value }))
     return
   }
   try {
@@ -834,7 +974,7 @@ const loadDeviceStatus = async (refresh = false) => {
     }
   } catch (e) {
     console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '加载设备状态失败')
+    ElMessage.error(e?.response?.data?.detail || t('siteDetail.device.loadFailed'))
   } finally {
     deviceStatusLoading.value = false
   }
@@ -847,7 +987,6 @@ const viewWorkOrder = (workOrder) => {
 onMounted(() => {
   load()
   loadUsers()
-  // 默认加载一次设备ever状态，实时状态为“待检测”
   loadDeviceStatus(false)
 })
 
@@ -874,14 +1013,14 @@ const openSurveys = async () => {
     })
     const items = Array.isArray(res?.items) ? res.items : []
     if (!items.length) {
-      ElMessage.info('当前站点暂无勘察档案')
+      ElMessage.info(t('siteDetail.messages.noSurveyArchive'))
       return
     }
     const archive = items[0]
     router.push({ name: 'SurveyArchiveDetail', params: { id: archive.id } })
   } catch (e) {
     console.error(e)
-    ElMessage.error('获取勘察档案失败')
+    ElMessage.error(t('siteDetail.messages.getSurveyArchiveFailed'))
   }
 }
 
@@ -894,14 +1033,14 @@ const openOpeningArchives = async () => {
     })
     const items = Array.isArray(res?.items) ? res.items : []
     if (!items.length) {
-      ElMessage.info('当前站点暂无开站档案')
+      ElMessage.info(t('siteDetail.messages.noOpeningArchive'))
       return
     }
     const archive = items[0]
     router.push({ name: 'OpeningArchiveDetail', params: { id: archive.id } })
   } catch (e) {
     console.error(e)
-    ElMessage.error('获取开站档案失败')
+    ElMessage.error(t('siteDetail.messages.getOpeningArchiveFailed'))
   }
 }
 
@@ -912,16 +1051,16 @@ const createSurvey = () => {
 const createResurvey = async () => {
   if (!site.value) return
   const parts = []
-  if (site.value.survey_skipped_at) parts.push(`跳过时间：${formatDate(site.value.survey_skipped_at)}`)
-  if (site.value.survey_skipped_by) parts.push(`操作人：${getUserName(site.value.survey_skipped_by)}`)
-  if (site.value.survey_skip_reason) parts.push(`原因：${site.value.survey_skip_reason}`)
+  if (site.value.survey_skipped_at) parts.push(`${t('siteDetail.basic.skippedAt')}：${formatDate(site.value.survey_skipped_at)}`)
+  if (site.value.survey_skipped_by) parts.push(`${t('siteDetail.basic.skippedBy')}：${getUserName(site.value.survey_skipped_by)}`)
+  if (site.value.survey_skip_reason) parts.push(`${t('siteDetail.basic.skippedReason')}：${site.value.survey_skip_reason}`)
   const skipInfo = parts.length ? `\n\n${parts.join('\n')}` : ''
 
   try {
     await ElMessageBox.confirm(
-      `确认新建补勘工单？创建成功后将自动把站点恢复为需要勘察（保留跳过记录）。${skipInfo}`,
-      '新建补勘',
-      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+      t('siteDetail.prompts.createResurveyConfirm', { skipInfo }),
+      t('siteDetail.prompts.createResurveyTitle'),
+      { confirmButtonText: t('siteDetail.prompts.confirm'), cancelButtonText: t('siteDetail.prompts.cancel'), type: 'warning' }
     )
     router.push({ name: 'WorkOrderList', query: { create: '1', site_id: route.params.id, type: 'site_survey', resurvey: '1' } })
   } catch (e) {
@@ -934,9 +1073,94 @@ const createResurvey = async () => {
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .header-actions { display:flex; gap: 12px; }
-.info-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-.item .label { color: var(--text-secondary); margin-right:8px; }
-.item .value { color: var(--text-primary); font-weight: 500; }
+.site-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.summary-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px 14px;
+}
+.summary-card-main {
+  background: linear-gradient(145deg, #eff6ff, #ffffff);
+}
+.summary-card-wide {
+  grid-column: span 2;
+}
+.summary-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 8px;
+}
+.summary-primary {
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #0f172a;
+  word-break: break-word;
+}
+.summary-secondary {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.inline-tag {
+  vertical-align: middle;
+}
+.skip-record {
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+.skip-record-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+.skip-record-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.skip-record-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+.skip-record-item-wide {
+  grid-column: span 1;
+}
+.skip-label {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+}
+.skip-value {
+  display: block;
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-word;
+}
 .mt16 { margin-top: 16px; }
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .card-actions { display: flex; gap: 8px; align-items: center; }
@@ -944,4 +1168,106 @@ const createResurvey = async () => {
 .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; width: 100%; }
 .status-cell { display: flex; align-items: center; gap: 4px; }
 .mr4 { margin-right: 4px; }
+.device-check-at {
+  margin-right: 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+.milestone-panel {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+.milestone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.milestone-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2937;
+}
+.milestone-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 10px;
+}
+.milestone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.milestone-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+.milestone-item.reached {
+  border-color: #bfdbfe;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
+}
+.milestone-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.milestone-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--dot-color);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
+}
+.milestone-name {
+  font-weight: 600;
+  color: #111827;
+}
+.milestone-desc {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.milestone-time {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+@media (max-width: 1200px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .summary-card-wide {
+    grid-column: span 2;
+  }
+}
+@media (max-width: 768px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+  }
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .summary-card-wide {
+    grid-column: span 1;
+  }
+  .skip-record-grid {
+    grid-template-columns: 1fr;
+  }
+  .milestone-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
