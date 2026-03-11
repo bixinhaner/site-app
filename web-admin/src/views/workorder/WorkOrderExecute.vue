@@ -46,6 +46,13 @@
             <div class="hero-card__flags">
               <el-tag v-if="permissions.is_readonly_type" type="info" effect="plain">该类型仅支持 App 执行</el-tag>
               <el-tag v-if="!effectiveSettings.allow_photo_upload" type="info" effect="plain">照片上传已关闭</el-tag>
+              <el-tag
+                v-if="effectiveSettings.allow_photo_upload"
+                :type="localUploadPolicyHint.type"
+                effect="plain"
+              >
+                无定位上传：{{ localUploadPolicyHint.text }}
+              </el-tag>
               <el-tag v-if="!effectiveSettings.allow_device_binding" type="info" effect="plain">设备绑定已关闭</el-tag>
               <el-tag v-if="!effectiveSettings.allow_submit" type="warning" effect="plain">仅允许补录，不允许提交</el-tag>
               <el-tag v-if="!effectiveSettings.allow_recall" type="info" effect="plain">撤回已关闭</el-tag>
@@ -613,6 +620,35 @@ const permissions = computed(() => context.value?.permissions || {})
 const effectiveSettings = computed(() => context.value?.effective_settings || {})
 const progressInfo = computed(() => context.value?.progress || {})
 const progressPercent = computed(() => Number(progressInfo.value?.progress || inspection.value?.completion_rate || 0))
+const LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY = 'deny'
+const LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK = 'allow_with_watermark'
+const LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK = 'allow_without_watermark'
+
+const normalizeLocalUploadWithoutGeoPolicy = (value, fallback = LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY) => {
+  const text = String(value || '').trim()
+  if (text === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK) return text
+  if (text === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK) return text
+  if (text === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY) return text
+  return fallback
+}
+
+const localUploadWithoutGeoPolicy = computed(() => normalizeLocalUploadWithoutGeoPolicy(
+  effectiveSettings.value?.local_upload_without_geo_policy,
+  effectiveSettings.value?.allow_local_upload_without_geo
+    ? LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+    : LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY,
+))
+
+const localUploadPolicyHint = computed(() => {
+  const policy = localUploadWithoutGeoPolicy.value
+  if (policy === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK) {
+    return { type: 'warning', text: '允许，且必须加水印' }
+  }
+  if (policy === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK) {
+    return { type: 'success', text: '允许，原图直传' }
+  }
+  return { type: 'info', text: '禁止' }
+})
 const pageSubtitle = computed(() => {
   if (permissions.value?.is_readonly_type) {
     return '该工单类型仅支持在 App 端接受和执行，Web 端当前只用于查看工单进度、检查结果和历史照片。'
@@ -999,23 +1035,28 @@ const handlePhotoFileChange = async (event) => {
 
     let uploadFile = file
     let localUploadWithoutGeo = false
+    let hasFrontendWatermark = false
     let location
 
     try {
       location = await resolveCurrentLocation()
     } catch (geoError) {
-      if (!effectiveSettings.value?.allow_local_upload_without_geo) {
-        throw new Error('浏览器定位不可用，且当前未允许无定位本地上传')
+      const policy = localUploadWithoutGeoPolicy.value
+      if (policy === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY) {
+        throw new Error('浏览器定位不可用，且当前策略禁止无定位上传')
       }
       localUploadWithoutGeo = true
-      uploadFile = await buildLocalUploadWatermarkFile(file, buildLocalUploadWatermarkLines())
+      if (policy === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK) {
+        uploadFile = await buildLocalUploadWatermarkFile(file, buildLocalUploadWatermarkLines())
+        hasFrontendWatermark = true
+      }
     }
 
     const formData = new FormData()
     formData.append('file', uploadFile)
     formData.append('check_item_id', selectedItem.value.id)
     if (section.fieldId) formData.append('field_id', section.fieldId)
-    formData.append('has_watermark', localUploadWithoutGeo ? 'true' : 'false')
+    formData.append('has_watermark', hasFrontendWatermark ? 'true' : 'false')
     formData.append('local_upload_without_geo', localUploadWithoutGeo ? 'true' : 'false')
     formData.append('original_content_hash', originalHash)
     formData.append('upload_ticket', precheck?.upload_ticket || '')

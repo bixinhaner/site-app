@@ -95,6 +95,7 @@ class WorkOrderExecutionPreviewResponse(BaseModel):
     allow_device_binding: bool = True
     allow_submit: bool = True
     allow_recall: bool = True
+    local_upload_without_geo_policy: str = 'deny'
     allow_local_upload_without_geo: bool = False
     visible_work_order_types: List[str] = Field(default_factory=list)
     editable_work_order_types: List[str] = Field(default_factory=list)

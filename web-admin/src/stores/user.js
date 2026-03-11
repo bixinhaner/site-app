@@ -26,6 +26,13 @@ const normalizeDataScopes = (value) => {
 
 const normalizeWorkOrderExecution = (value) => {
   const src = value && typeof value === 'object' ? value : {}
+  const normalizeLocalUploadPolicy = (raw, fallback = 'deny') => {
+    const policy = String(raw || '').trim()
+    if (policy === 'allow_with_watermark' || policy === 'allow_without_watermark' || policy === 'deny') {
+      return policy
+    }
+    return fallback
+  }
   const normalizeTypeList = (raw) => {
     if (!Array.isArray(raw)) return []
     return [...new Set(raw.map(item => String(item || '').trim()).filter(Boolean))]
@@ -34,6 +41,10 @@ const normalizeWorkOrderExecution = (value) => {
     if (!Array.isArray(raw)) return []
     return raw.map(item => String(item || '').trim()).filter(Boolean)
   }
+  const localUploadPolicy = normalizeLocalUploadPolicy(
+    src.local_upload_without_geo_policy,
+    src.allow_local_upload_without_geo ? 'allow_with_watermark' : 'deny',
+  )
 
   return {
     can_open_entry: Boolean(src.can_open_entry),
@@ -45,7 +56,8 @@ const normalizeWorkOrderExecution = (value) => {
     allow_device_binding: src.allow_device_binding !== false,
     allow_submit: src.allow_submit !== false,
     allow_recall: src.allow_recall !== false,
-    allow_local_upload_without_geo: Boolean(src.allow_local_upload_without_geo),
+    local_upload_without_geo_policy: localUploadPolicy,
+    allow_local_upload_without_geo: localUploadPolicy !== 'deny',
     visible_work_order_types: normalizeTypeList(src.visible_work_order_types),
     editable_work_order_types: normalizeTypeList(src.editable_work_order_types),
     has_any_visible_type: Boolean(src.has_any_visible_type),

@@ -32,8 +32,10 @@
           <el-tag :type="effective.allow_photo_upload ? 'success' : 'info'">{{ effective.allow_photo_upload ? '允许' : '禁止' }}</el-tag>
         </div>
         <div class="effective-item">
-          <div class="effective-label">无定位本地上传</div>
-          <el-tag :type="effective.allow_local_upload_without_geo ? 'warning' : 'info'">{{ effective.allow_local_upload_without_geo ? '允许' : '禁止' }}</el-tag>
+          <div class="effective-label">无定位本地上传策略</div>
+          <el-tag :type="localUploadPolicyTagType(effective.local_upload_without_geo_policy)">
+            {{ localUploadPolicyLabel(effective.local_upload_without_geo_policy) }}
+          </el-tag>
         </div>
         <div class="effective-item">
           <div class="effective-label">设备绑定</div>
@@ -82,8 +84,16 @@
         <el-form-item label="照片上传">
           <el-switch v-model="form.allow_photo_upload.default" active-text="允许" inactive-text="禁止" />
         </el-form-item>
-        <el-form-item label="无定位本地上传">
-          <el-switch v-model="form.allow_local_upload_without_geo.default" active-text="允许" inactive-text="禁止" />
+        <el-form-item label="无定位本地上传策略">
+          <el-select v-model="form.local_upload_without_geo_policy.default" style="width: 100%">
+            <el-option
+              v-for="option in localUploadPolicyOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+          <div class="hint mt8">这里只控制“浏览器无定位时是否允许上传”，以及允许后是否要求先加本地上传水印。</div>
         </el-form-item>
         <el-form-item label="设备绑定/解绑">
           <el-switch v-model="form.allow_device_binding.default" active-text="允许" inactive-text="禁止" />
@@ -143,15 +153,20 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="无定位本地上传" width="150">
+        <el-table-column label="无定位本地上传策略" width="210">
           <template #default="{ row }">
             <el-select
-              :model-value="toMode(form.allow_local_upload_without_geo.per_role[row.key])"
+              :model-value="toLocalUploadPolicyMode(form.local_upload_without_geo_policy.per_role[row.key])"
               :disabled="!canEdit"
               style="width: 100%"
-              @change="value => applyRoleBoolOverride('allow_local_upload_without_geo', row.key, value)"
+              @change="value => applyRoleLocalUploadPolicyOverride(row.key, value)"
             >
-              <el-option v-for="option in boolModeOptions" :key="option.value" :label="option.label" :value="option.value" />
+              <el-option
+                v-for="option in localUploadPolicyModeOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
           </template>
         </el-table-column>
@@ -233,7 +248,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="hint mt12">角色覆盖只影响 Web 管理端的细项能力，不影响 App 现有工单填写流程，也不能绕过上面的总开关。</div>
+      <div class="hint mt12">角色覆盖只影响 Web 执行端细项能力；无定位上传策略与移动端配置互不影响，且不能绕过总开关。</div>
     </el-card>
 
     <el-card v-loading="loading">
@@ -273,10 +288,15 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="无定位本地上传" width="150">
+        <el-table-column label="无定位本地上传策略" width="210">
           <template #default="{ row }">
-            <el-select v-model="row.allow_local_upload_without_geo" :disabled="!canEdit" style="width: 100%">
-              <el-option v-for="option in boolModeOptions" :key="option.value" :label="option.label" :value="option.value" />
+            <el-select v-model="row.local_upload_without_geo_policy" :disabled="!canEdit" style="width: 100%">
+              <el-option
+                v-for="option in localUploadPolicyModeOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
           </template>
         </el-table-column>
@@ -346,7 +366,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="hint mt12">用户覆盖只用于例外场景，比如临时禁止提交或单独放开照片上传，仍不能绕过总开关。</div>
+      <div class="hint mt12">用户覆盖只用于例外场景；“无定位上传”和“是否加水印”在这里合并为一条策略，仍不能绕过总开关。</div>
     </el-card>
   </div>
 </template>
@@ -370,6 +390,21 @@ const boolModeOptions = [
   { label: '跟随默认', value: '' },
   { label: '开启/允许', value: 'allow' },
   { label: '关闭/禁止', value: 'deny' },
+]
+
+const LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY = 'deny'
+const LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK = 'allow_with_watermark'
+const LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK = 'allow_without_watermark'
+
+const localUploadPolicyOptions = [
+  { label: '禁止无定位上传', value: LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY },
+  { label: '允许无定位上传并加水印', value: LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK },
+  { label: '允许无定位上传且不加水印', value: LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK },
+]
+
+const localUploadPolicyModeOptions = [
+  { label: '跟随默认', value: '' },
+  ...localUploadPolicyOptions,
 ]
 
 const roleRows = [
@@ -399,12 +434,19 @@ const createBoolRule = (defaultValue) => ({
   per_role: {},
 })
 
+const createPolicyRule = (defaultValue) => ({
+  default: defaultValue,
+  per_role: {},
+})
+
 const createDefaultForm = () => ({
   enabled: createBoolRule(false),
   allow_photo_upload: createBoolRule(true),
   allow_device_binding: createBoolRule(true),
   allow_submit: createBoolRule(true),
   allow_recall: createBoolRule(true),
+  local_upload_without_geo_policy: createPolicyRule(LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY),
+  // 兼容字段：保存时按三档策略自动派生。
   allow_local_upload_without_geo: createBoolRule(false),
   visible_work_order_types: {
     default: workOrderTypeOptions.map(item => item.value),
@@ -425,6 +467,7 @@ const effective = reactive({
   allow_device_binding: true,
   allow_submit: true,
   allow_recall: true,
+  local_upload_without_geo_policy: LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY,
   allow_local_upload_without_geo: false,
   visible_work_order_types: [],
   editable_work_order_types: [],
@@ -442,7 +485,6 @@ const defaultBoolKeys = [
   'allow_device_binding',
   'allow_submit',
   'allow_recall',
-  'allow_local_upload_without_geo',
 ]
 
 const overridableBoolKeys = defaultBoolKeys.filter(key => key !== 'enabled')
@@ -465,6 +507,42 @@ const fromMode = (value) => {
   if (value === 'deny') return false
   return undefined
 }
+
+const normalizeLocalUploadPolicy = (value, fallback = LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY) => {
+  const text = String(value || '').trim()
+  if (text === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK) return text
+  if (text === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK) return text
+  if (text === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY) return text
+  return fallback
+}
+
+const localUploadPolicyLabel = (value) => {
+  const policy = normalizeLocalUploadPolicy(value)
+  if (policy === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK) return '允许无定位上传并加水印'
+  if (policy === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK) return '允许无定位上传且不加水印'
+  return '禁止无定位上传'
+}
+
+const localUploadPolicyTagType = (value) => {
+  const policy = normalizeLocalUploadPolicy(value)
+  if (policy === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK) return 'warning'
+  if (policy === LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK) return 'success'
+  return 'info'
+}
+
+const toLocalUploadPolicyMode = (value) => {
+  if (!value) return ''
+  return normalizeLocalUploadPolicy(value, '')
+}
+
+const fromLocalUploadPolicyMode = (value) => {
+  if (!value) return undefined
+  return normalizeLocalUploadPolicy(value, '')
+}
+
+const policyAllowsLocalUpload = (value) => (
+  normalizeLocalUploadPolicy(value) !== LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+)
 
 const normalizeTypeList = (list = []) => {
   const out = []
@@ -507,7 +585,7 @@ const buildUserOverrideRow = (userId, label = '') => ({
   allow_device_binding: '',
   allow_submit: '',
   allow_recall: '',
-  allow_local_upload_without_geo: '',
+  local_upload_without_geo_policy: '',
   visible_work_order_types: [],
   editable_work_order_types: [],
 })
@@ -534,6 +612,53 @@ const applyRoleBoolOverride = (key, roleKey, value) => {
     return
   }
   form[key].per_role[roleKey] = boolValue
+}
+
+const normalizePolicyOverrideMap = (value = {}) => Object.entries(value || {}).reduce((out, [key, policy]) => {
+  const normalizedKey = String(key || '').trim()
+  const normalizedPolicy = normalizeLocalUploadPolicy(policy, '')
+  if (!normalizedKey || !normalizedPolicy) return out
+  out[normalizedKey] = normalizedPolicy
+  return out
+}, {})
+
+const buildPolicyRuleFromLegacyBoolRule = (rule = {}) => {
+  const defaultValue = Boolean(rule?.default)
+    ? LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+    : LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+
+  const per_role = Object.entries(rule?.per_role || {}).reduce((out, [key, value]) => {
+    const normalizedKey = String(key || '').trim()
+    if (!normalizedKey) return out
+    out[normalizedKey] = value
+      ? LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+      : LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+    return out
+  }, {})
+
+  const per_user = Object.entries(rule?.per_user || {}).reduce((out, [key, value]) => {
+    const normalizedKey = String(key || '').trim()
+    if (!normalizedKey) return out
+    out[normalizedKey] = value
+      ? LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+      : LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+    return out
+  }, {})
+
+  return {
+    default: defaultValue,
+    per_role,
+    per_user,
+  }
+}
+
+const applyRoleLocalUploadPolicyOverride = (roleKey, value) => {
+  const policy = fromLocalUploadPolicyMode(value)
+  if (!policy) {
+    delete form.local_upload_without_geo_policy.per_role[roleKey]
+    return
+  }
+  form.local_upload_without_geo_policy.per_role[roleKey] = policy
 }
 
 const applyRoleTypeOverride = (key, roleKey, values) => {
@@ -564,8 +689,16 @@ const applyRoleTypeOverride = (key, roleKey, values) => {
 const loadEffective = async () => {
   try {
     const data = await workOrderExecutionSettingsApi.getEffectiveSettings()
+    const resolvedPolicy = normalizeLocalUploadPolicy(
+      data?.local_upload_without_geo_policy,
+      Boolean(data?.allow_local_upload_without_geo)
+        ? LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+        : LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY,
+    )
     Object.assign(effective, {
       ...data,
+      local_upload_without_geo_policy: resolvedPolicy,
+      allow_local_upload_without_geo: policyAllowsLocalUpload(resolvedPolicy),
       visible_work_order_types: normalizeTypeList(data?.visible_work_order_types || []),
       editable_work_order_types: normalizeTypeList(data?.editable_work_order_types || []),
     })
@@ -585,6 +718,31 @@ const loadConfig = async () => {
       form[key].default = Boolean(data?.[key]?.default ?? form[key].default)
       form[key].per_role = key === 'enabled' ? {} : { ...(data?.[key]?.per_role || {}) }
     })
+
+    const localUploadPolicyRuleRaw = (
+      data?.local_upload_without_geo_policy && typeof data.local_upload_without_geo_policy === 'object'
+        ? data.local_upload_without_geo_policy
+        : buildPolicyRuleFromLegacyBoolRule(data?.allow_local_upload_without_geo || {})
+    )
+    const fallbackPolicy = Boolean(data?.allow_local_upload_without_geo?.default)
+      ? LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+      : LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+    form.local_upload_without_geo_policy.default = normalizeLocalUploadPolicy(
+      localUploadPolicyRuleRaw?.default,
+      fallbackPolicy,
+    )
+    form.local_upload_without_geo_policy.per_role = normalizePolicyOverrideMap(
+      localUploadPolicyRuleRaw?.per_role || {},
+    )
+    form.allow_local_upload_without_geo.default = policyAllowsLocalUpload(
+      form.local_upload_without_geo_policy.default,
+    )
+    form.allow_local_upload_without_geo.per_role = Object.entries(
+      form.local_upload_without_geo_policy.per_role || {},
+    ).reduce((out, [roleKey, policy]) => {
+      out[roleKey] = policyAllowsLocalUpload(policy)
+      return out
+    }, {})
 
     form.visible_work_order_types.default = normalizeTypeList(
       data?.visible_work_order_types?.default || form.visible_work_order_types.default,
@@ -620,6 +778,17 @@ const loadConfig = async () => {
         }
         row[key] = toMode(value)
       })
+    })
+
+    const localUploadPolicyPerUser = normalizePolicyOverrideMap(localUploadPolicyRuleRaw?.per_user || {})
+    Object.entries(localUploadPolicyPerUser).forEach(([userId, policy]) => {
+      userIdSet.add(String(userId))
+      let row = rows.find(item => item.user_id === String(userId))
+      if (!row) {
+        row = buildUserOverrideRow(userId)
+        rows.push(row)
+      }
+      row.local_upload_without_geo_policy = toLocalUploadPolicyMode(policy)
     })
 
     Object.entries(data?.visible_work_order_types?.per_user || {}).forEach(([userId, value]) => {
@@ -688,6 +857,23 @@ const buildPayload = () => {
     }
   })
 
+  payload.local_upload_without_geo_policy = {
+    default: normalizeLocalUploadPolicy(form.local_upload_without_geo_policy.default),
+    per_role: {},
+    per_user: {},
+  }
+  payload.allow_local_upload_without_geo = {
+    default: policyAllowsLocalUpload(payload.local_upload_without_geo_policy.default),
+    per_role: {},
+    per_user: {},
+  }
+  Object.entries(form.local_upload_without_geo_policy.per_role || {}).forEach(([roleKey, policy]) => {
+    const normalized = normalizeLocalUploadPolicy(policy, '')
+    if (!normalized) return
+    payload.local_upload_without_geo_policy.per_role[roleKey] = normalized
+    payload.allow_local_upload_without_geo.per_role[roleKey] = policyAllowsLocalUpload(normalized)
+  })
+
   Object.entries(form.visible_work_order_types.per_role || {}).forEach(([roleKey, list]) => {
     const normalized = normalizeTypeList(list || [])
     if (normalized.length) payload.visible_work_order_types.per_role[roleKey] = normalized
@@ -709,6 +895,12 @@ const buildPayload = () => {
       const value = fromMode(row[key])
       if (typeof value === 'boolean') payload[key].per_user[userId] = value
     })
+
+    const localUploadPolicy = fromLocalUploadPolicyMode(row.local_upload_without_geo_policy)
+    if (localUploadPolicy) {
+      payload.local_upload_without_geo_policy.per_user[userId] = localUploadPolicy
+      payload.allow_local_upload_without_geo.per_user[userId] = policyAllowsLocalUpload(localUploadPolicy)
+    }
 
     const visibleTypes = normalizeTypeList(row.visible_work_order_types || [])
     if (visibleTypes.length) payload.visible_work_order_types.per_user[userId] = visibleTypes

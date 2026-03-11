@@ -25,8 +25,18 @@ WORK_ORDER_EXECUTION_CAPABILITY_DEVICE_BINDING = 'allow_device_binding'
 WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT = 'allow_submit'
 WORK_ORDER_EXECUTION_CAPABILITY_RECALL = 'allow_recall'
 WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO = 'allow_local_upload_without_geo'
+WORK_ORDER_EXECUTION_LOCAL_UPLOAD_WITHOUT_GEO_POLICY_KEY = 'local_upload_without_geo_policy'
 WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY = 'visible_work_order_types'
 WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY = 'editable_work_order_types'
+
+LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY = 'deny'
+LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK = 'allow_with_watermark'
+LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK = 'allow_without_watermark'
+LOCAL_UPLOAD_WITHOUT_GEO_POLICY_VALUES = (
+    LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY,
+    LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK,
+    LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK,
+)
 
 WEB_WORK_ORDER_ACCESS_HIDDEN = 'hidden'
 WEB_WORK_ORDER_ACCESS_READONLY = 'readonly'
@@ -38,7 +48,6 @@ _BOOL_RULE_KEYS = (
     WORK_ORDER_EXECUTION_CAPABILITY_DEVICE_BINDING,
     WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT,
     WORK_ORDER_EXECUTION_CAPABILITY_RECALL,
-    WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO,
 )
 
 
@@ -58,6 +67,36 @@ def _normalize_work_order_type(value: Any) -> str:
     raw = getattr(value, 'value', value)
     text = str(raw or '').strip()
     return text
+
+
+def _try_parse_local_upload_without_geo_policy(value: Any) -> Optional[str]:
+    if isinstance(value, bool):
+        return (
+            LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+            if value
+            else LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+        )
+    raw = getattr(value, 'value', value)
+    text = str(raw or '').strip().lower()
+    if text in LOCAL_UPLOAD_WITHOUT_GEO_POLICY_VALUES:
+        return text
+    return None
+
+
+def normalize_local_upload_without_geo_policy(
+    value: Any,
+    *,
+    default: str = LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY,
+) -> str:
+    parsed = _try_parse_local_upload_without_geo_policy(value)
+    if parsed:
+        return parsed
+    return default
+
+
+def is_local_upload_without_geo_allowed(policy: Any) -> bool:
+    normalized = normalize_local_upload_without_geo_policy(policy)
+    return normalized != LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
 
 
 def normalize_work_order_type_list(values: Iterable[Any]) -> list[str]:
@@ -98,6 +137,91 @@ def _normalize_bool_rule(raw_rule: Any, *, default: bool, allow_overrides: bool 
         'default': bool(rule.get('default', default)),
         'per_role': per_role,
         'per_user': per_user,
+    }
+
+
+def _normalize_local_upload_without_geo_policy_rule(
+    raw_rule: Any,
+    *,
+    default: str,
+    allow_overrides: bool = True,
+) -> Dict[str, Any]:
+    rule = raw_rule if isinstance(raw_rule, dict) else {}
+
+    per_role: Dict[str, str] = {}
+    if allow_overrides:
+        for role_code, value in (rule.get('per_role') or {}).items():
+            key = _normalize_role_key(role_code)
+            policy = _try_parse_local_upload_without_geo_policy(value)
+            if not key or not policy:
+                continue
+            per_role[key] = policy
+
+    per_user: Dict[str, str] = {}
+    if allow_overrides:
+        for user_id, value in (rule.get('per_user') or {}).items():
+            key = _normalize_user_key(user_id)
+            policy = _try_parse_local_upload_without_geo_policy(value)
+            if not key or not policy:
+                continue
+            per_user[key] = policy
+
+    default_policy = normalize_local_upload_without_geo_policy(
+        rule.get('default'),
+        default=default,
+    )
+    return {
+        'default': default_policy,
+        'per_role': per_role,
+        'per_user': per_user,
+    }
+
+
+def _bool_rule_to_local_upload_without_geo_policy_rule(bool_rule: Dict[str, Any]) -> Dict[str, Any]:
+    out = {
+        'default': LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY,
+        'per_role': {},
+        'per_user': {},
+    }
+    out['default'] = (
+        LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+        if bool(bool_rule.get('default'))
+        else LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+    )
+    out['per_role'] = {
+        key: (
+            LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+            if bool(value)
+            else LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+        )
+        for key, value in (bool_rule.get('per_role') or {}).items()
+        if _normalize_role_key(key)
+    }
+    out['per_user'] = {
+        key: (
+            LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+            if bool(value)
+            else LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+        )
+        for key, value in (bool_rule.get('per_user') or {}).items()
+        if _normalize_user_key(key)
+    }
+    return out
+
+
+def _local_upload_without_geo_policy_rule_to_bool_rule(policy_rule: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'default': is_local_upload_without_geo_allowed(policy_rule.get('default')),
+        'per_role': {
+            _normalize_role_key(key): is_local_upload_without_geo_allowed(value)
+            for key, value in (policy_rule.get('per_role') or {}).items()
+            if _normalize_role_key(key)
+        },
+        'per_user': {
+            _normalize_user_key(key): is_local_upload_without_geo_allowed(value)
+            for key, value in (policy_rule.get('per_user') or {}).items()
+            if _normalize_user_key(key)
+        },
     }
 
 
@@ -179,6 +303,32 @@ def sanitize_work_order_execution_settings(raw_settings: Any) -> Dict[str, Any]:
             default=bool(defaults[key]['default']),
             allow_overrides=key != WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
         )
+
+    default_policy = normalize_local_upload_without_geo_policy(
+        (defaults.get(WORK_ORDER_EXECUTION_LOCAL_UPLOAD_WITHOUT_GEO_POLICY_KEY) or {}).get('default'),
+        default=LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY,
+    )
+    policy_rule_raw = raw.get(WORK_ORDER_EXECUTION_LOCAL_UPLOAD_WITHOUT_GEO_POLICY_KEY)
+    if policy_rule_raw is not None:
+        policy_rule = _normalize_local_upload_without_geo_policy_rule(
+            policy_rule_raw,
+            default=default_policy,
+            allow_overrides=True,
+        )
+    else:
+        legacy_local_upload_rule = _normalize_bool_rule(
+            raw.get(WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO),
+            default=bool(
+                (defaults.get(WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO) or {}).get('default', False)
+            ),
+            allow_overrides=True,
+        )
+        policy_rule = _bool_rule_to_local_upload_without_geo_policy_rule(legacy_local_upload_rule)
+
+    sanitized[WORK_ORDER_EXECUTION_LOCAL_UPLOAD_WITHOUT_GEO_POLICY_KEY] = policy_rule
+    sanitized[WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO] = (
+        _local_upload_without_geo_policy_rule_to_bool_rule(policy_rule)
+    )
 
     legacy_type_rule = raw.get('allowed_work_order_types')
     visible_rule_raw = raw.get(WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY)
@@ -271,8 +421,20 @@ def _resolve_type_list_for_user(settings: Dict[str, Any], key: str, user: Option
     return normalize_work_order_type_list(rule.get('default') or SUPPORTED_WEB_EXECUTION_WORK_ORDER_TYPES)
 
 
+def _resolve_local_upload_without_geo_policy_for_user(
+    settings: Dict[str, Any],
+    user: Optional[User],
+) -> str:
+    rule = settings.get(WORK_ORDER_EXECUTION_LOCAL_UPLOAD_WITHOUT_GEO_POLICY_KEY) or {}
+    override = _resolve_rule_override_for_user(rule, user)
+    if override is not None:
+        return normalize_local_upload_without_geo_policy(override)
+    return normalize_local_upload_without_geo_policy(rule.get('default'))
+
+
 def get_effective_work_order_execution_settings(db: Session, user: Optional[User]) -> Dict[str, Any]:
     settings = load_work_order_execution_settings(db)
+    local_upload_without_geo_policy = _resolve_local_upload_without_geo_policy_for_user(settings, user)
     visible_work_order_types = _resolve_type_list_for_user(
         settings,
         WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY,
@@ -288,11 +450,8 @@ def get_effective_work_order_execution_settings(db: Session, user: Optional[User
         'allow_device_binding': _resolve_bool_for_user(settings, WORK_ORDER_EXECUTION_CAPABILITY_DEVICE_BINDING, user),
         'allow_submit': _resolve_bool_for_user(settings, WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT, user),
         'allow_recall': _resolve_bool_for_user(settings, WORK_ORDER_EXECUTION_CAPABILITY_RECALL, user),
-        'allow_local_upload_without_geo': _resolve_bool_for_user(
-            settings,
-            WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO,
-            user,
-        ),
+        'local_upload_without_geo_policy': local_upload_without_geo_policy,
+        'allow_local_upload_without_geo': is_local_upload_without_geo_allowed(local_upload_without_geo_policy),
         'visible_work_order_types': visible_work_order_types,
         'editable_work_order_types': editable_work_order_types,
     }
@@ -376,6 +535,9 @@ def get_work_order_execution_access_summary(db: Session, user: Optional[User]) -
         'allow_device_binding': bool(effective.get('allow_device_binding')),
         'allow_submit': bool(effective.get('allow_submit')),
         'allow_recall': bool(effective.get('allow_recall')),
+        'local_upload_without_geo_policy': normalize_local_upload_without_geo_policy(
+            effective.get('local_upload_without_geo_policy'),
+        ),
         'allow_local_upload_without_geo': bool(effective.get('allow_local_upload_without_geo')),
         'visible_work_order_types': normalize_work_order_type_list(
             effective.get(WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY) or []

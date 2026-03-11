@@ -65,6 +65,9 @@ from app.services.equipment_unbind_service import (
     rollback_equipment_status_after_unbind,
 )
 from app.services.work_order_execution_settings_service import (
+    LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK,
+    LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK,
+    LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY,
     WORK_ORDER_EXECUTION_CAPABILITY_DEVICE_BINDING,
     WORK_ORDER_EXECUTION_CAPABILITY_ENABLED,
     WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO,
@@ -72,7 +75,9 @@ from app.services.work_order_execution_settings_service import (
     WORK_ORDER_EXECUTION_CAPABILITY_SUBMIT,
     can_use_web_work_order_execution,
     ensure_web_work_order_execution_allowed,
+    get_effective_work_order_execution_settings,
     is_web_admin_request,
+    normalize_local_upload_without_geo_policy,
 )
 from app.utils.timezone import to_utc_iso
 from app.utils.field_validator import FieldValidator
@@ -1541,10 +1546,13 @@ async def upload_inspection_photo(
     except Exception as e:
         print(f"  无法获取原始表单数据: {e}")
     
+    is_web_upload_request = is_web_admin_request(request)
+    local_upload_without_geo_policy = LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+
     # 本地上传（不带经纬度/地址）允许GPS为0，其他场景仍要求有效GPS
     if local_upload_without_geo:
-        # 本地上传仍要求前端已加水印（标注“本图片为本地上传照片”）
-        if not has_watermark:
+        if not is_web_upload_request and not has_watermark:
+            # 移动端保持原逻辑：无定位本地上传必须为前端已加水印图片。
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="本地上传照片必须带水印"
@@ -1576,6 +1584,29 @@ async def upload_inspection_photo(
             capability=WORK_ORDER_EXECUTION_CAPABILITY_LOCAL_UPLOAD_WITHOUT_GEO,
             detail="当前未启用 Web 端无定位本地上传",
         )
+        if is_web_upload_request:
+            effective_settings = get_effective_work_order_execution_settings(db, current_user)
+            local_upload_without_geo_policy = normalize_local_upload_without_geo_policy(
+                effective_settings.get('local_upload_without_geo_policy'),
+                default=(
+                    LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+                    if bool(effective_settings.get('allow_local_upload_without_geo'))
+                    else LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY
+                ),
+            )
+            if local_upload_without_geo_policy == LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="当前未启用 Web 端无定位本地上传",
+                )
+            if (
+                local_upload_without_geo_policy == LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK
+                and not has_watermark
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="当前策略要求无定位本地上传必须带水印",
+                )
     check_item, normalized_field_id = _resolve_photo_upload_check_item_and_field(
         db,
         inspection_id=inspection_id,
@@ -1703,7 +1734,17 @@ async def upload_inspection_photo(
     if distance_exceed_block_upload is not None:
         location_compare["distance_exceed_block_upload"] = bool(distance_exceed_block_upload)
     
-    if not has_watermark:
+    skip_backend_watermark_for_raw_local_upload = bool(
+        is_web_upload_request
+        and local_upload_without_geo
+        and local_upload_without_geo_policy == LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK
+        and not has_watermark
+    )
+
+    if skip_backend_watermark_for_raw_local_upload:
+        print('DEBUG: 无定位上传策略=允许且不加水印，直接保留原图')
+        watermark_data = None
+    elif not has_watermark:
         # 前端没有水印，后端添加水印
         print(f"DEBUG: 前端无水印，后端添加水印")
         watermark_data = {
