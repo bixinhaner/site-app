@@ -694,21 +694,30 @@ export class WatermarkTool {
         const distanceExceeded = gps.distanceExceeded === true
 
         if (hasPlannedCoords && !distanceExceeded) {
-          const distanceText = hasDistanceToPlan ? ` | 距离:${distanceToPlan.toFixed(1)}m` : ''
+          const actual = `${latitude.toFixed(coordinatePrecision)},${longitude.toFixed(coordinatePrecision)}`
+          const planned = `${plannedLatitude.toFixed(coordinatePrecision)},${plannedLongitude.toFixed(coordinatePrecision)}`
+          const distanceText = hasDistanceToPlan
+            ? t('messages.photoLocationCompareDistanceText', { distance: distanceToPlan.toFixed(1) })
+            : ''
           lines.push(
             buildLine(
               '📍',
-              `实拍:${latitude.toFixed(coordinatePrecision)},${longitude.toFixed(coordinatePrecision)} | 规划:${plannedLatitude.toFixed(coordinatePrecision)},${plannedLongitude.toFixed(coordinatePrecision)}${distanceText}`,
+              t('messages.photoLocationCompareLine', {
+                actual,
+                planned,
+                distanceText,
+              }),
             ),
           )
         } else if (hasPlannedCoords && distanceExceeded) {
           // 超阈值场景仅保留实拍坐标，避免修改原有业务结果表达
           lines.push(buildLine('📍', `${latitude.toFixed(coordinatePrecision)}, ${longitude.toFixed(coordinatePrecision)}`))
         } else if (planCoordinateMissing) {
+          const actual = `${latitude.toFixed(coordinatePrecision)},${longitude.toFixed(coordinatePrecision)}`
           lines.push(
             buildLine(
               '📍',
-              `实拍:${latitude.toFixed(coordinatePrecision)},${longitude.toFixed(coordinatePrecision)} | 规划坐标缺失`,
+              t('messages.photoLocationComparePlanMissingLine', { actual }),
             ),
           )
         } else {

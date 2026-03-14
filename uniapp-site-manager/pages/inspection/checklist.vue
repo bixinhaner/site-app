@@ -782,12 +782,51 @@
 
 		const hasChinese = (value) => /[\u4e00-\u9fff]/.test(String(value || ''))
 
-		const normalizeUnit = (unit) => {
-			const raw = String(unit || '').trim()
-			if (!raw) return ''
-			if (raw === '度') return '°'
-			if (raw === '米') return 'm'
-			return raw
+	const normalizeUnit = (unit) => {
+		const raw = String(unit || '').trim()
+		if (!raw) return ''
+		if (raw === '度') return '°'
+		if (raw === '米') return 'm'
+		return raw
+	}
+
+		const buildPhotoLocationCompareLine = ({
+			actualLatitude,
+			actualLongitude,
+			plannedLatitude,
+			plannedLongitude,
+			distanceToPlan,
+			distanceExceeded,
+			planCoordinateMissing,
+			precision
+		}) => {
+			const actual = `${Number(actualLatitude).toFixed(precision)},${Number(actualLongitude).toFixed(precision)}`
+			const planLat = Number(plannedLatitude)
+			const planLon = Number(plannedLongitude)
+			const hasPlanCoords = isValidCoordinatePair(planLat, planLon)
+			const hasDistanceToPlan = isFinite(Number(distanceToPlan)) && Number(distanceToPlan) >= 0
+
+			if (hasPlanCoords && distanceExceeded !== true) {
+				const planned = `${planLat.toFixed(precision)},${planLon.toFixed(precision)}`
+				const distanceText = hasDistanceToPlan
+					? t('messages.photoLocationCompareDistanceText', { distance: Number(distanceToPlan).toFixed(1) })
+					: ''
+				return t('messages.photoLocationCompareLine', {
+					actual,
+					planned,
+					distanceText
+				})
+			}
+
+			if (hasPlanCoords && distanceExceeded === true) {
+				return `${Number(actualLatitude).toFixed(precision)}, ${Number(actualLongitude).toFixed(precision)}`
+			}
+
+			if (planCoordinateMissing === true) {
+				return t('messages.photoLocationComparePlanMissingLine', { actual })
+			}
+
+			return `${Number(actualLatitude).toFixed(precision)}, ${Number(actualLongitude).toFixed(precision)}`
 		}
 
 		const getKnownFieldMapping = (rawLabel) => {
@@ -2666,22 +2705,18 @@
 									const planLon = Number(gpsExtra?.plannedLongitude)
 									const hasPlanCoords = isValidCoordinatePair(planLat, planLon)
 									const distanceToPlan = Number(gpsExtra?.distanceToPlanM)
-									const hasDistanceToPlan = isFinite(distanceToPlan) && distanceToPlan >= 0
 									const distanceExceeded = gpsExtra?.distanceExceeded === true
 
-									if (hasPlanCoords && !distanceExceeded) {
-										const distanceText = hasDistanceToPlan ? ` | 距离:${distanceToPlan.toFixed(1)}m` : ''
-										return `实拍:${shotLat.toFixed(precision)},${shotLon.toFixed(precision)} | 规划:${planLat.toFixed(precision)},${planLon.toFixed(precision)}${distanceText}`
-									}
-									if (hasPlanCoords && distanceExceeded) {
-										return `${shotLat.toFixed(precision)}, ${shotLon.toFixed(precision)}`
-									}
-
-									if (gpsExtra?.planCoordinateMissing === true) {
-										return `实拍:${shotLat.toFixed(precision)},${shotLon.toFixed(precision)} | 规划坐标缺失`
-									}
-
-									return `${shotLat.toFixed(precision)}, ${shotLon.toFixed(precision)}`
+									return buildPhotoLocationCompareLine({
+										actualLatitude: shotLat,
+										actualLongitude: shotLon,
+										plannedLatitude: hasPlanCoords ? planLat : null,
+										plannedLongitude: hasPlanCoords ? planLon : null,
+										distanceToPlan,
+										distanceExceeded,
+										planCoordinateMissing: gpsExtra?.planCoordinateMissing === true,
+										precision
+									})
 								})()
 								const watermarkText = []
 								if (customPrefix) watermarkText.push(customPrefix)
@@ -3403,26 +3438,33 @@
 			return Math.max(maxVal, current)
 		}, 0)
 		const thresholdVal = Number(exceededPhotos[0]?.threshold_m)
-		const thresholdText = isFinite(thresholdVal) ? `${thresholdVal}米` : '阈值'
+		const thresholdText = isFinite(thresholdVal)
+			? t('messages.photoLocationCompareThresholdText', { value: thresholdVal })
+			: t('messages.photoLocationCompareThresholdFallback')
 		const blockUpload = exceededPhotos.some((compare) => compare.block_upload_when_exceed === true)
 
 		const missingPlanCount = comparedPhotos.filter((compare) => compare.plan_coordinate_missing === true).length
 		const maxDistanceText = isFinite(maxDistance) && maxDistance > 0
-			? `，最大约${maxDistance.toFixed(1)}米`
+			? t('messages.photoLocationCompareMaxDistanceText', { distance: maxDistance.toFixed(1) })
 			: ''
 		const missingPlanText = missingPlanCount > 0
-			? `；另有${missingPlanCount}张照片规划坐标缺失`
+			? t('messages.photoLocationCompareMissingPlanText', { count: missingPlanCount })
 			: ''
 
-		const content = `检测到${exceededPhotos.length}张照片与规划坐标距离超过${thresholdText}${maxDistanceText}${missingPlanText}。`
+		const content = t('messages.photoLocationCompareExceededContent', {
+			count: exceededPhotos.length,
+			thresholdText,
+			maxDistanceText,
+			missingPlanText
+		})
 
 		if (blockUpload) {
 			await new Promise((resolve) => {
 				uni.showModal({
-					title: '位置超阈值，已阻断上传',
-					content: `${content}请返回重拍后再保存。`,
+					title: t('messages.photoLocationCompareBlockedTitle'),
+					content: `${content}${t('messages.photoLocationCompareBlockedDetail')}`,
 					showCancel: false,
-					confirmText: '我知道了',
+					confirmText: t('common.confirm'),
 					success: () => resolve(true),
 					fail: () => resolve(true)
 				})
@@ -3432,10 +3474,10 @@
 
 			return await new Promise((resolve) => {
 				uni.showModal({
-				title: '位置超阈值提醒',
-				content: `${content}是否继续上传？`,
-				confirmText: '继续上传',
-				cancelText: '返回检查',
+				title: t('messages.photoLocationCompareWarningTitle'),
+				content: `${content}${t('messages.photoLocationCompareContinuePrompt')}`,
+				confirmText: t('messages.photoLocationCompareContinueUpload'),
+				cancelText: t('inspection.backToCheck'),
 				success: (res) => resolve(!!res.confirm),
 				fail: () => resolve(false)
 			})
