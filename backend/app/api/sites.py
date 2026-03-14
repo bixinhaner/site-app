@@ -44,6 +44,7 @@ from app.services.omc_client import (
 )
 from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_state
 from app.services.authz_service import user_has_any_role_or_permission
+from app.utils.site_milestones import get_site_milestone_timestamps
 from app.utils.timezone import to_utc_iso
 from app.services.omc_monitor import (
     advance_opening_work_orders_by_ever,
@@ -1337,57 +1338,14 @@ async def get_site_milestones(
 
     _ensure_site_visible(site_id, db, current_user)
 
-    install_started_at = (
-        db.query(func.min(EquipmentBindingHistory.operated_at))
-        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
-        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
-        .filter(
-            EquipmentBindingHistory.site_id == site_id,
-            EquipmentBindingHistory.action.in_([BindingActionEnum.BIND, BindingActionEnum.REBIND]),
-            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-        )
-        .scalar()
-    )
-
-    opening_filter = (
-        WorkOrder.site_id == site_id,
-        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-    )
-    install_completed_at = (
-        db.query(func.min(WorkOrder.submitted_at))
-        .filter(*opening_filter, WorkOrder.submitted_at.isnot(None))
-        .scalar()
-    )
-    online_at = (
-        db.query(func.min(WorkOrder.activated_at))
-        .filter(*opening_filter, WorkOrder.activated_at.isnot(None))
-        .scalar()
-    )
-    activated_at = (
-        db.query(func.min(WorkOrder.completed_at))
-        .filter(*opening_filter, WorkOrder.completed_at.isnot(None))
-        .scalar()
-    )
-
-    ssv_at = (
-        db.query(func.min(WorkOrder.completed_at))
-        .filter(
-            WorkOrder.site_id == site_id,
-            WorkOrder.type == WorkOrderTypeEnum.SSV,
-            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-            WorkOrder.completed_at.isnot(None),
-        )
-        .scalar()
-    )
+    milestone_times = get_site_milestone_timestamps(db, site_id)
 
     return SiteMilestonesResponse(
-        install_started_at=to_utc_iso(install_started_at) if install_started_at else None,
-        install_completed_at=to_utc_iso(install_completed_at) if install_completed_at else None,
-        online_at=to_utc_iso(online_at) if online_at else None,
-        activated_at=to_utc_iso(activated_at) if activated_at else None,
-        ssv_at=to_utc_iso(ssv_at) if ssv_at else None,
+        install_started_at=to_utc_iso(milestone_times["install_started_at"]) if milestone_times["install_started_at"] else None,
+        install_completed_at=to_utc_iso(milestone_times["install_completed_at"]) if milestone_times["install_completed_at"] else None,
+        online_at=to_utc_iso(milestone_times["online_at"]) if milestone_times["online_at"] else None,
+        activated_at=to_utc_iso(milestone_times["activated_at"]) if milestone_times["activated_at"] else None,
+        ssv_at=to_utc_iso(milestone_times["ssv_at"]) if milestone_times["ssv_at"] else None,
     )
 
 

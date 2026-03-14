@@ -9,13 +9,19 @@ from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.user import User as UserModel
-from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
+from app.models.work_order import WorkOrder
 from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
 from app.models.survey_archive import SiteSurveyArchive
-from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
 from app.models.equipment import Inventory, Equipment, StockTransaction
 from app.services.authz_service import user_has_any_role_or_permission
+from app.utils.site_milestones import (
+    get_activated_rows,
+    get_install_completed_rows,
+    get_install_started_rows,
+    get_online_rows,
+    get_ssv_rows,
+)
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -200,42 +206,14 @@ async def get_dashboard_summary(
     site_rows = db.query(Site.status, func.count(Site.id)).group_by(Site.status).all()
     site_status = {str(s or "unknown"): int(c) for s, c in site_rows}
 
-    # 安装开始站点统计（按“首次开始绑定设备SN”口径）：
-    # 仅统计仍关联“有效开站工单”的绑定记录，保证工单删除后可回退。
-    install_started_filter = (
-        EquipmentBindingHistory.site_id.isnot(None),
-        EquipmentBindingHistory.action.in_([BindingActionEnum.BIND, BindingActionEnum.REBIND]),
-        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-    )
-    install_started_site_count = int(
-        db.query(func.count(func.distinct(EquipmentBindingHistory.site_id)))
-        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
-        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
-        .filter(*install_started_filter)
-        .scalar()
-        or 0
-    )
+    # 站点关键节点统计统一复用同一套“首次发生时间”数据源，避免概况卡片与趋势图口径不一致。
+    install_started_rows = get_install_started_rows(db)
+    install_completed_rows = get_install_completed_rows(db)
+    online_rows = get_online_rows(db)
+    activated_rows = get_activated_rows(db)
 
-    # 安装完成站点统计（按“相片全部提交”节点）：
-    # 开站工单达到已提交及以上阶段（含已完成），按站点去重统计。
-    installed_site_count = int(
-        db.query(func.count(func.distinct(WorkOrder.site_id)))
-        .filter(
-            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-            WorkOrder.status.in_(
-                [
-                    WorkOrderStatusEnum.SUBMITTED,
-                    WorkOrderStatusEnum.UNDER_REVIEW,
-                    WorkOrderStatusEnum.APPROVED,
-                    WorkOrderStatusEnum.ACTIVATED,
-                    WorkOrderStatusEnum.COMPLETED,
-                ]
-            ),
-        )
-        .scalar()
-        or 0
-    )
+    install_started_site_count = len(install_started_rows)
+    installed_site_count = len(install_completed_rows)
 
     # 检查待审统计
     pending_review_count = db.query(func.count(SiteInspection.id)).filter(
@@ -262,8 +240,8 @@ async def get_dashboard_summary(
     planning_done = count_with_status([
         "planned", "construction", "pending_online", "online_pending_activation", "operational", "maintenance"
     ])
-    online = count_with_status(["pending_online", "online_pending_activation", "operational", "maintenance"])
-    activated = count_with_status(["operational", "maintenance"])
+    online = len(online_rows)
+    activated = len(activated_rows)
     ssv_passed_cnt = int(db.query(func.count(Site.id)).filter(Site.ssv_passed == True).scalar() or 0)
 
     site_progress: Dict[str, int] = {
@@ -316,8 +294,8 @@ async def get_site_progress_trend(
     事件口径（按站点“首次发生时间”统计）：
     - install_started: 设备绑定历史首次 bind/rebind
     - install_completed: 开站工单首次 submitted_at
-    - online: 开站工单首次 activated_at
-    - activated: 开站工单首次 completed_at
+    - online: 站点首次进入 online_pending_activation（无审计时回退到开站工单首次 activated_at）
+    - activated: 站点首次进入 operational/maintenance（无审计时回退到开站工单首次 completed_at）
     - ssv: SSV 工单首次 completed_at
 
     返回每周期新增（incremental）以及区间前基线（baseline），前端可切换“新增/累计”。
@@ -341,79 +319,11 @@ async def get_site_progress_trend(
     bucket_starts, range_end = _build_bucket_starts(now_local, g, safe_periods)
     range_start = bucket_starts[0]
 
-    opening_filter = (
-        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-        WorkOrder.site_id.isnot(None),
-        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-    )
-
-    install_started_filter = (
-        EquipmentBindingHistory.site_id.isnot(None),
-        EquipmentBindingHistory.action.in_([BindingActionEnum.BIND, BindingActionEnum.REBIND]),
-        WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-        WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-    )
-    install_started_rows = (
-        db.query(
-            EquipmentBindingHistory.site_id,
-            func.min(EquipmentBindingHistory.operated_at).label("event_at"),
-        )
-        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
-        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
-        .filter(*install_started_filter)
-        .group_by(EquipmentBindingHistory.site_id)
-        .all()
-    )
-    install_completed_rows = (
-        db.query(
-            WorkOrder.site_id,
-            func.min(WorkOrder.submitted_at).label("event_at"),
-        )
-        .filter(
-            *opening_filter,
-            WorkOrder.submitted_at.isnot(None),
-        )
-        .group_by(WorkOrder.site_id)
-        .all()
-    )
-    online_rows = (
-        db.query(
-            WorkOrder.site_id,
-            func.min(WorkOrder.activated_at).label("event_at"),
-        )
-        .filter(
-            *opening_filter,
-            WorkOrder.activated_at.isnot(None),
-        )
-        .group_by(WorkOrder.site_id)
-        .all()
-    )
-    activated_rows = (
-        db.query(
-            WorkOrder.site_id,
-            func.min(WorkOrder.completed_at).label("event_at"),
-        )
-        .filter(
-            *opening_filter,
-            WorkOrder.completed_at.isnot(None),
-        )
-        .group_by(WorkOrder.site_id)
-        .all()
-    )
-    ssv_rows = (
-        db.query(
-            WorkOrder.site_id,
-            func.min(WorkOrder.completed_at).label("event_at"),
-        )
-        .filter(
-            WorkOrder.type == WorkOrderTypeEnum.SSV,
-            WorkOrder.site_id.isnot(None),
-            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-            WorkOrder.completed_at.isnot(None),
-        )
-        .group_by(WorkOrder.site_id)
-        .all()
-    )
+    install_started_rows = get_install_started_rows(db)
+    install_completed_rows = get_install_completed_rows(db)
+    online_rows = get_online_rows(db)
+    activated_rows = get_activated_rows(db)
+    ssv_rows = get_ssv_rows(db)
 
     install_started_counts, install_started_baseline = _count_events_by_bucket(
         install_started_rows,
