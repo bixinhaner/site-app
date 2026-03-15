@@ -36,9 +36,9 @@ export const TemplateFieldRules = {
     structural: [
       'field_id',             // 字段ID
       'type',                 // 字段类型
-      'required',             // 必填属性（false→true 为结构性变更）
     ],
     nonStructural: [
+      'required',             // 必填属性
       'label',                // 字段标签
       'placeholder',          // 占位符
       'default_value',        // 默认值
@@ -89,20 +89,7 @@ export function getFieldDisabledReason(level, fieldName, isTemplateUsed) {
  * @returns {string|null} 禁用原因，null 表示不禁用
  */
 export function getOperationDisabledReason(operation, isTemplateUsed) {
-  if (!isTemplateUsed) {
-    return null;
-  }
-  
-  const reasons = {
-    'add_category': '该检查模板已有工单使用，不允许添加新的检查分类',
-    'delete_category': '该检查模板已有工单使用，不允许删除检查分类',
-    'add_item': '该检查模板已有工单使用，不允许添加新的检查项',
-    'delete_item': '该检查模板已有工单使用，不允许删除检查项',
-    'add_field': '该检查模板已有工单使用，不允许添加新的字段',
-    'delete_field': '该检查模板已有工单使用，不允许删除字段',
-  };
-  
-  return reasons[operation] || null;
+  return null;
 }
 
 /**
@@ -113,17 +100,6 @@ export function getOperationDisabledReason(operation, isTemplateUsed) {
  * @returns {Object} { allowed: boolean, reason: string|null }
  */
 export function canChangeRequired(oldValue, newValue, isTemplateUsed) {
-  if (!isTemplateUsed) {
-    return { allowed: true, reason: null };
-  }
-  
-  if (!oldValue && newValue) {
-    return { 
-      allowed: false, 
-      reason: '该检查模板已有工单使用，不允许将字段从非必填改为必填' 
-    };
-  }
-  
   return { allowed: true, reason: null };
 }
 
@@ -132,14 +108,7 @@ export function canChangeRequired(oldValue, newValue, isTemplateUsed) {
  * @returns {Array} 结构性操作列表
  */
 export function getStructuralOperations() {
-  return [
-    'add_category',
-    'delete_category',
-    'add_item',
-    'delete_item',
-    'add_field',
-    'delete_field'
-  ];
+  return [];
 }
 
 /**
@@ -156,11 +125,6 @@ export function isStructuralChange(oldField, newField) {
   
   // 字段类型变更
   if (oldField.type !== newField.type) {
-    return true;
-  }
-  
-  // required 从 false 改为 true
-  if (!oldField.required && newField.required) {
     return true;
   }
   

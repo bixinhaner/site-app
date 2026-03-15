@@ -125,6 +125,16 @@
       />
 
       <el-alert
+        v-if="templateSyncInfo?.message"
+        class="mb16"
+        :type="templateSyncInfo.just_applied ? 'warning' : (templateSyncInfo.has_pending_update ? 'info' : 'warning')"
+        show-icon
+        :closable="false"
+        :title="templateSyncInfo.just_applied ? '检查模板已更新' : '模板同步提示'"
+        :description="templateSyncInfo.message"
+      />
+
+      <el-alert
         v-if="order.status === 'VOIDED'"
         class="mb16"
         type="warning"
@@ -616,6 +626,7 @@ const cachedGeo = ref(null)
 const workOrderId = computed(() => String(route.params.id || ''))
 const order = computed(() => context.value?.work_order || null)
 const inspection = computed(() => context.value?.inspection || null)
+const templateSyncInfo = computed(() => inspection.value?.template_sync || null)
 const permissions = computed(() => context.value?.permissions || {})
 const effectiveSettings = computed(() => context.value?.effective_settings || {})
 const progressInfo = computed(() => context.value?.progress || {})
@@ -878,8 +889,8 @@ const acceptWorkOrder = async () => {
 const recallWorkOrder = async () => {
   recalling.value = true
   try {
-    await workOrderAPI.recallWorkOrder(workOrderId.value)
-    ElMessage.success('工单已撤回，可继续编辑')
+    const response = await workOrderAPI.recallWorkOrder(workOrderId.value)
+    ElMessage.success(response?.message || '工单已撤回，可继续编辑')
     await loadPage()
   } catch (error) {
     console.error(error)

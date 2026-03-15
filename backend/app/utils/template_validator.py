@@ -27,7 +27,7 @@ def _normalize_level_type(cat: Dict) -> str:
 
 def validate_template_changes(old_data: Dict, new_data: Dict) -> Dict:
     """
-    后端验证：确保没有禁止的结构性变更
+    后端验证：确保没有禁止的高风险结构性变更
     这是防止前端绕过的最后防线
     
     Args:
@@ -43,16 +43,7 @@ def validate_template_changes(old_data: Dict, new_data: Dict) -> Dict:
     old_categories = {cat['category_id']: cat for cat in old_data.get('check_categories', [])}
     new_categories = {cat['category_id']: cat for cat in new_data.get('check_categories', [])}
     
-    # 1. 检查分类结构
-    for cat_id in new_categories:
-        if cat_id not in old_categories:
-            violations.append(f"禁止添加新分类: {cat_id}")
-    
-    for cat_id in old_categories:
-        if cat_id not in new_categories:
-            violations.append(f"禁止删除分类: {cat_id}")
-    
-    # 2. 检查分类属性
+    # 允许新增/删除分类、检查项和字段，但继续禁止高风险属性变更
     for cat_id in old_categories:
         if cat_id in new_categories:
             old_cat = old_categories[cat_id]
@@ -73,19 +64,13 @@ def validate_template_changes(old_data: Dict, new_data: Dict) -> Dict:
                     f"({_normalize_level_type(old_cat)} -> {_normalize_level_type(new_cat)})"
                 )
             
-            # 3. 检查检查项结构
+            # 检查检查项结构
             old_items = {item['item_id']: item for item in old_cat.get('items', [])}
             new_items = {item['item_id']: item for item in new_cat.get('items', [])}
-            
-            for item_id in new_items:
-                if item_id not in old_items:
-                    violations.append(f"禁止添加新检查项: {cat_id}.{item_id}")
-            
+
             for item_id in old_items:
-                if item_id not in new_items:
-                    violations.append(f"禁止删除检查项: {cat_id}.{item_id}")
-                else:
-                    # 4. 检查检查项属性
+                if item_id in new_items:
+                    # 检查检查项属性
                     old_item = old_items[item_id]
                     new_item = new_items[item_id]
                     
@@ -96,19 +81,13 @@ def validate_template_changes(old_data: Dict, new_data: Dict) -> Dict:
                             f"({old_item.get('required_type')} -> {new_item.get('required_type')})"
                         )
                     
-                    # 5. 检查字段结构
+                    # 检查字段结构
                     old_fields = {f['field_id']: f for f in old_item.get('fields', [])}
                     new_fields = {f['field_id']: f for f in new_item.get('fields', [])}
-                    
-                    for field_id in new_fields:
-                        if field_id not in old_fields:
-                            violations.append(f"禁止添加新字段: {cat_id}.{item_id}.{field_id}")
-                    
+
                     for field_id in old_fields:
-                        if field_id not in new_fields:
-                            violations.append(f"禁止删除字段: {cat_id}.{item_id}.{field_id}")
-                        else:
-                            # 6. 检查字段属性
+                        if field_id in new_fields:
+                            # 检查字段属性
                             old_field = old_fields[field_id]
                             new_field = new_fields[field_id]
                             
@@ -119,14 +98,6 @@ def validate_template_changes(old_data: Dict, new_data: Dict) -> Dict:
                                     f"({old_field.get('type')} -> {new_field.get('type')})"
                                 )
                             
-                            # required 从 false 改为 true 是结构性的
-                            old_required = old_field.get('required', False)
-                            new_required = new_field.get('required', False)
-                            if not old_required and new_required:
-                                violations.append(
-                                    f"禁止将字段改为必填: {cat_id}.{item_id}.{field_id}"
-                                )
-    
     return {
         'valid': len(violations) == 0,
         'violations': violations
@@ -152,12 +123,38 @@ def summarize_changes(old_data: Dict, new_data: Dict) -> Dict:
         'modified_labels': 0,
         'modified_constraints': 0,
         'modified_options': 0,
+        'added_categories': 0,
+        'removed_categories': 0,
+        'added_items': 0,
+        'removed_items': 0,
+        'added_fields': 0,
+        'removed_fields': 0,
         'details': []
     }
     
     old_categories = {cat['category_id']: cat for cat in old_data.get('check_categories', [])}
     new_categories = {cat['category_id']: cat for cat in new_data.get('check_categories', [])}
     
+    for cat_id in new_categories:
+        if cat_id not in old_categories:
+            summary['added_categories'] += 1
+            summary['total_changes'] += 1
+            summary['details'].append({
+                'type': 'category_added',
+                'path': cat_id,
+                'new': new_categories[cat_id].get('category_name')
+            })
+
+    for cat_id in old_categories:
+        if cat_id not in new_categories:
+            summary['removed_categories'] += 1
+            summary['total_changes'] += 1
+            summary['details'].append({
+                'type': 'category_removed',
+                'path': cat_id,
+                'old': old_categories[cat_id].get('category_name')
+            })
+
     for cat_id in old_categories:
         if cat_id in new_categories:
             old_cat = old_categories[cat_id]
@@ -188,6 +185,26 @@ def summarize_changes(old_data: Dict, new_data: Dict) -> Dict:
             # 检查检查项
             old_items = {item['item_id']: item for item in old_cat.get('items', [])}
             new_items = {item['item_id']: item for item in new_cat.get('items', [])}
+
+            for item_id in new_items:
+                if item_id not in old_items:
+                    summary['added_items'] += 1
+                    summary['total_changes'] += 1
+                    summary['details'].append({
+                        'type': 'item_added',
+                        'path': f"{cat_id}.{item_id}",
+                        'new': new_items[item_id].get('item_name')
+                    })
+
+            for item_id in old_items:
+                if item_id not in new_items:
+                    summary['removed_items'] += 1
+                    summary['total_changes'] += 1
+                    summary['details'].append({
+                        'type': 'item_removed',
+                        'path': f"{cat_id}.{item_id}",
+                        'old': old_items[item_id].get('item_name')
+                    })
             
             for item_id in old_items:
                 if item_id in new_items:
@@ -219,6 +236,26 @@ def summarize_changes(old_data: Dict, new_data: Dict) -> Dict:
                     # 检查字段
                     old_fields = {f['field_id']: f for f in old_item.get('fields', [])}
                     new_fields = {f['field_id']: f for f in new_item.get('fields', [])}
+
+                    for field_id in new_fields:
+                        if field_id not in old_fields:
+                            summary['added_fields'] += 1
+                            summary['total_changes'] += 1
+                            summary['details'].append({
+                                'type': 'field_added',
+                                'path': f"{cat_id}.{item_id}.{field_id}",
+                                'new': new_fields[field_id].get('label')
+                            })
+
+                    for field_id in old_fields:
+                        if field_id not in new_fields:
+                            summary['removed_fields'] += 1
+                            summary['total_changes'] += 1
+                            summary['details'].append({
+                                'type': 'field_removed',
+                                'path': f"{cat_id}.{item_id}.{field_id}",
+                                'old': old_fields[field_id].get('label')
+                            })
                     
                     for field_id in old_fields:
                         if field_id in new_fields:

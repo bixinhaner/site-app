@@ -9,6 +9,26 @@ export const useInspectionStore = defineStore('inspection', () => {
 	const loading = ref(false)
 	
 	const userStore = useUserStore()
+
+	const parseApiErrorMessage = (payload, fallback) => {
+		const detail = payload?.detail
+		if (typeof detail === 'string' && detail.trim()) return detail
+		if (detail && typeof detail === 'object') {
+			if (typeof detail.message === 'string' && detail.message.trim()) return detail.message
+			if (Array.isArray(detail.violations) && detail.violations.length) {
+				const first = detail.violations[0]
+				if (typeof first === 'string' && first.trim()) return first
+				if (first && typeof first === 'object') {
+					const itemName = first.item_name || first.check_item_name || ''
+					const errors = Array.isArray(first.errors) ? first.errors.filter(Boolean).join('；') : ''
+					if (itemName && errors) return `${itemName}：${errors}`
+					if (errors) return errors
+				}
+			}
+		}
+		if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message
+		return fallback
+	}
 	
 	// 获取检查列表
 	const getInspections = async (filters = {}) => {
@@ -143,7 +163,7 @@ export const useInspectionStore = defineStore('inspection', () => {
 				await getInspections()
 				return { success: true, data: response.data }
 			} else {
-				throw new Error(response.data.detail || '更新检查失败')
+				throw new Error(parseApiErrorMessage(response.data, '更新检查失败'))
 			}
 		} catch (error) {
 			console.error('Update inspection error:', error)
@@ -404,7 +424,7 @@ export const useInspectionStore = defineStore('inspection', () => {
 			if (response.statusCode === 200) {
 				return { success: true, data: response.data }
 			} else {
-				throw new Error(response.data.detail || '获取检查项失败')
+				throw new Error(parseApiErrorMessage(response.data, '获取检查项失败'))
 			}
 		} catch (error) {
 			console.error('Get inspection items error:', error)
@@ -429,7 +449,7 @@ export const useInspectionStore = defineStore('inspection', () => {
 			if (response.statusCode === 200) {
 				return { success: true, data: response.data }
 			} else {
-				throw new Error(response.data.detail || '更新检查项失败')
+				throw new Error(parseApiErrorMessage(response.data, '更新检查项失败'))
 			}
 		} catch (error) {
 			console.error('Update inspection item error:', error)

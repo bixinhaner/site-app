@@ -64,6 +64,16 @@ from app.services.equipment_unbind_service import (
     is_device_level_check_item,
     rollback_equipment_status_after_unbind,
 )
+from app.services.inspection_template_sync import (
+    apply_pending_template_if_editable,
+    attach_template_sync_metadata,
+    collect_check_item_submit_errors,
+    create_check_items_from_template,
+    extract_photo_field_rules as sync_extract_photo_field_rules,
+    is_field_visible as sync_is_field_visible,
+    is_template_field_active,
+    validate_inspection_for_submit,
+)
 from app.services.site_progress_service import rebuild_site_progress
 from app.services.work_order_execution_settings_service import (
     LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK,
@@ -300,6 +310,7 @@ def _resolve_photo_upload_check_item_and_field(
     check_item = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.id == normalized_check_item_id,
         InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
     ).first()
     if not check_item:
         raise HTTPException(
@@ -312,7 +323,7 @@ def _resolve_photo_upload_check_item_and_field(
     if str(getattr(check_item, "required_type", None) or "") == "both":
         if isinstance(check_item.fields, list) and check_item.fields:
             for f in check_item.fields:
-                if not isinstance(f, dict):
+                if not isinstance(f, dict) or not is_template_field_active(f):
                     continue
                 fid_str = str(f.get("field_id") or "").strip()
                 if not fid_str:
@@ -439,25 +450,7 @@ def _eval_dependency_condition(value, condition: Optional[dict]) -> bool:
 
 def _is_field_visible(field: dict, field_values: dict) -> bool:
     """根据字段依赖判断字段是否可见（与 UniApp 端 shouldShowField + processFieldDependencies 保持一致）。"""
-    hidden = bool(field.get("hidden", False))
-    deps = field.get("dependencies")
-    if isinstance(deps, list):
-        for dep in deps:
-            if not isinstance(dep, dict):
-                continue
-            if str(dep.get("type") or "").lower() != "visibility":
-                continue
-            source_field = dep.get("source_field")
-            source_value = field_values.get(source_field)
-            condition_met = _eval_dependency_condition(source_value, dep.get("condition") if isinstance(dep.get("condition"), dict) else None)
-            if condition_met:
-                effect = dep.get("effect") if isinstance(dep.get("effect"), dict) else {}
-                visible = effect.get("visible", True)
-                hidden = not bool(visible)
-            else:
-                # removeDependencyEffect: visibility -> hidden = false
-                hidden = False
-    return not hidden
+    return sync_is_field_visible(field, field_values)
 
 
 def _build_field_values_from_data_value(data_value) -> dict:
@@ -481,26 +474,7 @@ def _build_field_values_from_data_value(data_value) -> dict:
 
 def _extract_photo_field_rules(fields) -> tuple[set, set, dict, dict]:
     """从检查项字段配置提取拍照规则：允许拍照字段、必拍字段、label 映射、字段配置映射。"""
-    allowed: set = set()
-    required: set = set()
-    labels: dict = {}
-    by_id: dict = {}
-    if not isinstance(fields, list):
-        return allowed, required, labels, by_id
-    for f in fields:
-        if not isinstance(f, dict):
-            continue
-        fid = str(f.get("field_id") or "").strip()
-        if not fid:
-            continue
-        by_id[fid] = f
-        labels[fid] = str(f.get("label") or fid)
-        allow_photo = _truthy(f.get("allow_photo"))
-        if allow_photo:
-            allowed.add(fid)
-            if _truthy(f.get("photo_required")):
-                required.add(fid)
-    return allowed, required, labels, by_id
+    return sync_extract_photo_field_rules(fields)
 
 
 def _touch_check_item_and_clear_review(check_item: InspectionCheckItem, now: datetime) -> bool:
@@ -608,10 +582,17 @@ def _build_template_i18n_index(template_data: dict) -> dict:
 
 def _merge_fields_i18n(fields, template_field_map: Optional[dict]):
     """将模板中的字段 i18n 合并进检查项字段配置（仅响应层，不写回 DB）。"""
-    if not isinstance(fields, list) or not template_field_map:
+    if not isinstance(fields, list):
         return fields
 
-    merged = copy.deepcopy(fields)
+    merged = [
+        copy.deepcopy(field)
+        for field in fields
+        if not (isinstance(field, dict) and not is_template_field_active(field))
+    ]
+    if not template_field_map:
+        return merged
+
     for f in merged:
         if not isinstance(f, dict):
             continue
@@ -1063,6 +1044,7 @@ async def create_inspection(
         id=str(uuid.uuid4()),
         site_id=inspection_data.site_id,
         template_id=template.id,
+        applied_template_revision=getattr(template, "revision", 1) or 1,
         inspector_id=current_user.id,
         inspection_type=inspection_data.inspection_type,
         start_time=datetime.utcnow(),
@@ -1086,127 +1068,11 @@ async def create_inspection(
     db.flush()
     
     # 根据模板和站点规划创建检查项
-    total_items = 0
-    
-    # 设备维度（扇区×Band）列表：兼容旧模板“cell_specific”
-    devices = CellGenerator.generate_devices_from_planning(db, inspection_data.site_id)
-    sectors = sorted({d.sector_id for d in devices})
-
-    print(f"DEBUG: 开始为站点 {inspection_data.site_id} 生成检查项（设备数={len(devices)}，扇区数={len(sectors)}）")
-    if carrier_cells is not None:
-        print(f"DEBUG: 小区级（按EARFCN）数量={len(carrier_cells)}")
-
-    for i, category in enumerate(template_data.get("check_categories", [])):
-        category_name = category.get("category_name", "未知分类")
-        category_id = category.get("category_id", "unknown")
-        level_type = _normalize_category_level(category)
-        print(f"DEBUG: === 处理分类 {i+1}: {category_name} (ID: {category_id}) ===")
-        print(f"DEBUG:   level_type(raw)={category.get('level_type')}, level_type(norm)={level_type}")
-        
-        items = category.get("items", [])
-        print(f"DEBUG:   该分类有 {len(items)} 个检查项")
-        
-        for j, item in enumerate(items):
-            base_item_name = item.get("item_name", "未知检查项")
-            base_item_id = item.get("item_id", "unknown")
-            item_description = item.get("description", "")  # 获取检查项描述
-            item_fields = item.get("fields", [])  # 获取字段配置
-            required_type = item.get("required_type", "unknown")
-            print(f"DEBUG:   --- 处理检查项 {j+1}: {base_item_name} (ID: {base_item_id}) ---")
-            print(f"DEBUG:     required_type: {required_type}")
-            
-            if level_type == "cell_earfcn":
-                cells = carrier_cells or []
-                print(f"DEBUG:     ✅ 小区级（按EARFCN），为 {len(cells)} 个小区创建检查项")
-                for cell in cells:
-                    cell_item_id = f"{base_item_id}_cell_{cell.cell_id}"
-                    cell_item_name = f"{base_item_name} - 小区 {cell.cell_id}"
-                    check_item = InspectionCheckItem(
-                        id=str(uuid.uuid4()),
-                        inspection_id=inspection.id,
-                        item_id=cell_item_id,
-                        item_name=cell_item_name,
-                        description=item_description,
-                        category_id=category_id,
-                        category_name=category_name,
-                        sector_id=cell.sector_id,
-                        band=cell.band,
-                        cell_id=cell.cell_id,
-                        required_type=required_type,
-                        fields=item_fields,
-                        status=CheckItemStatusEnum.PENDING,
-                    )
-                    db.add(check_item)
-                    total_items += 1
-            elif level_type == "device":
-                print(f"DEBUG:     ✅ 设备级（扇区×Band），为 {len(devices)} 个设备创建检查项")
-                for dev in devices:
-                    dev_item_id = f"{base_item_id}_cell_{dev.cell_id}"
-                    dev_item_name = f"{base_item_name} - 设备 {dev.cell_id}"
-                    check_item = InspectionCheckItem(
-                        id=str(uuid.uuid4()),
-                        inspection_id=inspection.id,
-                        item_id=dev_item_id,
-                        item_name=dev_item_name,
-                        description=item_description,
-                        category_id=category_id,
-                        category_name=category_name,
-                        sector_id=dev.sector_id,
-                        band=dev.band,
-                        cell_id=dev.cell_id,
-                        required_type=required_type,
-                        fields=item_fields,
-                        status=CheckItemStatusEnum.PENDING,
-                    )
-                    db.add(check_item)
-                    total_items += 1
-            elif level_type == "sector":
-                print(f"DEBUG:     ✅ 扇区级，为 {len(sectors)} 个扇区创建检查项")
-                for sector_id in sectors:
-                    sector_item_id = f"{base_item_id}_sector_{sector_id}"
-                    sector_item_name = f"{base_item_name} - 扇区 {sector_id}"
-                    check_item = InspectionCheckItem(
-                        id=str(uuid.uuid4()),
-                        inspection_id=inspection.id,
-                        item_id=sector_item_id,
-                        item_name=sector_item_name,
-                        description=item_description,
-                        category_id=category_id,
-                        category_name=category_name,
-                        sector_id=sector_id,
-                        required_type=required_type,
-                        fields=item_fields,
-                        status=CheckItemStatusEnum.PENDING,
-                    )
-                    db.add(check_item)
-                    total_items += 1
-            else:
-                print(f"DEBUG:     ✅ 站点级，创建 1 个检查项")
-                check_item = InspectionCheckItem(
-                    id=str(uuid.uuid4()),
-                    inspection_id=inspection.id,
-                    item_id=base_item_id,
-                    item_name=base_item_name,
-                    description=item_description,
-                    category_id=category_id,
-                    category_name=category_name,
-                    required_type=required_type,
-                    fields=item_fields,
-                    status=CheckItemStatusEnum.PENDING,
-                )
-                db.add(check_item)
-                total_items += 1
-                    
-            print(f"DEBUG:     检查项 {base_item_name} 处理完成，当前总数: {total_items}")
-            
-    print(f"DEBUG: === 检查项创建汇总 ===")
-    print(f"DEBUG: 总共创建了 {total_items} 个检查项")
-    
-    # 更新总检查项数
-    inspection.total_items = total_items
+    total_items = create_check_items_from_template(db, inspection, template_data)
     
     db.commit()
     db.refresh(inspection)
+    attach_template_sync_metadata(db, inspection, template=template)
     
     # 记录审核日志
     audit_log = InspectionAuditLog(
@@ -1311,7 +1177,13 @@ async def get_inspection(
             # 如果工单被驳回且有驳回意见，将其添加到检查的review_comments字段
             inspection.review_comments = work_order.review_comments
             inspection.review_comments_i18n = getattr(work_order, "review_comments_i18n", None)
-    
+
+    sync_result = apply_pending_template_if_editable(db, inspection)
+    if sync_result.get("applied"):
+        db.commit()
+        db.refresh(inspection)
+    attach_template_sync_metadata(db, inspection, sync_result=sync_result)
+
     return inspection
 
 @router.put("/detail/{inspection_id}", response_model=SiteInspectionResponse)
@@ -1356,6 +1228,12 @@ async def update_inspection(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="只能从已提交/审核中状态变更为通过/驳回"
                 )
+
+    if update_fields.get("status") == InspectionStatusEnum.SUBMITTED:
+        sync_result = apply_pending_template_if_editable(db, inspection)
+        if sync_result.get("applied"):
+            db.flush()
+        validate_inspection_for_submit(db, inspection)
     
     for field, value in update_fields.items():
         if field == "gps_info" and value:
@@ -1433,6 +1311,7 @@ async def update_inspection(
     # 统一提交所有更改
     db.commit()
     db.refresh(inspection)
+    attach_template_sync_metadata(db, inspection)
     
     return inspection
 
@@ -2795,7 +2674,12 @@ async def get_inspection_items(
             detail="没有权限访问此检查记录"
         )
     _ensure_surveyor_inspection_type(db, current_user, inspection)
-    
+
+    sync_result = apply_pending_template_if_editable(db, inspection, getattr(inspection, "template", None))
+    if sync_result.get("applied"):
+        db.commit()
+        db.refresh(inspection)
+
     template_data = {}
     try:
         tpl = inspection.template
@@ -2810,7 +2694,8 @@ async def get_inspection_items(
     query = db.query(InspectionCheckItem).options(
         joinedload(InspectionCheckItem.photos)
     ).filter(
-        InspectionCheckItem.inspection_id == inspection_id
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
     )
     
     # 设备SN筛选（模糊查询）
@@ -2904,6 +2789,13 @@ async def update_inspection_item(
         detail="当前未启用 Web 工单填写",
     )
 
+    sync_result = apply_pending_template_if_editable(db, inspection, getattr(inspection, "template", None))
+    if sync_result.get("applied"):
+        db.commit()
+        db.refresh(inspection)
+        template_data = getattr(getattr(inspection, "template", None), "template_data", None) or {}
+        template_index = _build_template_i18n_index(template_data)
+
     # 检查状态门禁：仅允许草稿/进行中/驳回继续更新检查项（避免已提交/审核中/已通过/已完成继续修改）
     if inspection.status not in [InspectionStatusEnum.DRAFT, InspectionStatusEnum.IN_PROGRESS, InspectionStatusEnum.REJECTED]:
         raise HTTPException(
@@ -2923,7 +2815,8 @@ async def update_inspection_item(
     # 验证检查项存在
     check_item = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.id == item_id,
-        InspectionCheckItem.inspection_id == inspection_id
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
     ).first()
     
     if not check_item:
@@ -2944,6 +2837,8 @@ async def update_inspection_item(
         label_to_id = {}
         if isinstance(check_item.fields, list):
             for f in check_item.fields:
+                if isinstance(f, dict) and not is_template_field_active(f):
+                    continue
                 fid = f.get('field_id') if isinstance(f, dict) else getattr(f, 'field_id', None)
                 lbl = f.get('label') if isinstance(f, dict) else getattr(f, 'label', None)
                 if fid:
@@ -3186,16 +3081,19 @@ async def update_inspection_item(
     
     # 重新计算检查完成率
     total_items = db.query(InspectionCheckItem).filter(
-        InspectionCheckItem.inspection_id == inspection_id
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
     ).count()
     
     completed_items = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
         InspectionCheckItem.status == CheckItemStatusEnum.COMPLETED
     ).count()
     
     failed_items = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
         InspectionCheckItem.status == CheckItemStatusEnum.FAILED
     ).count()
     
@@ -3310,10 +3208,12 @@ async def reset_inspection_for_rejected_task(
         inspection.end_time = None
         inspection.submitted_at = None
         inspection.updated_at = datetime.utcnow()
+        apply_pending_template_if_editable(db, inspection)
         
         # 重置所有已完成的检查项为待处理状态，允许重新检查
         check_items = db.query(InspectionCheckItem).filter(
             InspectionCheckItem.inspection_id == inspection_id,
+            InspectionCheckItem.is_active.is_(True),
             InspectionCheckItem.status.in_([
                 CheckItemStatusEnum.COMPLETED,
                 CheckItemStatusEnum.FAILED
@@ -3330,11 +3230,13 @@ async def reset_inspection_for_rejected_task(
         
         # 重新计算完成率
         total_items = db.query(InspectionCheckItem).filter(
-            InspectionCheckItem.inspection_id == inspection_id
+            InspectionCheckItem.inspection_id == inspection_id,
+            InspectionCheckItem.is_active.is_(True),
         ).count()
         
         completed_items = db.query(InspectionCheckItem).filter(
             InspectionCheckItem.inspection_id == inspection_id,
+            InspectionCheckItem.is_active.is_(True),
             InspectionCheckItem.status == CheckItemStatusEnum.COMPLETED
         ).count()
         
@@ -3379,6 +3281,7 @@ async def review_inspection(
             inspection.status = InspectionStatusEnum.APPROVED
         else:
             inspection.status = InspectionStatusEnum.REJECTED
+            apply_pending_template_if_editable(db, inspection)
 
         # 回填审核信息
         inspection.reviewed_by = current_user.id
@@ -3429,7 +3332,8 @@ async def review_inspection_item(
 
     check_item = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.id == item_id,
-        InspectionCheckItem.inspection_id == inspection_id
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
     ).first()
     if not check_item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查项不存在")
@@ -3536,10 +3440,25 @@ async def get_inspection_review_summary(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限访问此检查记录")
     _ensure_surveyor_inspection_type(db, current_user, inspection)
 
-    total = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id).count()
-    pass_count = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id, InspectionCheckItem.review_status == "pass").count()
-    fail_count = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id, InspectionCheckItem.review_status == "fail").count()
-    warning_count = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id, InspectionCheckItem.review_status == "warning").count()
+    total = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+    ).count()
+    pass_count = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+        InspectionCheckItem.review_status == "pass",
+    ).count()
+    fail_count = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+        InspectionCheckItem.review_status == "fail",
+    ).count()
+    warning_count = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+        InspectionCheckItem.review_status == "warning",
+    ).count()
     pending_count = total - pass_count - fail_count - warning_count
 
     return InspectionReviewSummary(
@@ -3553,7 +3472,10 @@ async def get_inspection_review_summary(
 # 内部工具：根据检查项审核结果更新检查记录的 result 字段
 def _update_inspection_result_from_item_reviews(db: Session, inspection_id: str) -> None:
     try:
-        items = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == inspection_id).all()
+        items = db.query(InspectionCheckItem).filter(
+            InspectionCheckItem.inspection_id == inspection_id,
+            InspectionCheckItem.is_active.is_(True),
+        ).all()
         # 确定结果优先级：fail > warning > pass > pending
         result = None
         has_fail = any(i.review_status == "fail" for i in items)
@@ -3739,7 +3661,8 @@ async def bind_equipment_to_sector(
     # 查找该小区的检查项
     check_items = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.inspection_id == inspection_id,
-        InspectionCheckItem.sector_id == sector_id
+        InspectionCheckItem.sector_id == sector_id,
+        InspectionCheckItem.is_active.is_(True),
     )
     
     if band:

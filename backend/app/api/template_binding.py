@@ -30,7 +30,11 @@ from app.services.template_resolver import (
     TemplateResolver, ResolveContext, create_resolver
 )
 from app.utils.template_validator import validate_template_changes, summarize_changes
-from app.utils.template_cascader import cascade_update_check_items
+from app.services.inspection_template_sync import (
+    get_template_usage_counts,
+    get_template_revision,
+    sync_template_to_editable_inspections,
+)
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -126,6 +130,7 @@ async def get_templates(
             id=template.id,
             template_name=template.template_name,
             template_data=template.template_data,
+            revision=get_template_revision(template),
             created_by=template.created_by,
             created_at=template.created_at,
             updated_at=template.updated_at,
@@ -166,6 +171,7 @@ async def create_template(
         id=template.id,
         template_name=template.template_name,
         template_data=template.template_data,
+        revision=get_template_revision(template),
         created_by=template.created_by,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -232,6 +238,7 @@ async def get_template(
         id=template.id,
         template_name=template.template_name,
         template_data=template.template_data,
+        revision=get_template_revision(template),
         created_by=template.created_by,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -264,20 +271,7 @@ async def get_template_usage(
     if not template:
         raise HTTPException(status_code=404, detail="模板不存在")
     
-    # 统计使用情况
-    total = db.query(SiteInspection).filter(
-        SiteInspection.template_id == template_id
-    ).count()
-    
-    active = db.query(SiteInspection).filter(
-        SiteInspection.template_id == template_id,
-        SiteInspection.status.in_([
-            InspectionStatusEnum.DRAFT,
-            InspectionStatusEnum.IN_PROGRESS,
-            InspectionStatusEnum.SUBMITTED,
-            InspectionStatusEnum.UNDER_REVIEW
-        ])
-    ).count()
+    usage_counts = get_template_usage_counts(db, template_id)
     
     # 获取前10个检查记录详情
     inspections = db.query(SiteInspection).options(
@@ -300,10 +294,13 @@ async def get_template_usage(
     
     return {
         "template_id": template_id,
-        "is_used": total > 0,
-        "total_inspections": total,
-        "active_inspections": active,
-        "completed_inspections": total - active,
+        "is_used": usage_counts["total"] > 0,
+        "total_inspections": usage_counts["total"],
+        "active_inspections": usage_counts["immediate"] + usage_counts["pending"],
+        "completed_inspections": usage_counts["frozen"],
+        "immediate_sync_inspections": usage_counts["immediate"],
+        "pending_resubmit_inspections": usage_counts["pending"],
+        "frozen_inspections": usage_counts["frozen"],
         "inspection_details": details
     }
 
@@ -475,6 +472,7 @@ async def import_template(
         id=template.id,
         template_name=template.template_name,
         template_data=template.template_data,
+        revision=get_template_revision(template),
         created_by=template.created_by,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -508,7 +506,7 @@ async def update_template(
             detail="模板不存在"
         )
     
-    # 保存旧数据（用于后端验证和级联更新）
+    # 保存旧数据（用于后端验证和变更分析）
     old_template_data = template.template_data
     new_template_data = template_update.template_data
     
@@ -517,7 +515,7 @@ async def update_template(
                  .filter(SiteInspection.template_id == template_id)
                  .scalar() or 0) > 0
 
-    if is_used:
+    if is_used and old_template_data is not None and new_template_data is not None:
         # 后端验证：检查是否有禁止的结构性变更
         validation_result = validate_template_changes(old_template_data, new_template_data)
         if not validation_result['valid']:
@@ -525,50 +523,100 @@ async def update_template(
                 status_code=400,
                 detail={
                     "error": "检测到禁止的结构性变更",
-                    "message": "该模板已被使用，不允许进行结构性变更（如添加/删除检查项、修改字段类型等）",
+                    "message": "该模板已被使用，仍禁止修改高风险结构字段（如检查级别、检查类型、字段类型等）",
                     "violations": validation_result['violations']
                 }
             )
-    
-    # 应用更新
+
     update_fields = template_update.dict(exclude_unset=True)
+    template_changed = False
     for field, value in update_fields.items():
-        setattr(template, field, value)
-    
-    template.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(template)
-    
-    # 自动级联更新已有检查项
-    cascaded_count = 0
+        if getattr(template, field) != value:
+            setattr(template, field, value)
+            template_changed = True
+
+    if not template_changed:
+        return {
+            "success": True,
+            "message": "模板未发生变化",
+            "template_id": template_id,
+            "template_name": template.template_name,
+            "template_revision": get_template_revision(template),
+            "cascaded_updates_count": 0,
+            "sync_summary": {
+                "synced_inspections": 0,
+                "pending_inspections": 0,
+                "frozen_inspections": 0,
+                "created_items": 0,
+                "updated_items": 0,
+                "removed_items": 0,
+                "reopened_items": 0,
+            },
+            "change_summary": summarize_changes(
+                old_template_data or {},
+                (new_template_data if new_template_data is not None else old_template_data) or {},
+            ),
+            "updated_at": to_utc_iso(template.updated_at)
+        }
+
+    template_data_changed = new_template_data is not None and old_template_data != new_template_data
+
     try:
-        cascaded_count = cascade_update_check_items(
-            db, 
-            template_id, 
-            old_template_data, 
-            new_template_data
+        if template_data_changed:
+            template.revision = get_template_revision(template) + 1
+
+        template.updated_at = datetime.utcnow()
+        db.flush()
+
+        sync_summary = {
+            "synced_inspections": 0,
+            "pending_inspections": 0,
+            "frozen_inspections": 0,
+            "created_items": 0,
+            "updated_items": 0,
+            "removed_items": 0,
+            "reopened_items": 0,
+        }
+        if template_data_changed:
+            sync_summary = sync_template_to_editable_inspections(db, template)
+
+        change_summary = summarize_changes(
+            old_template_data or {},
+            (new_template_data if new_template_data is not None else old_template_data) or {},
         )
+        db.commit()
+        db.refresh(template)
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
-        # 级联更新失败不影响模板保存，但记录错误
-        print(f"[警告] 模板级联更新失败: {e}")
-    
-    # 分析变更摘要
-    change_summary = summarize_changes(old_template_data, new_template_data)
-    
-    # 返回更新结果
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"模板更新失败：{e}",
+        )
+
+    cascaded_count = (
+        int(sync_summary.get("created_items") or 0)
+        + int(sync_summary.get("updated_items") or 0)
+        + int(sync_summary.get("removed_items") or 0)
+    )
+    message = "模板更新成功"
+    if template_data_changed:
+        message += (
+            f"，已同步 {sync_summary.get('synced_inspections', 0)} 个进行中检查"
+            f"，{sync_summary.get('pending_inspections', 0)} 个待下次重提生效"
+        )
+
     return {
         "success": True,
-        "message": "模板更新成功" + (f"，已自动更新 {cascaded_count} 个检查项" if cascaded_count > 0 else ""),
+        "message": message,
         "template_id": template_id,
         "template_name": template.template_name,
+        "template_revision": get_template_revision(template),
         "cascaded_updates_count": cascaded_count,
-        "change_summary": {
-            "total_changes": change_summary['total_changes'],
-            "modified_names": change_summary['modified_names'],
-            "modified_descriptions": change_summary['modified_descriptions'],
-            "modified_labels": change_summary['modified_labels'],
-        "modified_constraints": change_summary['modified_constraints']
-        },
+        "sync_summary": sync_summary,
+        "change_summary": change_summary,
         "updated_at": to_utc_iso(template.updated_at)
     }
 

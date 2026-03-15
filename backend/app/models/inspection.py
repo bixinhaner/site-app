@@ -45,6 +45,7 @@ class InspectionTemplate(Base):
     id = Column(String(32), primary_key=True)
     template_name = Column(String(100), nullable=False)
     template_data = Column(JSON, nullable=False)  # 存储完整的检查模板JSON
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -94,6 +95,7 @@ class SiteInspection(Base):
     site_id = Column(Integer, ForeignKey("sites.id"), nullable=False)
     work_order_id = Column(String(32), ForeignKey("work_orders.id"), nullable=True)  # 关联工单ID
     template_id = Column(String(32), ForeignKey("inspection_templates.id"), nullable=False)
+    applied_template_revision = Column(Integer, nullable=False, default=1, server_default="1")
     inspector_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     # 检查基本信息
@@ -159,6 +161,7 @@ class InspectionCheckItem(Base):
     
     # 检查项信息
     item_id = Column(String(50), nullable=False)  # 对应模板中的item_id
+    template_item_id = Column(String(50), nullable=True)  # 对应模板中的基础 item_id（不带 sector/cell 后缀）
     item_name = Column(String(200), nullable=False)
     description = Column(Text)  # 检查项描述，用于说明填写要求和示例
     category_id = Column(String(50))  # site_level, sector_level
@@ -179,6 +182,9 @@ class InspectionCheckItem(Base):
     validation_result = Column(JSON)  # 验证结果
     fields = Column(JSON)  # 字段配置（从模板继承）
     notes = Column(Text)  # 检查项备注（前端填写，需持久化）
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
+    removed_by_template = Column(Boolean, nullable=False, default=False, server_default="0")
+    removed_at = Column(DateTime)
     
     # 检查人员和时间
     checked_by = Column(Integer, ForeignKey("users.id"))

@@ -46,6 +46,17 @@
 				</text>
 			</view>
 		</view>
+
+		<view
+			v-if="inspectionData?.template_sync?.message"
+			class="template-sync-banner"
+			:class="{ 'template-sync-banner--info': inspectionData?.template_sync?.has_pending_update && !inspectionData?.template_sync?.just_applied }"
+		>
+			<text class="template-sync-banner__title">
+				{{ inspectionData?.template_sync?.just_applied ? '检查模板已更新' : '模板同步提示' }}
+			</text>
+			<text class="template-sync-banner__text">{{ inspectionData?.template_sync?.message }}</text>
+		</view>
 		
 		<!-- 详情内容 -->
 		<scroll-view 
@@ -1819,6 +1830,38 @@
 		border-radius: 20rpx;
 		padding: 30rpx;
 		box-shadow: var(--shadow-card);
+	}
+
+	.template-sync-banner {
+		margin: 0 20rpx 20rpx;
+		padding: 22rpx 24rpx;
+		border-radius: 18rpx;
+		background: rgba(245, 158, 11, 0.12);
+		border: 1rpx solid rgba(245, 158, 11, 0.28);
+		display: flex;
+		flex-direction: column;
+		gap: 8rpx;
+	}
+
+	.template-sync-banner--info {
+		background: rgba(59, 130, 246, 0.10);
+		border-color: rgba(59, 130, 246, 0.24);
+	}
+
+	.template-sync-banner__title {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #92400e;
+	}
+
+	.template-sync-banner--info .template-sync-banner__title {
+		color: #1d4ed8;
+	}
+
+	.template-sync-banner__text {
+		font-size: 24rpx;
+		line-height: 1.5;
+		color: #6b7280;
 	}
 	
 	.header-content {

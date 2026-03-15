@@ -10,11 +10,19 @@ def ensure_inspection_schema(engine: Engine) -> None:
     - 清理旧版“检查项范围唯一索引”，避免在“只提醒不阻断”模式下误拦截
     """
     required_columns = {
+        "inspection_templates": {
+            "revision": "revision INTEGER DEFAULT 1",
+        },
         "site_inspections": {
             "review_comments_i18n": "review_comments_i18n TEXT",
+            "applied_template_revision": "applied_template_revision INTEGER DEFAULT 1",
         },
         "inspection_check_items": {
+            "template_item_id": "template_item_id TEXT",
             "notes": "notes TEXT",
+            "is_active": "is_active INTEGER DEFAULT 1",
+            "removed_by_template": "removed_by_template INTEGER DEFAULT 0",
+            "removed_at": "removed_at DATETIME",
             "review_comments_i18n": "review_comments_i18n TEXT",
             "ai_status": "ai_status TEXT",
             "ai_mode": "ai_mode TEXT",
@@ -62,6 +70,59 @@ def ensure_inspection_schema(engine: Engine) -> None:
                     # 兼容并发启动/重复执行等场景：若已存在则忽略
                     print(f"[Schema Migration] Skipped {column_name} on {table_name}: {e}")
                     continue
+
+        try:
+            conn.execute(text("UPDATE inspection_templates SET revision = 1 WHERE revision IS NULL OR revision <= 0"))
+        except Exception as e:
+            print(f"[Schema Migration] Skipped backfill inspection_templates.revision: {e}")
+
+        try:
+            conn.execute(
+                text(
+                    "UPDATE site_inspections "
+                    "SET applied_template_revision = 1 "
+                    "WHERE applied_template_revision IS NULL OR applied_template_revision <= 0"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped backfill site_inspections.applied_template_revision: {e}")
+
+        try:
+            conn.execute(
+                text(
+                    "UPDATE inspection_check_items "
+                    "SET is_active = 1 "
+                    "WHERE is_active IS NULL"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped backfill inspection_check_items.is_active: {e}")
+
+        try:
+            conn.execute(
+                text(
+                    "UPDATE inspection_check_items "
+                    "SET removed_by_template = 0 "
+                    "WHERE removed_by_template IS NULL"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped backfill inspection_check_items.removed_by_template: {e}")
+
+        try:
+            conn.execute(
+                text(
+                    "UPDATE inspection_check_items "
+                    "SET template_item_id = CASE "
+                    "WHEN instr(item_id, '_sector_') > 0 THEN substr(item_id, 1, instr(item_id, '_sector_') - 1) "
+                    "WHEN instr(item_id, '_cell_') > 0 THEN substr(item_id, 1, instr(item_id, '_cell_') - 1) "
+                    "ELSE item_id "
+                    "END "
+                    "WHERE template_item_id IS NULL OR template_item_id = ''"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped backfill inspection_check_items.template_item_id: {e}")
 
         if engine.dialect.name == "mysql":
             try:
@@ -136,3 +197,13 @@ def ensure_inspection_schema(engine: Engine) -> None:
             )
         except Exception as e:
             print(f"[Schema Migration] Skipped index idx_inspection_photos_is_similar_risk: {e}")
+
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_inspection_check_items_inspection_active "
+                    "ON inspection_check_items (inspection_id, is_active)"
+                )
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped index idx_inspection_check_items_inspection_active: {e}")

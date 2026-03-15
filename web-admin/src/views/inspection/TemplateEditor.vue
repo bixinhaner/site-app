@@ -45,9 +45,12 @@
           该检查模板已被 {{ templateUsageInfo.total_inspections }} 个工单使用
         </template>
         <div style="margin-top: 8px;">
-          <p style="margin: 4px 0;">✅ 您可以修改：检查项名称、描述、字段标签、约束条件等</p>
-          <p style="margin: 4px 0;">❌ 不可修改：检查分类结构、检查项类型、字段类型等</p>
-          <p style="margin: 8px 0; font-weight: bold; color: #E6A23C;">💡 修改后将自动同步更新所有已使用该模板的工单</p>
+          <p style="margin: 4px 0;">✅ 您可以继续新增/删除分类、检查项、字段，并修改文案、约束和必填规则</p>
+          <p style="margin: 4px 0;">❌ 仍不可修改：检查级别、检查项类型、字段类型，以及各类 ID</p>
+          <p style="margin: 8px 0; color: #E6A23C;">进行中/驳回工单会立即同步，已提交/审核中的工单会在下次重提时按新模板校验。</p>
+          <p style="margin: 4px 0; color: #909399; font-size: 12px;">
+            立即同步 {{ templateUsageInfo.immediate_sync_inspections || 0 }} 个，待重提生效 {{ templateUsageInfo.pending_resubmit_inspections || 0 }} 个，冻结不影响 {{ templateUsageInfo.frozen_inspections || 0 }} 个
+          </p>
         </div>
       </el-alert>
       
@@ -712,11 +715,10 @@ import {
 } from '@element-plus/icons-vue'
 import { templateAPI } from '../../api/templates'
 import { aiAPI } from '../../api/ai'
-import {
+import { 
   isStructuralField,
   getFieldDisabledReason,
-  getOperationDisabledReason,
-  canChangeRequired
+  getOperationDisabledReason
 } from '../../config/template-field-rules'
 import TemplatePreviewDrawer from './components/TemplatePreviewDrawer.vue'
 
@@ -816,6 +818,9 @@ const templateUsageInfo = ref({
   total_inspections: 0,
   active_inspections: 0,
   completed_inspections: 0,
+  immediate_sync_inspections: 0,
+  pending_resubmit_inspections: 0,
+  frozen_inspections: 0,
   inspection_details: []
 })
 
@@ -1160,26 +1165,12 @@ const saveTemplate = async () => {
     
     // 构建确认消息
     let confirmMessage = '<div style="text-align: left;">'
-    confirmMessage += `<p style="margin-bottom: 12px;"><strong>即将保存以下变更：</strong></p>`
-    confirmMessage += `<ul style="margin: 8px 0; padding-left: 20px;">`
-    
-    if (changes.summary.modified_names > 0) {
-      confirmMessage += `<li>修改了 ${changes.summary.modified_names} 个名称</li>`
-    }
-    if (changes.summary.modified_descriptions > 0) {
-      confirmMessage += `<li>修改了 ${changes.summary.modified_descriptions} 个描述</li>`
-    }
-    if (changes.summary.modified_constraints > 0) {
-      confirmMessage += `<li>修改了 ${changes.summary.modified_constraints} 个约束条件</li>`
-    }
-    if (changes.summary.modified_labels > 0) {
-      confirmMessage += `<li>修改了 ${changes.summary.modified_labels} 个字段标签</li>`
-    }
-    
-    confirmMessage += `</ul>`
+    confirmMessage += `<p style="margin-bottom: 12px;"><strong>确认保存并同步最新模板吗？</strong></p>`
     confirmMessage += `<div style="background: #FFF7E6; padding: 12px; border-radius: 4px; margin-top: 12px;">`
-    confirmMessage += `<p style="color: #E6A23C; font-weight: bold; margin: 0 0 8px 0;">⚠️ 这些变更将自动同步到已使用该模板的 ${templateUsageInfo.value.total_inspections} 个工单</p>`
-    confirmMessage += `<p style="color: #909399; font-size: 12px; margin: 0;">其中 ${templateUsageInfo.value.active_inspections} 个工单正在进行中</p>`
+    confirmMessage += `<p style="color: #E6A23C; font-weight: bold; margin: 0 0 8px 0;">⚠️ 当前共有 ${templateUsageInfo.value.total_inspections} 个工单关联此模板</p>`
+    confirmMessage += `<p style="color: #606266; margin: 0 0 4px 0;">立即同步：${templateUsageInfo.value.immediate_sync_inspections || 0} 个进行中/驳回工单</p>`
+    confirmMessage += `<p style="color: #606266; margin: 0 0 4px 0;">待重提生效：${templateUsageInfo.value.pending_resubmit_inspections || 0} 个已提交/审核中工单</p>`
+    confirmMessage += `<p style="color: #909399; font-size: 12px; margin: 0;">冻结不影响：${templateUsageInfo.value.frozen_inspections || 0} 个已完成/已归档工单</p>`
     confirmMessage += `</div>`
     confirmMessage += `</div>`
     
@@ -1217,14 +1208,7 @@ const saveTemplate = async () => {
       router.replace({ name: 'TemplateEditor', params: { id: newTemplate.id } })
     } else {
       const response = await templateAPI.updateTemplate(route.params.id, templatePayload)
-      
-      // 显示保存结果
-      let successMessage = '模板保存成功'
-      if (response.cascaded_updates_count > 0) {
-        successMessage += `，已自动更新 ${response.cascaded_updates_count} 个检查项`
-      }
-      
-      ElMessage.success(successMessage)
+      ElMessage.success(response.message || '模板保存成功')
       
       // 重新加载模板数据
       await loadTemplate()
@@ -1527,10 +1511,7 @@ const getFieldTooltip = (level, fieldName) => {
 }
 
 const isOperationDisabled = (operation) => {
-  if (!templateUsageInfo.value.is_used) {
-    return false
-  }
-  return true // 已使用，禁用所有结构性操作
+  return false
 }
 
 const getDisabledReason = (operation) => {
@@ -1539,30 +1520,10 @@ const getDisabledReason = (operation) => {
 
 // 特殊处理：required 字段
 const isRequiredFieldDisabled = (field) => {
-  if (!templateUsageInfo.value.is_used) {
-    return false
-  }
-  
-  // 如果当前是 true，允许改为 false（放宽限制）
-  if (field.required) {
-    return false
-  }
-  
-  // 如果当前是 false，不能在模板已使用时改为 true
-  // 这里不能直接禁用，因为会影响交互，而是在点击时阻止
-  // 但为了用户体验，我们还是禁用
-  return true
+  return false
 }
 
 const getRequiredFieldTooltip = (field) => {
-  if (!templateUsageInfo.value.is_used) {
-    return ''
-  }
-  
-  if (!field.required) {
-    return '该检查模板已有工单使用，不允许将字段从非必填改为必填'
-  }
-  
   return ''
 }
 

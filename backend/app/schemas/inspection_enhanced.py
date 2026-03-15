@@ -293,6 +293,9 @@ class SiteInspectionResponse(BaseModel):
     site_id: int
     work_order_id: Optional[str] = None  # 添加工单关联字段
     template_id: str
+    applied_template_revision: Optional[int] = 1
+    template_revision: Optional[int] = None
+    template_sync: Optional[Dict[str, Any]] = None
     inspector_id: int
     inspection_type: InspectionTypeEnum
     status: InspectionStatusEnum

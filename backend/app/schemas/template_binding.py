@@ -236,6 +236,7 @@ class InspectionTemplateResponse(BaseModel):
     id: str
     template_name: str
     template_data: dict
+    revision: int = 1
     created_by: Optional[int]
     created_at: datetime
     updated_at: datetime

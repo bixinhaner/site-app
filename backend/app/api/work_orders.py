@@ -51,6 +51,13 @@ from app.schemas.work_order import (
     WorkOrderListResponse,
 )
 from app.services.template_resolver import create_resolver, ResolveContext
+from app.services.inspection_template_sync import (
+    apply_pending_template_if_editable,
+    attach_template_sync_metadata,
+    create_check_items_from_template,
+    recalculate_inspection_stats,
+    validate_inspection_for_submit,
+)
 from app.services.work_order_sync import get_work_order_sync_service
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
@@ -1728,7 +1735,8 @@ async def accept_work_order(
         inspection_type=InspectionTypeEnum.OPENING if wo.type.value == "opening_inspection" else InspectionTypeEnum.MAINTENANCE,
         work_order_id=wo.id,  # 关联工单ID
         status=InspectionStatusEnum.DRAFT,
-        template_id=template_id
+        template_id=template_id,
+        applied_template_revision=getattr(template, "revision", 1) or 1,
     )
     db.add(inspection)
     db.flush()
@@ -1737,7 +1745,6 @@ async def accept_work_order(
     if template_data:
         from app.services.cell_generator import CellGenerator
 
-        total_items = 0
         devices = CellGenerator.generate_devices_from_planning(db, wo.site_id)
 
         # 设备更换工单：仅生成选中的设备位相关检查项
@@ -1792,115 +1799,7 @@ async def accept_work_order(
             ]
             wo.extra_data = extra
 
-        sectors = sorted({d.sector_id for d in devices})
-
-        print(
-            f"DEBUG_WO: 为站点 {wo.site_id} 生成检查项 (工单: {wo.id})，"
-            f"设备数={len(devices)}，扇区数={len(sectors)}"
-        )
-        if carrier_cells is not None:
-            print(f"DEBUG_WO: 小区级（按EARFCN）数量={len(carrier_cells)}")
-
-        for category in template_data.get("check_categories", []):
-            category_name = category.get("category_name", "未知分类")
-            category_id = category.get("category_id", "unknown")
-            level_type = _normalize_category_level(category)
-            print(
-                f"DEBUG_WO: 处理分类: {category_name}, "
-                f"level_type(raw)={category.get('level_type')}, level_type(norm)={level_type}"
-            )
-
-            for item in category.get("items", []):
-                base_item_name = item.get("item_name", "未知检查项")
-                base_item_id = item.get("item_id", "unknown")
-                required_type = item.get("required_type", "unknown")
-                item_description = item.get("description")  # 获取描述
-                item_fields = item.get("fields")  # 获取字段配置
-
-                if level_type == "cell_earfcn":
-                    cells = carrier_cells or []
-                    for cell in cells:
-                        cell_item_id = f"{base_item_id}_cell_{cell.cell_id}"
-                        cell_item_name = f"{base_item_name} - 小区 {cell.cell_id}"
-                        check_item = InspectionCheckItem(
-                            id=str(uuid.uuid4()),
-                            inspection_id=inspection.id,
-                            item_id=cell_item_id,
-                            item_name=cell_item_name,
-                            description=item_description,
-                            category_id=category_id,
-                            category_name=category_name,
-                            sector_id=cell.sector_id,
-                            band=cell.band,
-                            cell_id=cell.cell_id,
-                            required_type=required_type,
-                            fields=item_fields,
-                            status=CheckItemStatusEnum.PENDING,
-                        )
-                        db.add(check_item)
-                        total_items += 1
-                elif level_type == "device":
-                    for dev in devices:
-                        dev_item_id = f"{base_item_id}_cell_{dev.cell_id}"
-                        dev_item_name = f"{base_item_name} - 设备 {dev.cell_id}"
-                        check_item = InspectionCheckItem(
-                            id=str(uuid.uuid4()),
-                            inspection_id=inspection.id,
-                            item_id=dev_item_id,
-                            item_name=dev_item_name,
-                            description=item_description,
-                            category_id=category_id,
-                            category_name=category_name,
-                            sector_id=dev.sector_id,
-                            band=dev.band,
-                            cell_id=dev.cell_id,
-                            equipment_sn=(
-                                old_sn_map.get((str(dev.sector_id), str(dev.band)))
-                                if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT
-                                else None
-                            ),
-                            required_type=required_type,
-                            fields=item_fields,
-                            status=CheckItemStatusEnum.PENDING,
-                        )
-                        db.add(check_item)
-                        total_items += 1
-                elif level_type == "sector":
-                    for sector_id in sectors:
-                        sector_item_id = f"{base_item_id}_sector_{sector_id}"
-                        sector_item_name = f"{base_item_name} - 扇区 {sector_id}"
-                        check_item = InspectionCheckItem(
-                            id=str(uuid.uuid4()),
-                            inspection_id=inspection.id,
-                            item_id=sector_item_id,
-                            item_name=sector_item_name,
-                            description=item_description,
-                            category_id=category_id,
-                            category_name=category_name,
-                            sector_id=sector_id,
-                            required_type=required_type,
-                            fields=item_fields,
-                            status=CheckItemStatusEnum.PENDING,
-                        )
-                        db.add(check_item)
-                        total_items += 1
-                else:
-                    check_item = InspectionCheckItem(
-                        id=str(uuid.uuid4()),
-                        inspection_id=inspection.id,
-                        item_id=base_item_id,
-                        item_name=base_item_name,
-                        description=item_description,
-                        category_id=category_id,
-                        category_name=category_name,
-                        required_type=required_type,
-                        fields=item_fields,
-                        status=CheckItemStatusEnum.PENDING,
-                    )
-                    db.add(check_item)
-                    total_items += 1
-
-        inspection.total_items = total_items
+        total_items = create_check_items_from_template(db, inspection, template_data)
         print(f"DEBUG_WO: 总共创建了 {total_items} 个检查项")
     
     # 更新工单的inspection_id
@@ -1966,6 +1865,7 @@ async def get_work_order_inspection(
     # 如果工单被驳回，将检查状态设置为已驳回状态
     if wo.status == WorkOrderStatusEnum.REJECTED and inspection.status != InspectionStatusEnum.REJECTED:
         inspection.status = InspectionStatusEnum.REJECTED
+        apply_pending_template_if_editable(db, inspection)
         db.commit()
     
     return {"inspection_id": inspection.id, "status": inspection.status.value}
@@ -2001,6 +1901,12 @@ async def get_work_order_execution_context(
     inspection = None
     if wo.inspection_id:
         inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+        if inspection:
+            sync_result = apply_pending_template_if_editable(db, inspection)
+            if sync_result.get("applied"):
+                db.commit()
+                db.refresh(inspection)
+            attach_template_sync_metadata(db, inspection, sync_result=sync_result)
 
     effective_settings = get_effective_work_order_execution_settings(db, current_user)
     access_mode = resolve_web_work_order_access_mode(
@@ -2034,6 +1940,9 @@ async def get_work_order_execution_context(
                 "completed_items": int(getattr(inspection, "completed_items", 0) or 0),
                 "failed_items": int(getattr(inspection, "failed_items", 0) or 0),
                 "submitted_at": to_utc_iso(getattr(inspection, "submitted_at", None)),
+                "applied_template_revision": int(getattr(inspection, "applied_template_revision", 1) or 1),
+                "template_revision": int(getattr(inspection, "template_revision", getattr(inspection, "applied_template_revision", 1) or 1) or 1),
+                "template_sync": getattr(inspection, "template_sync", None),
             }
             if inspection
             else None
@@ -2225,7 +2134,8 @@ async def list_items(
     inspection_items = db.query(InspectionCheckItem).options(
         joinedload(InspectionCheckItem.photos)
     ).filter(
-        InspectionCheckItem.inspection_id == wo.inspection_id
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
     ).all()
     
     # 将检查项转换为工单检查项格式返回
@@ -2290,7 +2200,8 @@ async def update_item(
     
     inspection_item = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.id == item_id,
-        InspectionCheckItem.inspection_id == wo.inspection_id
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
     ).first()
     
     if not inspection_item:
@@ -2471,7 +2382,8 @@ async def review_item(
     
     item = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.id == item_id, 
-        InspectionCheckItem.inspection_id == wo.inspection_id
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="检查项不存在")
@@ -2584,10 +2496,25 @@ async def review_summary(
     if not wo.inspection_id:
         return ReviewSummary(total_items=0, pass_count=0, fail_count=0, warning_count=0, pending_count=0)
     
-    total = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == wo.inspection_id).count()
-    p = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == wo.inspection_id, InspectionCheckItem.review_status == "pass").count()
-    f = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == wo.inspection_id, InspectionCheckItem.review_status == "fail").count()
-    w = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == wo.inspection_id, InspectionCheckItem.review_status == "warning").count()
+    total = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+    ).count()
+    p = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+        InspectionCheckItem.review_status == "pass",
+    ).count()
+    f = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+        InspectionCheckItem.review_status == "fail",
+    ).count()
+    w = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+        InspectionCheckItem.review_status == "warning",
+    ).count()
     pending = total - p - f - w
     return ReviewSummary(total_items=total, pass_count=p, fail_count=f, warning_count=w, pending_count=pending)
 
@@ -2616,6 +2543,7 @@ async def final_review(
     if req.action == "approve" and wo.inspection_id:
         pending_items = db.query(InspectionCheckItem).filter(
             InspectionCheckItem.inspection_id == wo.inspection_id,
+            InspectionCheckItem.is_active.is_(True),
             (InspectionCheckItem.review_status.is_(None)) | (InspectionCheckItem.review_status.in_(["", "pending"]))
         ).all()
         if pending_items:
@@ -2628,6 +2556,7 @@ async def final_review(
 
         failed_items = db.query(InspectionCheckItem).filter(
             InspectionCheckItem.inspection_id == wo.inspection_id,
+            InspectionCheckItem.is_active.is_(True),
             InspectionCheckItem.review_status == "fail"
         ).all()
         
@@ -2745,6 +2674,7 @@ async def final_review(
                 inspection.reviewed_at = datetime.utcnow()
                 inspection.review_comments = req.comments
                 inspection.review_comments_i18n = req.comments_i18n
+                apply_pending_template_if_editable(db, inspection)
 
         # 设备更换工单：驳回时回滚站点状态
         if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
@@ -2885,7 +2815,10 @@ def _update_work_order_result(db: Session, work_order_id: str):
     if wo.status == WorkOrderStatusEnum.VOIDED:
         return
     
-    items = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == wo.inspection_id).all()
+    items = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+    ).all()
     result = None
     if any(i.review_status == "fail" for i in items):
         result = "fail"
@@ -2932,7 +2865,10 @@ async def get_item_field_schema(
         raise HTTPException(status_code=400, detail="工单尚未关联检查实例")
 
     template = _resolve_template_for_work_order(db, wo)
-    items = db.query(InspectionCheckItem).filter(InspectionCheckItem.inspection_id == wo.inspection_id).all()
+    items = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == wo.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+    ).all()
 
     # 构建模板 items 索引（按基础 item_id）
     tpl_index = {}
@@ -3005,26 +2941,15 @@ async def submit_work_order(
         raise HTTPException(status_code=400, detail=f"只能提交活跃或驳回状态的工单，当前状态：{wo.status}")
     
     # 检查关联的检查是否完成
+    inspection = None
     if wo.inspection_id:
         inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
         if not inspection:
             raise HTTPException(status_code=400, detail="未找到关联的检查实例")
-        
-        # 检查所有检查项是否完成
-        total_items = db.query(InspectionCheckItem).filter(
-            InspectionCheckItem.inspection_id == inspection.id
-        ).count()
-        
-        completed_items = db.query(InspectionCheckItem).filter(
-            InspectionCheckItem.inspection_id == inspection.id,
-            InspectionCheckItem.status == CheckItemStatusEnum.COMPLETED
-        ).count()
-        
-        if completed_items < total_items:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"检查未完成，已完成 {completed_items}/{total_items} 项"
-            )
+        sync_result = apply_pending_template_if_editable(db, inspection)
+        if sync_result.get("applied"):
+            db.flush()
+        validate_inspection_for_submit(db, inspection)
         
         # 同步检查状态
         inspection.status = InspectionStatusEnum.SUBMITTED
@@ -3144,12 +3069,16 @@ def recall_work_order(
     wo.updated_at = datetime.utcnow()
 
     # 同步到检查
+    recall_message = "撤回成功，已回到可编辑状态"
     if wo.inspection_id:
         inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
         if inspection:
             inspection.status = InspectionStatusEnum.IN_PROGRESS
             inspection.submitted_at = None
             inspection.updated_at = datetime.utcnow()
+            sync_result = apply_pending_template_if_editable(db, inspection)
+            if sync_result.get("applied"):
+                recall_message = "撤回成功，已同步最新检查模板并回到可编辑状态"
 
     # 审计日志
     audit = AuditEvent(
@@ -3180,7 +3109,7 @@ def recall_work_order(
     db.refresh(wo)
 
     return {
-        "message": "撤回成功，已回到可编辑状态",
+        "message": recall_message,
         "work_order": _enrich_work_order_response(db, wo)
     }
 
@@ -3264,6 +3193,7 @@ async def review_work_order(
                 inspection.review_comments = review_data.comments
                 inspection.review_comments_i18n = review_data.comments_i18n
                 inspection.result = "fail"
+                apply_pending_template_if_editable(db, inspection)
 
         # 设备更换工单：驳回时回滚站点状态
         if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
