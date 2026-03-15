@@ -2519,6 +2519,185 @@ async def review_summary(
     return ReviewSummary(total_items=total, pass_count=p, fail_count=f, warning_count=w, pending_count=pending)
 
 
+def _ensure_work_order_can_final_review(
+    work_order: WorkOrder,
+    current_user: User,
+) -> None:
+    _ensure_access(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+        detail="没有权限审核工单",
+    )
+    _ensure_work_order_not_voided(work_order, detail="已作废工单不能审核")
+    if work_order.status not in (WorkOrderStatusEnum.SUBMITTED, WorkOrderStatusEnum.UNDER_REVIEW):
+        raise HTTPException(status_code=400, detail=f"当前状态不允许审核：{work_order.status}")
+
+
+def _ensure_work_order_can_approve(db: Session, work_order: WorkOrder) -> None:
+    if not work_order.inspection_id:
+        return
+
+    pending_items = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == work_order.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+        (InspectionCheckItem.review_status.is_(None)) | (InspectionCheckItem.review_status.in_(["", "pending"])),
+    ).all()
+    if pending_items:
+        names = [item.item_name for item in pending_items[:10]]
+        extra = f" 等{len(pending_items)}项" if len(pending_items) > 10 else ""
+        raise HTTPException(
+            status_code=400,
+            detail=f"不能通过工单审核，仍有 {len(pending_items)} 项检查项未审核：{', '.join(names)}{extra}",
+        )
+
+    failed_items = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.inspection_id == work_order.inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+        InspectionCheckItem.review_status == "fail",
+    ).all()
+    if failed_items:
+        failed_names = [item.item_name for item in failed_items]
+        raise HTTPException(
+            status_code=400,
+            detail=f"不能通过工单审核，存在不合格的检查项：{', '.join(failed_names)}",
+        )
+
+
+def _finalize_work_order_approval(
+    db: Session,
+    work_order: WorkOrder,
+    review_req: WorkOrderReviewRequest,
+    current_user: User,
+) -> None:
+    if work_order.type == WorkOrderTypeEnum.SITE_SURVEY:
+        work_order.status = WorkOrderStatusEnum.COMPLETED
+        work_order.completed_at = datetime.utcnow()
+    elif work_order.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+        work_order.status = WorkOrderStatusEnum.APPROVED
+        site = db.query(Site).filter(Site.id == work_order.site_id).first()
+        if site and site.status in ("construction", "planning", "planned"):
+            old_site_status = site.status
+            site.status = "pending_online"
+            print(
+                f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
+                f"状态从 {old_site_status} 更新为 {site.status} (开站工单审核通过，待上线)"
+            )
+    elif work_order.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        work_order.status = WorkOrderStatusEnum.APPROVED
+    elif work_order.type == WorkOrderTypeEnum.SSV:
+        work_order.status = WorkOrderStatusEnum.COMPLETED
+        work_order.completed_at = datetime.utcnow()
+        site = db.query(Site).filter(Site.id == work_order.site_id).first()
+        if site:
+            site.ssv_passed = True
+    else:
+        work_order.status = WorkOrderStatusEnum.COMPLETED
+        work_order.completed_at = datetime.utcnow()
+
+    if work_order.inspection_id:
+        inspection = db.query(SiteInspection).filter(SiteInspection.id == work_order.inspection_id).first()
+        if inspection:
+            inspection.status = InspectionStatusEnum.APPROVED
+            inspection.reviewed_by = current_user.id
+            inspection.reviewed_at = datetime.utcnow()
+            inspection.review_comments = review_req.comments
+            inspection.review_comments_i18n = review_req.comments_i18n
+            if review_req.score is not None:
+                inspection.score = review_req.score
+                inspection.result = "pass" if review_req.score >= 60 else "fail"
+
+    if work_order.status == WorkOrderStatusEnum.COMPLETED:
+        _update_site_status_on_work_order_complete(db, work_order.site_id, work_order.type)
+
+    if (
+        work_order.type in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT)
+        and work_order.status == WorkOrderStatusEnum.APPROVED
+    ):
+        try:
+            run_omc_check_for_work_order(work_order.id)
+        except Exception as exc:  # pragma: no cover
+            print(f"[OMC] 审核后立即检查失败 work_order_id={work_order.id}: {exc}")
+        try:
+            db.flush()
+            if work_order.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+                advance_opening_work_orders_by_ever(db, work_order.site_id)
+            else:
+                advance_replacement_work_orders_by_ever(db, work_order.site_id)
+        except Exception as exc:  # pragma: no cover
+            print(f"[OMC] 基于 ever 推进失败 site_id={work_order.site_id}: {exc}")
+
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=work_order.site_id,
+        work_order_type=work_order.type,
+        reason=f"final_review_{review_req.action}",
+        operator_id=current_user.id,
+    )
+
+    try:
+        if not work_order.inspection_id:
+            return
+        if work_order.type == WorkOrderTypeEnum.SITE_SURVEY:
+            from app.services.survey_archive_service import create_or_append_archive
+            create_or_append_archive(
+                db,
+                inspection_id=work_order.inspection_id,
+                operator_id=current_user.id,
+                change_summary=review_req.comments or "审核通过",
+            )
+        elif work_order.type == WorkOrderTypeEnum.OPENING_INSPECTION:
+            from app.services.opening_archive_service import create_or_append_archive as create_opening_archive
+            create_opening_archive(
+                db,
+                inspection_id=work_order.inspection_id,
+                operator_id=current_user.id,
+                change_summary=review_req.comments or "审核通过",
+            )
+        elif work_order.type == WorkOrderTypeEnum.SSV:
+            from app.services.ssv_archive_service import create_or_append_archive as create_ssv_archive
+            create_ssv_archive(
+                db,
+                inspection_id=work_order.inspection_id,
+                operator_id=current_user.id,
+                change_summary=review_req.comments or "审核通过",
+            )
+    except Exception as exc:
+        print(f"[WARN] 创建/追加档案失败(final_review): {exc}")
+
+
+def _finalize_work_order_rejection(
+    db: Session,
+    work_order: WorkOrder,
+    review_req: WorkOrderReviewRequest,
+    current_user: User,
+) -> None:
+    work_order.status = WorkOrderStatusEnum.REJECTED
+    if work_order.inspection_id:
+        inspection = db.query(SiteInspection).filter(SiteInspection.id == work_order.inspection_id).first()
+        if inspection:
+            inspection.status = InspectionStatusEnum.REJECTED
+            inspection.reviewed_by = current_user.id
+            inspection.reviewed_at = datetime.utcnow()
+            inspection.review_comments = review_req.comments
+            inspection.review_comments_i18n = review_req.comments_i18n
+            inspection.result = "fail"
+            apply_pending_template_if_editable(db, inspection)
+
+    if work_order.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+        try:
+            extra = work_order.extra_data or {}
+            _restore_site_status_after_replacement(
+                db,
+                work_order.site_id,
+                preferred_status=extra.get("site_status_before"),
+                exclude_work_order_ids=[work_order.id],
+                reason="设备更换工单驳回，站点状态回滚",
+            )
+        except Exception as exc:  # pragma: no cover
+            print(f"[WARN] 设备更换工单驳回回滚站点状态失败: {exc}")
+
+
 @router.post("/{work_order_id}/review")
 async def final_review(
     work_order_id: str,
@@ -2526,169 +2705,20 @@ async def final_review(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    _ensure_access(
-        current_user,
-        role_codes=["admin", "manager", "reviewer"],
-        permission_codes=["workorder:review:write"],
-        detail="没有权限审核工单",
-    )
+    """工单最终审核入口，支持 submitted / under_review 两种状态。"""
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    _ensure_work_order_not_voided(wo, detail="已作废工单不能审核")
-    if wo.status not in [WorkOrderStatusEnum.SUBMITTED, WorkOrderStatusEnum.UNDER_REVIEW]:
-        raise HTTPException(status_code=400, detail=f"当前状态不允许审核：{wo.status}")
+    _ensure_work_order_can_final_review(wo, current_user)
 
-    # 检查是否有不合格的检查项，如果有则不能通过
-    if req.action == "approve" and wo.inspection_id:
-        pending_items = db.query(InspectionCheckItem).filter(
-            InspectionCheckItem.inspection_id == wo.inspection_id,
-            InspectionCheckItem.is_active.is_(True),
-            (InspectionCheckItem.review_status.is_(None)) | (InspectionCheckItem.review_status.in_(["", "pending"]))
-        ).all()
-        if pending_items:
-            names = [i.item_name for i in pending_items[:10]]
-            extra = f" 等{len(pending_items)}项" if len(pending_items) > 10 else ""
-            raise HTTPException(
-                status_code=400,
-                detail=f"不能通过工单审核，仍有 {len(pending_items)} 项检查项未审核：{', '.join(names)}{extra}"
-            )
-
-        failed_items = db.query(InspectionCheckItem).filter(
-            InspectionCheckItem.inspection_id == wo.inspection_id,
-            InspectionCheckItem.is_active.is_(True),
-            InspectionCheckItem.review_status == "fail"
-        ).all()
-        
-        if failed_items:
-            failed_names = [item.item_name for item in failed_items]
-            raise HTTPException(
-                status_code=400, 
-                detail=f"不能通过工单审核，存在不合格的检查项：{', '.join(failed_names)}"
-            )
+    if req.action == "approve":
+        _ensure_work_order_can_approve(db, wo)
 
     old = wo.status
     if req.action == "approve":
-        # 勘察类：审核即视为完成；开站类：仅标记为 APPROVED，待 OMC 达标后自动推进
-        if wo.type == WorkOrderTypeEnum.SITE_SURVEY:
-            wo.status = WorkOrderStatusEnum.COMPLETED
-            wo.completed_at = datetime.utcnow()
-        elif wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
-            wo.status = WorkOrderStatusEnum.APPROVED
-            # 站点从 construction/planning/planned 进入 pending_online
-            site = db.query(Site).filter(Site.id == wo.site_id).first()
-            if site and site.status in ("construction", "planning", "planned"):
-                old_site_status = site.status
-                site.status = "pending_online"
-                print(
-                    f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
-                    f"状态从 {old_site_status} 更新为 {site.status} (开站工单审核通过，待上线)"
-                )
-        elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
-            # 设备更换：审核通过后进入待上线/待激活推进（复用 OMC ever 推进，不走开站的站点状态分支）
-            wo.status = WorkOrderStatusEnum.APPROVED
-        elif wo.type == WorkOrderTypeEnum.SSV:
-            wo.status = WorkOrderStatusEnum.COMPLETED
-            wo.completed_at = datetime.utcnow()
-            # SSV 审核完成即视为通过
-            site = db.query(Site).filter(Site.id == wo.site_id).first()
-            if site:
-                site.ssv_passed = True
-        else:
-            wo.status = WorkOrderStatusEnum.COMPLETED
-            wo.completed_at = datetime.utcnow()
-        # 同步检查状态与结果
-        if wo.inspection_id:
-            inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
-            if inspection:
-                inspection.status = InspectionStatusEnum.APPROVED
-                inspection.reviewed_by = current_user.id
-                inspection.reviewed_at = datetime.utcnow()
-                inspection.review_comments = req.comments
-                if req.score is not None:
-                    inspection.score = req.score
-                    inspection.result = "pass" if req.score >= 60 else "fail"
-        # 站点状态更新
-        if wo.status == WorkOrderStatusEnum.COMPLETED:
-            _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
-
-        # 开站/设备更换工单审核通过后立即触发一次 OMC 检查（单工单）
-        if wo.type in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT) and wo.status == WorkOrderStatusEnum.APPROVED:
-            try:
-                from app.services.omc_monitor import run_omc_check_for_work_order
-                run_omc_check_for_work_order(wo.id)
-            except Exception as exc:  # pragma: no cover
-                print(f"[OMC] 审核后立即检查失败 work_order_id={wo.id}: {exc}")
-            # 若已存在“ever”达标（例如提前手工确认），尝试直接推进（不依赖 OMC 实时查询）
-            try:
-                db.flush()
-                if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
-                    advance_opening_work_orders_by_ever(db, wo.site_id)
-                else:
-                    advance_replacement_work_orders_by_ever(db, wo.site_id)
-            except Exception as exc:  # pragma: no cover
-                print(f"[OMC] 基于 ever 推进失败 site_id={wo.site_id}: {exc}")
-        _rebuild_site_progress_if_needed(
-            db,
-            site_id=wo.site_id,
-            work_order_type=wo.type,
-            reason=f"final_review_{req.action}",
-            operator_id=current_user.id,
-        )
-        # 审核通过时建立/追加档案快照
-        try:
-            if wo.inspection_id:
-                if wo.type == WorkOrderTypeEnum.SITE_SURVEY:
-                    from app.services.survey_archive_service import create_or_append_archive
-                    create_or_append_archive(
-                        db,
-                        inspection_id=wo.inspection_id,
-                        operator_id=current_user.id,
-                        change_summary=req.comments or "审核通过"
-                    )
-                elif wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
-                    from app.services.opening_archive_service import create_or_append_archive as create_opening_archive
-                    create_opening_archive(
-                        db,
-                        inspection_id=wo.inspection_id,
-                        operator_id=current_user.id,
-                        change_summary=req.comments or "审核通过"
-                    )
-                elif wo.type == WorkOrderTypeEnum.SSV:
-                    from app.services.ssv_archive_service import create_or_append_archive as create_ssv_archive
-                    create_ssv_archive(
-                        db,
-                        inspection_id=wo.inspection_id,
-                        operator_id=current_user.id,
-                        change_summary=req.comments or "审核通过"
-                    )
-        except Exception as e:
-            print(f"[WARN] 创建/追加档案失败(final_review): {e}")
+        _finalize_work_order_approval(db, wo, req, current_user)
     else:
-        wo.status = WorkOrderStatusEnum.REJECTED
-        if wo.inspection_id:
-            inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
-            if inspection:
-                inspection.status = InspectionStatusEnum.REJECTED
-                inspection.reviewed_by = current_user.id
-                inspection.reviewed_at = datetime.utcnow()
-                inspection.review_comments = req.comments
-                inspection.review_comments_i18n = req.comments_i18n
-                apply_pending_template_if_editable(db, inspection)
-
-        # 设备更换工单：驳回时回滚站点状态
-        if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
-            try:
-                extra = wo.extra_data or {}
-                _restore_site_status_after_replacement(
-                    db,
-                    wo.site_id,
-                    preferred_status=extra.get("site_status_before"),
-                    exclude_work_order_ids=[wo.id],
-                    reason="设备更换工单驳回，站点状态回滚",
-                )
-            except Exception as exc:  # pragma: no cover
-                print(f"[WARN] 设备更换工单驳回回滚站点状态失败: {exc}")
+        _finalize_work_order_rejection(db, wo, req, current_user)
 
     wo.reviewed_by = current_user.id
     wo.reviewed_at = datetime.utcnow()
@@ -3110,188 +3140,6 @@ def recall_work_order(
 
     return {
         "message": recall_message,
-        "work_order": _enrich_work_order_response(db, wo)
-    }
-
-
-@router.post("/{work_order_id}/review")
-async def review_work_order(
-    work_order_id: str,
-    review_data: WorkOrderReviewRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """审核工单"""
-    wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
-    if not wo:
-        raise HTTPException(status_code=404, detail="工单不存在")
-    _ensure_work_order_not_voided(wo, detail="已作废工单不能审核")
-    
-    # 权限检查：只有管理员、项目经理或指定审核人才能审核
-    if (
-        not _has_access(
-            current_user,
-            role_codes=["admin", "manager"],
-            permission_codes=["workorder:review:write"],
-        )
-        and wo.reviewer_id != current_user.id
-    ):
-        raise HTTPException(status_code=403, detail="无权限审核此工单")
-    
-    if wo.status != WorkOrderStatusEnum.SUBMITTED:
-        raise HTTPException(status_code=400, detail=f"只能审核已提交的工单，当前状态：{wo.status}")
-    
-    # 更新工单状态
-    old_status = wo.status
-    
-    if review_data.action == "approve":
-        # 审核通过：对于普通工单仍视为“已完成”，
-        # 对于开站工单则仅进入“待上线”阶段，后续由 OMC 状态推进。
-        if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
-            wo.status = WorkOrderStatusEnum.APPROVED  # 80%：待上线
-            # 站点状态：从 construction 进入 pending_online（待上线）
-            site = db.query(Site).filter(Site.id == wo.site_id).first()
-            if site and site.status in ("construction", "planning", "planned"):
-                old_site_status = site.status
-                site.status = "pending_online"
-                print(
-                    f"[站点状态自动更新] 站点 {site.id} ({site.site_name}) "
-                    f"状态从 {old_site_status} 更新为 {site.status} (开站工单审核通过，待上线)"
-                )
-        elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
-            wo.status = WorkOrderStatusEnum.APPROVED  # 80%：待上线
-        else:
-            wo.status = WorkOrderStatusEnum.COMPLETED
-            wo.completed_at = datetime.utcnow()
-            
-            # 自动更新站点状态（勘察/其他工单沿用原有逻辑）
-            _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
-        
-        # 同步检查状态
-        if wo.inspection_id:
-            inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
-            if inspection:
-                inspection.status = InspectionStatusEnum.APPROVED
-                inspection.reviewed_by = current_user.id
-                inspection.reviewed_at = datetime.utcnow()
-                inspection.review_comments = review_data.comments
-                inspection.review_comments_i18n = review_data.comments_i18n
-                if review_data.score:
-                    inspection.score = review_data.score
-                    inspection.result = "pass" if review_data.score >= 60 else "fail"
-        
-    elif review_data.action == "reject":
-        wo.status = WorkOrderStatusEnum.REJECTED  # 驳回状态
-        
-        # 同步检查状态
-        if wo.inspection_id:
-            inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
-            if inspection:
-                inspection.status = InspectionStatusEnum.REJECTED
-                inspection.reviewed_by = current_user.id
-                inspection.reviewed_at = datetime.utcnow()
-                inspection.review_comments = review_data.comments
-                inspection.review_comments_i18n = review_data.comments_i18n
-                inspection.result = "fail"
-                apply_pending_template_if_editable(db, inspection)
-
-        # 设备更换工单：驳回时回滚站点状态
-        if wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
-            try:
-                extra = wo.extra_data or {}
-                _restore_site_status_after_replacement(
-                    db,
-                    wo.site_id,
-                    preferred_status=extra.get("site_status_before"),
-                    exclude_work_order_ids=[wo.id],
-                    reason="设备更换工单驳回，站点状态回滚",
-                )
-            except Exception as exc:  # pragma: no cover
-                print(f"[WARN] 设备更换工单驳回回滚站点状态失败: {exc}")
-    
-    # 更新审核信息
-    wo.reviewed_at = datetime.utcnow()
-    wo.review_comments = review_data.comments
-    wo.review_comments_i18n = review_data.comments_i18n
-    
-    # 同步状态
-    sync_service = get_work_order_sync_service(db)
-    sync_service.sync_work_order_to_inspection_status(wo)
-    sync_service.sync_work_order_review_info(wo)
-    _rebuild_site_progress_if_needed(
-        db,
-        site_id=wo.site_id,
-        work_order_type=wo.type,
-        reason=f"review_work_order_{review_data.action}",
-        operator_id=current_user.id,
-    )
-    
-    db.commit()
-
-    # 审核通过后：
-    # 1) 旧链路：最终同步到旧site_surveys（允许覆盖）
-    # 2) 新链路：创建/追加“勘察档案快照”版本（严格跟随模板结构）
-    if review_data.action == "approve" and wo.inspection_id:
-        try:
-            from app.services.survey_sync import sync_inspection_to_survey, SyncOptions, PhotoPolicy
-            survey = sync_inspection_to_survey(
-                db,
-                wo.inspection_id,
-                SyncOptions(mode='on_approve', overwrite_fields=True, photo_policy=PhotoPolicy.categorized_best, per_category_limit=8)
-            )
-            if survey:
-                review_info = {
-                    'status': 'approved',
-                    'score': getattr(wo, 'score', None),
-                    'reviewed_by': current_user.id,
-                    # 审核时间按 UTC ISO 输出，便于前端统一解析
-                    'reviewed_at': to_utc_iso(datetime.utcnow()),
-                    'comments': review_data.comments,
-                }
-                try:
-                    extra = survey.extra_data or {}
-                    extra['review'] = review_info
-                    survey.extra_data = extra
-                    db.commit()
-                except Exception:
-                    db.rollback()
-        except Exception:
-            db.rollback()
-
-        # 新档案：仅在审核通过时建立/追加快照版本
-        try:
-            from app.services.survey_archive_service import create_or_append_archive
-            create_or_append_archive(
-                db,
-                inspection_id=wo.inspection_id,
-                operator_id=current_user.id,
-                change_summary=review_data.comments or "审核通过"
-            )
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            print(f"[WARN] 创建/追加勘察档案失败: {e}")
-    
-    _audit(
-        db,
-        "work_order",
-        wo.id,
-        f"review_{review_data.action}",
-        current_user.id,
-        from_status=old_status.value,
-        to_status=wo.status.value,
-        comments=review_data.comments,
-    )
-    
-    # 对于开站/设备更换工单：审核通过后触发一次后台 OMC 状态检查
-    if review_data.action == "approve" and wo.type in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT):
-        try:
-            run_omc_check_for_work_order(wo.id)
-        except Exception as exc:  # pragma: no cover - OMC 故障不影响审核主流程
-            print(f"[OMC] 审核后触发开站工单检查失败 work_order_id={wo.id}: {exc}")
-    
-    return {
-        "message": f"工单{review_data.action}成功",
         "work_order": _enrich_work_order_response(db, wo)
     }
 
