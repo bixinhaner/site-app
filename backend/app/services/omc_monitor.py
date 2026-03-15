@@ -28,6 +28,7 @@ from app.services.omc_state import (
   upsert_omc_device_state,
   summarize_site_omc_state,
 )
+from app.services.site_progress_service import rebuild_site_progress
 
 _monitor_thread: threading.Thread | None = None
 
@@ -207,6 +208,11 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
   extra["omc_status"] = summary
   wo.extra_data = extra
   wo.updated_at = datetime.utcnow()
+  rebuild_site_progress(
+    db,
+    wo.site_id,
+    reason="refresh_opening_work_order_omc_status",
+  )
 
   return summary
 
@@ -281,6 +287,11 @@ def refresh_replacement_work_order_omc_status(db: Session, client: OmcClient, wo
   extra["omc_status"] = summary
   wo.extra_data = extra
   wo.updated_at = datetime.utcnow()
+  rebuild_site_progress(
+    db,
+    wo.site_id,
+    reason="refresh_replacement_work_order_omc_status",
+  )
   return summary
 
 
@@ -334,6 +345,11 @@ def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
     if changed:
       result["work_orders"].append({"id": wo.id, "status": wo.status.value})
 
+  rebuild_site_progress(
+    db,
+    site_id,
+    reason="advance_opening_work_orders_by_ever",
+  )
   return result
 
 
@@ -384,6 +400,11 @@ def advance_replacement_work_orders_by_ever(db: Session, site_id: int) -> Dict:
     if changed:
       result["work_orders"].append({"id": wo.id, "status": wo.status.value})
 
+  rebuild_site_progress(
+    db,
+    site_id,
+    reason="advance_replacement_work_orders_by_ever",
+  )
   return result
 
 

@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>站点列表</h1>
+      <h1>{{ t('route.SiteList') }}</h1>
       <div class="header-actions">
         <el-input v-model="keyword" placeholder="搜索站点名称/编码/城市（动态生效）" clearable style="width: 260px" />
         <el-select v-model="statusFilter" placeholder="状态" clearable style="width: 140px" @change="onStatusFilterChange">
@@ -70,6 +70,26 @@
           <el-icon><Operation /></el-icon>
           规划信息导入
         </el-button>
+        <el-dropdown
+          v-if="canRebuildSiteProgress"
+          trigger="click"
+          @command="handleMoreCommand"
+        >
+          <el-button :loading="rebuildSiteProgressLoading">
+            <el-icon><Operation /></el-icon>
+            {{ t('siteList.actions.more') }}
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                command="rebuild-site-progress"
+                :disabled="rebuildSiteProgressLoading"
+              >
+                {{ t('siteList.actions.rebuildProgress') }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <!-- 筛选按钮已移除：搜索栏与筛选项动态生效 -->
       </div>
     </div>
@@ -264,17 +284,26 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import request from '@/utils/request'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '../../stores/user'
 import { createDebouncedTracker } from '@/utils/operationTrack'
 
 const router = useRouter()
+const { t } = useI18n()
 const userStore = useUserStore()
 const canManagePlanning = computed(() => userStore.hasPermission('sites:lld:write'))
 const canCreateSite = computed(() => userStore.hasPermission('sites:create:write'))
 const canManageSurveyStage = computed(() => userStore.hasPermission('sites:survey-stage:write'))
 const canBatchEditSite = computed(() => userStore.hasPermission('sites:update:write'))
+const canRebuildSiteProgress = computed(() => (
+  userStore.isAdmin
+  || userStore.isManager
+  || userStore.hasPermission('sites:create:write')
+  || userStore.hasPermission('sites:update:write')
+  || userStore.hasPermission('sites:survey-stage:write')
+))
 const siteTableRef = ref(null)
 const loading = ref(false)
 const sites = ref([])
@@ -300,6 +329,7 @@ const batchEditVisible = ref(false)
 const batchSubmitting = ref(false)
 const batchRows = ref([])
 const batchResult = ref(null)
+const rebuildSiteProgressLoading = ref(false)
 
 const trackSearchDebounced = createDebouncedTracker(800)
 const trackSearch = () => {
@@ -371,6 +401,12 @@ const openSurveyStageBatch = () => {
 
 const openBatchExcelUpdate = () => {
   router.push({ name: 'SiteBasicBatch', query: { mode: 'batchUpdate' } })
+}
+
+const handleMoreCommand = async (command) => {
+  if (command === 'rebuild-site-progress') {
+    await rebuildAllSiteProgress()
+  }
 }
 
 const handleSelectionChange = (rows) => {
@@ -530,6 +566,53 @@ const exportSites = async () => {
     ElMessage.error('导出失败: ' + msg)
   } finally {
     exporting.value = false
+  }
+}
+
+const rebuildAllSiteProgress = async () => {
+  if (rebuildSiteProgressLoading.value) return
+
+  try {
+    await ElMessageBox.confirm(
+      t('siteList.progressRebuild.confirm.message'),
+      t('siteList.progressRebuild.confirm.title'),
+      {
+        type: 'warning',
+        confirmButtonText: t('siteList.progressRebuild.confirm.confirmButton'),
+        cancelButtonText: t('common.cancel'),
+        closeOnClickModal: false,
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    rebuildSiteProgressLoading.value = true
+    const res = await request.post(
+      '/api/sites/progress/rebuild',
+      {
+        force: true,
+        reason: 'manual_site_progress_rebuild_from_web',
+      },
+      {
+        timeout: 300000,
+      },
+    )
+    await reload()
+    ElMessage.success(
+      t('siteList.progressRebuild.messages.success', {
+        requestedCount: Number(res?.requested_count || 0),
+        rebuiltCount: Number(res?.rebuilt_count || 0),
+        skippedCount: Number(res?.skipped_count || 0),
+      }),
+    )
+  } catch (e) {
+    console.error(e)
+    const msg = await extractErrorDetail(e)
+    ElMessage.error(t('siteList.progressRebuild.messages.failed', { message: msg }))
+  } finally {
+    rebuildSiteProgressLoading.value = false
   }
 }
 

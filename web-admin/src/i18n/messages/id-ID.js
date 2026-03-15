@@ -10,6 +10,7 @@ export default {
     chinese: 'Bahasa Mandarin',
     english: 'Bahasa Inggris',
     indonesian: 'Bahasa Indonesia',
+    cancel: 'Membatalkan',
     logout: 'Keluar',
     logoutSuccess: 'Berhasil keluar',
     logoutFailed: 'Gagal keluar',
@@ -185,6 +186,23 @@ export default {
       loadFailed: 'Gagal memuat peta situs',
       noCoordinateWarning: 'Situs ini tidak memiliki koordinat dan tidak dapat ditemukan di peta',
       outOfViewWarning: 'Situs ini tidak ada di area pandang peta saat ini. Sesuaikan filter dan coba lagi',
+    },
+  },
+  siteList: {
+    actions: {
+      more: 'Tindakan Lainnya',
+      rebuildProgress: 'Hitung Ulang Siklus Hidup Situs',
+    },
+    progressRebuild: {
+      confirm: {
+        title: 'Hitung Ulang Siklus Hidup Situs',
+        message: 'Ini akan menghitung ulang snapshot siklus hidup semua situs berdasarkan fakta valid saat ini. Gunakan untuk inisialisasi produksi, koreksi data historis, atau penelusuran masalah. Lanjutkan?',
+        confirmButton: 'Mulai Hitung Ulang',
+      },
+      messages: {
+        success: 'Perhitungan ulang selesai: meminta {requestedCount} situs, menghitung ulang {rebuiltCount}, melewati {skippedCount}.',
+        failed: 'Perhitungan ulang gagal: {message}',
+      },
     },
   },
   siteDetail: {

@@ -33,6 +33,7 @@ from app.models import geocode_cache as _geocode_cache_models  # noqa: F401
 from app.models import omc_state as _omc_state_models  # noqa: F401
 from app.models import app_version as _app_version_models  # noqa: F401
 from app.models import mobile_client_log as _mobile_client_log_models  # noqa: F401
+from app.models import site_progress as _site_progress_models  # noqa: F401
 from app.models.user import User
 from app.api import auth, authz, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai, ai_management
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache

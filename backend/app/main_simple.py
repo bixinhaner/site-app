@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.database import engine, Base, get_db
 from app.core.security import create_access_token, verify_password
 from app.models.user import User
+from app.models import site_progress as _site_progress_models  # noqa: F401
 from app.schemas.user import UserLogin, Token, UserResponse
 from app.utils.inspection_schema import ensure_inspection_schema
 

@@ -26,6 +26,7 @@ from app.models.planning import (
     SitePlanningCell,
 )
 from app.services.authz_service import user_has_any_role_or_permission
+from app.services.site_progress_service import rebuild_site_progress
 from app.utils.planning_schema import LLD_CELL_EXTRA_FIELD_CANDIDATES
 from app.utils.timezone import to_utc_iso
 from app.schemas.planning import (
@@ -932,6 +933,13 @@ def _create_new_version(
                 description=sp.description,
             )
         )
+
+    rebuild_site_progress(
+        db,
+        site_id,
+        reason="create_site_planning_version",
+        operator_id=actor_id,
+    )
 
     if commit:
         db.commit()

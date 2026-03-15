@@ -64,6 +64,7 @@ from app.services.equipment_unbind_service import (
     is_device_level_check_item,
     rollback_equipment_status_after_unbind,
 )
+from app.services.site_progress_service import rebuild_site_progress
 from app.services.work_order_execution_settings_service import (
     LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK,
     LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK,
@@ -4040,6 +4041,13 @@ async def bind_equipment_to_sector(
                 db,
                 sns=unbound_device_sns,
                 now=now,
+            )
+        if inspection.site_id:
+            rebuild_site_progress(
+                db,
+                inspection.site_id,
+                reason="bind_or_unbind_equipment",
+                operator_id=current_user.id,
             )
         
         db.commit()

@@ -44,7 +44,12 @@ from app.services.omc_client import (
 )
 from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_state
 from app.services.authz_service import user_has_any_role_or_permission
-from app.utils.site_milestones import get_site_milestone_timestamps
+from app.services.site_progress_service import (
+    ensure_site_progress_snapshots,
+    get_site_progress_snapshot,
+    rebuild_site_progress,
+    rebuild_site_progress_for_sites,
+)
 from app.utils.timezone import to_utc_iso
 from app.services.omc_monitor import (
     advance_opening_work_orders_by_ever,
@@ -125,6 +130,19 @@ class SiteMilestonesResponse(BaseModel):
     ssv_at: Optional[str] = None
 
 
+class SiteProgressRebuildRequest(BaseModel):
+    site_ids: Optional[List[int]] = None
+    force: bool = True
+    reason: Optional[str] = None
+
+
+class SiteProgressRebuildResponse(BaseModel):
+    requested_count: int
+    rebuilt_count: int
+    skipped_count: int
+    site_ids: List[int]
+
+
 class SurveyStageRowResult(BaseModel):
     row_index: int
     site_code: Optional[str] = None
@@ -187,6 +205,13 @@ async def create_site(
         created_by=current_user.id
     )
     db.add(db_site)
+    db.flush()
+    rebuild_site_progress(
+        db,
+        db_site.id,
+        reason="create_site",
+        operator_id=current_user.id,
+    )
     db.commit()
     db.refresh(db_site)
     
@@ -292,6 +317,33 @@ async def search_sites(
         page=page,
         size=limit,
         pages=pages,
+    )
+
+
+@router.post("/progress/rebuild", response_model=SiteProgressRebuildResponse)
+async def rebuild_site_progress_endpoint(
+    payload: SiteProgressRebuildRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_site_manage_access(current_user)
+
+    result = rebuild_site_progress_for_sites(
+        db,
+        payload.site_ids,
+        reason=(payload.reason or "").strip() or "manual_site_progress_rebuild",
+        operator_id=current_user.id,
+        force=bool(payload.force),
+    )
+    db.commit()
+
+    rebuilt_site_ids = list(result["rebuilt_site_ids"])
+    requested_site_ids = list(result["requested_site_ids"])
+    return SiteProgressRebuildResponse(
+        requested_count=len(requested_site_ids),
+        rebuilt_count=len(rebuilt_site_ids),
+        skipped_count=int(result["skipped_count"]),
+        site_ids=rebuilt_site_ids,
     )
 
 
@@ -630,6 +682,12 @@ async def upload_survey_stage_batch(
                         details={"reason": site.survey_skip_reason, "batch_id": batch_id, "row_index": i},
                     )
                 )
+                rebuild_site_progress(
+                    db,
+                    site.id,
+                    reason="batch_skip_site_survey",
+                    operator_id=current_user.id,
+                )
                 db.commit()
                 success_count += 1
                 results.append(
@@ -722,6 +780,12 @@ async def upload_survey_stage_batch(
                     comments="批量恢复需要勘察",
                     details={"reason": reason_clean, "batch_id": batch_id, "row_index": i},
                 )
+            )
+            rebuild_site_progress(
+                db,
+                site.id,
+                reason="batch_require_site_survey",
+                operator_id=current_user.id,
             )
             db.commit()
             success_count += 1
@@ -1338,14 +1402,19 @@ async def get_site_milestones(
 
     _ensure_site_visible(site_id, db, current_user)
 
-    milestone_times = get_site_milestone_timestamps(db, site_id)
+    ensure_result = ensure_site_progress_snapshots(db, site_ids=[site_id], reason="site_milestones_read")
+    if ensure_result["rebuilt_site_ids"]:
+        db.commit()
+    snapshot = get_site_progress_snapshot(db, site_id)
+    if snapshot is None:
+        raise HTTPException(status_code=500, detail="Site progress snapshot not found")
 
     return SiteMilestonesResponse(
-        install_started_at=to_utc_iso(milestone_times["install_started_at"]) if milestone_times["install_started_at"] else None,
-        install_completed_at=to_utc_iso(milestone_times["install_completed_at"]) if milestone_times["install_completed_at"] else None,
-        online_at=to_utc_iso(milestone_times["online_at"]) if milestone_times["online_at"] else None,
-        activated_at=to_utc_iso(milestone_times["activated_at"]) if milestone_times["activated_at"] else None,
-        ssv_at=to_utc_iso(milestone_times["ssv_at"]) if milestone_times["ssv_at"] else None,
+        install_started_at=to_utc_iso(snapshot.install_started_at) if snapshot.install_started_at else None,
+        install_completed_at=to_utc_iso(snapshot.install_completed_at) if snapshot.install_completed_at else None,
+        online_at=to_utc_iso(snapshot.online_at) if snapshot.online_at else None,
+        activated_at=to_utc_iso(snapshot.activated_at) if snapshot.activated_at else None,
+        ssv_at=to_utc_iso(snapshot.ssv_at) if snapshot.ssv_at else None,
     )
 
 
@@ -1408,6 +1477,12 @@ async def skip_site_survey(
             details={"reason": site.survey_skip_reason, "survey_required": False},
         )
     )
+    rebuild_site_progress(
+        db,
+        site_id,
+        reason="skip_site_survey",
+        operator_id=current_user.id,
+    )
 
     db.commit()
     db.refresh(site)
@@ -1457,6 +1532,12 @@ async def require_site_survey(
             comments="恢复需要勘察",
             details={"reason": reason, "survey_required": True},
         )
+    )
+    rebuild_site_progress(
+        db,
+        site_id,
+        reason="require_site_survey",
+        operator_id=current_user.id,
     )
 
     db.commit()

@@ -10,6 +10,7 @@ export default {
     chinese: '中文',
     english: '英文',
     indonesian: '印尼语',
+    cancel: '取消',
     logout: '退出登录',
     logoutSuccess: '已退出登录',
     logoutFailed: '退出登录失败',
@@ -164,6 +165,23 @@ export default {
       loadFailed: '站点地图加载失败',
       noCoordinateWarning: '该站点暂无经纬度，无法在地图定位',
       outOfViewWarning: '当前站点不在地图视野，请调整筛选条件',
+    },
+  },
+  siteList: {
+    actions: {
+      more: '更多操作',
+      rebuildProgress: '重算站点生命周期',
+    },
+    progressRebuild: {
+      confirm: {
+        title: '重算站点生命周期',
+        message: '这会基于当前有效事实，全量重算全部站点的生命周期快照。适用于生产初始化、历史修正和排障。是否继续？',
+        confirmButton: '开始重算',
+      },
+      messages: {
+        success: '重算完成：请求 {requestedCount} 个站点，重算 {rebuiltCount} 个，跳过 {skippedCount} 个。',
+        failed: '重算失败：{message}',
+      },
     },
   },
   siteDetail: {

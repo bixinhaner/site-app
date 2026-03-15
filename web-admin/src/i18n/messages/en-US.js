@@ -10,6 +10,7 @@ export default {
     chinese: 'Chinese',
     english: 'English',
     indonesian: 'Bahasa Indonesia',
+    cancel: 'Cancel',
     logout: 'Sign out',
     logoutSuccess: 'Signed out',
     logoutFailed: 'Failed to sign out',
@@ -164,6 +165,23 @@ export default {
       loadFailed: 'Failed to load site map',
       noCoordinateWarning: 'This site has no coordinates and cannot be located on the map',
       outOfViewWarning: 'This site is not in the current map viewport. Adjust filters and try again',
+    },
+  },
+  siteList: {
+    actions: {
+      more: 'More Actions',
+      rebuildProgress: 'Rebuild Site Lifecycle',
+    },
+    progressRebuild: {
+      confirm: {
+        title: 'Rebuild Site Lifecycle',
+        message: 'This will fully recalculate lifecycle snapshots for all sites based on current valid facts. Use it for production initialization, historical corrections, or troubleshooting. Continue?',
+        confirmButton: 'Start Rebuild',
+      },
+      messages: {
+        success: 'Rebuild completed: requested {requestedCount} sites, rebuilt {rebuiltCount}, skipped {skippedCount}.',
+        failed: 'Rebuild failed: {message}',
+      },
     },
   },
   siteDetail: {

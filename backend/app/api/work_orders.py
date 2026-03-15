@@ -83,6 +83,7 @@ from app.services.work_order_execution_settings_service import (
     resolve_web_work_order_access_mode,
 )
 from app.services.photo_duplicate_guard import delete_registry_records_by_source
+from app.services.site_progress_service import rebuild_site_progress
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -94,6 +95,30 @@ VOIDABLE_WORK_ORDER_STATUSES = (
     WorkOrderStatusEnum.UNDER_REVIEW,
     WorkOrderStatusEnum.REJECTED,
 )
+
+SITE_PROGRESS_REBUILD_WORK_ORDER_TYPES = {
+    WorkOrderTypeEnum.OPENING_INSPECTION,
+    WorkOrderTypeEnum.SSV,
+    WorkOrderTypeEnum.SITE_SURVEY,
+}
+
+
+def _rebuild_site_progress_if_needed(
+    db: Session,
+    *,
+    site_id: Optional[int],
+    work_order_type: Optional[WorkOrderTypeEnum],
+    reason: str,
+    operator_id: Optional[int] = None,
+) -> None:
+    if not site_id or work_order_type not in SITE_PROGRESS_REBUILD_WORK_ORDER_TYPES:
+        return
+    rebuild_site_progress(
+        db,
+        site_id,
+        reason=reason,
+        operator_id=operator_id,
+    )
 SSV_IN_PROGRESS_STATUSES = (
     WorkOrderStatusEnum.PENDING,
     WorkOrderStatusEnum.ACTIVE,
@@ -521,6 +546,13 @@ def _apply_void_work_order(
             exclude_work_order_ids=[wo.id],
             reason=f"{site_reason_prefix}设备更换工单，站点状态回滚",
         )
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=old_site_id,
+        work_order_type=old_wo_type,
+        reason=f"{site_reason_prefix}void_work_order",
+        operator_id=operator_id,
+    )
 
     db.add(
         AuditEvent(
@@ -1241,6 +1273,13 @@ async def create_work_order(
     
     # 自动更新站点状态
     _update_site_status_on_work_order_create(db, data.site_id, data.type)
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=data.site_id,
+        work_order_type=data.type,
+        reason="create_work_order",
+        operator_id=current_user.id,
+    )
 
     db.commit()
     db.refresh(wo)
@@ -1525,6 +1564,13 @@ async def delete_work_order(
                 exclude_work_order_ids=[wo.id],
                 reason="删除设备更换工单，站点状态回滚",
             )
+        _rebuild_site_progress_if_needed(
+            db,
+            site_id=old_site_id,
+            work_order_type=old_wo_type,
+            reason="delete_work_order",
+            operator_id=current_user.id,
+        )
 
         db.commit()
 
@@ -2142,6 +2188,13 @@ async def complete_work_order(
             print(f"[WARN] 标记完成时回滚站点状态失败: {exc}")
     else:
         _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=wo.site_id,
+        work_order_type=wo.type,
+        reason="complete_work_order",
+        operator_id=current_user.id,
+    )
     
     db.commit()
     _audit(db, "work_order", wo.id, "complete", current_user.id,
@@ -2646,6 +2699,13 @@ async def final_review(
                     advance_replacement_work_orders_by_ever(db, wo.site_id)
             except Exception as exc:  # pragma: no cover
                 print(f"[OMC] 基于 ever 推进失败 site_id={wo.site_id}: {exc}")
+        _rebuild_site_progress_if_needed(
+            db,
+            site_id=wo.site_id,
+            work_order_type=wo.type,
+            reason=f"final_review_{req.action}",
+            operator_id=current_user.id,
+        )
         # 审核通过时建立/追加档案快照
         try:
             if wo.inspection_id:
@@ -3003,6 +3063,13 @@ async def submit_work_order(
     sync_service = get_work_order_sync_service(db)
     sync_service.sync_work_order_to_inspection_status(wo)
     sync_service.sync_work_order_review_info(wo)
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=wo.site_id,
+        work_order_type=wo.type,
+        reason="submit_work_order",
+        operator_id=current_user.id,
+    )
     
     db.commit()
 
@@ -3101,6 +3168,13 @@ def recall_work_order(
     # 使用同步服务进行状态一致性同步
     sync_service = get_work_order_sync_service(db)
     sync_service.sync_work_order_to_inspection_status(wo)
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=wo.site_id,
+        work_order_type=wo.type,
+        reason="recall_work_order",
+        operator_id=current_user.id,
+    )
 
     db.commit()
     db.refresh(wo)
@@ -3214,6 +3288,13 @@ async def review_work_order(
     sync_service = get_work_order_sync_service(db)
     sync_service.sync_work_order_to_inspection_status(wo)
     sync_service.sync_work_order_review_info(wo)
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=wo.site_id,
+        work_order_type=wo.type,
+        reason=f"review_work_order_{review_data.action}",
+        operator_id=current_user.id,
+    )
     
     db.commit()
 
@@ -3498,6 +3579,14 @@ async def batch_work_order_operation(
                     )
                     rolled_back_replacement_site_ids.add(old_site_id)
 
+                _rebuild_site_progress_if_needed(
+                    db,
+                    site_id=old_site_id,
+                    work_order_type=old_wo_type,
+                    reason="batch_delete_work_order",
+                    operator_id=current_user.id,
+                )
+
                 _audit(db, "work_order", wo.id, "batch_delete", current_user.id,
                        from_status=old_status.value, to_status="deleted")
                 updated_count += 1
@@ -3734,6 +3823,13 @@ async def mark_work_order_completed(
     
     # 自动更新站点状态
     _update_site_status_on_work_order_complete(db, wo.site_id, wo.type)
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=wo.site_id,
+        work_order_type=wo.type,
+        reason="mark_work_order_completed",
+        operator_id=current_user.id,
+    )
     
     db.commit()
     
@@ -3791,6 +3887,14 @@ async def finalize_survey_work_order(
             create_or_append_archive(db, inspection_id=wo.inspection_id, operator_id=current_user.id, change_summary="Finalize补建")
     except Exception as e:
         print(f"[WARN] finalize-survey 建档失败: {e}")
+
+    _rebuild_site_progress_if_needed(
+        db,
+        site_id=wo.site_id,
+        work_order_type=wo.type,
+        reason="finalize_survey_work_order",
+        operator_id=current_user.id,
+    )
 
     db.commit()
     _audit(db, "work_order", work_order_id, "finalize_survey", current_user.id,

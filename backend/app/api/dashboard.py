@@ -14,14 +14,11 @@ from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
 from app.models.survey_archive import SiteSurveyArchive
 from app.models.equipment import Inventory, Equipment, StockTransaction
-from app.services.authz_service import user_has_any_role_or_permission
-from app.utils.site_milestones import (
-    get_activated_rows,
-    get_install_completed_rows,
-    get_install_started_rows,
-    get_online_rows,
-    get_ssv_rows,
+from app.services.site_progress_service import (
+    ensure_site_progress_snapshots,
+    get_site_progress_rows,
 )
+from app.services.authz_service import user_has_any_role_or_permission
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -206,11 +203,14 @@ async def get_dashboard_summary(
     site_rows = db.query(Site.status, func.count(Site.id)).group_by(Site.status).all()
     site_status = {str(s or "unknown"): int(c) for s, c in site_rows}
 
-    # 站点关键节点统计统一复用同一套“首次发生时间”数据源，避免概况卡片与趋势图口径不一致。
-    install_started_rows = get_install_started_rows(db)
-    install_completed_rows = get_install_completed_rows(db)
-    online_rows = get_online_rows(db)
-    activated_rows = get_activated_rows(db)
+    ensure_result = ensure_site_progress_snapshots(db, reason="dashboard_summary_read")
+    if ensure_result["rebuilt_site_ids"]:
+        db.commit()
+    install_started_rows = get_site_progress_rows(db, "install_started")
+    install_completed_rows = get_site_progress_rows(db, "install_completed")
+    online_rows = get_site_progress_rows(db, "online")
+    activated_rows = get_site_progress_rows(db, "activated")
+    ssv_rows = get_site_progress_rows(db, "ssv")
 
     install_started_site_count = len(install_started_rows)
     installed_site_count = len(install_completed_rows)
@@ -242,7 +242,7 @@ async def get_dashboard_summary(
     ])
     online = len(online_rows)
     activated = len(activated_rows)
-    ssv_passed_cnt = int(db.query(func.count(Site.id)).filter(Site.ssv_passed == True).scalar() or 0)
+    ssv_passed_cnt = len(ssv_rows)
 
     site_progress: Dict[str, int] = {
         "total": total_sites,
@@ -292,11 +292,13 @@ async def get_site_progress_trend(
     仪表盘站点阶段趋势。
 
     事件口径（按站点“首次发生时间”统计）：
-    - install_started: 设备绑定历史首次 bind/rebind
-    - install_completed: 开站工单首次 submitted_at
-    - online: 站点首次进入 online_pending_activation（无审计时回退到开站工单首次 activated_at）
-    - activated: 站点首次进入 operational/maintenance（无审计时回退到开站工单首次 completed_at）
-    - ssv: SSV 工单首次 completed_at
+    - install_started: 有效开站工单关联下的设备首次 bind/rebind
+    - install_completed: 有效开站工单首次 submitted_at
+    - online: 有效开站工单首次 activated_at
+    - activated: 有效开站工单首次 completed_at
+    - ssv: 有效 SSV 工单首次 completed_at
+
+    统计直接读取站点生命周期快照；当快照不存在时会自动补建。
 
     返回每周期新增（incremental）以及区间前基线（baseline），前端可切换“新增/累计”。
     """
@@ -319,11 +321,14 @@ async def get_site_progress_trend(
     bucket_starts, range_end = _build_bucket_starts(now_local, g, safe_periods)
     range_start = bucket_starts[0]
 
-    install_started_rows = get_install_started_rows(db)
-    install_completed_rows = get_install_completed_rows(db)
-    online_rows = get_online_rows(db)
-    activated_rows = get_activated_rows(db)
-    ssv_rows = get_ssv_rows(db)
+    ensure_result = ensure_site_progress_snapshots(db, reason="dashboard_trend_read")
+    if ensure_result["rebuilt_site_ids"]:
+        db.commit()
+    install_started_rows = get_site_progress_rows(db, "install_started")
+    install_completed_rows = get_site_progress_rows(db, "install_completed")
+    online_rows = get_site_progress_rows(db, "online")
+    activated_rows = get_site_progress_rows(db, "activated")
+    ssv_rows = get_site_progress_rows(db, "ssv")
 
     install_started_counts, install_started_baseline = _count_events_by_bucket(
         install_started_rows,
