@@ -6,7 +6,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.equipment_binding_history import EquipmentBindingHistory
+from app.models.inspection import SiteInspection
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.services.omc_state import upsert_omc_device_state
+from app.services.site_progress_service import rebuild_site_progress_for_sites
 
 
 router = APIRouter()
@@ -38,7 +42,8 @@ async def omc_status_callback(
 
     说明:
     - 当前不做鉴权和签名校验，后续接入真实 OMC 时再补充。
-    - 仅将 online/active 写入 OmcDeviceState，不影响现有业务流程。
+    - 仅将 online/active 写入 OmcDeviceState，并刷新站点生命周期快照；
+      不直接推进工单或站点业务状态。
     """
     sn = (payload.sn or "").strip()
     if not sn:
@@ -56,5 +61,27 @@ async def omc_status_callback(
         source="omc_push",
         status_payload=payload.dict(),
     )
-    db.commit()
 
+    affected_site_ids = [
+        int(site_id)
+        for site_id, in (
+            db.query(EquipmentBindingHistory.site_id)
+            .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
+            .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
+            .filter(
+                EquipmentBindingHistory.equipment_sn == sn,
+                WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+                WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+            )
+            .distinct()
+            .all()
+        )
+    ]
+    if affected_site_ids:
+        rebuild_site_progress_for_sites(
+            db,
+            affected_site_ids,
+            reason="omc_status_callback",
+            force=True,
+        )
+    db.commit()

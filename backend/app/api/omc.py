@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -28,6 +28,11 @@ from app.services.work_order_rule_service import (
   get_ssv_create_by_ever_activated_only,
   upsert_work_order_rules,
 )
+from app.services.site_progress_metric_service import (
+  SITE_PROGRESS_METRIC_MODE_WORKFLOW,
+  get_site_progress_metric_mode,
+  upsert_site_progress_settings,
+)
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -40,6 +45,7 @@ class OmcConfigPayload(BaseModel):
   timeout_seconds: Optional[int] = 10
   manual_confirm_enabled: Optional[bool] = False
   ssv_create_by_ever_activated_only: Optional[bool] = None
+  site_progress_metric_mode: Optional[Literal["workflow", "device_fact"]] = None
 
 
 class OmcConfigResponse(BaseModel):
@@ -48,6 +54,7 @@ class OmcConfigResponse(BaseModel):
   timeout_seconds: int = 10
   manual_confirm_enabled: bool = False
   ssv_create_by_ever_activated_only: bool = False
+  site_progress_metric_mode: str = SITE_PROGRESS_METRIC_MODE_WORKFLOW
 
 
 class OmcTestResponse(BaseModel):
@@ -98,9 +105,11 @@ def _ensure_admin(user: User) -> None:
 def _load_omc_config(db: Session) -> OmcConfigResponse:
   row = db.query(SystemConfig).filter(SystemConfig.key == "omc_api").first()
   ssv_create_by_ever_activated_only = get_ssv_create_by_ever_activated_only(db)
+  site_progress_metric_mode = get_site_progress_metric_mode(db)
   if not row or not row.value:
     return OmcConfigResponse(
       ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
+      site_progress_metric_mode=site_progress_metric_mode,
     )
   data = row.value or {}
   return OmcConfigResponse(
@@ -109,6 +118,7 @@ def _load_omc_config(db: Session) -> OmcConfigResponse:
     timeout_seconds=int(data.get("timeout_seconds") or 10),
     manual_confirm_enabled=bool(data.get("manual_confirm_enabled") or False),
     ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
+    site_progress_metric_mode=site_progress_metric_mode,
   )
 
 
@@ -149,6 +159,11 @@ async def update_omc_config(
     if payload.ssv_create_by_ever_activated_only is None
     else bool(payload.ssv_create_by_ever_activated_only)
   )
+  site_progress_metric_mode = (
+    get_site_progress_metric_mode(db)
+    if payload.site_progress_metric_mode is None
+    else str(payload.site_progress_metric_mode)
+  )
 
   row = db.query(SystemConfig).filter(SystemConfig.key == "omc_api").first()
   if not row:
@@ -178,6 +193,10 @@ async def update_omc_config(
     db,
     {"ssv_create_by_ever_activated_only": ssv_create_by_ever_activated_only},
   )
+  upsert_site_progress_settings(
+    db,
+    {"metric_mode": site_progress_metric_mode},
+  )
   db.commit()
 
   return OmcConfigResponse(
@@ -186,6 +205,7 @@ async def update_omc_config(
     timeout_seconds=timeout,
     manual_confirm_enabled=manual_confirm_enabled,
     ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
+    site_progress_metric_mode=site_progress_metric_mode,
   )
 
 

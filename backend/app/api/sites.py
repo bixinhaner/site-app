@@ -46,10 +46,12 @@ from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_s
 from app.services.authz_service import user_has_any_role_or_permission
 from app.services.site_progress_service import (
     ensure_site_progress_snapshots,
+    get_site_progress_milestone_at,
     get_site_progress_snapshot,
     rebuild_site_progress,
     rebuild_site_progress_for_sites,
 )
+from app.services.site_progress_metric_service import get_site_progress_metric_mode
 from app.utils.timezone import to_utc_iso
 from app.services.omc_monitor import (
     advance_opening_work_orders_by_ever,
@@ -1408,13 +1410,19 @@ async def get_site_milestones(
     snapshot = get_site_progress_snapshot(db, site_id)
     if snapshot is None:
         raise HTTPException(status_code=500, detail="Site progress snapshot not found")
+    metric_mode = get_site_progress_metric_mode(db)
+    install_started_at = get_site_progress_milestone_at(snapshot, "install_started")
+    install_completed_at = get_site_progress_milestone_at(snapshot, "install_completed")
+    online_at = get_site_progress_milestone_at(snapshot, "online", metric_mode=metric_mode)
+    activated_at = get_site_progress_milestone_at(snapshot, "activated", metric_mode=metric_mode)
+    ssv_at = get_site_progress_milestone_at(snapshot, "ssv")
 
     return SiteMilestonesResponse(
-        install_started_at=to_utc_iso(snapshot.install_started_at) if snapshot.install_started_at else None,
-        install_completed_at=to_utc_iso(snapshot.install_completed_at) if snapshot.install_completed_at else None,
-        online_at=to_utc_iso(snapshot.online_at) if snapshot.online_at else None,
-        activated_at=to_utc_iso(snapshot.activated_at) if snapshot.activated_at else None,
-        ssv_at=to_utc_iso(snapshot.ssv_at) if snapshot.ssv_at else None,
+        install_started_at=to_utc_iso(install_started_at) if install_started_at else None,
+        install_completed_at=to_utc_iso(install_completed_at) if install_completed_at else None,
+        online_at=to_utc_iso(online_at) if online_at else None,
+        activated_at=to_utc_iso(activated_at) if activated_at else None,
+        ssv_at=to_utc_iso(ssv_at) if ssv_at else None,
     )
 
 

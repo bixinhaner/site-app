@@ -17,6 +17,7 @@ from app.utils.planning_schema import ensure_planning_schema
 from app.utils.app_version_schema import ensure_app_version_schema
 from app.utils.inspection_schema import ensure_inspection_schema
 from app.utils.work_order_schema import ensure_work_order_schema
+from app.utils.site_progress_schema import ensure_site_progress_schema
 # Ensure new models are imported before creating tables
 from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
@@ -70,6 +71,8 @@ ensure_app_version_schema(engine)
 ensure_inspection_schema(engine)
 # 轻量迁移：为 work_orders 旧表补列（SQLite 友好）
 ensure_work_order_schema(engine)
+# 轻量迁移：为站点生命周期快照旧表补列（SQLite 友好）
+ensure_site_progress_schema(engine)
 
 app = FastAPI(
     title="站点信息管理系统 API",

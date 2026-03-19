@@ -2,20 +2,37 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.models.equipment_binding_history import BindingActionEnum, EquipmentBindingHistory
 from app.models.inspection import SiteInspection
+from app.models.omc_state import OmcDeviceState
 from app.models.site import Site
 from app.models.site_progress import SiteProgressEvent, SiteProgressSnapshot
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
+from app.services.site_progress_metric_service import (
+    SITE_PROGRESS_METRIC_MODE_DEVICE_FACT,
+    SITE_PROGRESS_METRIC_MODE_WORKFLOW,
+    normalize_site_progress_metric_mode,
+)
 
+
+CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION = 2
 
 MILESTONE_FIELD_MAP = {
     "install_started": "install_started_at",
     "install_completed": "install_completed_at",
     "online": "online_at",
     "activated": "activated_at",
+    "ssv": "ssv_at",
+}
+
+DEVICE_FACT_MILESTONE_FIELD_MAP = {
+    "install_started": "install_started_at",
+    "install_completed": "install_completed_at",
+    "online": "online_at_device_fact",
+    "activated": "activated_at_device_fact",
     "ssv": "ssv_at",
 }
 
@@ -100,6 +117,127 @@ def _get_first_work_order_fact(
     )
 
 
+def _get_effective_opening_binding_rows(db: Session, site_id: int) -> List[EquipmentBindingHistory]:
+    latest_at_subq = (
+        db.query(
+            EquipmentBindingHistory.sector_id.label("sector_id"),
+            EquipmentBindingHistory.band.label("band"),
+            EquipmentBindingHistory.cell_id.label("cell_id"),
+            func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
+        )
+        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
+        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
+        .filter(
+            EquipmentBindingHistory.site_id == site_id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+        )
+        .group_by(
+            EquipmentBindingHistory.sector_id,
+            EquipmentBindingHistory.band,
+            EquipmentBindingHistory.cell_id,
+        )
+        .subquery()
+    )
+
+    latest_id_subq = (
+        db.query(
+            EquipmentBindingHistory.sector_id.label("sector_id"),
+            EquipmentBindingHistory.band.label("band"),
+            EquipmentBindingHistory.cell_id.label("cell_id"),
+            func.max(EquipmentBindingHistory.id).label("latest_id"),
+        )
+        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
+        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
+        .join(
+            latest_at_subq,
+            and_(
+                EquipmentBindingHistory.sector_id == latest_at_subq.c.sector_id,
+                EquipmentBindingHistory.band == latest_at_subq.c.band,
+                EquipmentBindingHistory.cell_id == latest_at_subq.c.cell_id,
+                EquipmentBindingHistory.operated_at == latest_at_subq.c.latest_at,
+            ),
+        )
+        .filter(
+            EquipmentBindingHistory.site_id == site_id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+        )
+        .group_by(
+            EquipmentBindingHistory.sector_id,
+            EquipmentBindingHistory.band,
+            EquipmentBindingHistory.cell_id,
+        )
+        .subquery()
+    )
+
+    rows = (
+        db.query(EquipmentBindingHistory)
+        .join(latest_id_subq, EquipmentBindingHistory.id == latest_id_subq.c.latest_id)
+        .order_by(
+            EquipmentBindingHistory.sector_id.asc(),
+            EquipmentBindingHistory.band.asc(),
+            EquipmentBindingHistory.cell_id.asc(),
+            EquipmentBindingHistory.id.asc(),
+        )
+        .all()
+    )
+
+    return [
+        row for row in rows
+        if row.action != BindingActionEnum.UNBIND and str(row.equipment_sn or "").strip()
+    ]
+
+
+def _get_device_fact_milestone_fact(
+    db: Session,
+    *,
+    site_id: int,
+    datetime_field: str,
+    milestone_code: str,
+) -> MilestoneFact:
+    binding_rows = _get_effective_opening_binding_rows(db, site_id)
+    if not binding_rows:
+        return MilestoneFact()
+
+    sns = list({
+        str(row.equipment_sn).strip()
+        for row in binding_rows
+        if str(row.equipment_sn or "").strip()
+    })
+    if not sns:
+        return MilestoneFact()
+
+    state_rows = (
+        db.query(OmcDeviceState)
+        .filter(OmcDeviceState.sn.in_(sns))
+        .all()
+    )
+    state_map = {str(state.sn or "").strip(): state for state in state_rows}
+
+    effective_times: List[datetime] = []
+    for row in binding_rows:
+        sn = str(row.equipment_sn or "").strip()
+        if not sn:
+            return MilestoneFact()
+        state = state_map.get(sn)
+        if state is None:
+            return MilestoneFact()
+        effective_at = getattr(state, datetime_field, None)
+        if effective_at is None:
+            return MilestoneFact()
+        effective_times.append(effective_at)
+
+    if not effective_times:
+        return MilestoneFact()
+
+    return MilestoneFact(
+        effective_at=max(effective_times),
+        source_type="omc_device_state",
+        source_id=f"site:{site_id}:{milestone_code}",
+    )
+
+
 def calculate_site_progress_facts(db: Session, site_id: int) -> Dict[str, MilestoneFact]:
     return {
         "install_started": _get_first_binding_fact(db, site_id),
@@ -130,6 +268,23 @@ def calculate_site_progress_facts(db: Session, site_id: int) -> Dict[str, Milest
     }
 
 
+def calculate_site_progress_device_fact_facts(db: Session, site_id: int) -> Dict[str, MilestoneFact]:
+    return {
+        "online": _get_device_fact_milestone_fact(
+            db,
+            site_id=site_id,
+            datetime_field="first_online_at",
+            milestone_code="online_device_fact",
+        ),
+        "activated": _get_device_fact_milestone_fact(
+            db,
+            site_id=site_id,
+            datetime_field="first_activated_at",
+            milestone_code="activated_device_fact",
+        ),
+    }
+
+
 def _derive_current_opening_stage(site: Site, facts: Dict[str, MilestoneFact]) -> str:
     if facts["ssv"].effective_at or getattr(site, "ssv_passed", False):
         return "ssv"
@@ -144,14 +299,21 @@ def _derive_current_opening_stage(site: Site, facts: Dict[str, MilestoneFact]) -
     return str(getattr(site, "status", None) or "survey_pending")
 
 
-def _build_snapshot_values(site: Site, facts: Dict[str, MilestoneFact]) -> Dict[str, Optional[datetime] | str]:
+def _build_snapshot_values(
+    site: Site,
+    workflow_facts: Dict[str, MilestoneFact],
+    device_fact_facts: Dict[str, MilestoneFact],
+) -> Dict[str, Optional[datetime] | str | int]:
     return {
-        "install_started_at": facts["install_started"].effective_at,
-        "install_completed_at": facts["install_completed"].effective_at,
-        "online_at": facts["online"].effective_at,
-        "activated_at": facts["activated"].effective_at,
-        "ssv_at": facts["ssv"].effective_at,
-        "current_opening_stage": _derive_current_opening_stage(site, facts),
+        "install_started_at": workflow_facts["install_started"].effective_at,
+        "install_completed_at": workflow_facts["install_completed"].effective_at,
+        "online_at": workflow_facts["online"].effective_at,
+        "activated_at": workflow_facts["activated"].effective_at,
+        "online_at_device_fact": device_fact_facts["online"].effective_at,
+        "activated_at_device_fact": device_fact_facts["activated"].effective_at,
+        "ssv_at": workflow_facts["ssv"].effective_at,
+        "current_opening_stage": _derive_current_opening_stage(site, workflow_facts),
+        "snapshot_version": CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION,
     }
 
 
@@ -210,7 +372,8 @@ def rebuild_site_progress(
         return None
 
     facts = calculate_site_progress_facts(db, site_id)
-    snapshot_values = _build_snapshot_values(site, facts)
+    device_fact_facts = calculate_site_progress_device_fact_facts(db, site_id)
+    snapshot_values = _build_snapshot_values(site, facts, device_fact_facts)
     snapshot = db.query(SiteProgressSnapshot).filter(SiteProgressSnapshot.site_id == site_id).first()
     if snapshot is None:
         snapshot = SiteProgressSnapshot(site_id=site_id)
@@ -234,6 +397,9 @@ def rebuild_site_progress(
         )
         setattr(snapshot, field_name, new_value)
 
+    snapshot.online_at_device_fact = snapshot_values["online_at_device_fact"]
+    snapshot.activated_at_device_fact = snapshot_values["activated_at_device_fact"]
+
     old_stage = getattr(snapshot, "current_opening_stage", None)
     new_stage = str(snapshot_values["current_opening_stage"] or "survey_pending")
     if old_stage != new_stage:
@@ -248,6 +414,7 @@ def rebuild_site_progress(
             )
         )
     snapshot.current_opening_stage = new_stage
+    snapshot.snapshot_version = int(snapshot_values["snapshot_version"] or CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION)
     snapshot.last_rebuilt_at = datetime.utcnow()
     snapshot.last_rebuild_reason = (reason or "").strip() or None
 
@@ -275,13 +442,20 @@ def rebuild_site_progress_for_sites(
     if force:
         target_site_ids = requested_site_ids
     else:
-        existing_site_ids = {
-            site_id
-            for site_id, in db.query(SiteProgressSnapshot.site_id)
+        existing_snapshot_versions = {
+            int(site_id): int(snapshot_version or 0)
+            for site_id, snapshot_version in db.query(
+                SiteProgressSnapshot.site_id,
+                SiteProgressSnapshot.snapshot_version,
+            )
             .filter(SiteProgressSnapshot.site_id.in_(requested_site_ids))
             .all()
         }
-        target_site_ids = [site_id for site_id in requested_site_ids if site_id not in existing_site_ids]
+        target_site_ids = [
+            site_id
+            for site_id in requested_site_ids
+            if int(existing_snapshot_versions.get(site_id, 0)) < CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION
+        ]
 
     rebuilt_site_ids: List[int] = []
     for site_id in target_site_ids:
@@ -326,8 +500,10 @@ def get_site_progress_snapshot(db: Session, site_id: int) -> Optional[SiteProgre
 def get_site_progress_rows(
     db: Session,
     milestone_code: str,
+    *,
+    metric_mode: str = SITE_PROGRESS_METRIC_MODE_WORKFLOW,
 ) -> List[Tuple[int, datetime]]:
-    field_name = MILESTONE_FIELD_MAP[milestone_code]
+    field_name = resolve_site_progress_field_name(milestone_code, metric_mode=metric_mode)
     event_column = getattr(SiteProgressSnapshot, field_name)
     return [
         (site_id, event_at)
@@ -335,3 +511,26 @@ def get_site_progress_rows(
         .filter(event_column.isnot(None))
         .all()
     ]
+
+
+def resolve_site_progress_field_name(
+    milestone_code: str,
+    *,
+    metric_mode: str = SITE_PROGRESS_METRIC_MODE_WORKFLOW,
+) -> str:
+    normalized_mode = normalize_site_progress_metric_mode(metric_mode)
+    if normalized_mode == SITE_PROGRESS_METRIC_MODE_DEVICE_FACT:
+        return DEVICE_FACT_MILESTONE_FIELD_MAP[milestone_code]
+    return MILESTONE_FIELD_MAP[milestone_code]
+
+
+def get_site_progress_milestone_at(
+    snapshot: SiteProgressSnapshot,
+    milestone_code: str,
+    *,
+    metric_mode: str = SITE_PROGRESS_METRIC_MODE_WORKFLOW,
+) -> Optional[datetime]:
+    if snapshot is None:
+        return None
+    field_name = resolve_site_progress_field_name(milestone_code, metric_mode=metric_mode)
+    return getattr(snapshot, field_name, None)

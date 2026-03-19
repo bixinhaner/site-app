@@ -19,6 +19,7 @@ from app.services.site_progress_service import (
     get_site_progress_rows,
 )
 from app.services.authz_service import user_has_any_role_or_permission
+from app.services.site_progress_metric_service import get_site_progress_metric_mode
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -206,10 +207,11 @@ async def get_dashboard_summary(
     ensure_result = ensure_site_progress_snapshots(db, reason="dashboard_summary_read")
     if ensure_result["rebuilt_site_ids"]:
         db.commit()
+    metric_mode = get_site_progress_metric_mode(db)
     install_started_rows = get_site_progress_rows(db, "install_started")
     install_completed_rows = get_site_progress_rows(db, "install_completed")
-    online_rows = get_site_progress_rows(db, "online")
-    activated_rows = get_site_progress_rows(db, "activated")
+    online_rows = get_site_progress_rows(db, "online", metric_mode=metric_mode)
+    activated_rows = get_site_progress_rows(db, "activated", metric_mode=metric_mode)
     ssv_rows = get_site_progress_rows(db, "ssv")
 
     install_started_site_count = len(install_started_rows)
@@ -244,7 +246,7 @@ async def get_dashboard_summary(
     activated = len(activated_rows)
     ssv_passed_cnt = len(ssv_rows)
 
-    site_progress: Dict[str, int] = {
+    site_progress: Dict[str, int | str] = {
         "total": total_sites,
         "survey_done": survey_done,
         "planning_done": planning_done,
@@ -253,6 +255,7 @@ async def get_dashboard_summary(
         "online": online,
         "activated": activated,
         "ssv_passed": ssv_passed_cnt,
+        "metric_mode": metric_mode,
     }
 
     return {
@@ -294,8 +297,8 @@ async def get_site_progress_trend(
     事件口径（按站点“首次发生时间”统计）：
     - install_started: 有效开站工单关联下的设备首次 bind/rebind
     - install_completed: 有效开站工单首次 submitted_at
-    - online: 有效开站工单首次 activated_at
-    - activated: 有效开站工单首次 completed_at
+    - online: 根据全局口径开关读取“流程口径 activated_at”或“设备事实口径 first_online_at(max)”
+    - activated: 根据全局口径开关读取“流程口径 completed_at”或“设备事实口径 first_activated_at(max)”
     - ssv: 有效 SSV 工单首次 completed_at
 
     统计直接读取站点生命周期快照；当快照不存在时会自动补建。
@@ -324,10 +327,11 @@ async def get_site_progress_trend(
     ensure_result = ensure_site_progress_snapshots(db, reason="dashboard_trend_read")
     if ensure_result["rebuilt_site_ids"]:
         db.commit()
+    metric_mode = get_site_progress_metric_mode(db)
     install_started_rows = get_site_progress_rows(db, "install_started")
     install_completed_rows = get_site_progress_rows(db, "install_completed")
-    online_rows = get_site_progress_rows(db, "online")
-    activated_rows = get_site_progress_rows(db, "activated")
+    online_rows = get_site_progress_rows(db, "online", metric_mode=metric_mode)
+    activated_rows = get_site_progress_rows(db, "activated", metric_mode=metric_mode)
     ssv_rows = get_site_progress_rows(db, "ssv")
 
     install_started_counts, install_started_baseline = _count_events_by_bucket(
@@ -383,6 +387,7 @@ async def get_site_progress_trend(
     return {
         "granularity": g,
         "periods": safe_periods,
+        "metric_mode": metric_mode,
         "tz_offset_minutes": tz_offset_minutes,
         "range": {
             "from": to_utc_iso(_local_naive_to_utc(range_start, tz_offset_minutes)),

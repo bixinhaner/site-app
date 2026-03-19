@@ -83,6 +83,27 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-card v-loading="loading" class="mt16">
+      <template #header>站点进度统计口径</template>
+      <el-form :model="form" label-width="180px" :disabled="!canManageOmc">
+        <el-form-item label="全局统计口径">
+          <el-radio-group v-model="form.site_progress_metric_mode">
+            <el-radio label="workflow">流程口径</el-radio>
+            <el-radio label="device_fact">设备事实口径</el-radio>
+          </el-radio-group>
+          <div class="tip">
+            流程口径：上线=开站工单 <code>activated_at</code>，激活=开站工单 <code>completed_at</code>。
+          </div>
+          <div class="tip">
+            设备事实口径：上线/激活不依赖工单状态，按开站阶段有效设备集合全部达到 <code>ever_online / ever_activated</code> 的时间计算。
+          </div>
+          <div class="tip">
+            此开关会统一影响仪表盘站点概况、站点事件趋势，以及站点详情关键节点时间中的“上线 / 激活”。
+          </div>
+        </el-form-item>
+      </el-form>
+    </el-card>
   </div>
 </template>
 
@@ -104,6 +125,7 @@ const form = ref({
   timeout_seconds: 10,
   manual_confirm_enabled: false,
   ssv_create_by_ever_activated_only: false,
+  site_progress_metric_mode: 'workflow',
 })
 
 const canManageOmc = computed(() => userStore.hasPermission('system:mobile-settings:write'))
@@ -118,6 +140,7 @@ const loadConfig = async () => {
     form.value.timeout_seconds = res.timeout_seconds || 10
     form.value.manual_confirm_enabled = !!res.manual_confirm_enabled
     form.value.ssv_create_by_ever_activated_only = !!res.ssv_create_by_ever_activated_only
+    form.value.site_progress_metric_mode = res.site_progress_metric_mode || 'workflow'
   } catch (e) {
     console.error(e)
     ElMessage.error(e?.response?.data?.detail || '加载 OMC 配置失败')
@@ -140,6 +163,7 @@ const save = async () => {
       timeout_seconds: form.value.timeout_seconds || 10,
       manual_confirm_enabled: !!form.value.manual_confirm_enabled,
       ssv_create_by_ever_activated_only: !!form.value.ssv_create_by_ever_activated_only,
+      site_progress_metric_mode: form.value.site_progress_metric_mode || 'workflow',
     }
     await request.put('/api/omc/config', payload)
     ElMessage.success('保存成功')
