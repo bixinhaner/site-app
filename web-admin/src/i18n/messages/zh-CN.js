@@ -349,6 +349,7 @@ export default {
       activeCurrent: '当前已激活',
       activeInactive: '当前未激活',
       pendingCheck: '待检测',
+      unbound: '未绑定',
       everOnline: '曾上线',
       neverOnline: '未曾上线',
       everActive: '曾激活',

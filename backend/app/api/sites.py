@@ -42,7 +42,7 @@ from app.services.omc_client import (
     parse_activated_flag,
     is_success_status_payload,
 )
-from app.services.omc_state import summarize_site_omc_state, upsert_omc_device_state
+from app.services.omc_state import summarize_site_binding_slots, summarize_site_omc_state, upsert_omc_device_state
 from app.services.authz_service import user_has_any_role_or_permission
 from app.services.site_progress_service import (
     ensure_site_progress_snapshots,
@@ -1770,11 +1770,22 @@ class SiteOmcEverDevice(BaseModel):
     last_seen_at: Optional[str] = None
 
 
+class SiteOmcSlotInfo(BaseModel):
+    sector_id: str
+    band: str
+    cell_id: str
+
+
 class SiteOmcEverSummary(BaseModel):
     site_id: int
     sns: List[str]
     all_ever_online: bool
     all_ever_activated: bool
+    slot_check_required: bool = False
+    expected_slot_count: int = 0
+    bound_slot_count: int = 0
+    all_slots_bound: bool = True
+    missing_slots: List[SiteOmcSlotInfo] = []
     devices: List[SiteOmcEverDevice]
 
 
@@ -1807,6 +1818,7 @@ async def get_site_stats_summary(
 async def get_site_omc_devices(
     site_id: int,
     refresh: bool = Query(False, description="是否立即刷新 OMC 状态"),
+    include_expected_slots: bool = Query(False, description="是否按规划槽位返回完整列表，未绑定槽位也返回占位行"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1823,66 +1835,100 @@ async def get_site_omc_devices(
 
     _ensure_site_visible(site_id, db, current_user)
 
-    # 1. 基于绑定历史推导当前 SN 及扇区信息
-    # 取每个 SN 最新一条记录，且 action != UNBIND
-    latest_at_subq = (
-        db.query(
-            EquipmentBindingHistory.equipment_sn.label("sn"),
-            func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
-        )
-        .filter(EquipmentBindingHistory.site_id == site_id)
-        .group_by(EquipmentBindingHistory.equipment_sn)
-        .subquery()
-    )
-
-    latest_id_subq = (
-        db.query(
-            EquipmentBindingHistory.equipment_sn.label("sn"),
-            func.max(EquipmentBindingHistory.id).label("latest_id"),
-        )
-        .join(
-            latest_at_subq,
-            and_(
-                EquipmentBindingHistory.equipment_sn == latest_at_subq.c.sn,
-                EquipmentBindingHistory.operated_at == latest_at_subq.c.latest_at,
-            ),
-        )
-        .filter(EquipmentBindingHistory.site_id == site_id)
-        .group_by(EquipmentBindingHistory.equipment_sn)
-        .subquery()
-    )
-
-    latest_rows: list[EquipmentBindingHistory] = (
-        db.query(EquipmentBindingHistory)
-        .options(joinedload(EquipmentBindingHistory.operator))
-        .join(latest_id_subq, EquipmentBindingHistory.id == latest_id_subq.c.latest_id)
-        .all()
-    )
+    binding_slot_summary = summarize_site_binding_slots(db, site_id)
 
     devices = []
-    for row in latest_rows:
-        if row.action == BindingActionEnum.UNBIND or not row.equipment_sn:
-            continue
-        installer = row.operator
-        installer_name = None
-        if installer:
-            installer_name = installer.full_name or installer.username
-        devices.append(
-            {
-                "sn": row.equipment_sn,
-                "equipment_type": row.equipment_type,
-                "equipment_model": row.equipment_model,
-                "sector_id": row.sector_id,
-                "band": row.band,
-                "cell_id": row.cell_id,
-                "installer_id": row.operator_id,
-                "installer_name": installer_name,
-                # operated_at 使用数据库时间，视为 UTC
-                "bound_at": to_utc_iso(row.operated_at) if row.operated_at else None,
-                "online": None,
-                "activated": None,
-            }
+    if include_expected_slots and bool(binding_slot_summary.get("slot_check_required")):
+        bound_rows = list(binding_slot_summary.get("all_rows") or [])
+        bound_row_map = {
+            (str(row.sector_id or "").strip(), str(row.band or "").strip()): row
+            for row in bound_rows
+        }
+        for slot in binding_slot_summary.get("expected_slots") or []:
+            sector_id = str(slot.get("sector_id") or "").strip()
+            band = str(slot.get("band") or "").strip()
+            row = bound_row_map.get((sector_id, band))
+            installer = getattr(row, "operator", None) if row else None
+            installer_name = (installer.full_name or installer.username) if installer else None
+            devices.append(
+                {
+                    "slot_bound": bool(row),
+                    "sn": getattr(row, "equipment_sn", None) if row else None,
+                    "equipment_type": getattr(row, "equipment_type", None) if row else None,
+                    "equipment_model": getattr(row, "equipment_model", None) if row else None,
+                    "sector_id": sector_id or None,
+                    "band": band or None,
+                    "cell_id": str(slot.get("cell_id") or f"{sector_id}_{band}") if (sector_id and band) else None,
+                    "installer_id": getattr(row, "operator_id", None) if row else None,
+                    "installer_name": installer_name,
+                    "bound_at": to_utc_iso(row.operated_at) if row and row.operated_at else None,
+                    "online": None,
+                    "activated": None,
+                }
+            )
+    else:
+        # 1. 基于绑定历史推导当前 SN 及扇区信息
+        # 取每个 SN 最新一条记录，且 action != UNBIND
+        latest_at_subq = (
+            db.query(
+                EquipmentBindingHistory.equipment_sn.label("sn"),
+                func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
+            )
+            .filter(EquipmentBindingHistory.site_id == site_id)
+            .group_by(EquipmentBindingHistory.equipment_sn)
+            .subquery()
         )
+
+        latest_id_subq = (
+            db.query(
+                EquipmentBindingHistory.equipment_sn.label("sn"),
+                func.max(EquipmentBindingHistory.id).label("latest_id"),
+            )
+            .join(
+                latest_at_subq,
+                and_(
+                    EquipmentBindingHistory.equipment_sn == latest_at_subq.c.sn,
+                    EquipmentBindingHistory.operated_at == latest_at_subq.c.latest_at,
+                ),
+            )
+            .filter(EquipmentBindingHistory.site_id == site_id)
+            .group_by(EquipmentBindingHistory.equipment_sn)
+            .subquery()
+        )
+
+        latest_rows: list[EquipmentBindingHistory] = (
+            db.query(EquipmentBindingHistory)
+            .options(joinedload(EquipmentBindingHistory.operator))
+            .join(latest_id_subq, EquipmentBindingHistory.id == latest_id_subq.c.latest_id)
+            .all()
+        )
+
+        for row in latest_rows:
+            if row.action == BindingActionEnum.UNBIND or not row.equipment_sn:
+                continue
+            installer = row.operator
+            installer_name = None
+            if installer:
+                installer_name = installer.full_name or installer.username
+            devices.append(
+                {
+                    "slot_bound": True,
+                    "sn": row.equipment_sn,
+                    "equipment_type": row.equipment_type,
+                    "equipment_model": row.equipment_model,
+                    "sector_id": row.sector_id,
+                    "band": row.band,
+                    "cell_id": row.cell_id,
+                    "installer_id": row.operator_id,
+                    "installer_name": installer_name,
+                    # operated_at 使用数据库时间，视为 UTC
+                    "bound_at": to_utc_iso(row.operated_at) if row.operated_at else None,
+                    "online": None,
+                    "activated": None,
+                }
+            )
+
+    summary = summarize_site_omc_state(db, site_id)
 
     if not devices:
         return {
@@ -1890,17 +1936,14 @@ async def get_site_omc_devices(
             "checked_at": None,
             "devices": [],
             "manual_confirm_enabled": get_omc_manual_confirm_enabled(db),
+            "slot_check_required": bool(summary.get("slot_check_required")),
+            "expected_slot_count": int(summary.get("expected_slot_count") or 0),
+            "bound_slot_count": int(summary.get("bound_slot_count") or 0),
+            "all_slots_bound": bool(summary.get("all_slots_bound")),
+            "missing_slots": list(summary.get("missing_slots") or []),
         }
 
-    sns = [d["sn"] for d in devices]
-
-    # 2. 聚合 ever 状态（曾上线 / 曾激活）
-    summary = summarize_site_omc_state(db, site_id)
-    ever_map: dict[str, dict] = {}
-    for dev in summary.get("devices", []):
-        sn_key = dev.get("sn")
-        if sn_key:
-            ever_map[sn_key] = dev
+    sns = [d["sn"] for d in devices if d.get("sn")]
 
     checked_at = None
     online_map: dict[str, bool] = {}
@@ -1966,6 +2009,14 @@ async def get_site_omc_devices(
             db.rollback()
             print(f"[OMC] 手动刷新后推进工单/站点失败 site_id={site_id}: {exc}")
 
+    # 2. 聚合 ever 状态（曾上线 / 曾激活）
+    summary = summarize_site_omc_state(db, site_id)
+    ever_map: dict[str, dict] = {}
+    for dev in summary.get("devices", []):
+        sn_key = dev.get("sn")
+        if sn_key:
+            ever_map[sn_key] = dev
+
     # 将状态填充到设备列表：实时在线/激活 + ever 在线/激活
     for d in devices:
         sn = d["sn"]
@@ -1983,6 +2034,11 @@ async def get_site_omc_devices(
         "checked_at": checked_at,
         "devices": devices,
         "manual_confirm_enabled": get_omc_manual_confirm_enabled(db),
+        "slot_check_required": bool(summary.get("slot_check_required")),
+        "expected_slot_count": int(summary.get("expected_slot_count") or 0),
+        "bound_slot_count": int(summary.get("bound_slot_count") or 0),
+        "all_slots_bound": bool(summary.get("all_slots_bound")),
+        "missing_slots": list(summary.get("missing_slots") or []),
     }
 
 
@@ -2018,5 +2074,10 @@ async def get_site_omc_devices_ever(
         sns=summary["sns"],
         all_ever_online=summary["all_ever_online"],
         all_ever_activated=summary["all_ever_activated"],
+        slot_check_required=bool(summary.get("slot_check_required")),
+        expected_slot_count=int(summary.get("expected_slot_count") or 0),
+        bound_slot_count=int(summary.get("bound_slot_count") or 0),
+        all_slots_bound=bool(summary.get("all_slots_bound")),
+        missing_slots=[SiteOmcSlotInfo(**slot) for slot in (summary.get("missing_slots") or [])],
         devices=devices,
     )

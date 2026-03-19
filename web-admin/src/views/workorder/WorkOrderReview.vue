@@ -172,9 +172,21 @@
           </template>
           <el-empty v-if="!devices.length && !deviceStatusLoading" description="暂无绑定设备记录" />
           <el-table v-else :data="devices" size="small" stripe>
-            <el-table-column prop="sn" label="设备 SN" min-width="180" />
-            <el-table-column prop="equipment_type" label="设备类型" width="120" />
-            <el-table-column prop="equipment_model" label="设备型号" min-width="160" />
+            <el-table-column label="设备 SN" min-width="180">
+              <template #default="{ row }">
+                {{ row.sn || '未绑定' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="设备类型" width="120">
+              <template #default="{ row }">
+                {{ row.equipment_type || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="设备型号" min-width="160">
+              <template #default="{ row }">
+                {{ row.equipment_model || '-' }}
+              </template>
+            </el-table-column>
             <el-table-column label="扇区信息" min-width="160">
               <template #default="{ row }">
                 扇区 {{ row.sector_id || '-' }} / Band {{ row.band || '-' }} / Cell {{ row.cell_id || '-' }}
@@ -182,7 +194,7 @@
             </el-table-column>
             <el-table-column label="在线状态" width="200">
               <template #default="{ row }">
-                <div class="status-cell">
+                <div v-if="isBoundDeviceRow(row)" class="status-cell">
                   <el-tag :type="onlineRealtimeTagType(row.online)" size="small" class="mr4">
                     {{ onlineRealtimeText(row.online) }}
                   </el-tag>
@@ -190,11 +202,12 @@
                     {{ everOnlineText(row.ever_online) }}
                   </el-tag>
                 </div>
+                <el-tag v-else type="info" size="small">未绑定</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="激活状态" width="220">
               <template #default="{ row }">
-                <div class="status-cell">
+                <div v-if="isBoundDeviceRow(row)" class="status-cell">
                   <el-tag :type="activeRealtimeTagType(row.activated)" size="small" class="mr4">
                     {{ activeRealtimeText(row.activated) }}
                   </el-tag>
@@ -202,6 +215,7 @@
                     {{ everActiveText(row.ever_activated) }}
                   </el-tag>
                 </div>
+                <el-tag v-else type="info" size="small">未绑定</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="安装人" width="140">
@@ -216,7 +230,7 @@
             </el-table-column>
             <el-table-column v-if="canShowManualConfirm" label="手工确认" width="220">
               <template #default="{ row }">
-                <el-space>
+                <el-space v-if="isBoundDeviceRow(row)">
                   <el-button
                     size="small"
                     type="success"
@@ -236,6 +250,7 @@
                     确认激活
                   </el-button>
                 </el-space>
+                <span v-else>-</span>
               </template>
             </el-table-column>
           </el-table>
@@ -2945,6 +2960,7 @@ const activeRealtimeTagType = (val) => {
 }
 const everActiveTagType = (val) => (val ? 'success' : 'info')
 const everActiveText = (val) => (val ? '曾激活' : '未曾激活')
+const isBoundDeviceRow = (row) => !!row?.sn && row?.slot_bound !== false
 
 const deviceRefreshCooldown = ref(0)
 let deviceCooldownTimer = null
@@ -3011,7 +3027,7 @@ const loadDeviceStatus = async (refresh = false) => {
   try {
     deviceStatusLoading.value = true
     const res = await request.get(`/api/sites/${order.value.site_id}/omc/devices`, {
-      params: { refresh: refresh ? 1 : 0 }
+      params: { refresh: refresh ? 1 : 0, include_expected_slots: 1 }
     })
     devices.value = Array.isArray(res.devices) ? res.devices : []
     deviceStatusCheckedAt.value = res.checked_at || null

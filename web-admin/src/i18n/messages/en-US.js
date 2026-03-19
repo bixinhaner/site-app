@@ -349,6 +349,7 @@ export default {
       activeCurrent: 'Currently Activated',
       activeInactive: 'Currently Not Activated',
       pendingCheck: 'Pending Check',
+      unbound: 'Unbound',
       everOnline: 'Ever Online',
       neverOnline: 'Never Online',
       everActive: 'Ever Activated',

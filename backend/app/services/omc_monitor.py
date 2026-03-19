@@ -24,7 +24,7 @@ from app.services.omc_client import (
   is_success_status_payload,
 )
 from app.services.omc_state import (
-  get_bound_sns_for_site,
+  summarize_site_binding_slots,
   upsert_omc_device_state,
   summarize_site_omc_state,
 )
@@ -131,7 +131,12 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
   if wo.type != WorkOrderTypeEnum.OPENING_INSPECTION:
     return {}
 
-  sns = get_bound_sns_for_site(db, wo.site_id)
+  binding_summary = summarize_site_binding_slots(db, wo.site_id)
+  sns = sorted({
+    str(row.equipment_sn).strip()
+    for row in (binding_summary.get("rows") or [])
+    if str(getattr(row, "equipment_sn", "") or "").strip()
+  })
   if not sns:
     summary = {
       "sns": [],
@@ -143,8 +148,9 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
     }
   else:
     online_map, activated_map = _check_site_devices_status(db, client, sns)
-    all_online = all(online_map.values()) if sns else False
-    all_activated = sns and activated_map and all(activated_map.values())
+    binding_ready = bool(binding_summary.get("ready_for_status"))
+    all_online = binding_ready and all(online_map.values()) if sns else False
+    all_activated = binding_ready and bool(activated_map) and all(activated_map.values()) if sns else False
 
     summary = {
       "sns": sns,
@@ -154,6 +160,12 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
       "all_activated": bool(all_activated),
       "checked_at": to_utc_iso(datetime.utcnow()),
     }
+
+  summary["slot_check_required"] = bool(binding_summary.get("slot_check_required"))
+  summary["expected_slot_count"] = int(binding_summary.get("expected_slot_count") or 0)
+  summary["bound_slot_count"] = int(binding_summary.get("bound_slot_count") or 0)
+  summary["all_slots_bound"] = bool(binding_summary.get("all_slots_bound"))
+  summary["missing_slots"] = list(binding_summary.get("missing_slots") or [])
 
   # 基于 SN 聚合表的 ever 状态进行站点/工单状态推进
   ever_summary = summarize_site_omc_state(db, wo.site_id)
@@ -229,7 +241,12 @@ def refresh_replacement_work_order_omc_status(db: Session, client: OmcClient, wo
   if wo.type != WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
     return {}
 
-  sns = get_bound_sns_for_site(db, wo.site_id)
+  binding_summary = summarize_site_binding_slots(db, wo.site_id)
+  sns = sorted({
+    str(row.equipment_sn).strip()
+    for row in (binding_summary.get("rows") or [])
+    if str(getattr(row, "equipment_sn", "") or "").strip()
+  })
   if not sns:
     summary = {
       "sns": [],
@@ -241,8 +258,9 @@ def refresh_replacement_work_order_omc_status(db: Session, client: OmcClient, wo
     }
   else:
     online_map, activated_map = _check_site_devices_status(db, client, sns)
-    all_online = all(online_map.values()) if sns else False
-    all_activated = sns and activated_map and all(activated_map.values())
+    binding_ready = bool(binding_summary.get("ready_for_status"))
+    all_online = binding_ready and all(online_map.values()) if sns else False
+    all_activated = binding_ready and bool(activated_map) and all(activated_map.values()) if sns else False
 
     summary = {
       "sns": sns,
@@ -252,6 +270,12 @@ def refresh_replacement_work_order_omc_status(db: Session, client: OmcClient, wo
       "all_activated": bool(all_activated),
       "checked_at": to_utc_iso(datetime.utcnow()),
     }
+
+  summary["slot_check_required"] = bool(binding_summary.get("slot_check_required"))
+  summary["expected_slot_count"] = int(binding_summary.get("expected_slot_count") or 0)
+  summary["bound_slot_count"] = int(binding_summary.get("bound_slot_count") or 0)
+  summary["all_slots_bound"] = bool(binding_summary.get("all_slots_bound"))
+  summary["missing_slots"] = list(binding_summary.get("missing_slots") or [])
 
   ever_summary = summarize_site_omc_state(db, wo.site_id)
   ever_all_online = bool(ever_summary.get("all_ever_online"))

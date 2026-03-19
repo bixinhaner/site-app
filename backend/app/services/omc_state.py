@@ -1,12 +1,46 @@
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 
+from app.models.inspection import SiteInspection
 from app.models.omc_state import OmcDeviceState
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
+from app.services.cell_generator import CellGenerator
 from app.utils.timezone import to_utc_iso
+
+
+DeviceSlot = Tuple[str, str]
+
+
+def _normalize_slot_value(value: Optional[str]) -> str:
+    return str(value or "").strip()
+
+
+def _normalize_device_slot(sector_id: Optional[str], band: Optional[str]) -> Optional[DeviceSlot]:
+    normalized_sector_id = _normalize_slot_value(sector_id)
+    normalized_band = _normalize_slot_value(band)
+    if not normalized_sector_id or not normalized_band:
+        return None
+    return normalized_sector_id, normalized_band
+
+
+def _slot_sort_key(slot: DeviceSlot) -> Tuple[int, int | str, str]:
+    sector_id, band = slot
+    if str(sector_id).isdigit():
+        return (0, int(sector_id), band)
+    return (1, str(sector_id), band)
+
+
+def _serialize_slot(slot: DeviceSlot) -> Dict[str, str]:
+    sector_id, band = slot
+    return {
+        "sector_id": sector_id,
+        "band": band,
+        "cell_id": f"{sector_id}_{band}",
+    }
 
 
 def upsert_omc_device_state(
@@ -77,56 +111,166 @@ def get_device_state_by_sn(db: Session, sn: str) -> Optional[OmcDeviceState]:
     return db.query(OmcDeviceState).filter(OmcDeviceState.sn == sn).first()
 
 
-def get_bound_sns_for_site(db: Session, site_id: int) -> List[str]:
-    """
-    基于设备绑定历史推导当前站点绑定的设备 SN 列表。
+def get_expected_device_slots_for_site(db: Session, site_id: int) -> List[DeviceSlot]:
+    planning = CellGenerator.get_site_planning(db, site_id)
+    if not planning:
+        return []
 
-    规则与 OMC 相关逻辑保持一致：
-    - 同一 SN 取最新一条记录
-    - 若 action != UNBIND 则视为仍然绑定
-    """
-    # 注意：同一 SN 在同一时刻可能产生多条绑定记录（例如多个检查项写入了相同 SN），
-    # 仅用 max(operated_at) 会造成 join 命中多行，从而出现 SN 重复。
-    # 这里增加二次聚合：在 (SN, latest_at) 的候选集中取 max(id) 作为唯一“最新”记录。
-    latest_at_subq = (
+    slots = {
+        slot
+        for slot in (
+            _normalize_device_slot(getattr(device, "sector_id", None), getattr(device, "band", None))
+            for device in CellGenerator.generate_devices_from_planning(db, site_id)
+        )
+        if slot
+    }
+    return sorted(slots, key=_slot_sort_key)
+
+
+def get_bound_slot_rows_for_site(
+    db: Session,
+    site_id: int,
+    *,
+    opening_only: bool = False,
+) -> List[EquipmentBindingHistory]:
+    latest_at_query = (
         db.query(
-            EquipmentBindingHistory.equipment_sn.label("sn"),
+            EquipmentBindingHistory.sector_id.label("sector_id"),
+            EquipmentBindingHistory.band.label("band"),
             func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
         )
         .filter(EquipmentBindingHistory.site_id == site_id)
-        .group_by(EquipmentBindingHistory.equipment_sn)
+    )
+    latest_id_query = (
+        db.query(
+            EquipmentBindingHistory.sector_id.label("sector_id"),
+            EquipmentBindingHistory.band.label("band"),
+            func.max(EquipmentBindingHistory.id).label("latest_id"),
+        )
+        .filter(EquipmentBindingHistory.site_id == site_id)
+    )
+
+    if opening_only:
+        latest_at_query = (
+            latest_at_query
+            .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
+            .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
+            .filter(
+                WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+                WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+            )
+        )
+        latest_id_query = (
+            latest_id_query
+            .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
+            .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
+            .filter(
+                WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+                WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+            )
+        )
+
+    latest_at_subq = (
+        latest_at_query
+        .group_by(
+            EquipmentBindingHistory.sector_id,
+            EquipmentBindingHistory.band,
+        )
         .subquery()
     )
 
     latest_id_subq = (
-        db.query(
-            EquipmentBindingHistory.equipment_sn.label("sn"),
-            func.max(EquipmentBindingHistory.id).label("latest_id"),
-        )
+        latest_id_query
         .join(
             latest_at_subq,
             and_(
-                EquipmentBindingHistory.equipment_sn == latest_at_subq.c.sn,
+                EquipmentBindingHistory.sector_id == latest_at_subq.c.sector_id,
+                EquipmentBindingHistory.band == latest_at_subq.c.band,
                 EquipmentBindingHistory.operated_at == latest_at_subq.c.latest_at,
             ),
         )
-        .filter(EquipmentBindingHistory.site_id == site_id)
-        .group_by(EquipmentBindingHistory.equipment_sn)
+        .group_by(
+            EquipmentBindingHistory.sector_id,
+            EquipmentBindingHistory.band,
+        )
         .subquery()
     )
 
-    latest_rows: List[EquipmentBindingHistory] = (
+    return (
         db.query(EquipmentBindingHistory)
         .join(latest_id_subq, EquipmentBindingHistory.id == latest_id_subq.c.latest_id)
-        .order_by(EquipmentBindingHistory.equipment_sn)
+        .order_by(
+            EquipmentBindingHistory.sector_id.asc(),
+            EquipmentBindingHistory.band.asc(),
+            EquipmentBindingHistory.cell_id.asc(),
+            EquipmentBindingHistory.id.asc(),
+        )
         .all()
     )
 
-    sns: List[str] = []
-    for row in latest_rows:
-        if row.action != BindingActionEnum.UNBIND and row.equipment_sn:
-            sns.append(row.equipment_sn)
-    return sns
+
+def summarize_site_binding_slots(
+    db: Session,
+    site_id: int,
+    *,
+    opening_only: bool = False,
+) -> Dict[str, Any]:
+    expected_slots = get_expected_device_slots_for_site(db, site_id)
+
+    all_bound_rows = [
+        row for row in get_bound_slot_rows_for_site(db, site_id, opening_only=opening_only)
+        if row.action != BindingActionEnum.UNBIND and str(row.equipment_sn or "").strip()
+    ]
+
+    all_slot_map = {
+        slot: row
+        for row in all_bound_rows
+        for slot in [_normalize_device_slot(row.sector_id, row.band)]
+        if slot
+    }
+
+    slot_check_required = bool(expected_slots)
+    if slot_check_required:
+        relevant_rows = [all_slot_map[slot] for slot in expected_slots if slot in all_slot_map]
+        covered_slots = [slot for slot in expected_slots if slot in all_slot_map]
+        missing_slots = [slot for slot in expected_slots if slot not in all_slot_map]
+        all_slots_bound = len(missing_slots) == 0
+    else:
+        covered_slots = sorted(all_slot_map.keys(), key=_slot_sort_key)
+        missing_slots = []
+        relevant_rows = [all_slot_map[slot] for slot in covered_slots]
+        all_slots_bound = True
+
+    return {
+        "site_id": site_id,
+        "slot_check_required": slot_check_required,
+        "expected_slots": [_serialize_slot(slot) for slot in expected_slots],
+        "expected_slot_count": len(expected_slots),
+        "covered_slots": [_serialize_slot(slot) for slot in covered_slots],
+        "bound_slot_count": len(covered_slots),
+        "missing_slots": [_serialize_slot(slot) for slot in missing_slots],
+        "all_slots_bound": all_slots_bound,
+        "rows": relevant_rows,
+        "all_rows": all_bound_rows,
+        "ready_for_status": bool(relevant_rows) and (all_slots_bound or not slot_check_required),
+    }
+
+
+def get_bound_sns_for_site(db: Session, site_id: int) -> List[str]:
+    """
+    基于设备位当前绑定关系推导站点绑定的设备 SN 列表。
+
+    规则：
+    - 同一设备位（sector_id + band）取最新一条记录
+    - 若 action != UNBIND 则视为该设备位当前仍有绑定
+    - 同一 SN 若异常地出现在多个设备位，最终按去重后的 SN 列表返回
+    """
+    sns = {
+        str(row.equipment_sn).strip()
+        for row in get_bound_slot_rows_for_site(db, site_id, opening_only=False)
+        if row.action != BindingActionEnum.UNBIND and str(row.equipment_sn or "").strip()
+    }
+    return sorted(sns)
 
 
 def summarize_site_omc_state(db: Session, site_id: int) -> Dict:
@@ -152,7 +296,13 @@ def summarize_site_omc_state(db: Session, site_id: int) -> Dict:
       ],
     }
     """
-    sns = get_bound_sns_for_site(db, site_id)
+    binding_summary = summarize_site_binding_slots(db, site_id, opening_only=False)
+    binding_rows: List[EquipmentBindingHistory] = list(binding_summary.get("rows") or [])
+    sns = sorted({
+        str(row.equipment_sn).strip()
+        for row in binding_rows
+        if str(row.equipment_sn or "").strip()
+    })
     devices: List[Dict] = []
 
     if not sns:
@@ -162,6 +312,11 @@ def summarize_site_omc_state(db: Session, site_id: int) -> Dict:
             "all_ever_online": False,
             "all_ever_activated": False,
             "devices": [],
+            "slot_check_required": bool(binding_summary.get("slot_check_required")),
+            "expected_slot_count": int(binding_summary.get("expected_slot_count") or 0),
+            "bound_slot_count": int(binding_summary.get("bound_slot_count") or 0),
+            "all_slots_bound": bool(binding_summary.get("all_slots_bound")),
+            "missing_slots": list(binding_summary.get("missing_slots") or []),
         }
 
     all_ever_online = True
@@ -194,10 +349,19 @@ def summarize_site_omc_state(db: Session, site_id: int) -> Dict:
         if not ever_activated:
             all_ever_activated = False
 
+    if not bool(binding_summary.get("ready_for_status")):
+        all_ever_online = False
+        all_ever_activated = False
+
     return {
         "site_id": site_id,
         "sns": sns,
         "all_ever_online": all_ever_online,
         "all_ever_activated": all_ever_activated,
         "devices": devices,
+        "slot_check_required": bool(binding_summary.get("slot_check_required")),
+        "expected_slot_count": int(binding_summary.get("expected_slot_count") or 0),
+        "bound_slot_count": int(binding_summary.get("bound_slot_count") or 0),
+        "all_slots_bound": bool(binding_summary.get("all_slots_bound")),
+        "missing_slots": list(binding_summary.get("missing_slots") or []),
     }

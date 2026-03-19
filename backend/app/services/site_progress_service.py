@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.models.equipment_binding_history import BindingActionEnum, EquipmentBindingHistory
@@ -11,6 +10,7 @@ from app.models.omc_state import OmcDeviceState
 from app.models.site import Site
 from app.models.site_progress import SiteProgressEvent, SiteProgressSnapshot
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
+from app.services.omc_state import summarize_site_binding_slots
 from app.services.site_progress_metric_service import (
     SITE_PROGRESS_METRIC_MODE_DEVICE_FACT,
     SITE_PROGRESS_METRIC_MODE_WORKFLOW,
@@ -18,7 +18,7 @@ from app.services.site_progress_metric_service import (
 )
 
 
-CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION = 2
+CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION = 3
 
 MILESTONE_FIELD_MAP = {
     "install_started": "install_started_at",
@@ -118,75 +118,10 @@ def _get_first_work_order_fact(
 
 
 def _get_effective_opening_binding_rows(db: Session, site_id: int) -> List[EquipmentBindingHistory]:
-    latest_at_subq = (
-        db.query(
-            EquipmentBindingHistory.sector_id.label("sector_id"),
-            EquipmentBindingHistory.band.label("band"),
-            EquipmentBindingHistory.cell_id.label("cell_id"),
-            func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
-        )
-        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
-        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
-        .filter(
-            EquipmentBindingHistory.site_id == site_id,
-            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-        )
-        .group_by(
-            EquipmentBindingHistory.sector_id,
-            EquipmentBindingHistory.band,
-            EquipmentBindingHistory.cell_id,
-        )
-        .subquery()
-    )
-
-    latest_id_subq = (
-        db.query(
-            EquipmentBindingHistory.sector_id.label("sector_id"),
-            EquipmentBindingHistory.band.label("band"),
-            EquipmentBindingHistory.cell_id.label("cell_id"),
-            func.max(EquipmentBindingHistory.id).label("latest_id"),
-        )
-        .join(SiteInspection, SiteInspection.id == EquipmentBindingHistory.inspection_id)
-        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
-        .join(
-            latest_at_subq,
-            and_(
-                EquipmentBindingHistory.sector_id == latest_at_subq.c.sector_id,
-                EquipmentBindingHistory.band == latest_at_subq.c.band,
-                EquipmentBindingHistory.cell_id == latest_at_subq.c.cell_id,
-                EquipmentBindingHistory.operated_at == latest_at_subq.c.latest_at,
-            ),
-        )
-        .filter(
-            EquipmentBindingHistory.site_id == site_id,
-            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
-            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
-        )
-        .group_by(
-            EquipmentBindingHistory.sector_id,
-            EquipmentBindingHistory.band,
-            EquipmentBindingHistory.cell_id,
-        )
-        .subquery()
-    )
-
-    rows = (
-        db.query(EquipmentBindingHistory)
-        .join(latest_id_subq, EquipmentBindingHistory.id == latest_id_subq.c.latest_id)
-        .order_by(
-            EquipmentBindingHistory.sector_id.asc(),
-            EquipmentBindingHistory.band.asc(),
-            EquipmentBindingHistory.cell_id.asc(),
-            EquipmentBindingHistory.id.asc(),
-        )
-        .all()
-    )
-
-    return [
-        row for row in rows
-        if row.action != BindingActionEnum.UNBIND and str(row.equipment_sn or "").strip()
-    ]
+    binding_summary = summarize_site_binding_slots(db, site_id, opening_only=True)
+    if not bool(binding_summary.get("ready_for_status")):
+        return []
+    return list(binding_summary.get("rows") or [])
 
 
 def _get_device_fact_milestone_fact(

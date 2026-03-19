@@ -370,6 +370,7 @@ export default {
       activeCurrent: 'Saat Ini Diaktifkan',
       activeInactive: 'Saat Ini Tidak Diaktifkan',
       pendingCheck: 'Pemeriksaan Tertunda',
+      unbound: 'Tidak Terikat',
       everOnline: 'Pernah Daring',
       neverOnline: 'Tidak Pernah Daring',
       everActive: 'Pernah Diaktifkan',

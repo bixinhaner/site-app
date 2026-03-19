@@ -338,9 +338,21 @@
       </template>
       <el-empty v-if="!devices.length && !deviceStatusLoading" :description="t('siteDetail.device.empty')" />
       <el-table v-else :data="devices" size="small" stripe>
-        <el-table-column prop="sn" :label="t('siteDetail.device.columns.sn')" min-width="180" />
-        <el-table-column prop="equipment_type" :label="t('siteDetail.device.columns.type')" width="120" />
-        <el-table-column prop="equipment_model" :label="t('siteDetail.device.columns.model')" min-width="160" />
+        <el-table-column :label="t('siteDetail.device.columns.sn')" min-width="180">
+          <template #default="{ row }">
+            {{ row.sn || t('siteDetail.device.unbound') }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('siteDetail.device.columns.type')" width="120">
+          <template #default="{ row }">
+            {{ row.equipment_type || placeholderText }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('siteDetail.device.columns.model')" min-width="160">
+          <template #default="{ row }">
+            {{ row.equipment_model || placeholderText }}
+          </template>
+        </el-table-column>
         <el-table-column :label="t('siteDetail.device.columns.sectorInfo')" min-width="160">
           <template #default="{ row }">
             {{ t('siteDetail.device.sectorInfoValue', { sector: row.sector_id || placeholderText, band: row.band || placeholderText, cell: row.cell_id || placeholderText }) }}
@@ -348,7 +360,7 @@
         </el-table-column>
         <el-table-column :label="t('siteDetail.device.columns.onlineStatus')" width="200">
           <template #default="{ row }">
-            <div class="status-cell">
+            <div v-if="isBoundDeviceRow(row)" class="status-cell">
               <el-tag :type="onlineRealtimeTagType(row.online)" size="small" class="mr4">
                 {{ onlineRealtimeText(row.online) }}
               </el-tag>
@@ -356,11 +368,14 @@
                 {{ everOnlineText(row.ever_online) }}
               </el-tag>
             </div>
+            <el-tag v-else type="info" size="small">
+              {{ t('siteDetail.device.unbound') }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('siteDetail.device.columns.activeStatus')" width="220">
           <template #default="{ row }">
-            <div class="status-cell">
+            <div v-if="isBoundDeviceRow(row)" class="status-cell">
               <el-tag :type="activeRealtimeTagType(row.activated)" size="small" class="mr4">
                 {{ activeRealtimeText(row.activated) }}
               </el-tag>
@@ -368,6 +383,9 @@
                 {{ everActiveText(row.ever_activated) }}
               </el-tag>
             </div>
+            <el-tag v-else type="info" size="small">
+              {{ t('siteDetail.device.unbound') }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('siteDetail.device.columns.installer')" width="140">
@@ -952,6 +970,7 @@ const activeRealtimeTagType = (val) => {
 }
 const everActiveTagType = (val) => (val ? 'success' : 'info')
 const everActiveText = (val) => (val ? t('siteDetail.device.everActive') : t('siteDetail.device.neverActive'))
+const isBoundDeviceRow = (row) => !!row?.sn && row?.slot_bound !== false
 
 const deviceRefreshCooldown = ref(0)
 let deviceCooldownTimer = null
@@ -964,7 +983,7 @@ const loadDeviceStatus = async (refresh = false) => {
   try {
     deviceStatusLoading.value = true
     const res = await request.get(`/api/sites/${route.params.id}/omc/devices`, {
-      params: { refresh: refresh ? 1 : 0 }
+      params: { refresh: refresh ? 1 : 0, include_expected_slots: 1 }
     })
     devices.value = Array.isArray(res.devices) ? res.devices : []
     deviceStatusCheckedAt.value = res.checked_at || null
