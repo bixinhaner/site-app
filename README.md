@@ -214,6 +214,8 @@ npm run build                  # 生产构建
 
 ### 1. 工单管理系统
 - **工单状态流**: 主线为 `PENDING → ACTIVE → SUBMITTED → UNDER_REVIEW → APPROVED/REJECTED → ACTIVATED → COMPLETED`；其中 `PENDING / ACTIVE / SUBMITTED / UNDER_REVIEW / REJECTED` 可在 `web-admin` 进入 `VOIDED（已作废）`
+- **工单列表进度可视化（2026-03-20）**: `web-admin -> 工单管理 -> 工单列表` 的“状态”列已改成“状态标签 + 紧凑进度条”。不再单靠一枚状态标签判断流程位置，而是直接在列表里显示从待分配到完成的阶段进度；`APPROVED / ACTIVATED` 会显示更靠后的进度，`REJECTED` 保留在审核阶段，`VOIDED` 用终止态样式单独展示，尽量利用现有表格宽度而不额外挤占页面空间。
+- **工单列表节点说明与国际化补齐（2026-03-20）**: 进度条每个节点都支持鼠标悬停说明，能直接看到该节点代表的阶段和含义；`工单列表` 页面本身也已正式接入 `vue-i18n`，把状态列、筛选、排序、弹窗、提示消息和进度说明统一补齐到 `中文 / English / Bahasa Indonesia` 三套词条，不再依赖页面里零散的中英文硬编码混用。
 - **工单类型**: 开通检查、维护、电源问题、传输问题、GPS问题、信号问题
 - **优先级管理**: 低、普通、高、紧急
 - **分配和审核**: 支持多级审批和完整审计追踪

@@ -1,11 +1,11 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>工单列表</h1>
+      <h1>{{ t('workOrderList.pageTitle') }}</h1>
       <div class="header-actions">
         <el-input
           v-model="searchKeyword"
-          placeholder="搜索工单标题/描述/站点名称/编码（动态生效）"
+          :placeholder="t('workOrderList.filters.searchPlaceholder')"
           style="width: 240px"
           clearable
         >
@@ -13,69 +13,61 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-select v-model="statusFilter" clearable placeholder="状态" style="width: 140px">
-          <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
+        <el-select v-model="statusFilter" clearable :placeholder="t('workOrderList.filters.statusPlaceholder')" style="width: 140px">
+          <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
         <el-tooltip
           v-if="statusInFilter.length > 0 && !statusFilter"
-          :content="`当前按多状态筛选：${statusInFilter.join(' / ')}`"
+          :content="multiStatusFilterText"
           placement="bottom"
         >
-          <el-tag closable @close="clearStatusInFilter">多状态筛选中</el-tag>
+          <el-tag closable @close="clearStatusInFilter">{{ t('workOrderList.filters.multiStatusActive') }}</el-tag>
         </el-tooltip>
-        <el-select v-model="typeFilter" clearable placeholder="类型" style="width: 180px">
-          <el-option v-for="t in filterTypes" :key="t.value" :label="t.label" :value="t.value" />
+        <el-select v-model="typeFilter" clearable :placeholder="t('workOrderList.filters.typePlaceholder')" style="width: 180px">
+          <el-option v-for="option in filterTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
         <el-popover placement="bottom" :width="280" trigger="click">
           <template #reference>
             <el-button>
               <el-icon><Sort /></el-icon>
-              排序
+              {{ t('workOrderList.sort.button') }}
             </el-button>
           </template>
           <div class="sort-panel">
             <el-form label-width="72px" size="small">
-              <el-form-item label="字段">
+              <el-form-item :label="t('workOrderList.sort.fieldLabel')">
                 <el-select v-model="sortBy" style="width: 100%">
-                  <el-option label="创建时间" value="created_at" />
-                  <el-option label="更新时间" value="updated_at" />
-                  <el-option label="分配时间" value="assigned_at" />
-                  <el-option label="截止时间" value="due_date" />
-                  <el-option label="优先级" value="priority" />
-                  <el-option label="状态" value="status" />
-                  <el-option label="类型" value="type" />
-                  <el-option label="站点编码" value="site_code" />
-                  <el-option label="站点名称" value="site_name" />
+                  <el-option v-for="option in sortFieldOptions" :key="option.value" :label="option.label" :value="option.value" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="方向">
+              <el-form-item :label="t('workOrderList.sort.directionLabel')">
                 <el-radio-group v-model="sortOrder">
-                  <el-radio-button label="desc">降序</el-radio-button>
-                  <el-radio-button label="asc">升序</el-radio-button>
+                  <el-radio-button label="desc">{{ t('workOrderList.sort.orders.desc') }}</el-radio-button>
+                  <el-radio-button label="asc">{{ t('workOrderList.sort.orders.asc') }}</el-radio-button>
                 </el-radio-group>
               </el-form-item>
               <el-form-item label=" ">
-                <el-button size="small" @click="resetSort">恢复默认</el-button>
+                <el-button size="small" @click="resetSort">{{ t('workOrderList.sort.reset') }}</el-button>
               </el-form-item>
             </el-form>
           </div>
         </el-popover>
-        <el-button @click="load"><el-icon><Refresh /></el-icon>刷新</el-button>
-        <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新建工单</el-button>
+        <el-button @click="load"><el-icon><Refresh /></el-icon>{{ t('workOrderList.actions.refresh') }}</el-button>
+        <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>{{ t('workOrderList.actions.create') }}</el-button>
       </div>
     </div>
     
     <!-- 批量操作栏 -->
     <el-card v-if="selectedWorkOrders.length > 0" class="batch-operations">
       <div class="batch-info">
-        <span>已选择 {{ selectedWorkOrders.length }} 个工单</span>
+        <span>{{ t('workOrderList.batch.selectedCount', { count: selectedWorkOrders.length }) }}</span>
         <div class="batch-actions">
-          <el-button size="small" @click="clearSelection">取消选择</el-button>
+          <el-button size="small" @click="clearSelection">{{ t('workOrderList.actions.clearSelection') }}</el-button>
           <!-- <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button> -->
-          <el-button size="small" type="warning" @click="showBatchAssignDialog = true">批量重新分配</el-button>
-          <el-button size="small" type="info" @click="showBatchPriorityDialog = true">批量修改优先级</el-button>
-          <el-button v-if="canVoidPermission" size="small" type="warning" @click="confirmBatchVoid">批量作废</el-button>
-          <el-button size="small" type="danger" @click="confirmBatchDelete">批量删除</el-button>
+          <el-button size="small" type="warning" @click="showBatchAssignDialog = true">{{ t('workOrderList.actions.batchAssign') }}</el-button>
+          <el-button size="small" type="info" @click="showBatchPriorityDialog = true">{{ t('workOrderList.actions.batchPriority') }}</el-button>
+          <el-button v-if="canVoidPermission" size="small" type="warning" @click="confirmBatchVoid">{{ t('workOrderList.actions.batchVoid') }}</el-button>
+          <el-button size="small" type="danger" @click="confirmBatchDelete">{{ t('workOrderList.actions.batchDelete') }}</el-button>
         </div>
       </div>
     </el-card>
@@ -87,21 +79,21 @@
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="55" />
-        <el-table-column prop="title" label="标题" min-width="220">
+        <el-table-column prop="title" :label="t('workOrderList.table.title')" min-width="220">
           <template #default="{ row }">
             <div>
               <div class="title-with-duplicate">
                 <span>{{ row.title }}</span>
                 <el-tooltip
                   v-if="row.has_duplicate_photos"
-                  content="存在重复图片，请进入审核台详情查看来源信息"
+                  :content="t('workOrderList.tooltips.duplicatePhotos')"
                   placement="top"
                 >
                   <el-icon class="duplicate-warning-icon"><WarningFilled /></el-icon>
                 </el-tooltip>
                 <el-tooltip
                   v-if="row.has_similar_photos"
-                  content="存在极度相似图片，请进入审核台详情核验"
+                  :content="t('workOrderList.tooltips.similarPhotos')"
                   placement="top"
                 >
                   <el-icon class="similar-warning-icon"><WarningFilled /></el-icon>
@@ -109,44 +101,80 @@
               </div>
               <div class="work-order-id">ID: {{ row.id }}</div>
               <div v-if="row.status === 'VOIDED'" class="work-order-void-meta">
-                作废：{{ row.void_reason || '未填写原因' }}
+                {{ t('workOrderList.voidMeta.label') }}：{{ row.void_reason || t('workOrderList.voidMeta.noReason') }}
                 <span v-if="row.voided_by_name"> · {{ row.voided_by_name }}</span>
                 <span v-if="row.voided_at"> · {{ formatDateTime(row.voided_at) }}</span>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="type" label="类型" width="160">
+        <el-table-column prop="type" :label="t('workOrderList.table.type')" width="160">
           <template #default="{ row }">{{ typeText(row.type) }}</template>
         </el-table-column>
-        <el-table-column prop="site_name" label="站点" width="160">
+        <el-table-column prop="site_name" :label="t('workOrderList.table.site')" width="160">
           <template #default="{ row }">{{ row.site_name || row.site_id }}</template>
         </el-table-column>
-        <el-table-column prop="assignee_name" label="分配给" width="140" />
-        <el-table-column prop="priority" label="优先级" width="100">
+        <el-table-column prop="assignee_name" :label="t('workOrderList.table.assignee')" width="140" />
+        <el-table-column prop="priority" :label="t('workOrderList.table.priority')" width="100">
           <template #default="{ row }"><el-tag>{{ priorityText(row.priority) }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="160">
+        <el-table-column prop="status" :label="t('workOrderList.table.status')" width="240">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)">{{ statusText(row.status, row.type) }}</el-tag>
+            <div class="status-progress-card">
+              <div class="status-progress-head">
+                <el-tag :type="statusTagType(row.status)" size="small">{{ statusText(row.status, row.type) }}</el-tag>
+                <span
+                  v-if="row._progress?.text"
+                  class="status-progress-value"
+                  :class="`is-${row._progress.tone}`"
+                >
+                  {{ row._progress.text }}
+                </span>
+              </div>
+              <div
+                class="status-progress-track"
+                :class="[`is-${row._progress?.tone || 'pending'}`, { 'is-exception': row._progress?.isException }]"
+              >
+                <div class="status-progress-rail">
+                  <div
+                    v-if="!row._progress?.isException"
+                    class="status-progress-fill"
+                    :style="{ width: row._progress?.fillWidth || '0%' }"
+                  />
+                </div>
+                <div class="status-progress-dots">
+                  <el-tooltip
+                    v-for="dot in row._progress?.dots || []"
+                    :key="dot.index"
+                    :content="progressDotTooltip(row, dot)"
+                    placement="top"
+                  >
+                    <span
+                      class="status-progress-dot"
+                      :class="[`is-${dot.state}`, `is-${row._progress?.tone || 'pending'}`]"
+                    />
+                  </el-tooltip>
+                </div>
+              </div>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="assigned_at" label="分配时间" width="180">
+        <el-table-column prop="assigned_at" :label="t('workOrderList.table.assignedAt')" width="180">
           <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="420" fixed="right">
+        <el-table-column :label="t('workOrderList.table.actions')" width="420" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)" v-if="canEdit(row)">
-              <el-icon><Edit /></el-icon>编辑
+              <el-icon><Edit /></el-icon>{{ t('workOrderList.actions.edit') }}
             </el-button>
             <el-button link type="primary" size="small" @click="openReview(row)">
-              <el-icon><Stamp /></el-icon>审核
+              <el-icon><Stamp /></el-icon>{{ t('workOrderList.actions.review') }}
             </el-button>
             <el-button link type="warning" size="small" @click="confirmVoid(row)" v-if="canVoid(row)">
-              作废
+              {{ t('workOrderList.actions.void') }}
             </el-button>
             <el-button link type="danger" size="small" @click="confirmDelete(row)" v-if="canDelete(row)">
-              <el-icon><Delete /></el-icon>删除
+              <el-icon><Delete /></el-icon>{{ t('workOrderList.actions.delete') }}
             </el-button>
           </template>
         </el-table-column>
@@ -166,9 +194,9 @@
     </el-card>
   </div>
 
-  <el-dialog v-model="createVisible" title="新建工单" width="560px">
+  <el-dialog v-model="createVisible" :title="t('workOrderList.dialogs.createTitle')" width="560px">
     <el-form :model="createForm" label-width="96px" :rules="rules" ref="formRef">
-      <el-form-item label="站点" prop="site_id">
+      <el-form-item :label="t('workOrderList.form.site')" prop="site_id">
         <el-select
           v-model="createForm.site_id"
           filterable
@@ -179,8 +207,8 @@
           :loading="siteOptionsLoading"
           :remote-method="handleSiteRemoteSearch"
           :no-data-text="siteSelectNoDataText"
-          loading-text="正在搜索站点..."
-          placeholder="输入站点名称或编码搜索"
+          :loading-text="t('workOrderList.siteSearch.loading')"
+          :placeholder="t('workOrderList.form.placeholders.siteSearch')"
           style="width: 100%"
           @visible-change="handleSiteDropdownVisible"
           @change="handleSiteChange"
@@ -189,125 +217,119 @@
         </el-select>
         <div class="form-hint">{{ siteSelectHint }}</div>
       </el-form-item>
-      <el-form-item label="类型" prop="type">
-        <el-select v-model="createForm.type" placeholder="选择类型" style="width: 100%" @change="onTypeOrSiteChange">
-          <el-option v-for="t in createTypes" :key="t.value" :label="t.label" :value="t.value" />
+      <el-form-item :label="t('workOrderList.form.type')" prop="type">
+        <el-select v-model="createForm.type" :placeholder="t('workOrderList.form.placeholders.selectType')" style="width: 100%" @change="onTypeOrSiteChange">
+          <el-option v-for="option in createTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="分配给" prop="assigned_to">
-        <el-select v-model="createForm.assigned_to" filterable placeholder="选择人员" style="width: 100%" @visible-change="v=> v && loadUsers()">
+      <el-form-item :label="t('workOrderList.form.assignee')" prop="assigned_to">
+        <el-select v-model="createForm.assigned_to" filterable :placeholder="t('workOrderList.form.placeholders.selectAssignee')" style="width: 100%" @visible-change="v=> v && loadUsers()">
           <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="标题" prop="title">
-        <el-input v-model="createForm.title" placeholder="请输入标题" />
+      <el-form-item :label="t('workOrderList.form.title')" prop="title">
+        <el-input v-model="createForm.title" :placeholder="t('workOrderList.form.placeholders.enterTitle')" />
       </el-form-item>
-      <el-form-item label="检查模板">
-        <el-select v-model="createForm.template_id" clearable filterable placeholder="自动推荐(可不选)" style="width: 100%" @visible-change="v => v && loadTemplates()">
+      <el-form-item :label="t('workOrderList.form.inspectionTemplate')">
+        <el-select v-model="createForm.template_id" clearable filterable :placeholder="t('workOrderList.form.placeholders.template')" style="width: 100%" @visible-change="v => v && loadTemplates()">
           <el-option v-for="tpl in templateOptions" :key="tpl.id" :label="tpl.template_name" :value="tpl.id" />
         </el-select>
       </el-form-item>
-      <el-form-item v-if="createForm.type === 'equipment_replacement'" label="更换设备位" prop="replacement_targets">
+      <el-form-item v-if="createForm.type === 'equipment_replacement'" :label="t('workOrderList.form.replacementTargets')" prop="replacement_targets">
         <el-select
           v-model="createForm.replacement_targets"
           multiple
           filterable
           collapse-tags
           collapse-tags-tooltip
-          placeholder="请选择要更换的设备位（可多选）"
+          :placeholder="t('workOrderList.form.placeholders.replacementTargets')"
           style="width: 100%"
           :loading="replacementTargetsLoading"
           @visible-change="v => v && loadReplacementTargets()"
         >
-          <el-option v-for="opt in replacementTargetOptions" :key="opt.key" :label="opt.label" :value="opt.key" />
+          <el-option v-for="opt in replacementTargetOptions" :key="opt.key" :label="replacementTargetLabel(opt)" :value="opt.key" />
         </el-select>
-        <div class="form-hint">按站点规划生成的设备位（sector_id + band），支持多选。</div>
+        <div class="form-hint">{{ t('workOrderList.form.replacementTargetHint') }}</div>
       </el-form-item>
-      <el-form-item label="优先级">
-        <el-select v-model="createForm.priority" placeholder="选择优先级" style="width: 100%">
-          <el-option label="低" value="low" />
-          <el-option label="普通" value="normal" />
-          <el-option label="高" value="high" />
-          <el-option label="紧急" value="urgent" />
+      <el-form-item :label="t('workOrderList.form.priority')">
+        <el-select v-model="createForm.priority" :placeholder="t('workOrderList.form.placeholders.selectPriority')" style="width: 100%">
+          <el-option v-for="option in priorityOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="截止时间">
+      <el-form-item :label="t('workOrderList.form.dueDate')">
         <el-date-picker v-model="createForm.due_date" type="datetime" style="width: 100%" />
       </el-form-item>
-      <el-form-item label="描述">
-        <el-input v-model="createForm.description" type="textarea" :rows="3" placeholder="可填工单描述" />
+      <el-form-item :label="t('workOrderList.form.description')">
+        <el-input v-model="createForm.description" type="textarea" :rows="3" :placeholder="t('workOrderList.form.placeholders.description')" />
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="createVisible=false">取消</el-button>
-      <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
+      <el-button @click="createVisible=false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :loading="creating" @click="submitCreate">{{ t('workOrderList.actions.create') }}</el-button>
     </template>
   </el-dialog>
 
   <!-- 重复安装工单提示对话框 -->
-  <el-dialog v-model="dupVisible" title="该站点已存在安装工单" width="720px">
+  <el-dialog v-model="dupVisible" :title="t('workOrderList.dialogs.duplicateTitle')" width="720px">
     <el-alert type="warning" :closable="false" show-icon style="margin-bottom:8px"
-      title="确认后仍可继续创建，但请避免重复派单。" />
+      :title="t('workOrderList.dialogs.duplicateAlert')" />
     <div style="margin-bottom:12px; color:#606266;">
-      站点：<b>{{ dupSiteDisplay }}</b>
+      {{ t('workOrderList.dialogs.siteLabel') }}：<b>{{ dupSiteDisplay }}</b>
     </div>
     <el-table :data="dupExisting" size="small" style="width:100%" v-if="dupExisting && dupExisting.length">
-      <el-table-column prop="title" label="标题" min-width="180" />
-      <el-table-column prop="status" label="状态" width="120">
+      <el-table-column prop="title" :label="t('workOrderList.table.title')" min-width="180" />
+      <el-table-column prop="status" :label="t('workOrderList.table.status')" width="120">
         <template #default="{ row }">
           <el-tag>{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="assigner_name" label="创建者" width="140" />
-      <el-table-column prop="assignee_name" label="分配给" width="140" />
-      <el-table-column prop="assigned_at" label="分配时间" width="180">
+      <el-table-column prop="assigner_name" :label="t('workOrderList.table.creator')" width="140" />
+      <el-table-column prop="assignee_name" :label="t('workOrderList.table.assignee')" width="140" />
+      <el-table-column prop="assigned_at" :label="t('workOrderList.table.assignedAt')" width="180">
         <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
       </el-table-column>
     </el-table>
     <template #footer>
-      <el-button @click="dupVisible=false">取消</el-button>
-      <el-button type="primary" :loading="creating" @click="confirmDuplicateCreate">确认继续创建</el-button>
+      <el-button @click="dupVisible=false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :loading="creating" @click="confirmDuplicateCreate">{{ t('workOrderList.actions.confirmContinueCreate') }}</el-button>
     </template>
   </el-dialog>
 
   <!-- 编辑工单对话框 -->
-  <el-dialog v-model="editVisible" title="编辑工单" width="560px">
+  <el-dialog v-model="editVisible" :title="t('workOrderList.dialogs.editTitle')" width="560px">
     <el-form :model="editForm" label-width="96px" :rules="rules" ref="editFormRef">
-      <el-form-item label="站点" prop="site_id">
+      <el-form-item :label="t('workOrderList.form.site')" prop="site_id">
         <el-input :model-value="editSiteDisplay" disabled />
       </el-form-item>
-      <el-form-item label="类型" prop="type">
+      <el-form-item :label="t('workOrderList.form.type')" prop="type">
         <el-input :model-value="typeText(editForm.type)" disabled />
       </el-form-item>
-      <el-form-item label="检查模板">
+      <el-form-item :label="t('workOrderList.form.inspectionTemplate')">
         <el-input :model-value="editTemplateDisplay" disabled />
       </el-form-item>
-      <el-form-item label="分配给" prop="assigned_to">
-        <el-select v-model="editForm.assigned_to" filterable placeholder="选择人员" style="width: 100%" @visible-change="v=> v && loadUsers()">
+      <el-form-item :label="t('workOrderList.form.assignee')" prop="assigned_to">
+        <el-select v-model="editForm.assigned_to" filterable :placeholder="t('workOrderList.form.placeholders.selectAssignee')" style="width: 100%" @visible-change="v=> v && loadUsers()">
           <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="标题" prop="title">
-        <el-input v-model="editForm.title" placeholder="请输入标题" />
+      <el-form-item :label="t('workOrderList.form.title')" prop="title">
+        <el-input v-model="editForm.title" :placeholder="t('workOrderList.form.placeholders.enterTitle')" />
       </el-form-item>
-      <el-form-item label="优先级">
-        <el-select v-model="editForm.priority" placeholder="选择优先级" style="width: 100%">
-          <el-option label="低" value="low" />
-          <el-option label="普通" value="normal" />
-          <el-option label="高" value="high" />
-          <el-option label="紧急" value="urgent" />
+      <el-form-item :label="t('workOrderList.form.priority')">
+        <el-select v-model="editForm.priority" :placeholder="t('workOrderList.form.placeholders.selectPriority')" style="width: 100%">
+          <el-option v-for="option in priorityOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="截止时间">
+      <el-form-item :label="t('workOrderList.form.dueDate')">
         <el-date-picker v-model="editForm.due_date" type="datetime" style="width: 100%" />
       </el-form-item>
-      <el-form-item label="描述">
-        <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="可填工单描述" />
+      <el-form-item :label="t('workOrderList.form.description')">
+        <el-input v-model="editForm.description" type="textarea" :rows="3" :placeholder="t('workOrderList.form.placeholders.description')" />
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="editVisible=false">取消</el-button>
-      <el-button type="primary" :loading="updating" @click="submitUpdate">保存</el-button>
+      <el-button @click="editVisible=false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :loading="updating" @click="submitUpdate">{{ t('workOrderList.actions.save') }}</el-button>
     </template>
   </el-dialog>
 
@@ -327,56 +349,53 @@
   </el-dialog> -->
 
   <!-- 批量重新分配对话框 -->
-  <el-dialog v-model="showBatchAssignDialog" title="批量重新分配" width="400px">
+  <el-dialog v-model="showBatchAssignDialog" :title="t('workOrderList.dialogs.batchAssignTitle')" width="400px">
     <el-form label-width="80px">
-      <el-form-item label="分配给">
-        <el-select v-model="batchAssignValue" filterable placeholder="选择人员" style="width: 100%" @visible-change="v=> v && loadUsers()">
+      <el-form-item :label="t('workOrderList.form.assignee')">
+        <el-select v-model="batchAssignValue" filterable :placeholder="t('workOrderList.form.placeholders.selectAssignee')" style="width: 100%" @visible-change="v=> v && loadUsers()">
           <el-option v-for="u in userOptions" :key="u.id" :label="u.full_name || u.username" :value="u.id" />
         </el-select>
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="showBatchAssignDialog = false">取消</el-button>
-      <el-button type="primary" :loading="batchLoading" @click="executeBatchAssign">确认分配</el-button>
+      <el-button @click="showBatchAssignDialog = false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :loading="batchLoading" @click="executeBatchAssign">{{ t('workOrderList.actions.confirmAssign') }}</el-button>
     </template>
   </el-dialog>
 
   <!-- 批量修改优先级对话框 -->
-  <el-dialog v-model="showBatchPriorityDialog" title="批量修改优先级" width="400px">
+  <el-dialog v-model="showBatchPriorityDialog" :title="t('workOrderList.dialogs.batchPriorityTitle')" width="400px">
     <el-form label-width="80px">
-      <el-form-item label="优先级">
-        <el-select v-model="batchPriorityValue" placeholder="选择优先级" style="width: 100%">
-          <el-option label="低" value="low" />
-          <el-option label="普通" value="normal" />
-          <el-option label="高" value="high" />
-          <el-option label="紧急" value="urgent" />
+      <el-form-item :label="t('workOrderList.form.priority')">
+        <el-select v-model="batchPriorityValue" :placeholder="t('workOrderList.form.placeholders.selectPriority')" style="width: 100%">
+          <el-option v-for="option in priorityOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="showBatchPriorityDialog = false">取消</el-button>
-      <el-button type="primary" :loading="batchLoading" @click="executeBatchPriority">确认修改</el-button>
+      <el-button @click="showBatchPriorityDialog = false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :loading="batchLoading" @click="executeBatchPriority">{{ t('workOrderList.actions.confirmUpdate') }}</el-button>
     </template>
   </el-dialog>
 
   <!-- 批量操作错误详情对话框 -->
-  <el-dialog v-model="showErrorDialog" title="批量操作结果" width="600px">
+  <el-dialog v-model="showErrorDialog" :title="t('workOrderList.dialogs.batchResultTitle')" width="600px">
     <el-alert 
       v-if="batchResult.updated_count > 0"
-      :title="`成功处理 ${batchResult.updated_count} 个工单`" 
+      :title="t('workOrderList.batch.successHandled', { count: batchResult.updated_count })" 
       type="success" 
       :closable="false"
       style="margin-bottom: 16px"
     />
     <el-alert 
       v-if="batchResult.error_count > 0"
-      :title="`失败 ${batchResult.error_count} 个工单`" 
+      :title="t('workOrderList.batch.failedHandled', { count: batchResult.error_count })" 
       type="error" 
       :closable="false"
       style="margin-bottom: 16px"
     />
     <div v-if="batchResult.errors && batchResult.errors.length > 0" style="margin-top: 16px">
-      <div style="font-weight: bold; margin-bottom: 8px; color: #606266;">失败详情：</div>
+      <div style="font-weight: bold; margin-bottom: 8px; color: #606266;">{{ t('workOrderList.batch.errorDetails') }}：</div>
       <el-scrollbar max-height="300px">
         <ul style="margin: 0; padding-left: 20px; color: #909399; font-size: 14px;">
           <li v-for="(error, index) in batchResult.errors" :key="index" style="margin-bottom: 8px;">
@@ -386,7 +405,7 @@
       </el-scrollbar>
     </div>
     <template #footer>
-      <el-button type="primary" @click="showErrorDialog = false">确定</el-button>
+      <el-button type="primary" @click="showErrorDialog = false">{{ t('workOrderList.actions.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>
@@ -394,6 +413,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -404,6 +424,7 @@ import { useUserStore } from '@/stores/user'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const { t } = useI18n()
 const loading = ref(false)
 const items = ref([])
 const total = ref(0)
@@ -445,21 +466,25 @@ const batchPriorityValue = ref('')
 const showErrorDialog = ref(false)
 const batchResult = ref({ updated_count: 0, error_count: 0, errors: [] })
 
-const statuses = [
-  { label: '待分配', value: 'PENDING' },
-  { label: '已分配', value: 'ACTIVE' },
-  { label: '已提交', value: 'SUBMITTED' },
-  { label: '审核中', value: 'UNDER_REVIEW' },
-  { label: '已通过/待上线', value: 'APPROVED' },
-  { label: '已开通(上线阶段)', value: 'ACTIVATED' },
-  { label: '已驳回', value: 'REJECTED' },
-  { label: '已完成', value: 'COMPLETED' },
-  { label: '已作废', value: 'VOIDED' }
-]
-const statusValueSet = new Set(statuses.map(s => s.value))
+const STATUS_VALUES = ['PENDING', 'ACTIVE', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'ACTIVATED', 'REJECTED', 'COMPLETED', 'VOIDED']
+const statusValueSet = new Set(STATUS_VALUES)
 const INSTALLED_SITE_PRESET_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'ACTIVATED', 'COMPLETED']
 const VOIDABLE_STATUSES = ['PENDING', 'ACTIVE', 'SUBMITTED', 'UNDER_REVIEW', 'REJECTED']
 const canVoidPermission = computed(() => userStore.hasPermission('workorder:void:write'))
+const WORK_ORDER_PROGRESS_DOT_COUNT = 5
+const WORK_ORDER_PROGRESS_META = {
+  PENDING: { percent: 0, text: '0%', tone: 'pending', currentDot: 0 },
+  ACTIVE: { percent: 25, text: '25%', tone: 'primary', currentDot: 1 },
+  SUBMITTED: { percent: 50, text: '50%', tone: 'warning', currentDot: 2 },
+  UNDER_REVIEW: { percent: 70, text: '70%', tone: 'warning', currentDot: 3 },
+  APPROVED: { percent: 80, text: '80%', tone: 'success', currentDot: 3 },
+  ACTIVATED: { percent: 90, text: '90%', tone: 'success', currentDot: 3 },
+  REJECTED: { percent: 70, text: '70%', tone: 'danger', currentDot: 3 },
+  COMPLETED: { percent: 100, text: '100%', tone: 'success', currentDot: 4 },
+  VOIDED: { percent: 0, text: '', tone: 'muted', currentDot: -1, isException: true },
+}
+const DEFAULT_PROGRESS_STAGE_KEYS = ['pending', 'active', 'submitted', 'review', 'completed']
+const OPENING_PROGRESS_STAGE_KEYS = ['pending', 'active', 'submitted', 'reviewActivation', 'activated']
 
 const parseCsvQuery = (value) => {
   const raw = String(_firstQueryValue(value) || '').trim()
@@ -474,34 +499,25 @@ const normalizeStatusList = (list) => {
   }
   return out
 }
-// 类型显示映射（用于表格/详情友好显示历史类型）
-const typeLabelMap = {
-  opening_inspection: '新站安装',
-  equipment_replacement: '设备更换',
-  maintenance: '维护检查',
-  power_issue: '断电问题',
-  transmission_issue: '传输问题',
-  gps_issue: 'GPS问题',
-  signal_issue: '信号问题',
-  site_survey: '站点勘查',
-  ssv: 'SSV 验收',
-}
-	
-// 创建工单可选类型
-const createTypes = [
-  { label: '站点勘查', value: 'site_survey' },
-  { label: '新站安装', value: 'opening_inspection' },
-  { label: '设备更换', value: 'equipment_replacement' },
-  { label: 'SSV 验收', value: 'ssv' },
-]
-
-// 顶部筛选可选类型
-const filterTypes = [
-  { label: '站点勘查', value: 'site_survey' },
-  { label: '新站安装', value: 'opening_inspection' },
-  { label: '设备更换', value: 'equipment_replacement' },
-  { label: 'SSV 验收', value: 'ssv' },
-]
+const createTypeValues = ['site_survey', 'opening_inspection', 'equipment_replacement', 'ssv']
+const sortFieldOptions = computed(() => [
+  { label: t('workOrderList.sort.fields.createdAt'), value: 'created_at' },
+  { label: t('workOrderList.sort.fields.updatedAt'), value: 'updated_at' },
+  { label: t('workOrderList.sort.fields.assignedAt'), value: 'assigned_at' },
+  { label: t('workOrderList.sort.fields.dueDate'), value: 'due_date' },
+  { label: t('workOrderList.sort.fields.priority'), value: 'priority' },
+  { label: t('workOrderList.sort.fields.status'), value: 'status' },
+  { label: t('workOrderList.sort.fields.type'), value: 'type' },
+  { label: t('workOrderList.sort.fields.siteCode'), value: 'site_code' },
+  { label: t('workOrderList.sort.fields.siteName'), value: 'site_name' },
+])
+const statusOptions = computed(() => STATUS_VALUES.map((value) => ({ value, label: statusText(value) })))
+const createTypeOptions = computed(() => createTypeValues.map((value) => ({ value, label: typeText(value) })))
+const filterTypeOptions = computed(() => createTypeValues.map((value) => ({ value, label: typeText(value) })))
+const priorityOptions = computed(() => ['low', 'normal', 'high', 'urgent'].map((value) => ({ value, label: priorityText(value) })))
+const multiStatusFilterText = computed(() => t('workOrderList.filters.multiStatusTooltip', {
+  statuses: statusInFilter.value.map((status) => statusText(status)).join(' / ')
+}))
 
 const resetSort = () => {
   sortBy.value = 'created_at'
@@ -527,11 +543,14 @@ const load = async () => {
 
     const response = await workOrderAPI.searchWorkOrders(params)
     const list = Array.isArray(response?.work_orders) ? response.work_orders : []
-    items.value = list
+    items.value = list.map((item) => ({
+      ...item,
+      _progress: buildWorkOrderProgress(item),
+    }))
     total.value = typeof response?.total === 'number' ? response.total : list.length
   } catch (e) {
     console.error(e)
-    ElMessage.error('加载工单失败')
+    ElMessage.error(t('workOrderList.messages.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -599,41 +618,41 @@ const validateReplacementTargets = (rule, value, callback) => {
     callback()
     return
   }
-  callback(new Error('请选择要更换的设备位'))
+  callback(new Error(t('workOrderList.validation.selectReplacementTarget')))
 }
 
-const rules = {
-  site_id: [{ required: true, message: '请选择站点', trigger: 'change' }],
-  type: [{ required: true, message: '请选择类型', trigger: 'change' }],
-  assigned_to: [{ required: true, message: '请选择分配对象', trigger: 'change' }],
-  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
+const rules = computed(() => ({
+  site_id: [{ required: true, message: t('workOrderList.validation.selectSite'), trigger: 'change' }],
+  type: [{ required: true, message: t('workOrderList.validation.selectType'), trigger: 'change' }],
+  assigned_to: [{ required: true, message: t('workOrderList.validation.selectAssignee'), trigger: 'change' }],
+  title: [{ required: true, message: t('workOrderList.validation.enterTitle'), trigger: 'blur' }],
   replacement_targets: [{ validator: validateReplacementTargets, trigger: 'change' }],
-}
+}))
 
 const siteSelectNoDataText = computed(() => {
-  if (siteOptionsLoading.value) return '正在搜索站点...'
-  return siteSearchKeyword.value.trim() ? '未找到匹配站点' : '输入站点名称或编码搜索'
+  if (siteOptionsLoading.value) return t('workOrderList.siteSearch.loading')
+  return siteSearchKeyword.value.trim() ? t('workOrderList.siteSearch.noMatch') : t('workOrderList.siteSearch.inputHint')
 })
 
 const siteSelectHint = computed(() => {
-  if (siteOptionsLoading.value) return '正在搜索站点，请稍候。'
+  if (siteOptionsLoading.value) return t('workOrderList.siteSearch.loadingHint')
 
   const keyword = siteSearchKeyword.value.trim()
   const visibleCount = siteOptions.value.length
 
   if (keyword) {
-    if (!visibleCount) return `未找到与“${keyword}”匹配的站点，请尝试站点名称、编码或更短关键词。`
+    if (!visibleCount) return t('workOrderList.siteSearch.noKeywordResults', { keyword })
     if (siteSearchTotal.value > SITE_SEARCH_LIMIT) {
-      return `共匹配 ${siteSearchTotal.value} 个站点，当前显示前 ${visibleCount} 个，请继续缩小关键词。`
+      return t('workOrderList.siteSearch.totalTruncated', { total: siteSearchTotal.value, visible: visibleCount })
     }
-    return `已找到 ${siteSearchTotal.value || visibleCount} 个匹配站点，可直接选择。`
+    return t('workOrderList.siteSearch.foundCount', { count: siteSearchTotal.value || visibleCount })
   }
 
-  if (!visibleCount) return '打开下拉后默认只显示少量建议结果，输入站点名称或编码可搜索更多。'
+  if (!visibleCount) return t('workOrderList.siteSearch.defaultHint')
   if (siteSearchTotal.value > SITE_SUGGEST_LIMIT) {
-    return `当前仅展示前 ${visibleCount} 个建议站点，输入名称或编码可搜索全部可见站点。`
+    return t('workOrderList.siteSearch.suggestTruncated', { visible: visibleCount })
   }
-  return `当前展示 ${visibleCount} 个建议站点，可直接选择或继续搜索。`
+  return t('workOrderList.siteSearch.visibleCount', { visible: visibleCount })
 })
 
 const dedupeSites = (sites = []) => {
@@ -797,8 +816,8 @@ const applyCreatePrefillFromRoute = async () => {
       s = null
     }
     const siteCode = s?.site_code ? String(s.site_code) : ''
-    const baseTitle = type === 'site_survey' ? '站点勘查' : '工单'
-    const prefix = isResurvey ? '补勘-' : ''
+    const baseTitle = type === 'site_survey' ? typeText(type) : t('workOrderList.prefill.genericTitle')
+    const prefix = isResurvey ? t('workOrderList.prefill.resurveyPrefix') : ''
     const title = siteCode ? `${prefix}${baseTitle}-${siteCode}` : `${prefix}${baseTitle}`
 
     await openCreateWithPreset({ siteId, type, title })
@@ -934,7 +953,7 @@ const loadReplacementTargets = async () => {
         const band = String(b ?? '').trim()
         if (!band) continue
         const key = `${sectorId}__${band}`
-        opts.push({ key, label: `扇区 ${sectorId} / Band ${band}` })
+        opts.push({ key, sectorId, band })
       }
     }
 
@@ -949,7 +968,7 @@ const loadReplacementTargets = async () => {
     console.error(e)
     replacementTargetOptions.value = []
     lastReplacementTargetsSiteId.value = null
-    ElMessage.warning('站点规划未找到或无权限，无法加载设备位')
+    ElMessage.warning(t('workOrderList.messages.planningNotFound'))
   } finally {
     replacementTargetsLoading.value = false
   }
@@ -1010,7 +1029,7 @@ const submitCreate = () => {
           .map(_parseReplacementTargetKey)
           .filter(Boolean)
         if (!payload.replacement_targets.length) {
-          ElMessage.error('设备更换工单必须选择要更换的设备位')
+          ElMessage.error(t('workOrderList.messages.replacementTargetRequired'))
           creating.value = false
           return
         }
@@ -1019,7 +1038,7 @@ const submitCreate = () => {
       }
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
       await request.post('/api/work-orders', payload)
-      ElMessage.success('创建成功')
+      ElMessage.success(t('workOrderList.messages.createSuccess'))
       createVisible.value = false
       await load()
     } catch (e) {
@@ -1033,7 +1052,7 @@ const submitCreate = () => {
         dupSiteCode.value = detail?.site_code || ''
         dupVisible.value = true
       } else {
-        ElMessage.error((typeof detail === 'string' && detail) || detail?.message || '创建失败')
+        ElMessage.error((typeof detail === 'string' && detail) || detail?.message || t('workOrderList.messages.createFailed'))
       }
     } finally {
       creating.value = false
@@ -1054,14 +1073,14 @@ const confirmDuplicateCreate = async () => {
     const payload = { ...dupPayload.value }
     if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
     await request.post('/api/work-orders', payload)
-    ElMessage.success('创建成功')
+    ElMessage.success(t('workOrderList.messages.createSuccess'))
     dupVisible.value = false
     createVisible.value = false
     await load()
   } catch (e) {
     console.error(e)
     const detail = e?.response?.data?.detail
-    ElMessage.error((typeof detail === 'string' && detail) || detail?.message || '创建失败')
+    ElMessage.error((typeof detail === 'string' && detail) || detail?.message || t('workOrderList.messages.createFailed'))
   } finally {
     creating.value = false
   }
@@ -1093,7 +1112,7 @@ const editSiteDisplay = computed(() => {
   return editSiteName.value || editSiteCode.value || (editForm.value?.site_id ?? '-')
 })
 const editTemplateDisplay = computed(() => {
-  if (editTemplateLoading.value) return '加载中...'
+  if (editTemplateLoading.value) return t('workOrderList.form.loading')
   return editTemplateName.value || '-'
 })
 
@@ -1122,7 +1141,7 @@ const loadEditTemplate = async (row) => {
     editTemplateName.value = tpl?.template_name || templateId
   } catch (e) {
     console.error(e)
-    editTemplateName.value = '加载失败'
+    editTemplateName.value = t('workOrderList.form.loadFailed')
   } finally {
     editTemplateLoading.value = false
   }
@@ -1157,12 +1176,12 @@ const submitUpdate = () => {
       delete payload.type
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
       await request.put(`/api/work-orders/${editForm.value.id}`, payload)
-      ElMessage.success('更新成功')
+      ElMessage.success(t('workOrderList.messages.updateSuccess'))
       editVisible.value = false
       await load()
     } catch (e) {
       console.error(e)
-      ElMessage.error(e?.response?.data?.detail || '更新失败')
+      ElMessage.error(e?.response?.data?.detail || t('workOrderList.messages.updateFailed'))
     } finally {
       updating.value = false
     }
@@ -1173,11 +1192,11 @@ const submitUpdate = () => {
 const confirmDelete = async (row) => {
   try {
     await ElMessageBox.confirm(
-      `确定要删除工单"${row.title}"吗？删除后无法恢复。`,
-      '确认删除',
+      t('workOrderList.prompts.deleteSingleMessage', { title: row.title }),
+      t('workOrderList.prompts.deleteSingleTitle'),
       {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t('workOrderList.actions.delete'),
+        cancelButtonText: t('common.cancel'),
         type: 'warning',
         confirmButtonClass: 'el-button--danger'
       }
@@ -1191,29 +1210,29 @@ const confirmDelete = async (row) => {
 const deleteWorkOrder = async (id) => {
   try {
     await request.delete(`/api/work-orders/${id}`)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('workOrderList.messages.deleteSuccess'))
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '删除失败')
+    ElMessage.error(e?.response?.data?.detail || t('workOrderList.messages.deleteFailed'))
   }
 }
 
 const promptVoidReason = async (title, message) => {
   const result = await ElMessageBox.prompt(
-    `${message}\n\n作废后工单与检查记录会保留，但会被冻结为只读。若仍有设备级 SN 绑定，系统会拒绝作废。请输入作废原因：`,
+    `${message}\n\n${t('workOrderList.prompts.voidReasonNote')}`,
     title,
     {
-      confirmButtonText: '确认作废',
-      cancelButtonText: '取消',
+      confirmButtonText: t('workOrderList.actions.voidConfirm'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
       inputType: 'textarea',
-      inputPlaceholder: '请填写至少 5 个字的作废原因',
+      inputPlaceholder: t('workOrderList.validation.voidReasonPlaceholder'),
       closeOnClickModal: false,
       inputValidator: (value) => {
         const text = String(value || '').trim()
-        if (text.length < 5) return '作废原因至少需要 5 个字符'
-        if (text.length > 200) return '作废原因不能超过 200 个字符'
+        if (text.length < 5) return t('workOrderList.validation.voidReasonMin')
+        if (text.length > 200) return t('workOrderList.validation.voidReasonMax')
         return true
       },
     }
@@ -1224,8 +1243,8 @@ const promptVoidReason = async (title, message) => {
 const confirmVoid = async (row) => {
   try {
     const reason = await promptVoidReason(
-      '确认作废工单',
-      `确定要作废工单“${row.title}”吗？`
+      t('workOrderList.prompts.voidSingleTitle'),
+      t('workOrderList.prompts.voidSingleMessage', { title: row.title })
     )
     await voidWorkOrder(row.id, reason)
   } catch (e) {
@@ -1236,21 +1255,75 @@ const confirmVoid = async (row) => {
 const voidWorkOrder = async (id, reason) => {
   try {
     await workOrderAPI.voidWorkOrder(id, reason)
-    ElMessage.success('工单已作废')
+    ElMessage.success(t('workOrderList.messages.voidSuccess'))
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '作废失败')
+    ElMessage.error(e?.response?.data?.detail || t('workOrderList.messages.voidFailed'))
   }
+}
+
+const buildProgressDots = (status, currentDot, isException) => {
+  return Array.from({ length: WORK_ORDER_PROGRESS_DOT_COUNT }, (_, index) => {
+    let state = 'pending'
+
+    if (isException) {
+      state = 'muted'
+    } else if (status === 'COMPLETED') {
+      state = index <= currentDot ? 'done' : 'pending'
+    } else if (status === 'REJECTED') {
+      if (index < currentDot) state = 'done'
+      else if (index === currentDot) state = 'rejected'
+    } else {
+      if (index < currentDot) state = 'done'
+      else if (index === currentDot) state = 'current'
+    }
+
+    return { index, state }
+  })
+}
+
+const buildWorkOrderProgress = (row) => {
+  const meta = WORK_ORDER_PROGRESS_META[row?.status] || WORK_ORDER_PROGRESS_META.PENDING
+  return {
+    ...meta,
+    fillWidth: `${meta.percent}%`,
+    dots: buildProgressDots(row?.status, meta.currentDot, meta.isException === true),
+  }
+}
+
+const progressStageKeys = (type) => (
+  ['opening_inspection', 'equipment_replacement'].includes(type)
+    ? OPENING_PROGRESS_STAGE_KEYS
+    : DEFAULT_PROGRESS_STAGE_KEYS
+)
+
+const progressStageKey = (type, index) => progressStageKeys(type)[index] || DEFAULT_PROGRESS_STAGE_KEYS[index] || 'completed'
+const progressStageTitle = (type, index) => t(`workOrderList.progress.stages.${progressStageKey(type, index)}.title`)
+const progressStageDescription = (type, index) => t(`workOrderList.progress.stages.${progressStageKey(type, index)}.desc`)
+
+const progressDotStateLabel = (state) => {
+  if (state === 'done') return t('workOrderList.progress.stateLabels.done')
+  if (state === 'current') return t('workOrderList.progress.stateLabels.current')
+  if (state === 'rejected') return t('workOrderList.progress.stateLabels.rejected')
+  if (state === 'muted') return t('workOrderList.progress.stateLabels.muted')
+  return t('workOrderList.progress.stateLabels.pending')
+}
+
+const progressDotTooltip = (row, dot) => {
+  const title = progressStageTitle(row?.type, dot.index)
+  const desc = progressStageDescription(row?.type, dot.index)
+  return `${progressDotStateLabel(dot.state)} · ${title}：${desc}`
 }
 
 const statusText = (status, type) => {
   if (type === 'opening_inspection' || type === 'equipment_replacement') {
-    if (status === 'APPROVED') return '待上线 (80%)'
-    if (status === 'ACTIVATED') return '已上线待激活 (90%)'
-    if (status === 'COMPLETED') return '已激活 (100%)'
+    if (status === 'APPROVED') return t('workOrderList.statusOverrides.APPROVED')
+    if (status === 'ACTIVATED') return t('workOrderList.statusOverrides.ACTIVATED')
+    if (status === 'COMPLETED') return t('workOrderList.statusOverrides.COMPLETED')
   }
-  return statuses.find(s => s.value === status)?.label || status
+  const translated = t(`workOrderList.statuses.${status}`)
+  return translated === `workOrderList.statuses.${status}` ? status : translated
 }
 const statusTagType = (status) => {
   if (status === 'VOIDED') return 'info'
@@ -1260,8 +1333,18 @@ const statusTagType = (status) => {
   if (status === 'ACTIVE') return 'primary'
   return ''
 }
-const typeText = (v) => (typeLabelMap[v] || v)
-const priorityText = (v) => ({ low: '低', normal: '普通', high: '高', urgent: '紧急' }[v] || v)
+const typeText = (v) => {
+  const translated = t(`workOrderList.types.${v}`)
+  return translated === `workOrderList.types.${v}` ? v : translated
+}
+const priorityText = (v) => {
+  const translated = t(`workOrderList.priorities.${v}`)
+  return translated === `workOrderList.priorities.${v}` ? v : translated
+}
+const replacementTargetLabel = (opt) => t('workOrderList.form.replacementTargetOption', {
+  sectorId: opt?.sectorId ?? '-',
+  band: opt?.band ?? '-',
+})
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
 
 // 批量操作相关函数
@@ -1276,8 +1359,8 @@ const clearSelection = () => {
 const confirmBatchVoid = async () => {
   try {
     const reason = await promptVoidReason(
-      '确认批量作废',
-      `确定要作废选中的 ${selectedWorkOrders.value.length} 个工单吗？`
+      t('workOrderList.prompts.voidBatchTitle'),
+      t('workOrderList.prompts.voidBatchMessage', { count: selectedWorkOrders.value.length })
     )
     await executeBatchVoid(reason)
   } catch (e) {
@@ -1288,11 +1371,11 @@ const confirmBatchVoid = async () => {
 const confirmBatchDelete = async () => {
   try {
     await ElMessageBox.confirm(
-      `确定要删除选中的 ${selectedWorkOrders.value.length} 个工单吗？\n\n注意：只能删除"待分配"或"已分配"状态的工单。`,
-      '确认批量删除',
+      `${t('workOrderList.prompts.deleteBatchMessage', { count: selectedWorkOrders.value.length })}\n\n${t('workOrderList.prompts.deleteBatchNote')}`,
+      t('workOrderList.prompts.deleteBatchTitle'),
       {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t('workOrderList.actions.delete'),
+        cancelButtonText: t('common.cancel'),
         type: 'warning'
       }
     )
@@ -1316,14 +1399,14 @@ const executeBatchDelete = async () => {
       showErrorDialog.value = true
     } else {
       // 全部成功
-      ElMessage.success(`成功删除 ${result.updated_count} 个工单`)
+      ElMessage.success(t('workOrderList.messages.batchDeleteSuccess', { count: result.updated_count }))
     }
     
     clearSelection()
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error('批量删除失败: ' + e.message)
+    ElMessage.error(`${t('workOrderList.messages.batchDeleteFailed')}: ${e.message}`)
   } finally {
     batchLoading.value = false
   }
@@ -1340,14 +1423,14 @@ const executeBatchVoid = async (reason) => {
     if (result.error_count > 0) {
       showErrorDialog.value = true
     } else {
-      ElMessage.success(`成功作废 ${result.updated_count} 个工单`)
+      ElMessage.success(t('workOrderList.messages.batchVoidSuccess', { count: result.updated_count }))
     }
 
     clearSelection()
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error('批量作废失败: ' + (e?.message || e))
+    ElMessage.error(`${t('workOrderList.messages.batchVoidFailed')}: ${e?.message || e}`)
   } finally {
     batchLoading.value = false
   }
@@ -1355,7 +1438,7 @@ const executeBatchVoid = async (reason) => {
 
 const executeBatchStatus = async () => {
   if (!batchStatusValue.value) {
-    ElMessage.warning('请选择新状态')
+    ElMessage.warning(t('workOrderList.validation.selectNewStatus'))
     return
   }
   
@@ -1372,7 +1455,7 @@ const executeBatchStatus = async () => {
       showErrorDialog.value = true
     } else {
       // 全部成功
-      ElMessage.success(`成功修改 ${result.updated_count} 个工单状态`)
+      ElMessage.success(t('workOrderList.messages.batchStatusSuccess', { count: result.updated_count }))
     }
     
     showBatchStatusDialog.value = false
@@ -1381,7 +1464,7 @@ const executeBatchStatus = async () => {
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error('批量修改状态失败: ' + e.message)
+    ElMessage.error(`${t('workOrderList.messages.batchStatusFailed')}: ${e.message}`)
   } finally {
     batchLoading.value = false
   }
@@ -1389,17 +1472,17 @@ const executeBatchStatus = async () => {
 
 const executeBatchAssign = async () => {
   if (!batchAssignValue.value) {
-    ElMessage.warning('请选择分配人员')
+    ElMessage.warning(t('workOrderList.validation.selectAssigneeForBatch'))
     return
   }
   
   try {
     await ElMessageBox.confirm(
-      `确定要重新分配选中的 ${selectedWorkOrders.value.length} 个工单吗？\n\n注意：只能重新分配"待分配"或"已分配"状态的工单。`,
-      '确认批量重新分配',
+      `${t('workOrderList.prompts.assignBatchMessage', { count: selectedWorkOrders.value.length })}\n\n${t('workOrderList.prompts.assignBatchNote')}`,
+      t('workOrderList.prompts.assignBatchTitle'),
       {
-        confirmButtonText: '确认',
-        cancelButtonText: '取消',
+        confirmButtonText: t('workOrderList.actions.confirm'),
+        cancelButtonText: t('common.cancel'),
         type: 'warning'
       }
     )
@@ -1416,7 +1499,7 @@ const executeBatchAssign = async () => {
       showErrorDialog.value = true
     } else {
       // 全部成功
-      ElMessage.success(`成功重新分配 ${result.updated_count} 个工单`)
+      ElMessage.success(t('workOrderList.messages.batchAssignSuccess', { count: result.updated_count }))
     }
     
     showBatchAssignDialog.value = false
@@ -1426,7 +1509,7 @@ const executeBatchAssign = async () => {
   } catch (e) {
     if (e !== 'cancel') {
       console.error(e)
-      ElMessage.error('批量重新分配失败: ' + (e.message || e))
+      ElMessage.error(`${t('workOrderList.messages.batchAssignFailed')}: ${e.message || e}`)
     }
   } finally {
     batchLoading.value = false
@@ -1435,7 +1518,7 @@ const executeBatchAssign = async () => {
 
 const executeBatchPriority = async () => {
   if (!batchPriorityValue.value) {
-    ElMessage.warning('请选择优先级')
+    ElMessage.warning(t('workOrderList.validation.selectPriorityForBatch'))
     return
   }
   
@@ -1452,7 +1535,7 @@ const executeBatchPriority = async () => {
       showErrorDialog.value = true
     } else {
       // 全部成功
-      ElMessage.success(`成功修改 ${result.updated_count} 个工单优先级`)
+      ElMessage.success(t('workOrderList.messages.batchPrioritySuccess', { count: result.updated_count }))
     }
     
     showBatchPriorityDialog.value = false
@@ -1461,7 +1544,7 @@ const executeBatchPriority = async () => {
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error('批量修改优先级失败: ' + e.message)
+    ElMessage.error(`${t('workOrderList.messages.batchPriorityFailed')}: ${e.message}`)
   } finally {
     batchLoading.value = false
   }
@@ -1543,6 +1626,131 @@ onBeforeUnmount(() => {
 .similar-warning-icon {
   color: #f56c6c;
   font-size: 15px;
+}
+
+.status-progress-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-progress-value {
+  flex-shrink: 0;
+  min-width: 38px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: right;
+  color: #909399;
+}
+
+.status-progress-value.is-primary { color: #409eff; }
+.status-progress-value.is-warning { color: #e6a23c; }
+.status-progress-value.is-success { color: #67c23a; }
+.status-progress-value.is-danger { color: #f56c6c; }
+.status-progress-value.is-muted { color: #c0c4cc; }
+
+.status-progress-track {
+  position: relative;
+  height: 14px;
+}
+
+.status-progress-rail {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  right: 4px;
+  height: 4px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: #ebeef5;
+  overflow: hidden;
+}
+
+.status-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.status-progress-dots {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.status-progress-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #dcdfe6;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.status-progress-dot.is-done {
+  background: currentColor;
+  border-color: currentColor;
+}
+
+.status-progress-dot.is-current {
+  background: #fff;
+  border-color: currentColor;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+.status-progress-dot.is-rejected {
+  background: #fff2f0;
+  border-color: #f56c6c;
+}
+
+.status-progress-dot.is-muted {
+  background: #f5f7fa;
+  border-color: #dcdfe6;
+}
+
+.status-progress-track.is-primary,
+.status-progress-dot.is-primary { color: #409eff; }
+
+.status-progress-track.is-warning,
+.status-progress-dot.is-warning { color: #e6a23c; }
+
+.status-progress-track.is-success,
+.status-progress-dot.is-success { color: #67c23a; }
+
+.status-progress-track.is-danger,
+.status-progress-dot.is-danger { color: #f56c6c; }
+
+.status-progress-track.is-pending,
+.status-progress-dot.is-pending { color: #909399; }
+
+.status-progress-track.is-muted,
+.status-progress-dot.is-muted { color: #c0c4cc; }
+
+.status-progress-track.is-primary .status-progress-fill { background: #409eff; }
+.status-progress-track.is-warning .status-progress-fill { background: linear-gradient(90deg, #f5c260 0%, #e6a23c 100%); }
+.status-progress-track.is-success .status-progress-fill { background: linear-gradient(90deg, #85ce61 0%, #67c23a 100%); }
+.status-progress-track.is-danger .status-progress-fill { background: linear-gradient(90deg, #f89898 0%, #f56c6c 100%); }
+.status-progress-track.is-pending .status-progress-fill { background: #909399; }
+.status-progress-track.is-muted .status-progress-fill { background: #c0c4cc; }
+
+.status-progress-track.is-exception .status-progress-rail {
+  background: repeating-linear-gradient(
+    135deg,
+    #f4f4f5 0,
+    #f4f4f5 6px,
+    #ebeef5 6px,
+    #ebeef5 12px
+  );
 }
 
 .batch-operations {
