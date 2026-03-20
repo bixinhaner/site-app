@@ -41,7 +41,7 @@
 			:class="{ 'template-sync-banner--info': inspectionData?.template_sync?.has_pending_update && !inspectionData?.template_sync?.just_applied }"
 		>
 			<text class="template-sync-banner__title">
-				{{ inspectionData?.template_sync?.just_applied ? '检查模板已更新' : '模板同步提示' }}
+				{{ inspectionData?.template_sync?.just_applied ? $t('inspection.templateSyncAppliedTitle') : $t('inspection.templateSyncHintTitle') }}
 			</text>
 			<text class="template-sync-banner__text">{{ inspectionData?.template_sync?.message }}</text>
 		</view>
@@ -1895,8 +1895,62 @@
 			)
 		}
 
+		const normalizePhotoErrorReason = (reasonText = '') => {
+			const text = String(reasonText || '').trim()
+			if (!text) return ''
+
+			const lowerText = text.toLowerCase()
+			if (
+				text.includes('图片疑似未完整渲染') ||
+				text.includes('Canvas渲染疑似不完整') ||
+				text.includes('底部区域空白') ||
+				lowerText.includes('blank bottom area')
+			) {
+				return t('messages.photoReasonIncompleteRenderBottomBlank')
+			}
+			if (
+				text.includes('Canvas输出疑似纯白图') ||
+				text.includes('纯白图') ||
+				text.includes('图片疑似纯白或损坏') ||
+				lowerText.includes('pure white')
+			) {
+				return t('messages.photoReasonSuspiciousWhiteImage')
+			}
+			if (
+				text.includes('图片内容异常') ||
+				lowerText.includes('invalid image')
+			) {
+				return t('messages.photoReasonInvalidImageContent')
+			}
+			if (
+				text.includes('图片文件无法读取') ||
+				lowerText.includes('unreadable')
+			) {
+				return t('messages.photoReasonFileUnreadable')
+			}
+			if (
+				text.includes('图片路径为空') ||
+				lowerText.includes('image path is empty')
+			) {
+				return t('messages.photoReasonPathEmpty')
+			}
+			if (
+				text.includes('图片文件不存在') ||
+				lowerText.includes('file does not exist')
+			) {
+				return t('messages.photoReasonFileMissing')
+			}
+			if (
+				text.includes('图片解码失败') ||
+				lowerText.includes('decode failed')
+			) {
+				return t('messages.photoReasonDecodeFailed')
+			}
+			return text
+		}
+
 		const showPhotoAbnormalBlockedModal = async (reasonText = '') => {
-			const reason = String(reasonText || '').trim()
+			const reason = normalizePhotoErrorReason(reasonText)
 			const content = reason
 				? $t('messages.photoSuspiciousWhiteBlockedWithReason', { reason })
 				: $t('messages.photoSuspiciousWhiteBlocked')
@@ -1932,7 +1986,7 @@
 			if (!precheckRes.success) {
 				return {
 					success: false,
-					error: precheckRes.error || $t('messages.photoPrecheckFailed'),
+					error: normalizePhotoErrorReason(precheckRes.error) || $t('messages.photoPrecheckFailed'),
 					detail: precheckRes.detail
 				}
 			}
@@ -1968,7 +2022,7 @@
 		const takePhotoForField = async (dataField) => {
 			if (dataField?.allow_photo !== true) {
 				uni.showToast({
-					title: '该字段禁止拍照',
+					title: $t('inspection.fieldPhotoDisabled'),
 					icon: 'none',
 					duration: 2500
 				})
@@ -1978,7 +2032,7 @@
 			const fid = dataField?.field_id
 			if (fid === undefined || fid === null || String(fid).trim() === '') {
 				uni.showToast({
-					title: '该字段缺少字段ID，无法关联照片',
+					title: $t('inspection.photoFieldIdMissing'),
 				icon: 'none',
 				duration: 2500
 			})
@@ -2073,7 +2127,7 @@
 										if (!precheckResult.success) {
 											uni.showToast({
 												title: $t('messages.photoUploadFailedWithReason', {
-													reason: precheckResult.error || $t('messages.photoPrecheckFailed')
+													reason: normalizePhotoErrorReason(precheckResult.error) || $t('messages.photoPrecheckFailed')
 												}),
 												icon: 'none',
 												duration: 3200
@@ -3821,7 +3875,7 @@
 									originalContentHash: photo.original_content_hash
 								})
 								if (!refreshPrecheckResult.success) {
-									throw new Error(refreshPrecheckResult.error || $t('messages.photoPrecheckFailed'))
+									throw new Error(normalizePhotoErrorReason(refreshPrecheckResult.error) || $t('messages.photoPrecheckFailed'))
 								}
 								if (refreshPrecheckResult.shouldBlock) {
 									uni.hideLoading()
@@ -3875,10 +3929,10 @@
 								// 字段级照片：仅在“字段拍照模式”下才允许传 field_id（且必须属于 allow_photo=true 的字段）
 								if (fieldPhotoMode) {
 									if (!photoFieldId) {
-										throw new Error('字段照片缺少field_id，无法上传')
+										throw new Error($t('inspection.photoUploadFieldIdMissing'))
 									}
 									if (!allowedPhotoFieldIdSet.has(photoFieldId)) {
-										throw new Error('field_id无效或该字段禁止拍照')
+										throw new Error($t('inspection.photoUploadFieldNotAllowed'))
 									}
 									photoData.field_id = photoFieldId
 								}
@@ -3943,7 +3997,7 @@
 							console.log('照片上传结果:', uploadResult)
 							
 								if (!uploadResult.success) {
-									throw new Error(uploadResult.error || $t('inspection.photoUploadFailed'))
+									throw new Error(normalizePhotoErrorReason(uploadResult.error) || $t('inspection.photoUploadFailed'))
 								}
 
 								const uploadRiskCandidates = []
@@ -4012,7 +4066,9 @@
 							return
 						}
 						uni.showToast({
-							title: $t('messages.photoUploadFailedWithReason', { reason: photoError.message }),
+							title: $t('messages.photoUploadFailedWithReason', {
+								reason: normalizePhotoErrorReason(photoError.message) || $t('messages.photoUploadFailed')
+							}),
 							icon: 'error',
 							duration: 3000
 						})
