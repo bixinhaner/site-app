@@ -152,6 +152,23 @@
 				</button>
 			</template>
 		</view>
+		<ReasonInputDialog
+			:visible="abandonDialogVisible"
+			v-model="abandonReason"
+			:title="$t('stock.materialRequestAbandonDialogTitle')"
+			:message="$t('stock.materialRequestAbandonConfirm')"
+			:label="$t('stock.materialRequestAbandonReasonLabel')"
+			:placeholder="$t('stock.materialRequestAbandonReasonPlaceholder')"
+			:helper-text="$t('stock.materialRequestAbandonReasonHelper')"
+			:error-text="abandonError"
+			:confirm-text="$t('stock.materialRequestAbandonSubmit')"
+			:cancel-text="$t('common.cancel')"
+			:submitting-text="$t('common.loading')"
+			:submitting="abandonSubmitting"
+			:maxlength="200"
+			@close="closeAbandonDialog"
+			@confirm="submitAbandonRequest"
+		/>
 	</view>
 </template>
 
@@ -163,7 +180,9 @@
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
+	import ReasonInputDialog from '@/components/ReasonInputDialog.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
+	import { reportMobileLog } from '@/utils/mobileLogReporter.js'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
@@ -174,6 +193,10 @@
 	const loading = ref(false)
 	const refreshing = ref(false)
 	const acting = ref(false)
+	const abandonDialogVisible = ref(false)
+	const abandonReason = ref('')
+	const abandonError = ref('')
+	const abandonSubmitting = ref(false)
 
 	const extractErrorMessage = (data, fallback = '') => {
 		const detail = data?.detail
@@ -225,14 +248,25 @@
 		const items = request.value?.items || []
 		return items.reduce((s, it) => s + Number(it.issued_qty || 0), 0)
 	})
+	const currentUserId = computed(() => Number(userStore.userInfo?.id || 0) || 0)
+	const isRequester = computed(() => {
+		return currentUserId.value > 0 && Number(request.value?.requester_id || 0) === currentUserId.value
+	})
+	const hasWarehouseAccess = computed(() => {
+		if (userStore.hasGlobalInventoryAccess) return true
+		const warehouseId = Number(request.value?.warehouse_id || 0)
+		if (!warehouseId) return false
+		const managedIds = Array.isArray(userStore.managedWarehouseIds) ? userStore.managedWarehouseIds : []
+		return managedIds.includes(warehouseId)
+	})
 
 	const canStartPick = computed(() => {
 		const s = String(request.value?.status || '')
-		return (s === 'approved' || s === 'partially_approved') && remainingTotal.value > 0
+		return (s === 'approved' || s === 'partially_approved') && remainingTotal.value > 0 && isRequester.value
 	})
 	const canAbandon = computed(() => {
 		const s = String(request.value?.status || '')
-		return (s === 'approved' || s === 'partially_approved') && issuedTotal.value <= 0
+		return (s === 'approved' || s === 'partially_approved') && issuedTotal.value <= 0 && (isRequester.value || hasWarehouseAccess.value)
 	})
 
 	const stepActive = computed(() => {
@@ -247,6 +281,9 @@
 
 	const tipText = computed(() => {
 		const s = String(request.value?.status || '')
+		if ((s === 'approved' || s === 'partially_approved') && remainingTotal.value > 0 && !isRequester.value) {
+			return $t('stock.materialRequestStartPickRequesterOnly')
+		}
 		if (s === 'submitted') return $t('stock.materialRequestTipSubmitted')
 		if (s === 'approved' || s === 'partially_approved') return $t('stock.materialRequestTipApproved')
 		if (s === 'abandoned') return $t('stock.materialRequestTipAbandoned')
@@ -299,6 +336,26 @@
 
 	const goEdit = () => {
 		uni.navigateTo({ url: `/pages/stock/material-requests/create?id=${id.value}` })
+	}
+
+	const logAbandonEvent = (message, level = 'INFO', extra = {}) => {
+		reportMobileLog({
+			level,
+			tag: 'material_request_abandon',
+			message,
+			context: {
+				request_id: request.value?.id || id.value || '',
+				request_no: request.value?.request_no || '',
+				request_status: request.value?.status || '',
+				warehouse_id: request.value?.warehouse_id || null,
+				requester_id: request.value?.requester_id || null,
+				current_user_id: currentUserId.value || null,
+				is_requester: isRequester.value,
+				has_warehouse_access: hasWarehouseAccess.value,
+				reason_length: String(abandonReason.value || '').trim().length,
+				...extra,
+			},
+		})
 	}
 
 	const submitDraft = async () => {
@@ -373,44 +430,70 @@
 	const abandonRequest = async () => {
 		if (!request.value) return
 		if (!canAbandon.value) return
-		uni.showModal({
-			title: $t('common.confirm'),
-			content: $t('stock.materialRequestAbandonConfirm'),
-			editable: true,
-			placeholderText: $t('stock.materialRequestAbandonReasonPlaceholder'),
-			success: async (r) => {
-				if (!r.confirm) return
-				const reason = String(r.content || '').trim()
-				if (!reason) {
-					uni.showToast({ title: $t('stock.materialRequestAbandonReasonRequired'), icon: 'none' })
-					return
-				}
-				acting.value = true
-				try {
-					const res = await uni.request({
-						url: buildApiUrl(API_ENDPOINTS.STOCK.MATERIAL_REQUEST_ABANDON(id.value)),
-						method: 'POST',
-						header: getAuthHeaders(userStore.token),
-						data: { reason },
-					})
-					if (res.statusCode === 200) {
-						uni.showToast({ title: $t('stock.materialRequestAbandoned'), icon: 'success' })
-						await load()
-						return
-					}
-					if (res.statusCode === 401) {
-						userStore.logout()
-						return
-					}
-					uni.showToast({ title: extractErrorMessage(res.data), icon: 'none' })
-				} catch (e) {
-					console.error('放弃领货失败:', e)
-					uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
-				} finally {
-					acting.value = false
-				}
+		abandonReason.value = ''
+		abandonError.value = ''
+		abandonDialogVisible.value = true
+		logAbandonEvent('open_dialog')
+	}
+
+	const closeAbandonDialog = () => {
+		if (abandonSubmitting.value) return
+		abandonDialogVisible.value = false
+		abandonReason.value = ''
+		abandonError.value = ''
+	}
+
+	const submitAbandonRequest = async () => {
+		if (!request.value || abandonSubmitting.value) return
+		const reason = String(abandonReason.value || '').trim()
+		if (!reason) {
+			abandonError.value = $t('stock.materialRequestAbandonReasonRequired')
+			logAbandonEvent('validate_failed', 'WARN', { error: abandonError.value })
+			return
+		}
+
+		abandonError.value = ''
+		abandonSubmitting.value = true
+		acting.value = true
+		logAbandonEvent('submit_start')
+		try {
+			const res = await uni.request({
+				url: buildApiUrl(API_ENDPOINTS.STOCK.MATERIAL_REQUEST_ABANDON(id.value)),
+				method: 'POST',
+				header: getAuthHeaders(userStore.token),
+				data: { reason },
+			})
+			if (res.statusCode === 200) {
+				logAbandonEvent('submit_success')
+				abandonDialogVisible.value = false
+				abandonReason.value = ''
+				abandonError.value = ''
+				uni.showToast({ title: $t('stock.materialRequestAbandoned'), icon: 'success' })
+				await load()
+				return
 			}
-		})
+			if (res.statusCode === 401) {
+				userStore.logout()
+				return
+			}
+			abandonError.value = extractErrorMessage(res.data)
+			logAbandonEvent('submit_failed', 'WARN', {
+				error: abandonError.value,
+				response_status: res.statusCode,
+			})
+			uni.showToast({ title: abandonError.value, icon: 'none' })
+		} catch (e) {
+			console.error('放弃领货失败:', e)
+			abandonError.value = $t('messages.networkError')
+			logAbandonEvent('submit_failed', 'ERROR', {
+				error: abandonError.value,
+				exception: String(e?.message || e || ''),
+			})
+			uni.showToast({ title: abandonError.value, icon: 'none' })
+		} finally {
+			abandonSubmitting.value = false
+			acting.value = false
+		}
 	}
 
 	const startPick = async () => {

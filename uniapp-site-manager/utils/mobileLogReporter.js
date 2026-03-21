@@ -374,6 +374,33 @@ export const flush = async () => {
   }
 }
 
+export const reportMobileLog = (payload = {}) => {
+  if (!state.enabled) return false
+
+  const level = normalizeLevel(payload.level)
+  const message = String(payload.message || '').trim() || 'mobile_log_event'
+
+  enqueue({
+    ts: payload.ts || new Date().toISOString(),
+    level,
+    tag: String(payload.tag || 'custom').slice(0, 100),
+    message,
+    route: payload.route || getCurrentRoute(),
+    api_url: payload.api_url || null,
+    api_method: payload.api_method || null,
+    api_status: payload.api_status ?? null,
+    duration_ms: payload.duration_ms ?? null,
+    error_msg: payload.error_msg || null,
+    context: payload.context || null,
+    ...getCommonFields(),
+  })
+
+  if (level === 'ERROR') {
+    flush().catch(() => {})
+  }
+  return true
+}
+
 export const startMobileLogReporter = async (opts = {}) => {
   state.flushIntervalMs = typeof opts.flushIntervalMs === 'number' ? opts.flushIntervalMs : state.flushIntervalMs
   state.batchSize = typeof opts.batchSize === 'number' ? opts.batchSize : state.batchSize
