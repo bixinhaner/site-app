@@ -8,6 +8,7 @@ from app.models.equipment_binding_history import BindingActionEnum, EquipmentBin
 from app.models.inspection import SiteInspection
 from app.models.omc_state import OmcDeviceState
 from app.models.site import Site
+from app.models.site_business import SiteMilestoneRecord
 from app.models.site_progress import SiteProgressEvent, SiteProgressSnapshot
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.services.omc_state import summarize_site_binding_slots
@@ -18,7 +19,7 @@ from app.services.site_progress_metric_service import (
 )
 
 
-CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION = 3
+CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION = 4
 
 MILESTONE_FIELD_MAP = {
     "install_started": "install_started_at",
@@ -26,6 +27,8 @@ MILESTONE_FIELD_MAP = {
     "online": "online_at",
     "activated": "activated_at",
     "ssv": "ssv_at",
+    "customer_approved": "customer_approved_at",
+    "pac": "pac_at",
 }
 
 DEVICE_FACT_MILESTONE_FIELD_MAP = {
@@ -34,6 +37,8 @@ DEVICE_FACT_MILESTONE_FIELD_MAP = {
     "online": "online_at_device_fact",
     "activated": "activated_at_device_fact",
     "ssv": "ssv_at",
+    "customer_approved": "customer_approved_at",
+    "pac": "pac_at",
 }
 
 
@@ -173,6 +178,25 @@ def _get_device_fact_milestone_fact(
     )
 
 
+def _get_manual_milestone_fact(db: Session, site_id: int, milestone_code: str) -> MilestoneFact:
+    row = (
+        db.query(SiteMilestoneRecord)
+        .filter(
+            SiteMilestoneRecord.site_id == site_id,
+            SiteMilestoneRecord.milestone_code == milestone_code,
+        )
+        .order_by(SiteMilestoneRecord.approved_at.desc(), SiteMilestoneRecord.updated_at.desc())
+        .first()
+    )
+    if row is None:
+        return MilestoneFact()
+    return MilestoneFact(
+        effective_at=row.approved_at,
+        source_type="site_milestone_record",
+        source_id=str(row.id),
+    )
+
+
 def calculate_site_progress_facts(db: Session, site_id: int) -> Dict[str, MilestoneFact]:
     return {
         "install_started": _get_first_binding_fact(db, site_id),
@@ -200,6 +224,8 @@ def calculate_site_progress_facts(db: Session, site_id: int) -> Dict[str, Milest
             work_order_type=WorkOrderTypeEnum.SSV,
             datetime_field="completed_at",
         ),
+        "customer_approved": _get_manual_milestone_fact(db, site_id, "customer_approved"),
+        "pac": _get_manual_milestone_fact(db, site_id, "pac"),
     }
 
 
@@ -217,6 +243,8 @@ def calculate_site_progress_device_fact_facts(db: Session, site_id: int) -> Dict
             datetime_field="first_activated_at",
             milestone_code="activated_device_fact",
         ),
+        "customer_approved": _get_manual_milestone_fact(db, site_id, "customer_approved"),
+        "pac": _get_manual_milestone_fact(db, site_id, "pac"),
     }
 
 
@@ -247,6 +275,8 @@ def _build_snapshot_values(
         "online_at_device_fact": device_fact_facts["online"].effective_at,
         "activated_at_device_fact": device_fact_facts["activated"].effective_at,
         "ssv_at": workflow_facts["ssv"].effective_at,
+        "customer_approved_at": workflow_facts["customer_approved"].effective_at,
+        "pac_at": workflow_facts["pac"].effective_at,
         "current_opening_stage": _derive_current_opening_stage(site, workflow_facts),
         "snapshot_version": CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION,
     }

@@ -12,6 +12,8 @@ def ensure_site_progress_schema(engine: Engine) -> None:
         "site_progress_snapshots": {
             "online_at_device_fact": "online_at_device_fact DATETIME",
             "activated_at_device_fact": "activated_at_device_fact DATETIME",
+            "customer_approved_at": "customer_approved_at DATETIME",
+            "pac_at": "pac_at DATETIME",
             "snapshot_version": "snapshot_version INTEGER DEFAULT 1",
         },
     }

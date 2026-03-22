@@ -18,6 +18,8 @@ class SiteProgressSnapshot(Base):
     online_at_device_fact = Column(DateTime)
     activated_at_device_fact = Column(DateTime)
     ssv_at = Column(DateTime)
+    customer_approved_at = Column(DateTime)
+    pac_at = Column(DateTime)
     current_opening_stage = Column(String(50), default="survey_pending", nullable=False)
     snapshot_version = Column(Integer, default=1, server_default="1", nullable=False)
     last_rebuilt_at = Column(DateTime, server_default=func.now(), nullable=False)
