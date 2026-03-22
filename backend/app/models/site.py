@@ -36,6 +36,7 @@ class Site(Base):
     description = Column(Text)
     contact_person = Column(String(50))
     contact_phone = Column(String(20))
+    contract_amount = Column(Float)
     assigned_to = Column(Integer, ForeignKey("users.id"))
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())

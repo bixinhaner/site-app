@@ -138,7 +138,7 @@
         <div class="milestone-header">
           <span class="milestone-title">{{ t('siteDetail.milestones.title') }}</span>
           <el-tag size="small" :type="milestoneReachedCount ? 'success' : 'info'">
-            {{ t('siteDetail.milestones.reachedCount', { count: milestoneReachedCount }) }}
+            {{ t('siteDetail.milestones.reachedCount', { count: milestoneReachedCount, total: milestoneItems.length }) }}
           </el-tag>
         </div>
         <div class="milestone-subtitle">{{ t('siteDetail.milestones.subtitle') }}</div>
@@ -158,9 +158,82 @@
             </div>
             <div class="milestone-desc">{{ item.desc }}</div>
             <div class="milestone-time">{{ item.time ? formatDate(item.time) : t('siteDetail.milestones.pending') }}</div>
+            <template v-if="isManualMilestone(item.key)">
+              <div v-if="getMilestoneRecord(item.key)?.operator_name" class="milestone-meta">
+                {{ t('siteDetail.milestones.operator') }}：{{ getMilestoneRecord(item.key)?.operator_name }}
+              </div>
+              <div v-if="getMilestoneRecord(item.key)?.remark" class="milestone-meta">
+                {{ t('siteDetail.milestones.remark') }}：{{ getMilestoneRecord(item.key)?.remark }}
+              </div>
+              <div v-if="getMilestoneRecord(item.key)?.files?.length" class="milestone-files">
+                <el-link
+                  v-for="file in getMilestoneRecord(item.key)?.files"
+                  :key="`${item.key}_${file.file_url}`"
+                  :href="file.file_url"
+                  target="_blank"
+                  type="primary"
+                  class="milestone-file-link"
+                >
+                  {{ file.file_name }}
+                </el-link>
+              </div>
+              <div v-if="canManageSite" class="milestone-action-row">
+                <el-button size="small" type="primary" plain @click="openMilestoneApproveDialog(item.key)">
+                  {{ item.time ? t('siteDetail.milestones.replaceProof') : t('siteDetail.milestones.approveWithProof') }}
+                </el-button>
+              </div>
+            </template>
           </div>
         </div>
       </div>
+    </el-card>
+
+    <el-card class="mt16" v-loading="paymentLoading">
+      <template #header>
+        <div class="card-header">
+          <span>{{ t('siteDetail.payment.title') }}</span>
+          <div class="payment-summary">
+            <span>{{ t('siteDetail.payment.contractAmount') }}：{{ formatMoney(site?.contract_amount, paymentData.currency) }}</span>
+            <span>{{ t('siteDetail.payment.openingWorkOrder') }}：{{ paymentOpeningStatusText }}</span>
+          </div>
+        </div>
+      </template>
+      <el-alert
+        v-if="paymentNeedsContractAmount"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="mb16"
+        :title="t('siteDetail.payment.contractAmountMissing')"
+      />
+      <el-empty v-if="!paymentData.items.length" :description="t('siteDetail.payment.empty')" />
+      <el-table v-else :data="paymentData.items" stripe>
+        <el-table-column :label="t('siteDetail.payment.columns.rule')" min-width="180">
+          <template #default="{ row }">
+            <div class="payment-rule-name">{{ row.rule_name }}</div>
+            <div class="payment-rule-subtitle">{{ row.milestone_label }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('siteDetail.payment.columns.amount')" width="220">
+          <template #default="{ row }">
+            <div>{{ formatPaymentAmount(row) }}</div>
+            <div class="payment-muted">{{ formatPaymentAmountValue(row) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('siteDetail.payment.columns.status')" width="180">
+          <template #default="{ row }">
+            <el-tag :type="getPaymentStatusTagType(row.status)">{{ getPaymentStatusText(row.status) }}</el-tag>
+            <div v-if="row.warning_count > 0" class="payment-muted">
+              {{ t('siteDetail.payment.warningCount', { count: row.warning_count }) }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('siteDetail.payment.columns.conditions')" min-width="300">
+          <template #default="{ row }">
+            {{ (row.reasons || []).join('；') || placeholderText }}
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <el-dialog
@@ -224,6 +297,16 @@
             <el-input v-model="editForm.contact_phone" :placeholder="t('siteDetail.editDialog.contactPhone')" />
           </div>
         </el-form-item>
+        <el-form-item :label="t('siteDetail.editDialog.contractAmount')">
+          <el-input-number
+            v-model="editForm.contract_amount"
+            :min="0"
+            :precision="2"
+            :step="100"
+            :controls="false"
+            style="width: 100%"
+          />
+        </el-form-item>
         <el-form-item :label="t('siteDetail.editDialog.remark')">
           <el-input v-model="editForm.description" type="textarea" :rows="3" />
         </el-form-item>
@@ -263,6 +346,40 @@
           @click="submitDelete"
         >
           {{ t('siteDetail.deleteDialog.confirmDelete') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="milestoneApproveVisible"
+      :title="t('siteDetail.milestones.dialogTitle')"
+      width="640px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="120px">
+        <el-form-item :label="t('siteDetail.milestones.dialogNode')">
+          <el-input :model-value="milestoneLabelMap[milestoneApproveForm.milestone_code] || milestoneApproveForm.milestone_code" disabled />
+        </el-form-item>
+        <el-form-item :label="t('siteDetail.milestones.remark')">
+          <el-input v-model="milestoneApproveForm.remark" type="textarea" :rows="3" :placeholder="t('siteDetail.milestones.dialogRemarkPlaceholder')" />
+        </el-form-item>
+        <el-form-item :label="t('siteDetail.milestones.dialogFiles')" required>
+          <el-upload
+            v-model:file-list="milestoneUploadFileList"
+            drag
+            multiple
+            :auto-upload="false"
+            :limit="20"
+          >
+            <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+            <div class="el-upload__text">{{ t('siteDetail.milestones.dialogUploadText') }}</div>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="milestoneApproveVisible = false">{{ t('siteDetail.common.cancel') }}</el-button>
+        <el-button type="primary" :loading="milestoneApproveSubmitting" @click="submitMilestoneApproval">
+          {{ t('siteDetail.milestones.dialogConfirm') }}
         </el-button>
       </template>
     </el-dialog>
@@ -510,11 +627,19 @@ const editForm = ref({
   contact_person: '',
   contact_phone: '',
   description: '',
+  contract_amount: null,
 })
 
 const deleteVisible = ref(false)
 const deleteSubmitting = ref(false)
 const deleteConfirmCode = ref('')
+const milestoneApproveVisible = ref(false)
+const milestoneApproveSubmitting = ref(false)
+const milestoneApproveForm = ref({
+  milestone_code: '',
+  remark: '',
+})
+const milestoneUploadFileList = ref([])
 
 // 工单相关
 const workOrdersLoading = ref(false)
@@ -533,7 +658,25 @@ const milestoneData = ref({
   online_at: null,
   activated_at: null,
   ssv_at: null,
+  customer_approved_at: null,
+  pac_at: null,
 })
+const manualMilestoneRecords = ref({
+  customer_approved: null,
+  pac: null,
+})
+const paymentLoading = ref(false)
+const paymentData = ref({
+  contract_amount: null,
+  currency: 'USD',
+  opening_work_order: {},
+  items: [],
+})
+const manualMilestoneKeys = ['customer_approved', 'pac']
+const milestoneLabelMap = computed(() => ({
+  customer_approved: t('siteDetail.milestones.customerApproved.label'),
+  pac: t('siteDetail.milestones.pac.label'),
+}))
 
 const formatRegion = (record) => {
   if (!record) return placeholderText.value
@@ -579,6 +722,20 @@ const milestoneItems = computed(() => [
     time: milestoneData.value.ssv_at,
     color: '#8b5cf6',
   },
+  {
+    key: 'customer_approved',
+    label: t('siteDetail.milestones.customerApproved.label'),
+    desc: t('siteDetail.milestones.customerApproved.desc'),
+    time: milestoneData.value.customer_approved_at,
+    color: '#0f766e',
+  },
+  {
+    key: 'pac',
+    label: t('siteDetail.milestones.pac.label'),
+    desc: t('siteDetail.milestones.pac.desc'),
+    time: milestoneData.value.pac_at,
+    color: '#b45309',
+  },
 ])
 
 const milestoneReachedCount = computed(() => milestoneItems.value.filter((item) => !!item.time).length)
@@ -592,6 +749,12 @@ const loadMilestones = async () => {
       online_at: res?.online_at || null,
       activated_at: res?.activated_at || null,
       ssv_at: res?.ssv_at || null,
+      customer_approved_at: res?.customer_approved_at || null,
+      pac_at: res?.pac_at || null,
+    }
+    manualMilestoneRecords.value = {
+      customer_approved: res?.manual_records?.customer_approved || null,
+      pac: res?.manual_records?.pac || null,
     }
   } catch (e) {
     console.error(e)
@@ -601,7 +764,36 @@ const loadMilestones = async () => {
       online_at: null,
       activated_at: null,
       ssv_at: null,
+      customer_approved_at: null,
+      pac_at: null,
     }
+    manualMilestoneRecords.value = {
+      customer_approved: null,
+      pac: null,
+    }
+  }
+}
+
+const loadPaymentRecords = async () => {
+  try {
+    paymentLoading.value = true
+    const res = await request.get(`/api/sites/${route.params.id}/payment-records`)
+    paymentData.value = {
+      contract_amount: res?.contract_amount ?? null,
+      currency: res?.currency || 'USD',
+      opening_work_order: res?.opening_work_order || {},
+      items: Array.isArray(res?.items) ? res.items : [],
+    }
+  } catch (e) {
+    console.error(e)
+    paymentData.value = {
+      contract_amount: null,
+      currency: 'USD',
+      opening_work_order: {},
+      items: [],
+    }
+  } finally {
+    paymentLoading.value = false
   }
 }
 
@@ -611,6 +803,7 @@ const load = async () => {
     const res = await request.get(`/api/sites/${route.params.id}`)
     site.value = res
     await loadMilestones()
+    await loadPaymentRecords()
     if (canManageSite.value) {
       await loadDeleteCheck()
     }
@@ -732,6 +925,7 @@ const openEdit = () => {
     contact_person: site.value.contact_person || '',
     contact_phone: site.value.contact_phone || '',
     description: site.value.description || '',
+    contract_amount: site.value.contract_amount ?? null,
   }
   editVisible.value = true
 }
@@ -757,6 +951,7 @@ const submitEdit = async () => {
       contact_person: editForm.value.contact_person?.trim() || null,
       contact_phone: editForm.value.contact_phone?.trim() || null,
       description: editForm.value.description || null,
+      contract_amount: editForm.value.contract_amount === null || editForm.value.contract_amount === '' ? null : editForm.value.contract_amount,
     }
     await request.put(`/api/sites/${route.params.id}`, payload)
     ElMessage.success(t('siteDetail.messages.saveSuccess'))
@@ -871,6 +1066,55 @@ const formatDate = (dateStr) => {
   return new Date(dateStr).toLocaleString(dateLocale.value)
 }
 
+const isManualMilestone = (key) => manualMilestoneKeys.includes(String(key || ''))
+
+const getMilestoneRecord = (key) => manualMilestoneRecords.value[String(key || '')] || null
+
+const openMilestoneApproveDialog = (milestoneCode) => {
+  milestoneApproveForm.value = {
+    milestone_code: milestoneCode,
+    remark: getMilestoneRecord(milestoneCode)?.remark || '',
+  }
+  milestoneUploadFileList.value = []
+  milestoneApproveVisible.value = true
+}
+
+const submitMilestoneApproval = async () => {
+  if (!milestoneApproveForm.value.milestone_code) return
+  if (!milestoneUploadFileList.value.length) {
+    ElMessage.warning(t('siteDetail.milestones.dialogFilesRequired'))
+    return
+  }
+
+  const formData = new FormData()
+  if (milestoneApproveForm.value.remark?.trim()) {
+    formData.append('remark', milestoneApproveForm.value.remark.trim())
+  }
+  milestoneUploadFileList.value.forEach((item) => {
+    if (item?.raw) {
+      formData.append('files', item.raw)
+    }
+  })
+
+  try {
+    milestoneApproveSubmitting.value = true
+    await request.post(
+      `/api/sites/${route.params.id}/milestones/${milestoneApproveForm.value.milestone_code}/approve`,
+      formData,
+    )
+    ElMessage.success(t('siteDetail.milestones.approveSuccess'))
+    milestoneApproveVisible.value = false
+    milestoneUploadFileList.value = []
+    await loadMilestones()
+    await loadPaymentRecords()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || t('siteDetail.milestones.approveFailed'))
+  } finally {
+    milestoneApproveSubmitting.value = false
+  }
+}
+
 const formatWorkOrderType = (type) => {
   const map = {
     INSPECTION: t('siteDetail.workOrder.typeMap.INSPECTION'),
@@ -918,6 +1162,71 @@ const formatPriority = (priority) => {
     LOW: t('siteDetail.priorityMap.LOW'),
   }
   return map[priority] || priority
+}
+
+const paymentNeedsContractAmount = computed(() => (
+  (site.value?.contract_amount === null || site.value?.contract_amount === undefined || site.value?.contract_amount === '') &&
+  paymentData.value.items.some((item) => item.amount_type === 'ratio' && item.enabled !== false)
+))
+
+const paymentOpeningStatusText = computed(() => {
+  const status = paymentData.value.opening_work_order?.status
+  if (!status) return t('siteDetail.payment.noOpeningWorkOrder')
+  return formatWorkOrderStatus(status)
+})
+
+const formatMoney = (value, currency = 'USD') => {
+  if (value === null || value === undefined || value === '') return placeholderText.value
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return placeholderText.value
+  const normalizedCurrency = String(currency || '').trim().toUpperCase()
+  if (!normalizedCurrency) return numeric.toFixed(2)
+  try {
+    return new Intl.NumberFormat(dateLocale.value, {
+      style: 'currency',
+      currency: normalizedCurrency,
+      maximumFractionDigits: 2,
+    }).format(numeric)
+  } catch (e) {
+    return `${normalizedCurrency} ${numeric.toFixed(2)}`
+  }
+}
+
+const formatPaymentAmountValue = (row) => {
+  if (row.amount_type === 'ratio') return `${Number(row.amount_value || 0)}%`
+  return formatMoney(row.amount_value, row.currency)
+}
+
+const formatPaymentAmount = (row) => {
+  if (row.adjusted_amount === null || row.adjusted_amount === undefined) {
+    return placeholderText.value
+  }
+  if (row.warning_discount_applied && row.base_amount !== null && row.base_amount !== undefined) {
+    return `${formatMoney(row.adjusted_amount, row.currency)} / ${t('siteDetail.payment.originalAmount', { amount: formatMoney(row.base_amount, row.currency) })}`
+  }
+  return formatMoney(row.adjusted_amount, row.currency)
+}
+
+const getPaymentStatusTagType = (status) => {
+  const map = {
+    disabled: 'info',
+    pending_milestone: 'warning',
+    pending_work_order_approval: 'warning',
+    pending_amount_base: 'danger',
+    ready: 'success',
+  }
+  return map[status] || 'info'
+}
+
+const getPaymentStatusText = (status) => {
+  const map = {
+    disabled: t('siteDetail.payment.status.disabled'),
+    pending_milestone: t('siteDetail.payment.status.pendingMilestone'),
+    pending_work_order_approval: t('siteDetail.payment.status.pendingWorkOrderApproval'),
+    pending_amount_base: t('siteDetail.payment.status.pendingAmountBase'),
+    ready: t('siteDetail.payment.status.ready'),
+  }
+  return map[status] || status
 }
 
 const getStatusTagType = (status) => {
@@ -1181,6 +1490,7 @@ const createResurvey = async () => {
   word-break: break-word;
 }
 .mt16 { margin-top: 16px; }
+.mb16 { margin-bottom: 16px; }
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .card-actions { display: flex; gap: 8px; align-items: center; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
@@ -1259,6 +1569,45 @@ const createResurvey = async () => {
   font-weight: 600;
   color: #111827;
 }
+.milestone-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #475569;
+  word-break: break-word;
+}
+.milestone-files {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.milestone-file-link {
+  width: fit-content;
+}
+.milestone-action-row {
+  margin-top: 10px;
+}
+.payment-summary {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: #475569;
+  flex-wrap: wrap;
+}
+.payment-rule-name {
+  font-weight: 600;
+  color: #111827;
+}
+.payment-rule-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.payment-muted {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
 @media (max-width: 1200px) {
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1284,6 +1633,11 @@ const createResurvey = async () => {
   }
   .skip-record-grid {
     grid-template-columns: 1fr;
+  }
+  .payment-summary {
+    gap: 8px;
+    flex-direction: column;
+    align-items: flex-start;
   }
   .milestone-grid {
     grid-template-columns: 1fr;

@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, aliased
-from typing import List, Optional, Dict
+from typing import Any, List, Optional, Dict
 import uuid
 import io
 import pandas as pd
@@ -11,6 +13,7 @@ import math
 from app.core.database import get_db
 from app.models.user import User
 from app.models.site import Site
+from app.models.site_business import SiteMilestoneRecord
 from app.schemas.site import (
     SiteCreate,
     SiteUpdate,
@@ -51,8 +54,10 @@ from app.services.site_progress_service import (
     rebuild_site_progress,
     rebuild_site_progress_for_sites,
 )
+from app.services.site_payment_service import build_site_payment_records
 from app.services.site_progress_metric_service import get_site_progress_metric_mode
 from app.utils.timezone import to_utc_iso
+from app.utils.file_handler import save_uploaded_file
 from app.services.omc_monitor import (
     advance_opening_work_orders_by_ever,
     advance_replacement_work_orders_by_ever,
@@ -130,6 +135,57 @@ class SiteMilestonesResponse(BaseModel):
     online_at: Optional[str] = None
     activated_at: Optional[str] = None
     ssv_at: Optional[str] = None
+    customer_approved_at: Optional[str] = None
+    pac_at: Optional[str] = None
+    manual_records: Dict[str, Any] = {}
+
+
+class SiteMilestoneFileResponse(BaseModel):
+    file_name: str
+    file_url: str
+    content_type: Optional[str] = None
+    file_size: Optional[int] = None
+
+
+class SiteMilestoneRecordResponse(BaseModel):
+    milestone_code: str
+    approved_at: Optional[str] = None
+    remark: Optional[str] = None
+    operator_id: Optional[int] = None
+    operator_name: Optional[str] = None
+    files: List[SiteMilestoneFileResponse] = []
+
+
+class SitePaymentRuleItemResponse(BaseModel):
+    rule_id: str
+    rule_name: str
+    milestone_code: str
+    milestone_label: str
+    enabled: bool
+    amount_type: str
+    amount_value: float
+    base_amount: Optional[float] = None
+    adjusted_amount: Optional[float] = None
+    currency: str
+    milestone_reached: bool
+    milestone_at: Optional[str] = None
+    requires_work_order_approved: bool
+    opening_work_order_id: Optional[str] = None
+    opening_work_order_status: Optional[str] = None
+    warning_count: int
+    warning_discount_enabled: bool
+    warning_discount_ratio: float
+    warning_discount_applied: bool
+    status: str
+    reasons: List[str] = []
+
+
+class SitePaymentRecordsResponse(BaseModel):
+    config_version: int
+    currency: str
+    contract_amount: Optional[float] = None
+    opening_work_order: Dict[str, Any]
+    items: List[SitePaymentRuleItemResponse]
 
 
 class SiteProgressRebuildRequest(BaseModel):
@@ -164,6 +220,66 @@ class SurveyStageBatchReport(BaseModel):
     success_count: int
     failed_count: int
     results: List[SurveyStageRowResult]
+
+
+MANUAL_SITE_MILESTONE_CODES = {"customer_approved", "pac"}
+
+
+def _to_public_upload_url(file_path: str) -> Optional[str]:
+    normalized = str(file_path or "").replace("\\", "/").strip()
+    if not normalized:
+        return None
+    if normalized.startswith("uploads/"):
+        return f"/{normalized}"
+    index = normalized.find("/uploads/")
+    if index >= 0:
+        return normalized[index:]
+    return None
+
+
+def _serialize_site_milestone_record(record: Optional[SiteMilestoneRecord]) -> Optional[SiteMilestoneRecordResponse]:
+    if record is None:
+        return None
+    file_rows = []
+    for row in list(record.proof_files or []):
+        if not isinstance(row, dict):
+            continue
+        file_rows.append(
+            SiteMilestoneFileResponse(
+                file_name=str(row.get("file_name") or "未命名文件"),
+                file_url=str(row.get("file_url") or ""),
+                content_type=str(row.get("content_type") or "") or None,
+                file_size=int(row.get("file_size")) if row.get("file_size") not in (None, "") else None,
+            )
+        )
+    return SiteMilestoneRecordResponse(
+        milestone_code=record.milestone_code,
+        approved_at=to_utc_iso(record.approved_at) if record.approved_at else None,
+        remark=record.remark,
+        operator_id=record.operator_id,
+        operator_name=(record.operator.full_name or record.operator.username) if record.operator else None,
+        files=file_rows,
+    )
+
+
+def _load_manual_site_milestone_records(db: Session, site_id: int) -> Dict[str, SiteMilestoneRecord]:
+    rows = (
+        db.query(SiteMilestoneRecord)
+        .options(joinedload(SiteMilestoneRecord.operator))
+        .filter(
+            SiteMilestoneRecord.site_id == site_id,
+            SiteMilestoneRecord.milestone_code.in_(list(MANUAL_SITE_MILESTONE_CODES)),
+        )
+        .all()
+    )
+    result: Dict[str, SiteMilestoneRecord] = {}
+    for row in rows:
+        existing = result.get(row.milestone_code)
+        if existing is None or (row.approved_at and existing.approved_at and row.approved_at > existing.approved_at):
+            result[row.milestone_code] = row
+        elif existing is None:
+            result[row.milestone_code] = row
+    return result
 
 
 def _get_site_related_counts(db: Session, site_id: int) -> Dict[str, int]:
@@ -1416,6 +1532,9 @@ async def get_site_milestones(
     online_at = get_site_progress_milestone_at(snapshot, "online", metric_mode=metric_mode)
     activated_at = get_site_progress_milestone_at(snapshot, "activated", metric_mode=metric_mode)
     ssv_at = get_site_progress_milestone_at(snapshot, "ssv")
+    customer_approved_at = get_site_progress_milestone_at(snapshot, "customer_approved")
+    pac_at = get_site_progress_milestone_at(snapshot, "pac")
+    manual_records = _load_manual_site_milestone_records(db, site_id)
 
     return SiteMilestonesResponse(
         install_started_at=to_utc_iso(install_started_at) if install_started_at else None,
@@ -1423,6 +1542,156 @@ async def get_site_milestones(
         online_at=to_utc_iso(online_at) if online_at else None,
         activated_at=to_utc_iso(activated_at) if activated_at else None,
         ssv_at=to_utc_iso(ssv_at) if ssv_at else None,
+        customer_approved_at=to_utc_iso(customer_approved_at) if customer_approved_at else None,
+        pac_at=to_utc_iso(pac_at) if pac_at else None,
+        manual_records={
+            code: _serialize_site_milestone_record(manual_records.get(code))
+            for code in MANUAL_SITE_MILESTONE_CODES
+        },
+    )
+
+
+@router.post("/{site_id}/milestones/{milestone_code}/approve", response_model=SiteMilestoneRecordResponse)
+async def approve_site_manual_milestone(
+    site_id: int,
+    milestone_code: str,
+    remark: Optional[str] = Form(None),
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_site_manage_access(current_user)
+
+    normalized_code = str(milestone_code or "").strip()
+    if normalized_code not in MANUAL_SITE_MILESTONE_CODES:
+        raise HTTPException(status_code=400, detail="仅支持客户审批通过和 PAC 节点人工操作")
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    valid_files = [file for file in list(files or []) if str(getattr(file, "filename", "") or "").strip()]
+    if not valid_files:
+        raise HTTPException(status_code=400, detail="请至少上传一个凭证文件")
+
+    stored_files = []
+    for upload in valid_files:
+        stored_path = await save_uploaded_file(
+            upload,
+            category="site_milestones",
+            sub_folder=f"{site_id}/{normalized_code}",
+        )
+        file_url = _to_public_upload_url(stored_path)
+        stored_files.append(
+            {
+                "file_name": str(upload.filename or os.path.basename(stored_path)),
+                "file_path": stored_path,
+                "file_url": file_url,
+                "content_type": str(upload.content_type or "") or None,
+                "file_size": os.path.getsize(stored_path) if stored_path and os.path.exists(stored_path) else None,
+            }
+        )
+
+    record = (
+        db.query(SiteMilestoneRecord)
+        .filter(
+            SiteMilestoneRecord.site_id == site_id,
+            SiteMilestoneRecord.milestone_code == normalized_code,
+        )
+        .first()
+    )
+    approved_at = datetime.utcnow()
+    if record is None:
+        record = SiteMilestoneRecord(
+            id=uuid.uuid4().hex,
+            site_id=site_id,
+            milestone_code=normalized_code,
+            approved_at=approved_at,
+            remark=(remark or "").strip() or None,
+            proof_files=stored_files,
+            operator_id=current_user.id,
+        )
+        db.add(record)
+    else:
+        record.approved_at = approved_at
+        record.remark = (remark or "").strip() or None
+        record.proof_files = stored_files
+        record.operator_id = current_user.id
+
+    db.add(
+        AuditEvent(
+            id=uuid.uuid4().hex,
+            resource_type="site",
+            resource_id=str(site_id),
+            action=f"manual_milestone_{normalized_code}_approve",
+            operator_id=current_user.id,
+            comments=f"人工确认节点：{normalized_code}",
+            details={
+                "milestone_code": normalized_code,
+                "remark": (remark or "").strip() or None,
+                "files": [
+                    {
+                        "file_name": item["file_name"],
+                        "file_url": item["file_url"],
+                        "content_type": item["content_type"],
+                        "file_size": item["file_size"],
+                    }
+                    for item in stored_files
+                ],
+            },
+        )
+    )
+    db.flush()
+    rebuild_site_progress(
+        db,
+        site_id,
+        reason=f"manual_milestone_{normalized_code}_approve",
+        operator_id=current_user.id,
+    )
+    db.commit()
+    db.refresh(record)
+    record = (
+        db.query(SiteMilestoneRecord)
+        .options(joinedload(SiteMilestoneRecord.operator))
+        .filter(SiteMilestoneRecord.id == record.id)
+        .first()
+    )
+    return _serialize_site_milestone_record(record)
+
+
+@router.get("/{site_id}/payment-records", response_model=SitePaymentRecordsResponse)
+async def get_site_payment_records(
+    site_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    _ensure_site_visible(site_id, db, current_user)
+
+    ensure_result = ensure_site_progress_snapshots(db, site_ids=[site_id], reason="site_payment_records_read")
+    if ensure_result["rebuilt_site_ids"]:
+        db.commit()
+        db.refresh(site)
+
+    payload = build_site_payment_records(db, site)
+    items = [
+        SitePaymentRuleItemResponse(
+            **{
+                **item,
+                "milestone_at": to_utc_iso(item["milestone_at"]) if item.get("milestone_at") else None,
+            }
+        )
+        for item in payload["items"]
+    ]
+    return SitePaymentRecordsResponse(
+        config_version=int(payload["config_version"]),
+        currency=str(payload["currency"]),
+        contract_amount=payload.get("contract_amount"),
+        opening_work_order=payload.get("opening_work_order") or {},
+        items=items,
     )
 
 
@@ -1623,6 +1892,11 @@ async def batch_update_sites(
             if lng_val < -180 or lng_val > 180:
                 row_errors.append("经度必须在 -180 到 180 之间")
 
+        if "contract_amount" in update_data and update_data["contract_amount"] is not None:
+            amount_val = float(update_data["contract_amount"])
+            if amount_val < 0:
+                row_errors.append("站点合同金额不能小于 0")
+
         if not row_errors:
             site = db.query(Site).filter(Site.id == site_id).first()
             if site is None:
@@ -1714,6 +1988,10 @@ async def update_site(
     forbidden_fields = [f for f in ["status", "assigned_to"] if f in update_data]
     if forbidden_fields:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不允许修改状态/指派人")
+    if "contract_amount" in update_data and update_data["contract_amount"] is not None:
+        amount_val = float(update_data["contract_amount"])
+        if amount_val < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="站点合同金额不能小于 0")
     for field, value in update_data.items():
         setattr(site, field, value)
     

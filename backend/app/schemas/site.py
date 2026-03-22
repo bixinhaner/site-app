@@ -18,6 +18,7 @@ class SiteBase(BaseModel):
     description: Optional[str] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
+    contract_amount: Optional[float] = None
 
 class SiteCreate(SiteBase):
     pass
@@ -36,6 +37,7 @@ class SiteUpdate(BaseModel):
     description: Optional[str] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
+    contract_amount: Optional[float] = None
     assigned_to: Optional[int] = None
 
 
@@ -53,6 +55,7 @@ class SiteBatchUpdateItem(BaseModel):
     description: Optional[str] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
+    contract_amount: Optional[float] = None
 
     class Config:
         extra = "forbid"

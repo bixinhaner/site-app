@@ -15,6 +15,7 @@ def ensure_site_schema(engine: Engine) -> None:
             "survey_skip_reason": "survey_skip_reason TEXT",
             "survey_skipped_at": "survey_skipped_at DATETIME",
             "survey_skipped_by": "survey_skipped_by INTEGER",
+            "contract_amount": "contract_amount FLOAT",
         },
     }
 

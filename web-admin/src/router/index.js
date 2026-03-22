@@ -211,6 +211,12 @@ const routes = [
             meta: { title: 'Web工单执行配置', icon: 'Monitor' }
           },
           {
+            path: 'site-payment',
+            name: 'SitePaymentSettings',
+            component: () => import('../views/system/SitePaymentSettings.vue'),
+            meta: { title: '站点付款规则', icon: 'Money', roles: ['admin'] }
+          },
+          {
             path: 'geocode-cache',
             name: 'GeocodeCache',
             component: () => import('../views/system/GeocodeCache.vue'),
@@ -336,6 +342,7 @@ const ROUTE_PERMISSION_MAP = {
   UserList: ['users:list:read'],
   MobileLocationSettings: ['system:mobile-settings:read'],
   WorkOrderExecutionSettings: ['authz:manage:all'],
+  SitePaymentSettings: ['authz:manage:all'],
   GeocodeCache: ['system:geocode-cache:read'],
   OmcConfig: ['system:mobile-settings:write'],
   OmcDeviceStates: ['system:logs:read'],
