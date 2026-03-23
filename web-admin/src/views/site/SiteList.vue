@@ -247,6 +247,18 @@
             <el-input v-model="row.contact_phone" />
           </template>
         </el-table-column>
+        <el-table-column :label="t('siteList.batchEdit.contractAmount')" width="180">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="row.contract_amount"
+              :min="0"
+              :precision="2"
+              :step="100"
+              :controls="false"
+              style="width: 100%"
+            />
+          </template>
+        </el-table-column>
         <el-table-column label="备注" min-width="220">
           <template #default="{ row }">
             <el-input v-model="row.description" />
@@ -433,6 +445,7 @@ const openBatchEdit = () => {
     description: site.description || '',
     contact_person: site.contact_person || '',
     contact_phone: site.contact_phone || '',
+    contract_amount: site.contract_amount ?? null,
   }))
   batchResult.value = null
   batchEditVisible.value = true
@@ -451,6 +464,10 @@ const validateBatchRows = () => {
     }
     if (row.longitude !== null && row.longitude !== undefined && (row.longitude < -180 || row.longitude > 180)) {
       ElMessage.warning(`第 ${i + 1} 行经度超出范围（-180 到 180）`)
+      return false
+    }
+    if (row.contract_amount !== null && row.contract_amount !== undefined && row.contract_amount !== '' && Number(row.contract_amount) < 0) {
+      ElMessage.warning(t('siteList.batchEdit.contractAmountMin', { index: i + 1 }))
       return false
     }
   }
@@ -472,6 +489,7 @@ const buildBatchPayload = () => ({
     description: row.description || null,
     contact_person: row.contact_person || null,
     contact_phone: row.contact_phone || null,
+    contract_amount: row.contract_amount ?? null,
   })),
 })
 

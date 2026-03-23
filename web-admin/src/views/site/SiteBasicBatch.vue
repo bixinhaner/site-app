@@ -90,7 +90,7 @@
             <el-tag v-if="batchId" type="info">批次ID: {{ batchId }}</el-tag>
           </div>
           <div class="tips">
-            推荐流程：先在站点列表按筛选条件导出 Excel，编辑后回传；支持按 site_id 或 site_code 定位站点，先试运行再正式执行。
+            {{ t('siteBasicBatch.batchUpdate.contractAmountTip') }}
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -131,12 +131,14 @@
 <script setup>
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import siteBasicApi from '../../api/siteBasic'
 import { useUserStore } from '../../stores/user'
 
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 const userStore = useUserStore()
 const loading = ref(false)
 const saving = ref(false)

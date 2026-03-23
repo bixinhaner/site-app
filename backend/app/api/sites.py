@@ -530,6 +530,7 @@ async def export_sites(
                 "priority": site.priority,
                 "contact_person": site.contact_person,
                 "contact_phone": site.contact_phone,
+                "contract_amount": site.contract_amount,
                 "description": site.description,
                 "assigned_to": site.assigned_to,
                 "assigned_to_name": _display_name(assigned),
@@ -556,6 +557,7 @@ async def export_sites(
         "priority",
         "contact_person",
         "contact_phone",
+        "contract_amount",
         "description",
         "assigned_to",
         "assigned_to_name",
@@ -994,6 +996,7 @@ async def download_basic_update_template():
             "priority": "normal",
             "contact_person": "李四",
             "contact_phone": "13811112222",
+            "contract_amount": 12500,
             "description": "更新备注示例",
         }
     ])
@@ -1070,6 +1073,7 @@ async def basic_batch_update_upload(
         "contact_person",
         "contact_phone",
         "description",
+        "contract_amount",
     ]
     effective_editable_columns = [c for c in editable_columns if c in df.columns]
     if not effective_editable_columns:
@@ -1142,6 +1146,20 @@ async def basic_batch_update_upload(
         for col in ["site_type", "province", "city", "district", "address", "contact_person", "contact_phone", "description"]:
             if col in effective_editable_columns:
                 update_candidate[col] = _to_optional_str(row_dict.get(col))
+
+        if "contract_amount" in effective_editable_columns:
+            amount_raw = row_dict.get("contract_amount")
+            if _is_excel_blank(amount_raw):
+                update_candidate["contract_amount"] = None
+            else:
+                try:
+                    amount_val = float(amount_raw)
+                    if amount_val < 0:
+                        errors.append("合同金额不能小于 0")
+                    else:
+                        update_candidate["contract_amount"] = amount_val
+                except Exception:
+                    errors.append("合同金额格式错误")
 
         if "priority" in effective_editable_columns:
             priority_val = _to_optional_str(row_dict.get("priority"))
