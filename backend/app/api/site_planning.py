@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case
+from sqlalchemy import func, case, or_
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from functools import lru_cache
@@ -95,6 +95,25 @@ def _ensure_planning_batch_operator(current_user: User) -> None:
         permission_codes=["sites:create:write", "sites:lld:write"],
     ):
         raise HTTPException(status_code=403, detail="Not enough permissions")
+
+
+def _normalize_lld_site_keyword(site_keyword: Optional[str]) -> Optional[str]:
+    value = (site_keyword or "").strip()
+    return value or None
+
+
+def _apply_lld_site_keyword_filter(query, site_keyword: Optional[str]):
+    keyword = _normalize_lld_site_keyword(site_keyword)
+    if not keyword:
+        return query
+
+    pattern = f"%{keyword}%"
+    return query.filter(
+        or_(
+            Site.site_code.ilike(pattern),
+            Site.site_name.ilike(pattern),
+        )
+    )
 
 LLD_TEMPLATE_HEADER_TO_FIELD: Dict[str, str] = {
     # base fields
@@ -3375,6 +3394,7 @@ def _build_lld_planning_query(
     band_list: List[str],
     start_time: Optional[datetime],
     end_time: Optional[datetime],
+    site_keyword: Optional[str] = None,
 ):
     query = (
         db.query(SitePlanning, Site)
@@ -3388,6 +3408,7 @@ def _build_lld_planning_query(
         query = query.filter(SitePlanning.updated_at >= start_time)
     if end_time:
         query = query.filter(SitePlanning.updated_at <= end_time)
+    query = _apply_lld_site_keyword_filter(query, site_keyword)
 
     if band_list:
         band_subq = (
@@ -3452,11 +3473,12 @@ def _fetch_lld_planning_summary(
     band: Optional[str],
     start_time: Optional[datetime],
     end_time: Optional[datetime],
+    site_keyword: Optional[str] = None,
     skip: int = 0,
     limit: Optional[int] = 50,
 ) -> Tuple[List[LldPlanningSummaryItem], int]:
     band_list = _parse_band_list(band)
-    query = _build_lld_planning_query(db, status, band_list, start_time, end_time)
+    query = _build_lld_planning_query(db, status, band_list, start_time, end_time, site_keyword)
     total = query.count()
 
     if limit is not None:
@@ -3514,6 +3536,7 @@ def _build_lld_cells_query(
     band_list: List[str],
     start_time: Optional[datetime],
     end_time: Optional[datetime],
+    site_keyword: Optional[str] = None,
 ):
     query = (
         db.query(SitePlanningCell, SitePlanning, Site)
@@ -3528,6 +3551,7 @@ def _build_lld_cells_query(
         query = query.filter(SitePlanning.updated_at >= start_time)
     if end_time:
         query = query.filter(SitePlanning.updated_at <= end_time)
+    query = _apply_lld_site_keyword_filter(query, site_keyword)
 
     if band_list:
         query = query.filter(SitePlanningCell.band_code.in_(band_list))
@@ -3541,11 +3565,12 @@ def _fetch_lld_cells(
     band: Optional[str],
     start_time: Optional[datetime],
     end_time: Optional[datetime],
+    site_keyword: Optional[str] = None,
     skip: int = 0,
     limit: Optional[int] = 50,
 ) -> Tuple[List[LldPlanningCellItem], int]:
     band_list = _parse_band_list(band)
-    query = _build_lld_cells_query(db, status, band_list, start_time, end_time)
+    query = _build_lld_cells_query(db, status, band_list, start_time, end_time, site_keyword)
     total = query.count()
 
     if limit is not None:
@@ -3583,6 +3608,7 @@ async def list_lld_planning(
     band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
     start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
     end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    site_keyword: Optional[str] = Query(None, description="站点编码或站点名称关键字"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(50, ge=1, le=200, description="每页记录数"),
     db: Session = Depends(get_db),
@@ -3596,6 +3622,7 @@ async def list_lld_planning(
         band=band,
         start_time=start_time,
         end_time=end_time,
+        site_keyword=site_keyword,
         skip=skip,
         limit=limit,
     )
@@ -3622,6 +3649,7 @@ async def list_lld_cells(
     band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
     start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
     end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    site_keyword: Optional[str] = Query(None, description="站点编码或站点名称关键字"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(50, ge=1, le=200, description="每页记录数"),
     db: Session = Depends(get_db),
@@ -3635,6 +3663,7 @@ async def list_lld_cells(
         band=band,
         start_time=start_time,
         end_time=end_time,
+        site_keyword=site_keyword,
         skip=skip,
         limit=limit,
     )
@@ -3658,6 +3687,7 @@ async def list_lld_cells_template(
     band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
     start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
     end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    site_keyword: Optional[str] = Query(None, description="站点编码或站点名称关键字"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(50, ge=1, le=200, description="每页记录数"),
     db: Session = Depends(get_db),
@@ -3674,7 +3704,7 @@ async def list_lld_cells_template(
     headers = headers_map.get(sheet) or []
 
     band_list = _parse_band_list(band)
-    query = _build_lld_cells_query(db, status, band_list, start_time, end_time).filter(SitePlanningCell.rat == rat_norm)
+    query = _build_lld_cells_query(db, status, band_list, start_time, end_time, site_keyword).filter(SitePlanningCell.rat == rat_norm)
     # 模板视图用于回导：过滤掉无法作为有效 key 的行
     query = query.filter(SitePlanningCell.local_cell_id.isnot(None))
     query = query.filter(SitePlanningCell.band_code.isnot(None))
@@ -3715,6 +3745,7 @@ async def export_lld_planning(
     band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
     start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
     end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    site_keyword: Optional[str] = Query(None, description="站点编码或站点名称关键字"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -3728,6 +3759,7 @@ async def export_lld_planning(
         band=band,
         start_time=start_time,
         end_time=end_time,
+        site_keyword=site_keyword,
         skip=0,
         limit=None,
     )
@@ -3806,6 +3838,7 @@ async def export_lld_cells(
     band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
     start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
     end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    site_keyword: Optional[str] = Query(None, description="站点编码或站点名称关键字"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -3831,7 +3864,7 @@ async def export_lld_cells(
     ws_5g = wb["5G"]
 
     band_list = _parse_band_list(band)
-    query = _build_lld_cells_query(db, status, band_list, start_time, end_time)
+    query = _build_lld_cells_query(db, status, band_list, start_time, end_time, site_keyword)
     # 导出用于回导：过滤掉无法作为有效 key 的行
     query = query.filter(SitePlanningCell.local_cell_id.isnot(None))
     query = query.filter(SitePlanningCell.band_code.isnot(None))

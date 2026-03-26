@@ -42,6 +42,16 @@
           />
         </el-form-item>
 
+        <el-form-item label="站点">
+          <el-input
+            v-model="siteKeyword"
+            clearable
+            placeholder="按站点编码 / 名称搜索"
+            style="width: 220px"
+            @keyup.enter.prevent="search"
+          />
+        </el-form-item>
+
         <el-form-item class="filter-actions">
           <el-button type="primary" :disabled="loading" @click="search">
             <el-icon><Search /></el-icon>查询
@@ -248,6 +258,7 @@ const activeTab = ref('summary')
 const statusFilter = ref('')
 const bandFilter = ref([])
 const timeRange = ref([])
+const siteKeyword = ref('')
 
 const summaryList = ref([])
 const summaryTotal = ref(0)
@@ -414,6 +425,7 @@ const buildParams = () => {
   const params = {
     status: statusFilter.value || undefined,
     band: bandFilter.value?.length ? bandFilter.value.join(',') : undefined,
+    site_keyword: siteKeyword.value.trim() || undefined,
   }
   if (Array.isArray(timeRange.value) && timeRange.value.length === 2) {
     const start = toUtcIsoParam(timeRange.value[0])
@@ -503,6 +515,7 @@ const resetFilters = () => {
   statusFilter.value = ''
   bandFilter.value = []
   timeRange.value = []
+  siteKeyword.value = ''
   search()
 }
 
