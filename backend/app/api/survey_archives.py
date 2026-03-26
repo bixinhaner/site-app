@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, Form, Query
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,6 +21,7 @@ from app.services.photo_duplicate_guard import (
 )
 from app.utils.file_handler import save_uploaded_file, calculate_file_hash, extract_exif, compress_image, add_text_watermark_inline
 from app.utils.timezone import to_utc_iso
+from app.utils.archive_pdf import localized_text, normalize_locale, pick_localized_text
 from datetime import datetime
 import os
 import io
@@ -345,6 +346,7 @@ def list_history(
 @router.get("/{archive_id}/export")
 async def export_archive_zip(
     archive_id: str,
+    locale: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -355,6 +357,8 @@ async def export_archive_zip(
     ).filter(SiteSurveyArchive.id == archive_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="档案不存在")
+
+    locale_code = normalize_locale(locale)
 
     overview = {
         "id": a.id,
@@ -374,7 +378,7 @@ async def export_archive_zip(
     mem_zip = build_archive_zip(
         overview=overview,
         content=a.content or {},
-        archive_title="勘察档案",
+        archive_title=localized_text("勘察档案", locale_code, "Survey Archive", "Arsip Survei"),
     )
     # 构造更有信息量的文件名
     site_code = a.site.site_code if a.site else None
@@ -386,7 +390,7 @@ async def export_archive_zip(
         s = str(s or '').strip().replace(' ', '_')
         return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
     ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
-    human_base = f"勘察档案_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    human_base = f"{localized_text('勘察档案', locale_code, 'Survey Archive', 'Arsip Survei')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
     from urllib.parse import quote
     headers = {
         "Content-Disposition": f"attachment; filename={ascii_base}.zip; filename*=UTF-8''{quote(human_base + '.zip')}"
@@ -398,6 +402,7 @@ async def export_archive_zip(
 async def export_archive_pdf(
     archive_id: str,
     with_thumbs: bool = True,
+    locale: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -420,6 +425,8 @@ async def export_archive_pdf(
     ).filter(SiteSurveyArchive.id == archive_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="档案不存在")
+
+    locale_code = normalize_locale(locale)
 
     # 字体
     def register_cn_fonts() -> tuple[str, str]:
@@ -477,28 +484,36 @@ async def export_archive_pdf(
         canvas.rect(0, A4[1]-1.2*cm, A4[0], 1.2*cm, stroke=0, fill=1)
         canvas.setFillColor(colors.white)
         canvas.setFont(FONT_BOLD, 12)
-        canvas.drawString(2*cm, A4[1]-0.85*cm, "勘察档案报告 Site Survey Archive")
+        canvas.drawString(
+            2*cm,
+            A4[1]-0.85*cm,
+            localized_text("勘察档案报告", locale_code, "Site Survey Archive Report", "Laporan Arsip Survei Situs"),
+        )
         # footer
         canvas.setStrokeColor(primary)
         canvas.setLineWidth(0.6)
         canvas.line(2*cm, 1.5*cm, A4[0]-2*cm, 1.5*cm)
         canvas.setFont(FONT_MAIN, 9)
         canvas.setFillColor(colors.HexColor('#888888'))
-        canvas.drawRightString(A4[0]-2*cm, 1.1*cm, f"第 {doc_.page} 页")
+        canvas.drawRightString(
+            A4[0]-2*cm,
+            1.1*cm,
+            localized_text("第 {page} 页", locale_code, "Page {page}", "Halaman {page}").format(page=doc_.page),
+        )
         canvas.restoreState()
 
     story = []
     # 封面标题
-    story.append(Paragraph("勘察档案报告", styles["TitleCN"]))
+    story.append(Paragraph(localized_text("勘察档案报告", locale_code, "Site Survey Archive Report", "Laporan Arsip Survei Situs"), styles["TitleCN"]))
 
     # Meta 卡片（两列表格）
     meta_rows = [
-        ["站点", f"{a.site.site_name if a.site else '-'} ({a.site.site_code if a.site else '-'})"],
-        ["版本", str(a.current_version or '-')],
-        ["勘察人", str(getattr(getattr(a.inspection, 'inspector', None), 'full_name', '-') or '-')],
-        ["审核人", str(getattr(getattr(a.inspection, 'reviewer', None), 'full_name', '-') or '-')],
-        ["更新时间", (a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-')],
-        ["导出时间", datetime.utcnow().strftime('%Y-%m-%d %H:%M')],
+        [localized_text("站点", locale_code, "Site", "Situs"), f"{a.site.site_name if a.site else '-'} ({a.site.site_code if a.site else '-'})"],
+        [localized_text("版本", locale_code, "Version", "Versi"), str(a.current_version or '-')],
+        [localized_text("勘察人", locale_code, "Surveyor", "Surveyor"), str(getattr(getattr(a.inspection, 'inspector', None), 'full_name', '-') or '-')],
+        [localized_text("审核人", locale_code, "Reviewer", "Peninjau"), str(getattr(getattr(a.inspection, 'reviewer', None), 'full_name', '-') or '-')],
+        [localized_text("更新时间", locale_code, "Updated At", "Waktu Pembaruan"), (a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-')],
+        [localized_text("导出时间", locale_code, "Exported At", "Waktu Ekspor"), datetime.utcnow().strftime('%Y-%m-%d %H:%M')],
     ]
     meta_tbl = Table(meta_rows, colWidths=[3*cm, 12*cm])
     meta_tbl.setStyle(TableStyle([
@@ -522,11 +537,16 @@ async def export_archive_pdf(
     cats = (a.content or {}).get("check_categories") or []
     if cats:
         story.append(Spacer(1, 8))
-        story.append(Paragraph("目录", styles["H2CN"]))
+        story.append(Paragraph(localized_text("目录", locale_code, "Contents", "Daftar Isi"), styles["H2CN"]))
         for i, cat in enumerate(cats, start=1):
-            cat_name = cat.get("category_name") or str(cat.get("category_id") or "未命名分类")
+            cat_name = pick_localized_text(
+                cat.get("category_name") or str(cat.get("category_id") or localized_text("未命名分类", locale_code, "Unnamed Category", "Kategori Tanpa Nama")),
+                cat.get("category_name_i18n"),
+                locale_code,
+            )
             cnt = len(cat.get("items") or [])
-            story.append(Paragraph(f"{i}. {cat_name}（{cnt}项）", styles["MetaCN"]))
+            cnt_text = localized_text("{count}项", locale_code, "{count} items", "{count} item").format(count=cnt)
+            story.append(Paragraph(f"{i}. {cat_name}（{cnt_text}）", styles["MetaCN"]))
         story.append(PageBreak())
 
     # 内容（字段值/层级/照片）
@@ -548,15 +568,6 @@ async def export_archive_pdf(
             return len(v) == 0
         return False
 
-    def opt_label(options, v):
-        try:
-            for o in (options or []):
-                if str(o.get('value')) == str(v):
-                    return o.get('label') or v
-        except Exception:
-            pass
-        return v
-
     def fmt_value_by_field(fd: dict, v):
         if is_blank_raw(v):
             return None
@@ -574,7 +585,11 @@ async def export_archive_pdf(
                 return s if s else None
             # boolean
             if t == 'boolean' or isinstance(v, bool):
-                return ('是' if (v is True or str(v).lower() in ('1','true','yes','y')) else '否') + (f" {unit}" if unit else '')
+                return (
+                    localized_text('是', locale_code, 'Yes', 'Ya')
+                    if (v is True or str(v).lower() in ('1', 'true', 'yes', 'y'))
+                    else localized_text('否', locale_code, 'No', 'Tidak')
+                ) + (f" {unit}" if unit else '')
             # number
             if t == 'number' or isinstance(v, (int, float)):
                 prec = cons.get('precision')
@@ -591,11 +606,26 @@ async def export_archive_pdf(
                 return sval + (f" {unit}" if unit else '')
             # select single/multi
             if t == 'select_single':
-                return str(opt_label((fd or {}).get('options'), v))
+                options = (fd or {}).get('options') or []
+                for o in options:
+                    if str(o.get('value')) == str(v):
+                        return pick_localized_text(o.get('label') or v, o.get('label_i18n'), locale_code)
+                return str(v)
             if t == 'select_multi':
                 arr = v if isinstance(v, list) else ([v] if v not in (None, '') else [])
-                labeled = [str(opt_label((fd or {}).get('options'), x)) for x in arr]
-                return '、'.join(labeled) if labeled else None
+                labeled = []
+                options = (fd or {}).get('options') or []
+                for x in arr:
+                    matched = None
+                    for o in options:
+                        if str(o.get('value')) == str(x):
+                            matched = pick_localized_text(o.get('label') or x, o.get('label_i18n'), locale_code)
+                            break
+                    labeled.append(str(matched if matched is not None else x))
+                if not labeled:
+                    return None
+                sep = '、' if locale_code.startswith('zh') else ', '
+                return sep.join(labeled)
             # dates
             if t in ('date','time','datetime'):
                 from datetime import datetime as _dt
@@ -699,7 +729,7 @@ async def export_archive_pdf(
         used = set()
         for fd in (fields or []):
             fid = fd.get("field_id")
-            label = fd.get("label") or fid
+            label = pick_localized_text(fd.get("label") or fid, fd.get("label_i18n"), locale_code) or fid
             raw = (values or {}).get(fid)
             val = fmt_value_by_field(fd, raw)
             if val is None:
@@ -715,17 +745,27 @@ async def export_archive_pdf(
         return rows
 
     for ci, cat in enumerate(cats, start=1):
-        story.append(Paragraph(f"{ci}. {cat.get('category_name') or str(cat.get('category_id') or '未命名分类')}", styles["H2CN"]))
+        category_name = pick_localized_text(
+            cat.get('category_name') or str(cat.get('category_id') or localized_text('未命名分类', locale_code, 'Unnamed Category', 'Kategori Tanpa Nama')),
+            cat.get('category_name_i18n'),
+            locale_code,
+        )
+        story.append(Paragraph(f"{ci}. {category_name}", styles["H2CN"]))
         items = cat.get("items") or []
         for ii, it in enumerate(items, start=1):
-            title = f"{ci}.{ii} {it.get('item_name') or it.get('item_id') or '未命名检查项'}"
+            item_name = pick_localized_text(
+                it.get('item_name') or it.get('item_id') or localized_text('未命名检查项', locale_code, 'Unnamed Check Item', 'Item Pemeriksaan Tanpa Nama'),
+                it.get('item_name_i18n'),
+                locale_code,
+            )
+            title = f"{ci}.{ii} {item_name}"
             story.append(Paragraph(title, styles["H3CN"]))
 
             fields = it.get("fields") or []
             values = it.get("values") or {}
             rows = build_value_rows(fields, values)
             if rows:
-                tbl_data = [["字段", "值"]] + rows
+                tbl_data = [[localized_text("字段", locale_code, "Field", "Bidang"), localized_text("值", locale_code, "Value", "Nilai")]] + rows
                 t = Table(tbl_data, colWidths=[5*cm, 9*cm])
                 t.setStyle(TableStyle([
                     ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
@@ -751,7 +791,7 @@ async def export_archive_pdf(
             if with_thumbs:
                 grid = make_photo_grid((it.get("photos") or []), cols=2)
                 if grid:
-                    story.append(Paragraph("站点照片", styles["H4CN"]))
+                    story.append(Paragraph(localized_text("站点照片", locale_code, "Site Photos", "Foto Situs"), styles["H4CN"]))
                     story.append(grid)
                     story.append(Spacer(1, 6))
 
@@ -762,9 +802,9 @@ async def export_archive_pdf(
                 sec_photos = sec.get("photos") or []
                 if not sec_rows and not sec_photos:
                     continue
-                story.append(Paragraph(f"扇区：{sec_id}", styles["H4CN"]))
+                story.append(Paragraph(f"{localized_text('扇区', locale_code, 'Sector', 'Sektor')}：{sec_id}", styles["H4CN"]))
                 if sec_rows:
-                    sec_tbl = Table([["字段", "值"]] + sec_rows, colWidths=[5*cm, 9*cm])
+                    sec_tbl = Table([[localized_text("字段", locale_code, "Field", "Bidang"), localized_text("值", locale_code, "Value", "Nilai")]] + sec_rows, colWidths=[5*cm, 9*cm])
                     sec_tbl.setStyle(TableStyle([
                         ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
                         ('FONTSIZE', (0,0), (-1,-1), 10),
@@ -794,14 +834,14 @@ async def export_archive_pdf(
                 cell_photos = cell.get("photos") or []
                 if not cell_rows and not cell_photos:
                     continue
-                head = f"小区：{cell_id}"
+                head = f"{localized_text('小区', locale_code, 'Cell', 'Sel')}：{cell_id}"
                 if cell.get("sector_id"):
-                    head += f"（扇区 {cell.get('sector_id')}）"
+                    head += f"（{localized_text('扇区', locale_code, 'Sector', 'Sektor')} {cell.get('sector_id')}）"
                 if cell.get("band"):
-                    head += f" 频段 {cell.get('band')}"
+                    head += f" {localized_text('频段', locale_code, 'Band', 'Band')} {cell.get('band')}"
                 story.append(Paragraph(head, styles["H4CN"]))
                 if cell_rows:
-                    cell_tbl = Table([["字段", "值"]] + cell_rows, colWidths=[5*cm, 9*cm])
+                    cell_tbl = Table([[localized_text("字段", locale_code, "Field", "Bidang"), localized_text("值", locale_code, "Value", "Nilai")]] + cell_rows, colWidths=[5*cm, 9*cm])
                     cell_tbl.setStyle(TableStyle([
                         ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
                         ('FONTSIZE', (0,0), (-1,-1), 10),
@@ -860,13 +900,18 @@ async def export_archive_pdf(
         name = att.get("original_name") or os.path.basename(fp)
         mime = att.get("mime_type") or "-"
         size = att.get("file_size") or (os.path.getsize(fp) if exists else None)
-        status_txt = "" if exists else "缺失"
+        status_txt = "" if exists else localized_text("缺失", locale_code, "Missing", "Hilang")
         att_rows.append([name, mime, fmt_size(size), status_txt])
 
     if att_rows:
         story.append(PageBreak())
-        story.append(Paragraph("附件", styles["H2CN"]))
-        t = Table([["文件", "类型", "大小", "状态"]] + att_rows, colWidths=[8.5*cm, 4.0*cm, 2.5*cm, 2.0*cm])
+        story.append(Paragraph(localized_text("附件", locale_code, "Attachments", "Lampiran"), styles["H2CN"]))
+        t = Table([[
+            localized_text("文件", locale_code, "File", "Berkas"),
+            localized_text("类型", locale_code, "Type", "Tipe"),
+            localized_text("大小", locale_code, "Size", "Ukuran"),
+            localized_text("状态", locale_code, "Status", "Status"),
+        ]] + att_rows, colWidths=[8.5*cm, 4.0*cm, 2.5*cm, 2.0*cm])
         t.setStyle(TableStyle([
             ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
             ('FONTSIZE', (0,0), (-1,-1), 10),
@@ -898,7 +943,7 @@ async def export_archive_pdf(
         s = str(s or '').strip().replace(' ', '_')
         return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
     ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
-    human_base = f"勘察档案_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    human_base = f"{localized_text('勘察档案', locale_code, 'Survey Archive', 'Arsip Survei')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
     from urllib.parse import quote
     headers = {
         "Content-Disposition": f"attachment; filename={ascii_base}.pdf; filename*=UTF-8''{quote(human_base + '.pdf')}"

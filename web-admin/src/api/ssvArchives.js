@@ -63,14 +63,16 @@ export const ssvArchivesApi = {
   search(params) {
     return request.get('/api/ssv-archives/search', { params })
   },
-  exportZip(id) {
+  exportZip(id, params = {}) {
     return request.get(`/api/ssv-archives/${id}/export`, {
+      params,
       responseType: 'blob',
       timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
     })
   },
-  exportPdf(id) {
+  exportPdf(id, params = {}) {
     return request.get(`/api/ssv-archives/${id}/export-pdf`, {
+      params,
       responseType: 'blob',
       timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
     })

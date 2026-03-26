@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, Form, Query
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,6 +21,15 @@ from app.services.photo_duplicate_guard import (
 )
 from app.utils.file_handler import save_uploaded_file, calculate_file_hash, extract_exif, compress_image, add_text_watermark_inline
 from app.utils.timezone import to_utc_iso
+from app.utils.archive_pdf import (
+    build_archive_value_rows,
+    build_pdf_styles,
+    create_pdf_cell,
+    localized_text,
+    normalize_locale,
+    pick_localized_text,
+    register_pdf_fonts,
+)
 from datetime import datetime
 import os
 import io
@@ -306,6 +315,7 @@ def list_history(
 @router.get("/{archive_id}/export")
 async def export_archive_zip(
     archive_id: str,
+    locale: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -316,6 +326,8 @@ async def export_archive_zip(
     ).filter(SiteOpeningArchive.id == archive_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="档案不存在")
+
+    locale_code = normalize_locale(locale)
 
     overview = {
         "id": a.id,
@@ -335,7 +347,7 @@ async def export_archive_zip(
     mem_zip = build_archive_zip(
         overview=overview,
         content=a.content or {},
-        archive_title="开站档案",
+        archive_title=localized_text("开站档案", locale_code, "Opening Archive", "Arsip Pembukaan"),
     )
     # 构造更有信息量的文件名
     site_code = a.site.site_code if a.site else None
@@ -347,7 +359,7 @@ async def export_archive_zip(
         s = str(s or '').strip().replace(' ', '_')
         return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
     ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
-    human_base = f"开站档案_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    human_base = f"{localized_text('开站档案', locale_code, 'Opening Archive', 'Arsip Pembukaan')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
     from urllib.parse import quote
     headers = {
         "Content-Disposition": f"attachment; filename={ascii_base}.zip; filename*=UTF-8''{quote(human_base + '.zip')}"
@@ -359,6 +371,7 @@ async def export_archive_zip(
 async def export_archive_pdf(
     archive_id: str,
     with_thumbs: bool = True,
+    locale: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -382,32 +395,11 @@ async def export_archive_pdf(
     if not a:
         raise HTTPException(status_code=404, detail="档案不存在")
 
+    locale_code = normalize_locale(locale)
+
     # 字体
     def register_cn_fonts() -> tuple[str, str]:
-        fonts_dir = os.path.join("backend", "fonts")
-        candidates = [
-            ("NotoSansSC-Regular.ttf", "NotoSansSC-Bold.ttf"),
-            ("SourceHanSansSC-Regular.ttf", "SourceHanSansSC-Bold.ttf"),
-            ("NotoSansCJKsc-Regular.otf", "NotoSansCJKsc-Bold.otf"),
-        ]
-        for reg, bold in candidates:
-            reg_p = os.path.join(fonts_dir, reg)
-            bold_p = os.path.join(fonts_dir, bold)
-            if os.path.exists(reg_p):
-                try:
-                    pdfmetrics.registerFont(TTFont("CN", reg_p))
-                    if os.path.exists(bold_p):
-                        pdfmetrics.registerFont(TTFont("CN-Bold", bold_p))
-                    else:
-                        pdfmetrics.registerFont(TTFont("CN-Bold", reg_p))
-                    return "CN", "CN-Bold"
-                except Exception:
-                    pass
-        try:
-            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-            return "STSong-Light", "STSong-Light"
-        except Exception:
-            return "Helvetica", "Helvetica-Bold"
+        return register_pdf_fonts()
 
     FONT_MAIN, FONT_BOLD = register_cn_fonts()
     primary = colors.HexColor("#F56C3A")
@@ -421,14 +413,7 @@ async def export_archive_pdf(
         leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=1.8*cm
     )
 
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="TitleCN", fontName=FONT_BOLD, fontSize=24, leading=30, textColor=primary, spaceAfter=10))
-    styles.add(ParagraphStyle(name="H2CN", fontName=FONT_BOLD, fontSize=16, leading=22, textColor=primary, spaceBefore=10, spaceAfter=6))
-    styles.add(ParagraphStyle(name="H3CN", fontName=FONT_BOLD, fontSize=13, leading=18, textColor=text_color, spaceBefore=6, spaceAfter=4))
-    styles.add(ParagraphStyle(name="H4CN", fontName=FONT_BOLD, fontSize=11, leading=16, textColor=colors.HexColor('#555555'), spaceBefore=4, spaceAfter=2, leftIndent=6))
-    styles.add(ParagraphStyle(name="BodyCN", fontName=FONT_MAIN, fontSize=11, leading=16, textColor=text_color))
-    styles.add(ParagraphStyle(name="MetaCN", fontName=FONT_MAIN, fontSize=10, leading=14, textColor=colors.HexColor('#555555')))
-    styles.add(ParagraphStyle(name="CaptionCN", fontName=FONT_MAIN, fontSize=9, leading=12, textColor=colors.HexColor('#666666'), alignment=1))
+    styles = build_pdf_styles(FONT_MAIN, FONT_BOLD)
 
     # 页眉/页脚
     def draw_page_frame(canvas, doc_):
@@ -438,28 +423,36 @@ async def export_archive_pdf(
         canvas.rect(0, A4[1]-1.2*cm, A4[0], 1.2*cm, stroke=0, fill=1)
         canvas.setFillColor(colors.white)
         canvas.setFont(FONT_BOLD, 12)
-        canvas.drawString(2*cm, A4[1]-0.85*cm, "开站档案报告 Site Opening Archive")
+        canvas.drawString(
+            2*cm,
+            A4[1]-0.85*cm,
+            localized_text("开站档案报告", locale_code, "Opening Archive Report", "Laporan Arsip Pembukaan"),
+        )
         # footer
         canvas.setStrokeColor(primary)
         canvas.setLineWidth(0.6)
         canvas.line(2*cm, 1.5*cm, A4[0]-2*cm, 1.5*cm)
         canvas.setFont(FONT_MAIN, 9)
         canvas.setFillColor(colors.HexColor('#888888'))
-        canvas.drawRightString(A4[0]-2*cm, 1.1*cm, f"第 {doc_.page} 页")
+        canvas.drawRightString(
+            A4[0]-2*cm,
+            1.1*cm,
+            localized_text("第 {page} 页", locale_code, "Page {page}", "Halaman {page}").format(page=doc_.page),
+        )
         canvas.restoreState()
 
     story = []
     # 封面标题
-    story.append(Paragraph("开站档案报告", styles["TitleCN"]))
+    story.append(Paragraph(localized_text("开站档案报告", locale_code, "Opening Archive Report", "Laporan Arsip Pembukaan"), styles["ArchivePdfTitle"]))
 
     # Meta 卡片（两列表格）
     meta_rows = [
-        ["站点", f"{a.site.site_name if a.site else '-'} ({a.site.site_code if a.site else '-'})"],
-        ["版本", str(a.current_version or '-')],
-        ["开站检查人", str(getattr(getattr(a.inspection, 'inspector', None), 'full_name', '-') or '-')],
-        ["审核人", str(getattr(getattr(a.inspection, 'reviewer', None), 'full_name', '-') or '-')],
-        ["更新时间", (a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-')],
-        ["导出时间", datetime.utcnow().strftime('%Y-%m-%d %H:%M')],
+        [create_pdf_cell(localized_text("站点", locale_code, "Site", "Situs"), styles["ArchivePdfBody"]), create_pdf_cell(f"{a.site.site_name if a.site else '-'} ({a.site.site_code if a.site else '-'})", styles["ArchivePdfBody"])],
+        [create_pdf_cell(localized_text("版本", locale_code, "Version", "Versi"), styles["ArchivePdfBody"]), create_pdf_cell(str(a.current_version or '-'), styles["ArchivePdfBody"])],
+        [create_pdf_cell(localized_text("开站检查人", locale_code, "Inspector", "Pemeriksa"), styles["ArchivePdfBody"]), create_pdf_cell(str(getattr(getattr(a.inspection, 'inspector', None), 'full_name', '-') or '-'), styles["ArchivePdfBody"])],
+        [create_pdf_cell(localized_text("审核人", locale_code, "Reviewer", "Peninjau"), styles["ArchivePdfBody"]), create_pdf_cell(str(getattr(getattr(a.inspection, 'reviewer', None), 'full_name', '-') or '-'), styles["ArchivePdfBody"])],
+        [create_pdf_cell(localized_text("更新时间", locale_code, "Updated At", "Waktu Pembaruan"), styles["ArchivePdfBody"]), create_pdf_cell((a.updated_at.strftime('%Y-%m-%d %H:%M') if a.updated_at else '-'), styles["ArchivePdfBody"])],
+        [create_pdf_cell(localized_text("导出时间", locale_code, "Exported At", "Waktu Ekspor"), styles["ArchivePdfBody"]), create_pdf_cell(datetime.utcnow().strftime('%Y-%m-%d %H:%M'), styles["ArchivePdfBody"])],
     ]
     meta_tbl = Table(meta_rows, colWidths=[3*cm, 12*cm])
     meta_tbl.setStyle(TableStyle([
@@ -483,11 +476,11 @@ async def export_archive_pdf(
     cats = (a.content or {}).get("check_categories") or []
     if cats:
         story.append(Spacer(1, 8))
-        story.append(Paragraph("目录", styles["H2CN"]))
+        story.append(Paragraph(localized_text("目录", locale_code, "Contents", "Daftar Isi"), styles["ArchivePdfH2"]))
         for i, cat in enumerate(cats, start=1):
-            cat_name = cat.get("category_name") or str(cat.get("category_id") or "未命名分类")
+            cat_name = pick_localized_text(cat.get("category_name") or str(cat.get("category_id") or "未命名分类"), cat.get("category_name_i18n"), locale_code)
             cnt = len(cat.get("items") or [])
-            story.append(Paragraph(f"{i}. {cat_name}（{cnt}项）", styles["MetaCN"]))
+            story.append(Paragraph(f"{i}. {cat_name}（{cnt}项）", styles["ArchivePdfMeta"]))
         story.append(PageBreak())
 
     # 内容（字段值/层级/照片，不占位：空字段/空照片不展示）
@@ -592,11 +585,7 @@ async def export_archive_pdf(
         if s is None:
             return ""
         txt = str(s)
-        if "\n" in txt:
-            return Paragraph(xml_escape(txt).replace("\n", "<br/>"), styles["BodyCN"])
-        if len(txt) > 80:
-            return Paragraph(xml_escape(txt), styles["BodyCN"])
-        return txt
+        return create_pdf_cell(txt, styles["ArchivePdfBody"])
 
     def make_photo_grid(photo_list, cols=2):
         try:
@@ -622,7 +611,7 @@ async def export_archive_pdf(
                         im = Image(fp, width=max_w, height=max_h)
                 else:
                     im = Image(fp, width=max_w, height=max_h)
-                caption = Paragraph(os.path.basename(fp), styles['CaptionCN'])
+                caption = Paragraph(os.path.basename(fp), styles['ArchivePdfCaption'])
                 row.append([im, caption])
                 if len(row) == cols:
                     cells.append(row)
@@ -668,20 +657,32 @@ async def export_archive_pdf(
         return rows
 
     for ci, cat in enumerate(cats, start=1):
-        story.append(Paragraph(f"{ci}. {cat.get('category_name') or str(cat.get('category_id') or '未命名分类')}", styles["H2CN"]))
+        story.append(Paragraph(f"{ci}. {pick_localized_text(cat.get('category_name') or str(cat.get('category_id') or '未命名分类'), cat.get('category_name_i18n'), locale_code)}", styles["ArchivePdfH2"]))
         items = cat.get("items") or []
         for ii, it in enumerate(items, start=1):
-            title = f"{ci}.{ii} {it.get('item_name') or it.get('item_id') or '未命名检查项'}"
-            story.append(Paragraph(title, styles["H3CN"]))
+            title = f"{ci}.{ii} {pick_localized_text(it.get('item_name') or it.get('item_id') or '未命名检查项', it.get('item_name_i18n'), locale_code)}"
+            story.append(Paragraph(title, styles["ArchivePdfH3"]))
 
             fields = it.get("fields") or []
             values = it.get("values") or {}
-            rows = build_value_rows(fields, values)
+            rows = build_archive_value_rows(
+                fields,
+                values,
+                locale=locale_code,
+                label_style=styles["ArchivePdfBody"],
+                value_style=styles["ArchivePdfBody"],
+            )
             if rows:
-                t = Table([["字段", "值"]] + rows, colWidths=[5*cm, 9*cm])
+                t = Table(
+                    [
+                        [
+                            create_pdf_cell(localized_text("字段", locale_code, "Field", "Bidang"), styles["ArchivePdfHeader"]),
+                            create_pdf_cell(localized_text("值", locale_code, "Value", "Nilai"), styles["ArchivePdfHeader"]),
+                        ]
+                    ] + rows,
+                    colWidths=[5*cm, 9*cm]
+                )
                 t.setStyle(TableStyle([
-                    ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
-                    ('FONTSIZE', (0,0), (-1,-1), 10),
                     ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                     ('VALIGN', (0,0), (-1,-1), 'TOP'),
                     ('BACKGROUND', (0,0), (-1,0), primary),
@@ -702,22 +703,34 @@ async def export_archive_pdf(
             if with_thumbs:
                 grid = make_photo_grid((it.get("photos") or []), cols=2)
                 if grid:
-                    story.append(Paragraph("站点照片", styles["H4CN"]))
+                    story.append(Paragraph(localized_text("站点照片", locale_code, "Site Photos", "Foto Situs"), styles["ArchivePdfH4"]))
                     story.append(grid)
                     story.append(Spacer(1, 6))
 
             for sec in (it.get("sectors") or []):
                 sec_id = sec.get("sector_id")
-                sec_rows = build_value_rows(fields, sec.get("values") or {})
+                sec_rows = build_archive_value_rows(
+                    fields,
+                    sec.get("values") or {},
+                    locale=locale_code,
+                    label_style=styles["ArchivePdfBody"],
+                    value_style=styles["ArchivePdfBody"],
+                )
                 sec_photos = sec.get("photos") or []
                 if not sec_rows and not sec_photos:
                     continue
-                story.append(Paragraph(f"扇区：{sec_id}", styles["H4CN"]))
+                story.append(Paragraph(f"{localized_text('扇区', locale_code, 'Sector', 'Sektor')}：{sec_id}", styles["ArchivePdfH4"]))
                 if sec_rows:
-                    sec_tbl = Table([["字段", "值"]] + sec_rows, colWidths=[5*cm, 9*cm])
+                    sec_tbl = Table(
+                        [
+                            [
+                                create_pdf_cell(localized_text("字段", locale_code, "Field", "Bidang"), styles["ArchivePdfHeader"]),
+                                create_pdf_cell(localized_text("值", locale_code, "Value", "Nilai"), styles["ArchivePdfHeader"]),
+                            ]
+                        ] + sec_rows,
+                        colWidths=[5*cm, 9*cm]
+                    )
                     sec_tbl.setStyle(TableStyle([
-                        ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
-                        ('FONTSIZE', (0,0), (-1,-1), 10),
                         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#FDEFE6")),
                         ('TEXTCOLOR', (0,0), (-1,0), primary),
                         ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
@@ -740,21 +753,33 @@ async def export_archive_pdf(
 
             for cell in (it.get("cells") or []):
                 cell_id = cell.get("cell_id")
-                cell_rows = build_value_rows(fields, cell.get("values") or {})
+                cell_rows = build_archive_value_rows(
+                    fields,
+                    cell.get("values") or {},
+                    locale=locale_code,
+                    label_style=styles["ArchivePdfBody"],
+                    value_style=styles["ArchivePdfBody"],
+                )
                 cell_photos = cell.get("photos") or []
                 if not cell_rows and not cell_photos:
                     continue
-                head = f"小区：{cell_id}"
+                head = f"{localized_text('小区', locale_code, 'Cell', 'Sel') }：{cell_id}"
                 if cell.get("sector_id"):
                     head += f"（扇区 {cell.get('sector_id')}）"
                 if cell.get("band"):
                     head += f" 频段 {cell.get('band')}"
-                story.append(Paragraph(head, styles["H4CN"]))
+                story.append(Paragraph(head, styles["ArchivePdfH4"]))
                 if cell_rows:
-                    cell_tbl = Table([["字段", "值"]] + cell_rows, colWidths=[5*cm, 9*cm])
+                    cell_tbl = Table(
+                        [
+                            [
+                                create_pdf_cell(localized_text("字段", locale_code, "Field", "Bidang"), styles["ArchivePdfHeader"]),
+                                create_pdf_cell(localized_text("值", locale_code, "Value", "Nilai"), styles["ArchivePdfHeader"]),
+                            ]
+                        ] + cell_rows,
+                        colWidths=[5*cm, 9*cm]
+                    )
                     cell_tbl.setStyle(TableStyle([
-                        ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
-                        ('FONTSIZE', (0,0), (-1,-1), 10),
                         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#FDEFE6")),
                         ('TEXTCOLOR', (0,0), (-1,0), primary),
                         ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
@@ -810,16 +835,22 @@ async def export_archive_pdf(
         name = att.get("original_name") or os.path.basename(fp)
         mime = att.get("mime_type") or "-"
         size = att.get("file_size") or (os.path.getsize(fp) if exists else None)
-        status_txt = "" if exists else "缺失"
+        status_txt = "" if exists else localized_text("缺失", locale_code, "Missing", "Hilang")
         att_rows.append([name, mime, fmt_size(size), status_txt])
 
     if att_rows:
         story.append(PageBreak())
-        story.append(Paragraph("附件", styles["H2CN"]))
-        t = Table([["文件", "类型", "大小", "状态"]] + att_rows, colWidths=[8.5*cm, 4.0*cm, 2.5*cm, 2.0*cm])
+        story.append(Paragraph(localized_text("附件", locale_code, "Attachments", "Lampiran"), styles["ArchivePdfH2"]))
+        t = Table(
+            [[
+                create_pdf_cell(localized_text("文件", locale_code, "File", "Berkas"), styles["ArchivePdfHeader"]),
+                create_pdf_cell(localized_text("类型", locale_code, "Type", "Tipe"), styles["ArchivePdfHeader"]),
+                create_pdf_cell(localized_text("大小", locale_code, "Size", "Ukuran"), styles["ArchivePdfHeader"]),
+                create_pdf_cell(localized_text("状态", locale_code, "Status", "Status"), styles["ArchivePdfHeader"]),
+            ]] + att_rows,
+            colWidths=[8.5*cm, 4.0*cm, 2.5*cm, 2.0*cm]
+        )
         t.setStyle(TableStyle([
-            ('FONTNAME', (0,0), (-1,-1), FONT_MAIN),
-            ('FONTSIZE', (0,0), (-1,-1), 10),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('BACKGROUND', (0,0), (-1,0), primary),
@@ -848,7 +879,7 @@ async def export_archive_pdf(
         s = str(s or '').strip().replace(' ', '_')
         return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
     ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
-    human_base = f"开站档案_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    human_base = f"{localized_text('开站档案', locale_code, 'Opening Archive', 'Arsip Pembukaan')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
     from urllib.parse import quote
     headers = {
         "Content-Disposition": f"attachment; filename={ascii_base}.pdf; filename*=UTF-8''{quote(human_base + '.pdf')}"

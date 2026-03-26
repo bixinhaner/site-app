@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Body
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Body, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
@@ -23,6 +23,13 @@ from app.schemas.site_survey import (
 )
 from app.utils.file_handler import save_uploaded_file, calculate_file_hash, extract_exif, compress_image, add_text_watermark_inline
 from app.utils.timezone import to_utc_iso
+from app.utils.archive_pdf import (
+    build_pdf_styles,
+    create_pdf_cell,
+    localized_text,
+    normalize_locale,
+    register_pdf_fonts,
+)
 
 
 router = APIRouter()
@@ -1077,6 +1084,7 @@ async def delete_photos_batch(
 async def export_survey_pdf(
     survey_id: str,
     with_thumbs: bool = True,
+    locale: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -1096,34 +1104,11 @@ async def export_survey_pdf(
     if not survey:
         raise HTTPException(status_code=404, detail="勘察记录不存在")
 
+    locale_code = normalize_locale(locale)
+
     # Register Chinese-capable fonts
     def register_cn_fonts() -> tuple[str, str]:
-        fonts_dir = os.path.join("backend", "fonts")
-        candidates = [
-            ("NotoSansSC-Regular.ttf", "NotoSansSC-Bold.ttf"),
-            ("SourceHanSansSC-Regular.ttf", "SourceHanSansSC-Bold.ttf"),
-            ("NotoSansCJKsc-Regular.otf", "NotoSansCJKsc-Bold.otf"),
-        ]
-        for reg, bold in candidates:
-            reg_p = os.path.join(fonts_dir, reg)
-            bold_p = os.path.join(fonts_dir, bold)
-            if os.path.exists(reg_p):
-                try:
-                    pdfmetrics.registerFont(TTFont("CN", reg_p))
-                    if os.path.exists(bold_p):
-                        pdfmetrics.registerFont(TTFont("CN-Bold", bold_p))
-                    else:
-                        pdfmetrics.registerFont(TTFont("CN-Bold", reg_p))
-                    return "CN", "CN-Bold"
-                except Exception:
-                    pass
-        # Fallback to built-in CID font (no embedding, but wide coverage)
-        try:
-            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-            return "STSong-Light", "STSong-Light"
-        except Exception:
-            # final fallback to Helvetica (may break CJK)
-            return "Helvetica", "Helvetica-Bold"
+        return register_pdf_fonts()
 
     FONT_MAIN, FONT_BOLD = register_cn_fonts()
     primary = colors.HexColor("#F56C3A")  # Orange primary
@@ -1136,12 +1121,7 @@ async def export_survey_pdf(
         leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=1.8*cm
     )
 
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="TitleCN", fontName=FONT_BOLD, fontSize=24, leading=30, textColor=primary))
-    styles.add(ParagraphStyle(name="H2CN", fontName=FONT_BOLD, fontSize=16, leading=22, textColor=primary, spaceBefore=6, spaceAfter=8))
-    styles.add(ParagraphStyle(name="BodyCN", fontName=FONT_MAIN, fontSize=11, leading=16, textColor=text_color))
-    styles.add(ParagraphStyle(name="MetaCN", fontName=FONT_MAIN, fontSize=10, leading=14, textColor=colors.HexColor('#666666')))
-    styles.add(ParagraphStyle(name="CaptionCN", fontName=FONT_MAIN, fontSize=9, leading=12, textColor=colors.HexColor('#666666'), alignment=1))
+    styles = build_pdf_styles(FONT_MAIN, FONT_BOLD)
 
     def draw_page_frame(c, d):
         c.saveState()
@@ -1150,46 +1130,54 @@ async def export_survey_pdf(
         c.rect(0, A4[1]-1.2*cm, A4[0], 1.2*cm, stroke=0, fill=1)
         c.setFillColor(colors.white)
         c.setFont(FONT_BOLD, 12)
-        c.drawString(2*cm, A4[1]-0.85*cm, "站点勘察报告 Site Survey Report")
+        c.drawString(
+            2*cm,
+            A4[1]-0.85*cm,
+            localized_text("站点勘察报告", locale_code, "Site Survey Report", "Laporan Survei Situs"),
+        )
         # Footer line and page number
         c.setStrokeColor(primary)
         c.setLineWidth(0.6)
         c.line(2*cm, 1.5*cm, A4[0]-2*cm, 1.5*cm)
         c.setFont(FONT_MAIN, 9)
         c.setFillColor(colors.HexColor('#888888'))
-        c.drawRightString(A4[0]-2*cm, 1.1*cm, f"第 {d.page} 页")
+        c.drawRightString(
+            A4[0]-2*cm,
+            1.1*cm,
+            localized_text("第 {page} 页", locale_code, "Page {page}", "Halaman {page}").format(page=d.page),
+        )
         c.restoreState()
 
     elements: list = []
 
     # Cover
     elements.append(Spacer(1, 4*cm))
-    elements.append(Paragraph("站点勘察报告", styles["TitleCN"]))
+    elements.append(Paragraph(localized_text("站点勘察报告", locale_code, "Site Survey Report", "Laporan Survei Situs"), styles["ArchivePdfTitle"]))
     elements.append(Spacer(1, 0.6*cm))
     site_name = survey.site.site_name if survey.site else ""
     site_code = survey.site.site_code if survey.site else ""
-    elements.append(Paragraph(f"{site_name} ({site_code})", styles["BodyCN"]))
+    elements.append(Paragraph(f"{site_name} ({site_code})", styles["ArchivePdfBody"]))
     elements.append(Spacer(1, 0.2*cm))
     meta = [
-        f"勘察日期：{survey.survey_date.strftime('%Y-%m-%d %H:%M') if survey.survey_date else '-'}",
-        f"勘察人：{survey.surveyor_name or '-'}",
-        f"结论：{survey.feasibility or '-'}",
-        f"坐标：{(survey.latitude or '-')}, {(survey.longitude or '-')}",
-        f"地址：{survey.address or '-'}",
+        f"{localized_text('勘察日期', locale_code, 'Survey Date', 'Tanggal Survei')}：{survey.survey_date.strftime('%Y-%m-%d %H:%M') if survey.survey_date else '-'}",
+        f"{localized_text('勘察人', locale_code, 'Surveyor', 'Surveyor')}：{survey.surveyor_name or '-'}",
+        f"{localized_text('结论', locale_code, 'Conclusion', 'Kesimpulan')}：{survey.feasibility or '-'}",
+        f"{localized_text('坐标', locale_code, 'Coordinates', 'Koordinat')}：{(survey.latitude or '-')}, {(survey.longitude or '-')} ",
+        f"{localized_text('地址', locale_code, 'Address', 'Alamat')}：{survey.address or '-'}",
     ]
     for m in meta:
-        elements.append(Paragraph(m, styles["MetaCN"]))
+        elements.append(Paragraph(m, styles["ArchivePdfMeta"]))
     elements.append(PageBreak())
 
     # Highlighted conclusion banner
     feas = (survey.feasibility or "").strip()
     feas_map = {
-        'feasible': ("可行", colors.HexColor('#67C23A')),
-        'conditionally_feasible': ("有条件可行", colors.HexColor('#E6A23C')),
-        'infeasible': ("不可行", colors.HexColor('#F56C6C')),
+        'feasible': (localized_text("可行", locale_code, "Feasible", "Layak"), colors.HexColor('#67C23A')),
+        'conditionally_feasible': (localized_text("有条件可行", locale_code, "Conditionally feasible", "Layak Bersyarat"), colors.HexColor('#E6A23C')),
+        'infeasible': (localized_text("不可行", locale_code, "Infeasible", "Tidak Layak"), colors.HexColor('#F56C6C')),
     }
-    feas_label, feas_color = feas_map.get(feas, (feas or "未填写", primary))
-    badge = Table([[Paragraph(f"<b>结论：</b> {feas_label}", styles["BodyCN"])]], colWidths=[15*cm])
+    feas_label, feas_color = feas_map.get(feas, (feas or localized_text("未填写", locale_code, "Not filled", "Belum diisi"), primary))
+    badge = Table([[create_pdf_cell(f"{localized_text('结论', locale_code, 'Conclusion', 'Kesimpulan')}：{feas_label}", styles["ArchivePdfBadge"])]], colWidths=[15*cm])
     badge.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,-1), feas_color),
         ("TEXTCOLOR", (0,0), (-1,-1), colors.white),
@@ -1202,18 +1190,18 @@ async def export_survey_pdf(
     elements.append(Spacer(1, 0.3*cm))
 
     # 概览
-    elements.append(Paragraph("概览", styles["H2CN"]))
+    elements.append(Paragraph(localized_text("概览", locale_code, "Overview", "Ringkasan"), styles["ArchivePdfH2"]))
     kv = [
-        ("站点名称", site_name),
-        ("站点编码", site_code),
-        ("勘察日期", survey.survey_date.strftime('%Y-%m-%d %H:%M') if survey.survey_date else "-"),
-        ("勘察人", survey.surveyor_name or "-"),
-        ("勘察人电话", survey.surveyor_phone or "-"),
-        ("地址", survey.address or "-"),
-        ("坐标", f"{survey.latitude or ''}, {survey.longitude or ''}"),
-        ("GPS精度(m)", f"{survey.gps_accuracy}" if survey.gps_accuracy is not None else "-"),
-        ("风险", survey.risks or "-"),
-        ("建议", survey.recommendations or "-"),
+        (localized_text("站点名称", locale_code, "Site Name", "Nama Situs"), site_name),
+        (localized_text("站点编码", locale_code, "Site Code", "Kode Situs"), site_code),
+        (localized_text("勘察日期", locale_code, "Survey Date", "Tanggal Survei"), survey.survey_date.strftime('%Y-%m-%d %H:%M') if survey.survey_date else "-"),
+        (localized_text("勘察人", locale_code, "Surveyor", "Surveyor"), survey.surveyor_name or "-"),
+        (localized_text("勘察人电话", locale_code, "Surveyor Phone", "Telepon Surveyor"), survey.surveyor_phone or "-"),
+        (localized_text("地址", locale_code, "Address", "Alamat"), survey.address or "-"),
+        (localized_text("坐标", locale_code, "Coordinates", "Koordinat"), f"{survey.latitude or ''}, {survey.longitude or ''}"),
+        (localized_text("GPS精度(m)", locale_code, "GPS Accuracy (m)", "Akurasi GPS (m)"), f"{survey.gps_accuracy}" if survey.gps_accuracy is not None else "-"),
+        (localized_text("风险", locale_code, "Risks", "Risiko"), survey.risks or "-"),
+        (localized_text("建议", locale_code, "Recommendations", "Rekomendasi"), survey.recommendations or "-"),
     ]
     def _fmt_val(v):
         try:
@@ -1233,7 +1221,7 @@ async def export_survey_pdf(
             return str(v)
 
     def build_kv_table(pairs):
-        data = [[Paragraph(f"<b>{k}</b>", styles["BodyCN"]), Paragraph(_fmt_val(v), styles["BodyCN"])] for k, v in pairs]
+        data = [[create_pdf_cell(k, styles["ArchivePdfHeader"]), create_pdf_cell(_fmt_val(v), styles["ArchivePdfBody"])] for k, v in pairs]
         t = Table(data, colWidths=[3*cm, 12*cm])
         t.setStyle(TableStyle([
             ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.white, accent_bg]),
@@ -1249,43 +1237,43 @@ async def export_survey_pdf(
 
     # 详细信息分组
     elements.append(Spacer(1, 0.4*cm))
-    elements.append(Paragraph("场地与结构", styles["H2CN"]))
+    elements.append(Paragraph(localized_text("场地与结构", locale_code, "Site & Structure", "Tapak & Struktur"), styles["ArchivePdfH2"]))
     elements.append(build_kv_table([
-        ("站点类型", survey.site_type),
-        ("塔型", survey.tower_type),
-        ("可用挂高(m)", survey.available_height_m),
-        ("荷载(kg)", survey.load_capacity_kg),
+        (localized_text("站点类型", locale_code, "Site Type", "Tipe Situs"), survey.site_type),
+        (localized_text("塔型", locale_code, "Tower Type", "Tipe Menara"), survey.tower_type),
+        (localized_text("可用挂高(m)", locale_code, "Available Height (m)", "Tinggi Tersedia (m)"), survey.available_height_m),
+        (localized_text("荷载(kg)", locale_code, "Load Capacity (kg)", "Kapasitas Beban (kg)"), survey.load_capacity_kg),
     ]))
 
     elements.append(Spacer(1, 0.4*cm))
-    elements.append(Paragraph("供电与回传", styles["H2CN"]))
+    elements.append(Paragraph(localized_text("供电与回传", locale_code, "Power & Backhaul", "Daya & Backhaul"), styles["ArchivePdfH2"]))
     elements.append(build_kv_table([
-        ("市电可用", '是' if survey.power_available else ('否' if survey.power_available is not None else '-')),
-        ("电源距离(m)", survey.power_distance_m),
-        ("容量(kW)", survey.power_capacity_kw),
-        ("接地可行", '是' if survey.earthing_feasible else ('否' if survey.earthing_feasible is not None else '-')),
-        ("光纤可用", '是' if survey.fiber_available else ('否' if survey.fiber_available is not None else '-')),
-        ("光纤距离(m)", survey.fiber_distance_m),
-        ("微波LoS", '是' if survey.microwave_los else ('否' if survey.microwave_los is not None else '-')),
-        ("方位角(°)", survey.los_azimuth_deg),
-        ("距离(km)", survey.los_distance_km),
+        (localized_text("市电可用", locale_code, "Power Available", "Daya Tersedia"), localized_text("是", locale_code, "Yes", "Ya") if survey.power_available else (localized_text("否", locale_code, "No", "Tidak") if survey.power_available is not None else '-')),
+        (localized_text("电源距离(m)", locale_code, "Power Distance (m)", "Jarak Daya (m)"), survey.power_distance_m),
+        (localized_text("容量(kW)", locale_code, "Capacity (kW)", "Kapasitas (kW)"), survey.power_capacity_kw),
+        (localized_text("接地可行", locale_code, "Grounding Feasible", "Pembumian Layak"), localized_text("是", locale_code, "Yes", "Ya") if survey.earthing_feasible else (localized_text("否", locale_code, "No", "Tidak") if survey.earthing_feasible is not None else '-')),
+        (localized_text("光纤可用", locale_code, "Fiber Available", "Serat Tersedia"), localized_text("是", locale_code, "Yes", "Ya") if survey.fiber_available else (localized_text("否", locale_code, "No", "Tidak") if survey.fiber_available is not None else '-')),
+        (localized_text("光纤距离(m)", locale_code, "Fiber Distance (m)", "Jarak Serat (m)"), survey.fiber_distance_m),
+        (localized_text("微波LoS", locale_code, "Microwave LoS", "LoS Microwave"), localized_text("是", locale_code, "Yes", "Ya") if survey.microwave_los else (localized_text("否", locale_code, "No", "Tidak") if survey.microwave_los is not None else '-')),
+        (localized_text("方位角(°)", locale_code, "Azimuth (°)", "Azimut (°)"), survey.los_azimuth_deg),
+        (localized_text("距离(km)", locale_code, "Distance (km)", "Jarak (km)"), survey.los_distance_km),
     ]))
 
     elements.append(Spacer(1, 0.4*cm))
-    elements.append(Paragraph("环境与进场", styles["H2CN"]))
+    elements.append(Paragraph(localized_text("环境与进场", locale_code, "Environment & Access", "Lingkungan & Akses"), styles["ArchivePdfH2"]))
     elements.append(build_kv_table([
-        ("敏感点", survey.sensitive_points),
-        ("安全/隐患", survey.safety_notes),
-        ("审批/物业限制", survey.permits_constraints),
-        ("进场限制", survey.entry_constraints),
+        (localized_text("敏感点", locale_code, "Sensitive Points", "Titik Sensitif"), survey.sensitive_points),
+        (localized_text("安全/隐患", locale_code, "Safety / Risks", "Keamanan / Risiko"), survey.safety_notes),
+        (localized_text("审批/物业限制", locale_code, "Approval / Property Limits", "Persetujuan / Batas Properti"), survey.permits_constraints),
+        (localized_text("进场限制", locale_code, "Access Limits", "Batas Akses"), survey.entry_constraints),
     ]))
 
     elements.append(Spacer(1, 0.2*cm))
-    elements.append(Paragraph("业主信息", styles["H2CN"]))
+    elements.append(Paragraph(localized_text("业主信息", locale_code, "Owner Info", "Info Pemilik"), styles["ArchivePdfH2"]))
     elements.append(build_kv_table([
-        ("业主姓名", survey.owner_name),
-        ("业主电话", survey.owner_phone),
-        ("时间窗口", survey.access_time_window),
+        (localized_text("业主姓名", locale_code, "Owner Name", "Nama Pemilik"), survey.owner_name),
+        (localized_text("业主电话", locale_code, "Owner Phone", "Telepon Pemilik"), survey.owner_phone),
+        (localized_text("时间窗口", locale_code, "Time Window", "Jendela Waktu"), survey.access_time_window),
     ]))
 
     # 附件清单（非图片）
@@ -1298,8 +1286,13 @@ async def export_survey_pdf(
     )
     if attachments:
         elements.append(Spacer(1, 0.4*cm))
-        elements.append(Paragraph("附件清单", styles["H2CN"]))
-        rows = [["文件名", "分类", "类型", "大小(KB)"]]
+        elements.append(Paragraph(localized_text("附件清单", locale_code, "Attachment List", "Daftar Lampiran"), styles["ArchivePdfH2"]))
+        rows = [[
+            create_pdf_cell(localized_text("文件名", locale_code, "File Name", "Nama Berkas"), styles["ArchivePdfHeader"]),
+            create_pdf_cell(localized_text("分类", locale_code, "Category", "Kategori"), styles["ArchivePdfHeader"]),
+            create_pdf_cell(localized_text("类型", locale_code, "Type", "Tipe"), styles["ArchivePdfHeader"]),
+            create_pdf_cell(localized_text("大小(KB)", locale_code, "Size (KB)", "Ukuran (KB)"), styles["ArchivePdfHeader"]),
+        ]]
         for a in attachments:
             size_kb = None
             try:
@@ -1308,8 +1301,10 @@ async def export_survey_pdf(
             except Exception:
                 size_kb = None
             rows.append([
-                os.path.basename(a.file_path) if a.file_path else (a.original_name or a.id),
-                a.category or '-', a.mime_type or '-', str(size_kb or '-')
+                create_pdf_cell(os.path.basename(a.file_path) if a.file_path else (a.original_name or a.id), styles["ArchivePdfBody"]),
+                create_pdf_cell(a.category or '-', styles["ArchivePdfBody"]),
+                create_pdf_cell(a.mime_type or '-', styles["ArchivePdfBody"]),
+                create_pdf_cell(str(size_kb or '-'), styles["ArchivePdfBody"]),
             ])
         t = Table(rows, colWidths=[8*cm, 3*cm, 3*cm, 2*cm])
         t.setStyle(TableStyle([
@@ -1332,25 +1327,22 @@ async def export_survey_pdf(
     photos = [p for p in photos if (p.mime_type or '').startswith('image/')]
 
     if photos:
-        # 小标题样式用于分类标题
-        styles.add(ParagraphStyle(name="H3CN", fontName=FONT_BOLD, fontSize=13, leading=18, textColor=text_color, spaceBefore=8, spaceAfter=4))
-
         elements.append(Spacer(1, 0.6*cm))
-        elements.append(Paragraph("照片索引", styles["H2CN"]))
+        elements.append(Paragraph(localized_text("照片索引", locale_code, "Photo Index", "Indeks Foto"), styles["ArchivePdfH2"]))
 
         # 映射分类显示名称（与前端一致）
         def cat_label(k: str) -> str:
             mapping = {
-                'overview': '全景',
-                'power': '电力/配电',
-                'room': '机房/机柜',
-                'duct': '管道/弱电',
-                'roof': '屋面/塔体',
-                'hazard': '隐患',
-                'custom': '其他',
-                'uncategorized': '未分类',
+                'overview': localized_text('全景', locale_code, 'Overview', 'Ringkasan'),
+                'power': localized_text('电力/配电', locale_code, 'Power / Distribution', 'Daya / Distribusi'),
+                'room': localized_text('机房/机柜', locale_code, 'Room / Cabinet', 'Ruang / Kabinet'),
+                'duct': localized_text('管道/弱电', locale_code, 'Duct / Low Voltage', 'Duct / Tegangan Rendah'),
+                'roof': localized_text('屋面/塔体', locale_code, 'Roof / Tower', 'Atap / Menara'),
+                'hazard': localized_text('隐患', locale_code, 'Hazard', 'Bahaya'),
+                'custom': localized_text('其他', locale_code, 'Other', 'Lainnya'),
+                'uncategorized': localized_text('未分类', locale_code, 'Uncategorized', 'Belum dikategorikan'),
             }
-            return mapping.get(k, k or '未分类')
+            return mapping.get(k, k or localized_text('未分类', locale_code, 'Uncategorized', 'Belum dikategorikan'))
 
         # 分组
         grouped: dict[str, list] = {}
@@ -1368,7 +1360,7 @@ async def export_survey_pdf(
             group = [p for p in grouped[cat] if p.file_path and os.path.exists(p.file_path)]
             if not group:
                 continue
-            elements.append(Paragraph(f"{cat_label(cat)}（{len(group)}）", styles["H3CN"]))
+            elements.append(Paragraph(f"{cat_label(cat)}（{len(group)}）", styles["ArchivePdfH3"]))
 
             row: list = []
             grid: list = []
@@ -1376,7 +1368,7 @@ async def export_survey_pdf(
                 try:
                     img = Image(p.file_path, width=7.4*cm, height=5.0*cm)
                     # 标注文件名作为说明
-                    caption = Paragraph(os.path.basename(p.file_path), styles["CaptionCN"])
+                    caption = Paragraph(os.path.basename(p.file_path), styles["ArchivePdfCaption"])
                     cell = Table([[img], [caption]], colWidths=[7.4*cm])
                     cell.setStyle(TableStyle([
                         ("ALIGN", (0,0), (-1,-1), "CENTER"),

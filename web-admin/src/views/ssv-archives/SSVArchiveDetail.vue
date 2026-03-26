@@ -135,6 +135,8 @@ import { ssvArchivesApi } from '@/api/ssvArchives'
 import ArchiveFormRenderer from '@/components/archives/ArchiveFormRenderer.vue'
 import { useUserStore } from '@/stores/user'
 import { resolveImageUrl } from '@/utils/imageLoader'
+import { getCurrentLocale } from '@/i18n/translator'
+import { buildArchiveExportName } from '@/utils/archiveExportFilename'
 
 const route = useRoute()
 const router = useRouter()
@@ -208,11 +210,12 @@ async function exportZip() {
   try {
     exporting.value = true
     ElMessage.info('正在生成Zip压缩包，请稍候…')
-    const blob = await ssvArchivesApi.exportZip(id)
+    const currentLocale = getCurrentLocale()
+    const blob = await ssvArchivesApi.exportZip(id, { locale: currentLocale })
     const url = window.URL.createObjectURL(new Blob([blob]))
     const a = document.createElement('a')
     a.href = url
-    a.download = buildExportName('zip')
+    a.download = buildExportName('zip', currentLocale)
     a.click()
     window.URL.revokeObjectURL(url)
     ElMessage.success('Zip导出成功，浏览器将开始下载')
@@ -228,11 +231,12 @@ async function exportPdf() {
   try {
     exporting.value = true
     ElMessage.info('正在生成PDF，请稍候…')
-    const blob = await ssvArchivesApi.exportPdf(id)
+    const currentLocale = getCurrentLocale()
+    const blob = await ssvArchivesApi.exportPdf(id, { locale: currentLocale })
     const url = window.URL.createObjectURL(new Blob([blob]))
     const a = document.createElement('a')
     a.href = url
-    a.download = buildExportName('pdf')
+    a.download = buildExportName('pdf', currentLocale)
     a.click()
     window.URL.revokeObjectURL(url)
     ElMessage.success('PDF导出成功，浏览器将开始下载')
@@ -244,15 +248,16 @@ async function exportPdf() {
   }
 }
 
-function buildExportName(ext) {
-  const code = content.value?.meta?.site_code || 'NA'
-  const name = content.value?.meta?.site_name || 'NA'
-  const ver = archive.value?.current_version || 1
-  const ts = archive.value?.updated_at ? new Date(archive.value.updated_at) : new Date()
-  const pad = (n) => String(n).padStart(2, '0')
-  const tsStr = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}`
-  const raw = `SSV档案_${code}_${name}_v${ver}_${tsStr}.${ext}`
-  return raw.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '_')
+function buildExportName(ext, locale) {
+  return buildArchiveExportName({
+    archiveType: 'ssv',
+    locale,
+    siteCode: content.value?.meta?.site_code,
+    siteName: content.value?.meta?.site_name,
+    version: archive.value?.current_version,
+    updatedAt: archive.value?.updated_at,
+    ext,
+  })
 }
 
 const jsonPointerEscape = (s) => String(s).replaceAll('~', '~0').replaceAll('/', '~1')

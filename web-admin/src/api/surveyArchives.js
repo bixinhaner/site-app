@@ -67,14 +67,16 @@ export const surveyArchivesApi = {
   search(params) {
     return request.get('/api/survey-archives/search', { params })
   },
-  exportZip(id) {
+  exportZip(id, params = {}) {
     return request.get(`/api/survey-archives/${id}/export`, {
+      params,
       responseType: 'blob',
       timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
     })
   },
-  exportPdf(id) {
+  exportPdf(id, params = {}) {
     return request.get(`/api/survey-archives/${id}/export-pdf`, {
+      params,
       responseType: 'blob',
       timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
     })

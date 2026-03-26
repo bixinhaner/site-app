@@ -66,14 +66,16 @@ export const openingArchivesApi = {
   search(params) {
     return request.get('/api/opening-archives/search', { params })
   },
-  exportZip(id) {
+  exportZip(id, params = {}) {
     return request.get(`/api/opening-archives/${id}/export`, {
+      params,
       responseType: 'blob',
       timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
     })
   },
-  exportPdf(id) {
+  exportPdf(id, params = {}) {
     return request.get(`/api/opening-archives/${id}/export-pdf`, {
+      params,
       responseType: 'blob',
       timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
     })
