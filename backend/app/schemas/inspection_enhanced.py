@@ -232,6 +232,14 @@ class InspectionPhotoResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class FieldIssueComment(BaseModel):
+    """字段问题备注"""
+    field_key: Optional[str] = None
+    field_id: Optional[str] = None
+    field_label: str
+    field_label_i18n: Optional[Dict[str, str]] = None
+    comment: str
+
 class InspectionCheckItemResponse(BaseModel):
     """检查项响应"""
     id: str
@@ -257,7 +265,9 @@ class InspectionCheckItemResponse(BaseModel):
     checked_at: Optional[datetime]
     review_status: Optional[str]
     review_comments: Optional[str]
+    review_comments_manual: Optional[str] = None
     review_comments_i18n: Optional[Dict[str, str]] = None
+    field_issue_comments: Optional[List[FieldIssueComment]] = None
     reviewed_at: Optional[datetime]
     ai_status: Optional[str] = None
     ai_mode: Optional[str] = None
@@ -417,6 +427,7 @@ class CheckItemReviewRequest(BaseModel):
     action: str = Field(..., pattern="^(pass|fail|warning)$")
     comments: Optional[str] = None
     comments_i18n: Optional[Dict[str, str]] = None
+    field_issue_comments: Optional[List[FieldIssueComment]] = None
 
 class PhotoReviewRequest(BaseModel):
     """照片审核请求"""

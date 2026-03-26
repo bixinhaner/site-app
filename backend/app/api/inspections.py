@@ -485,18 +485,184 @@ def _touch_check_item_and_clear_review(check_item: InspectionCheckItem, now: dat
     had_review = (
         check_item.review_status is not None
         or check_item.review_comments is not None
+        or getattr(check_item, "review_comments_manual", None) is not None
         or getattr(check_item, "review_comments_i18n", None) is not None
+        or getattr(check_item, "field_issue_comments", None) is not None
         or check_item.reviewed_by is not None
         or check_item.reviewed_at is not None
     )
     if had_review:
         check_item.review_status = None
         check_item.review_comments = None
+        check_item.review_comments_manual = None
         check_item.review_comments_i18n = None
+        check_item.field_issue_comments = None
         check_item.reviewed_by = None
         check_item.reviewed_at = None
     check_item.updated_at = now
     return had_review
+
+
+def _build_check_item_field_meta_map(fields: Any) -> Dict[str, Dict[str, Any]]:
+    field_map: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(fields, list):
+        return field_map
+    for raw in fields:
+        if not isinstance(raw, dict) or not is_template_field_active(raw):
+            continue
+        field_id = str(raw.get("field_id") or "").strip()
+        if not field_id:
+            continue
+        field_map[field_id] = {
+            "label": str(raw.get("label") or field_id).strip() or field_id,
+            "label_i18n": _as_i18n_dict(raw.get("label_i18n")),
+        }
+    return field_map
+
+
+def _normalize_field_issue_comments(raw_items: Any, *, fields: Any) -> List[Dict[str, str]]:
+    if raw_items in (None, "", []):
+        return []
+    if not isinstance(raw_items, list):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="field_issue_comments 格式无效")
+
+    field_meta_map = _build_check_item_field_meta_map(fields)
+    normalized_by_field_key: Dict[str, Dict[str, str]] = {}
+
+    for index, raw in enumerate(raw_items):
+        current = raw.dict() if hasattr(raw, "dict") else raw
+        if not isinstance(current, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"field_issue_comments 第 {index + 1} 项格式无效",
+            )
+
+        field_key = str(current.get("field_key") or current.get("field_id") or "").strip()
+        field_id = str(current.get("field_id") or "").strip()
+        field_label = str(current.get("field_label") or "").strip()
+        field_label_i18n = _as_i18n_dict(current.get("field_label_i18n"))
+        comment = str(current.get("comment") or "").strip()
+        if not field_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"field_issue_comments 第 {index + 1} 项缺少 field_key",
+            )
+        if field_id:
+            if field_id not in field_meta_map:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"field_issue_comments 包含无效字段: {field_id}",
+                )
+            field_meta = field_meta_map.get(field_id) or {}
+            field_label = str(field_meta.get("label") or field_id).strip() or field_id
+            field_label_i18n = _as_i18n_dict(field_meta.get("label_i18n")) or field_label_i18n
+        elif not field_label:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"field_issue_comments 第 {index + 1} 项缺少 field_label",
+            )
+        if not comment:
+            continue
+
+        normalized_by_field_key[field_key] = {
+            "field_key": field_key,
+            "field_id": field_id or None,
+            "field_label": field_label,
+            "field_label_i18n": field_label_i18n,
+            "comment": comment,
+        }
+
+    return list(normalized_by_field_key.values())
+
+
+def _build_check_item_review_comment(
+    *,
+    field_issue_comments: List[Dict[str, str]],
+    manual_comment: Optional[str],
+) -> Optional[str]:
+    sections: List[str] = []
+
+    if field_issue_comments:
+        lines = ["字段问题汇总："]
+        for index, item in enumerate(field_issue_comments, start=1):
+            label = str(
+                item.get("field_label")
+                or item.get("field_id")
+                or item.get("field_key")
+                or f"字段{index}"
+            ).strip()
+            comment = str(item.get("comment") or "").strip()
+            if not comment:
+                continue
+            lines.append(f"{index}. {label}：{comment}")
+        if len(lines) > 1:
+            sections.append("\n".join(lines))
+
+    manual_text = str(manual_comment or "").strip()
+    if manual_text:
+        if sections:
+            sections.append("补充说明：\n" + manual_text)
+        else:
+            sections.append(manual_text)
+
+    final_text = "\n\n".join(part for part in sections if str(part or "").strip())
+    return final_text.strip() or None
+
+
+_CHECK_ITEM_REVIEW_I18N_LABELS = {
+    "en": {
+        "summary_title": "Field Issue Summary:",
+        "supplement_title": "Additional Notes:",
+    },
+    "id": {
+        "summary_title": "Ringkasan Masalah Field:",
+        "supplement_title": "Catatan Tambahan:",
+    },
+}
+
+
+def _build_check_item_review_comment_i18n(
+    *,
+    field_issue_comments: List[Dict[str, str]],
+    manual_comment_i18n: Optional[Dict[str, str]],
+) -> Optional[Dict[str, str]]:
+    manual_i18n = _as_i18n_dict(manual_comment_i18n) or {}
+    result: Dict[str, str] = {}
+
+    for locale_key, labels in _CHECK_ITEM_REVIEW_I18N_LABELS.items():
+        sections: List[str] = []
+
+        if field_issue_comments:
+            lines = [labels["summary_title"]]
+            for index, item in enumerate(field_issue_comments, start=1):
+                label = str(
+                    (item.get("field_label_i18n") or {}).get(locale_key)
+                    or item.get("field_label")
+                    or item.get("field_id")
+                    or item.get("field_key")
+                    or f"Field {index}"
+                ).strip()
+                comment = str(item.get("comment") or "").strip()
+                if not comment:
+                    continue
+                lines.append(f"{index}. {label}: {comment}")
+            if len(lines) > 1:
+                sections.append("\n".join(lines))
+
+        manual_text = str(manual_i18n.get(locale_key) or "").strip()
+        if manual_text:
+            if sections:
+                sections.append(labels["supplement_title"] + "\n" + manual_text)
+            else:
+                sections.append(manual_text)
+
+        final_text = "\n\n".join(
+            part for part in sections if str(part or "").strip()
+        ).strip()
+        if final_text:
+            result[locale_key] = final_text
+
+    return result or None
 
 
 def _normalize_category_level(category: dict) -> str:
@@ -3346,9 +3512,29 @@ async def review_inspection_item(
                 detail=f"检查项未完成提交，无法审核（当前状态：{item_status_value}）"
             )
         now = datetime.utcnow()
+        manual_comment = str(review.comments or "").strip() or None
+        field_issue_comments = _normalize_field_issue_comments(
+            getattr(review, "field_issue_comments", None),
+            fields=check_item.fields,
+        )
+        if review.action != "pass" and not manual_comment and not field_issue_comments:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="请输入审核意见或至少填写一条字段问题备注",
+            )
+        final_comment = _build_check_item_review_comment(
+            field_issue_comments=field_issue_comments,
+            manual_comment=manual_comment,
+        )
+        final_comment_i18n = _build_check_item_review_comment_i18n(
+            field_issue_comments=field_issue_comments,
+            manual_comment_i18n=review.comments_i18n if manual_comment else None,
+        )
         check_item.review_status = review.action
-        check_item.review_comments = review.comments
-        check_item.review_comments_i18n = review.comments_i18n
+        check_item.review_comments = final_comment
+        check_item.review_comments_manual = manual_comment
+        check_item.review_comments_i18n = final_comment_i18n
+        check_item.field_issue_comments = field_issue_comments or None
         check_item.reviewed_by = current_user.id
         check_item.reviewed_at = now
         check_item.updated_at = now
@@ -3363,8 +3549,12 @@ async def review_inspection_item(
             from_status=None,
             to_status=None,
             operator_id=current_user.id,
-            comments=review.comments,
-            details={"item_id": item_id, "result": review.action}
+            comments=final_comment,
+            details={
+                "item_id": item_id,
+                "result": review.action,
+                "field_issue_count": len(field_issue_comments),
+            }
         )
         db.add(audit_log)
         db.commit()

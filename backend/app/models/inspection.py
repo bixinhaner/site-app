@@ -193,7 +193,9 @@ class InspectionCheckItem(Base):
     # 审核信息
     review_status = Column(String(20))  # pass, fail, warning
     review_comments = Column(Text)
+    review_comments_manual = Column(Text)
     review_comments_i18n = Column(JSON)
+    field_issue_comments = Column(JSON)
     reviewed_by = Column(Integer, ForeignKey("users.id"))
     reviewed_at = Column(DateTime)
 

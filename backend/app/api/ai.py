@@ -331,7 +331,9 @@ def apply_check_item_ai_suggestion(
     try:
         check_item.review_status = suggested
         check_item.review_comments = comments
+        check_item.review_comments_manual = None
         check_item.review_comments_i18n = None
+        check_item.field_issue_comments = None
         check_item.reviewed_by = current_user.id
         check_item.reviewed_at = now
         check_item.updated_at = now
