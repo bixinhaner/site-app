@@ -22,7 +22,7 @@ from app.services.photo_duplicate_guard import (
 from app.utils.file_handler import save_uploaded_file, calculate_file_hash, extract_exif, compress_image, add_text_watermark_inline
 from app.utils.timezone import to_utc_iso
 from app.utils.archive_pdf import (
-    build_archive_value_rows,
+    build_archive_value_photo_blocks,
     build_pdf_styles,
     create_pdf_cell,
     localized_text,
@@ -633,6 +633,90 @@ async def export_archive_pdf(
         ]))
         return t
 
+    def build_value_blocks(fields, values, photos):
+        return build_archive_value_photo_blocks(
+            fields,
+            values,
+            photos,
+            locale=locale_code,
+            label_style=styles["ArchivePdfBody"],
+            value_style=styles["ArchivePdfBody"],
+            unbound_label=localized_text("照片", locale_code, "Photo", "Foto"),
+            unbound_value=localized_text("未关联字段", locale_code, "Unassigned to Field", "Tidak terkait field"),
+        )
+
+    def append_value_blocks(blocks, *, header_bg, header_text):
+        if not blocks:
+            return False
+
+        if with_thumbs:
+            for idx, block in enumerate(blocks):
+                row_bg = colors.white if idx % 2 == 0 else primary_light
+                row_tbl = Table(
+                    [[block["label_cell"], block["value_cell"]]],
+                    colWidths=[5 * cm, 9 * cm],
+                )
+                row_tbl.setStyle(
+                    TableStyle(
+                        [
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                            ('BACKGROUND', (0, 0), (-1, -1), row_bg),
+                            ('LINEBEFORE', (0, 0), (-1, -1), 0.25, border),
+                            ('LINEAFTER', (0, 0), (-1, -1), 0.25, border),
+                            ('LINEABOVE', (0, 0), (-1, -1), 0.25, border),
+                            ('LINEBELOW', (0, 0), (-1, -1), 0.25, border),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                            ('TOPPADDING', (0, 0), (-1, -1), 4),
+                            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                        ]
+                    )
+                )
+                story.append(row_tbl)
+                story.append(Spacer(1, 4))
+
+                block_photos = block.get("photos") or []
+                if block_photos:
+                    grid = make_photo_grid(block_photos, cols=2)
+                    if grid:
+                        story.append(grid)
+                        story.append(Spacer(1, 6))
+            return True
+
+        rows = [[blk["label_cell"], blk["value_cell"]] for blk in blocks]
+        tbl = Table(
+            [
+                [
+                    create_pdf_cell(localized_text("字段", locale_code, "Field", "Bidang"), styles["ArchivePdfHeader"]),
+                    create_pdf_cell(localized_text("值", locale_code, "Value", "Nilai"), styles["ArchivePdfHeader"]),
+                ]
+            ] + rows,
+            colWidths=[5 * cm, 9 * cm],
+        )
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('BACKGROUND', (0, 0), (-1, 0), header_bg),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), header_text),
+                    ('LINEBEFORE', (0, 0), (-1, -1), 0.25, border),
+                    ('LINEAFTER', (0, 0), (-1, -1), 0.25, border),
+                    ('LINEABOVE', (0, 0), (-1, -1), 0.25, border),
+                    ('LINEBELOW', (0, 0), (-1, -1), 0.25, border),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, primary_light]),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(tbl)
+        story.append(Spacer(1, 6))
+        return True
+
     for ci, cat in enumerate(cats, start=1):
         story.append(Paragraph(f"{ci}. {pick_localized_text(cat.get('category_name') or str(cat.get('category_id') or '未命名分类'), cat.get('category_name_i18n'), locale_code)}", styles["ArchivePdfH2"]))
         items = cat.get("items") or []
@@ -641,100 +725,41 @@ async def export_archive_pdf(
             story.append(Paragraph(title, styles["ArchivePdfH3"]))
 
             fields = it.get("fields") or []
-            values = it.get("values") or {}
-            rows = build_archive_value_rows(
+            item_blocks = build_value_blocks(
                 fields,
-                values,
-                locale=locale_code,
-                label_style=styles["ArchivePdfBody"],
-                value_style=styles["ArchivePdfBody"],
+                it.get("values") or {},
+                it.get("photos") or [],
             )
-            if rows:
-                t = Table(
-                    [[
-                        create_pdf_cell(localized_text("字段", locale_code, "Field", "Bidang"), styles["ArchivePdfHeader"]),
-                        create_pdf_cell(localized_text("值", locale_code, "Value", "Nilai"), styles["ArchivePdfHeader"]),
-                    ]] + rows,
-                    colWidths=[5*cm, 9*cm]
-                )
-                t.setStyle(TableStyle([
-                    ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                    ('BACKGROUND', (0,0), (-1,0), primary),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                    ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
-                    ('LINEAFTER', (0,0), (-1,-1), 0.25, border),
-                    ('LINEABOVE', (0,0), (-1,-1), 0.25, border),
-                    ('LINEBELOW', (0,0), (-1,-1), 0.25, border),
-                    ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, primary_light]),
-                    ('LEFTPADDING', (0,0), (-1,-1), 6),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                    ('TOPPADDING', (0,0), (-1,-1), 4),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                ]))
-                story.append(t)
-                story.append(Spacer(1, 6))
-
-            if with_thumbs:
-                grid = make_photo_grid((it.get("photos") or []), cols=2)
-                if grid:
-                    story.append(Paragraph(localized_text("站点照片", locale_code, "Site Photos", "Foto Situs"), styles["ArchivePdfH4"]))
-                    story.append(grid)
-                    story.append(Spacer(1, 6))
+            append_value_blocks(
+                item_blocks,
+                header_bg=primary,
+                header_text=colors.white,
+            )
 
             for sec in (it.get("sectors") or []):
                 sec_id = sec.get("sector_id")
-                sec_rows = build_archive_value_rows(
+                sec_blocks = build_value_blocks(
                     fields,
                     sec.get("values") or {},
-                    locale=locale_code,
-                    label_style=styles["ArchivePdfBody"],
-                    value_style=styles["ArchivePdfBody"],
+                    sec.get("photos") or [],
                 )
-                sec_photos = sec.get("photos") or []
-                if not sec_rows and not sec_photos:
+                if not sec_blocks:
                     continue
                 story.append(Paragraph(f"{localized_text('扇区', locale_code, 'Sector', 'Sektor')}：{sec_id}", styles["ArchivePdfH4"]))
-                if sec_rows:
-                    sec_tbl = Table(
-                        [[
-                            create_pdf_cell(localized_text("字段", locale_code, "Field", "Bidang"), styles["ArchivePdfHeader"]),
-                            create_pdf_cell(localized_text("值", locale_code, "Value", "Nilai"), styles["ArchivePdfHeader"]),
-                        ]] + sec_rows,
-                        colWidths=[5*cm, 9*cm]
-                    )
-                    sec_tbl.setStyle(TableStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#FDEFE6")),
-                        ('TEXTCOLOR', (0,0), (-1,0), primary),
-                        ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
-                        ('LINEAFTER', (0,0), (-1,-1), 0.25, border),
-                        ('LINEABOVE', (0,0), (-1,-1), 0.25, border),
-                        ('LINEBELOW', (0,0), (-1,-1), 0.25, border),
-                        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, primary_light]),
-                        ('LEFTPADDING', (0,0), (-1,-1), 6),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                        ('TOPPADDING', (0,0), (-1,-1), 4),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                    ]))
-                    story.append(sec_tbl)
-                    story.append(Spacer(1, 6))
-                if with_thumbs and sec_photos:
-                    grid = make_photo_grid(sec_photos, cols=2)
-                    if grid:
-                        story.append(grid)
-                        story.append(Spacer(1, 6))
+                append_value_blocks(
+                    sec_blocks,
+                    header_bg=colors.HexColor("#FDEFE6"),
+                    header_text=primary,
+                )
 
             for cell in (it.get("cells") or []):
                 cell_id = cell.get("cell_id")
-                cell_rows = build_archive_value_rows(
+                cell_blocks = build_value_blocks(
                     fields,
                     cell.get("values") or {},
-                    locale=locale_code,
-                    label_style=styles["ArchivePdfBody"],
-                    value_style=styles["ArchivePdfBody"],
+                    cell.get("photos") or [],
                 )
-                cell_photos = cell.get("photos") or []
-                if not cell_rows and not cell_photos:
+                if not cell_blocks:
                     continue
                 head = f"{localized_text('小区', locale_code, 'Cell', 'Sel')}：{cell_id}"
                 if cell.get("sector_id"):
@@ -742,34 +767,11 @@ async def export_archive_pdf(
                 if cell.get("band"):
                     head += f" 频段 {cell.get('band')}"
                 story.append(Paragraph(head, styles["ArchivePdfH4"]))
-                if cell_rows:
-                    cell_tbl = Table(
-                        [[
-                            create_pdf_cell(localized_text("字段", locale_code, "Field", "Bidang"), styles["ArchivePdfHeader"]),
-                            create_pdf_cell(localized_text("值", locale_code, "Value", "Nilai"), styles["ArchivePdfHeader"]),
-                        ]] + cell_rows,
-                        colWidths=[5*cm, 9*cm]
-                    )
-                    cell_tbl.setStyle(TableStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#FDEFE6")),
-                        ('TEXTCOLOR', (0,0), (-1,0), primary),
-                        ('LINEBEFORE', (0,0), (-1,-1), 0.25, border),
-                        ('LINEAFTER', (0,0), (-1,-1), 0.25, border),
-                        ('LINEABOVE', (0,0), (-1,-1), 0.25, border),
-                        ('LINEBELOW', (0,0), (-1,-1), 0.25, border),
-                        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, primary_light]),
-                        ('LEFTPADDING', (0,0), (-1,-1), 6),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                        ('TOPPADDING', (0,0), (-1,-1), 4),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                    ]))
-                    story.append(cell_tbl)
-                    story.append(Spacer(1, 6))
-                if with_thumbs and cell_photos:
-                    grid = make_photo_grid(cell_photos, cols=2)
-                    if grid:
-                        story.append(grid)
-                        story.append(Spacer(1, 6))
+                append_value_blocks(
+                    cell_blocks,
+                    header_bg=colors.HexColor("#FDEFE6"),
+                    header_text=primary,
+                )
 
         if ci != len(cats):
             story.append(PageBreak())

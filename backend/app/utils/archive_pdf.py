@@ -439,3 +439,123 @@ def build_archive_value_rows(
         rows.append([create_pdf_cell(str(key), label_style), create_pdf_cell(str(raw), value_style)])
 
     return rows
+
+
+_ARCHIVE_UNBOUND_PHOTO_FIELD = "__archive_unbound_photo_field__"
+
+
+def _normalize_photo_field_key(photo_obj: Any) -> str:
+    if not isinstance(photo_obj, dict):
+        return _ARCHIVE_UNBOUND_PHOTO_FIELD
+    raw = photo_obj.get("field_id")
+    if raw is None:
+        return _ARCHIVE_UNBOUND_PHOTO_FIELD
+    key = str(raw).strip()
+    if key == "":
+        return _ARCHIVE_UNBOUND_PHOTO_FIELD
+    return key
+
+
+def build_archive_value_photo_blocks(
+    fields: Optional[Iterable[Dict[str, Any]]],
+    values: Optional[Dict[str, Any]],
+    photos: Optional[Iterable[Dict[str, Any]]],
+    *,
+    locale: Any,
+    label_style: ParagraphStyle,
+    value_style: ParagraphStyle,
+    unbound_label: Optional[str] = None,
+    unbound_value: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    构建“字段值 + 对应照片”的顺序块：
+    1) 优先按模板字段顺序；
+    2) 再补充 values 中模板外字段；
+    3) 再补充仅有 field_id 但无字段定义/无值的照片组；
+    4) 最后兜底未绑定字段的照片组。
+    """
+    blocks: List[Dict[str, Any]] = []
+    used = set()
+    grouped_photos: Dict[str, List[Dict[str, Any]]] = {}
+
+    for photo in photos or []:
+        if not isinstance(photo, dict):
+            continue
+        key = _normalize_photo_field_key(photo)
+        grouped_photos.setdefault(key, []).append(photo)
+
+    for field_def in fields or []:
+        field_id = field_def.get("field_id")
+        if field_id is None:
+            continue
+        field_key = str(field_id)
+        label = pick_localized_text(field_def.get("label") or field_id, field_def.get("label_i18n"), locale) or field_key
+        raw = (values or {}).get(field_id)
+        formatted = format_archive_value(field_def, raw, locale)
+        field_photos = grouped_photos.pop(field_key, [])
+        if formatted is None and not field_photos:
+            continue
+        blocks.append(
+            {
+                "field_id": field_key,
+                "label_cell": create_pdf_cell(label, label_style),
+                "value_cell": create_pdf_cell("" if formatted is None else formatted, value_style),
+                "photos": field_photos,
+                "has_value": formatted is not None,
+            }
+        )
+        used.add(field_key)
+
+    for key, raw in (values or {}).items():
+        key_str = str(key)
+        if key_str in used:
+            continue
+        field_photos = grouped_photos.pop(key_str, [])
+        if _is_blank_raw(raw) and not field_photos:
+            continue
+        blocks.append(
+            {
+                "field_id": key_str,
+                "label_cell": create_pdf_cell(key_str, label_style),
+                "value_cell": create_pdf_cell("" if _is_blank_raw(raw) else str(raw), value_style),
+                "photos": field_photos,
+                "has_value": not _is_blank_raw(raw),
+            }
+        )
+        used.add(key_str)
+
+    for key in list(grouped_photos.keys()):
+        if key == _ARCHIVE_UNBOUND_PHOTO_FIELD:
+            continue
+        field_photos = grouped_photos.pop(key) or []
+        if not field_photos:
+            continue
+        blocks.append(
+            {
+                "field_id": key,
+                "label_cell": create_pdf_cell(key, label_style),
+                "value_cell": create_pdf_cell("", value_style),
+                "photos": field_photos,
+                "has_value": False,
+            }
+        )
+
+    unbound_photos = grouped_photos.get(_ARCHIVE_UNBOUND_PHOTO_FIELD) or []
+    if unbound_photos:
+        blocks.append(
+            {
+                "field_id": _ARCHIVE_UNBOUND_PHOTO_FIELD,
+                "label_cell": create_pdf_cell(
+                    unbound_label or localized_text("照片", locale, "Photo", "Foto"),
+                    label_style,
+                ),
+                "value_cell": create_pdf_cell(
+                    unbound_value or localized_text("未关联字段", locale, "Unassigned to Field", "Tidak terkait field"),
+                    value_style,
+                ),
+                "photos": unbound_photos,
+                "has_value": False,
+            }
+        )
+
+    return blocks
