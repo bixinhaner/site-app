@@ -2404,10 +2404,41 @@ const localizeScopedItemName = (rawName) => {
   return `${baseName} - ${getScopeLabelByCode(scopeCode)} ${suffixValue}`;
 };
 
+const buildEquipmentScopeSuffix = (item) => {
+  const cellId = String(item?.cell_id || "").trim();
+  if (cellId) return cellId;
+  const sectorId = String(item?.sector_id || "").trim();
+  const band = String(item?.band || "").trim();
+  if (sectorId && band) return `${sectorId}_${band}`;
+  return "";
+};
+
 const localizedItemName = (item) => {
   const name = pickLocalizedText(item?.item_name_i18n, item?.item_name);
   const localizedName = localizeScopedItemName(name);
-  return localizedName || "-";
+  const displayName = localizedName || "-";
+
+  if (getItemScopeCode(item) !== "equipment") return displayName;
+
+  const scopeSuffix = buildEquipmentScopeSuffix(item);
+  if (!scopeSuffix) return displayName;
+
+  const equipmentLabel = getScopeLabelByCode("equipment");
+  const suffixPattern = new RegExp(
+    `\\s*-\\s*${equipmentLabel}\\s+(.+)$`,
+    "i",
+  );
+  if (suffixPattern.test(displayName)) return displayName;
+
+  const genericScopePattern =
+    /^(.+?)\s*-\s*(设备|Equipment|Peralatan)\s+(.+)$/i;
+  const matches = displayName.match(genericScopePattern);
+  if (matches) {
+    const baseName = String(matches[1] || "").trim();
+    if (baseName) return `${baseName} - ${equipmentLabel} ${scopeSuffix}`;
+  }
+
+  return `${displayName} - ${equipmentLabel} ${scopeSuffix}`;
 };
 
 const localizedFieldLabel = (field) =>
