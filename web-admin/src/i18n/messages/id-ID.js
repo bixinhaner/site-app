@@ -238,7 +238,7 @@ export default {
     currencyPlaceholder: "Contoh USD / CNY / UGX",
     rulesTitle: "Daftar Aturan",
     rulesTip:
-      "Atur apakah sebuah node dibayar, rasio atau jumlah tetapnya, apakah bergantung pada approval akhir work order pembukaan, dan aturan diskon warning di sini.",
+      "Atur apakah sebuah node dibayar, rasio atau jumlah tetapnya, apakah bergantung pada approval akhir work order instalasi situs, dan aturan diskon warning di sini.",
     empty:
       'Belum ada aturan pembayaran. Klik "Tambah Aturan" di kanan atas untuk mulai.',
     ruleCardTitle: "Aturan {index}",
@@ -254,7 +254,7 @@ export default {
       amountTypeFixed: "Nilai Tetap",
       amountRatio: "Rasio Pembayaran (%)",
       amountFixed: "Jumlah Pembayaran",
-      requiresApprove: "Bergantung pada Approval Akhir Work Order Pembukaan",
+      requiresApprove: "Bergantung pada Approval Akhir Work Order Instalasi Situs",
       warningDiscount: "Diskon Warning",
       sortOrder: "Urutan",
       remark: "Catatan / Syarat",
@@ -283,7 +283,7 @@ export default {
     actions: {
       back: "Kembali",
       surveyArchive: "Arsip Survei",
-      openingArchive: "Membuka Arsip",
+      openingArchive: "Arsip Instalasi Situs",
       createResurvey: "Buat survei ulang",
       createSurvey: "Buat Survei",
       createResurveyDisabledTip:
@@ -341,15 +341,15 @@ export default {
       },
       installCompleted: {
         label: "Instal Selesai",
-        desc: "Penyerahan perintah kerja pembukaan pertama",
+        desc: "Penyerahan perintah kerja instalasi situs pertama",
       },
       online: {
         label: "On line",
-        desc: "Aktivasi perintah kerja pembukaan pertama",
+        desc: "Aktivasi perintah kerja instalasi situs pertama",
       },
       activated: {
         label: "Diaktifkan",
-        desc: "Penyelesaian perintah kerja pembukaan pertama",
+        desc: "Penyelesaian perintah kerja instalasi situs pertama",
       },
       ssv: {
         label: "SSV",
@@ -397,8 +397,8 @@ export default {
       contractAmount: "Nilai Kontrak",
       contractAmountMissing:
         "Situs ini belum memiliki nilai kontrak. Node pembayaran berbasis rasio belum bisa dihitung.",
-      openingWorkOrder: "Perintah Kerja Pembukaan",
-      noOpeningWorkOrder: "Belum ada perintah kerja pembukaan",
+      openingWorkOrder: "Perintah Kerja Instalasi Situs",
+      noOpeningWorkOrder: "Belum ada perintah kerja instalasi situs",
       empty: "Belum ada aturan pembayaran",
       warningCount: "{count} item warning",
       originalAmount: "Nilai awal {amount}",
@@ -516,8 +516,8 @@ export default {
       surveyRequireSuccess: "Situs diatur kembali untuk memerlukan survei",
       noSurveyArchive: "Tidak ada arsip survei untuk situs ini",
       getSurveyArchiveFailed: "Gagal mendapatkan arsip survei",
-      noOpeningArchive: "Tidak ada arsip pembuka untuk situs ini",
-      getOpeningArchiveFailed: "Gagal mendapatkan arsip pembuka",
+      noOpeningArchive: "Tidak ada arsip instalasi situs untuk situs ini",
+      getOpeningArchiveFailed: "Gagal mendapatkan arsip instalasi situs",
     },
     prompts: {
       skipSurveyMessage:
@@ -543,7 +543,7 @@ export default {
         inspections: "Catatan Inspeksi Warisan",
         site_surveys: "Catatan Survei",
         site_survey_archives: "Arsip Survei",
-        site_opening_archives: "Membuka Arsip",
+        site_opening_archives: "Arsip Instalasi Situs",
         site_ssv_archives: "Arsip SSV",
         equipment_binding_history: "Sejarah Pengikatan Peralatan",
         site_planning: "Versi Perencanaan",
@@ -835,6 +835,7 @@ export default {
       itemDetailTitle: "Detail Item Pemeriksaan",
       checkItemPrefix: "Item pemeriksaan:",
       itemName: "Item Pemeriksaan",
+      scope: "Cakupan",
       type: "Jenis",
       status: "Status",
       completedAt: "Waktu Selesai",
@@ -858,6 +859,68 @@ export default {
       photo: "Foto",
       noSubmittedContent:
         "Item pemeriksaan ini belum memiliki konten yang dikirim",
+    },
+    filters: {
+      reviewList: {
+        all: "Semua",
+        pending: "Lihat yang perlu ditinjau",
+      },
+      scope: {
+        all: "Semua cakupan",
+        site: "Situs",
+        sector: "Sektor",
+        cell: "Sel",
+        equipment: "Peralatan",
+      },
+      distance: {
+        all: "Semua jarak",
+        exceeded: "Hanya melebihi jarak",
+      },
+    },
+    summary: {
+      passCount: "Lulus {count}",
+      warningCount: "Peringatan {count}",
+      failCount: "Tidak Lulus {count}",
+      pendingCount: "Menunggu {count}",
+    },
+    actions: {
+      aiCheckBatch: "Inspeksi AI Sekali Klik",
+      aiCheckMissing: "Hanya yang belum dibuat",
+      aiCheckAll: "Semua",
+    },
+    scope: {
+      sectorTooltip: "Sektor {sector}",
+      cellTooltip: "Sektor {sector} / Band {band} / Sel {cell}",
+    },
+    hints: {
+      voided: {
+        text: "Perintah kerja dibatalkan",
+        tooltip:
+          "Perintah kerja ini sudah dibatalkan, dan semua aksi review/edit dibekukan.",
+      },
+      pending: {
+        text: "{count} belum ditinjau",
+        tooltip:
+          "Masih ada {count} item pemeriksaan yang belum ditinjau. Selesaikan semua review item sebelum review akhir.",
+      },
+      failed: {
+        text: "Ada item tidak lulus",
+        tooltip:
+          "Ada item pemeriksaan yang tidak lulus, sehingga perintah kerja tidak bisa disetujui.",
+      },
+      ready: {
+        text: "Siap untuk review akhir",
+        tooltip:
+          "Semua item pemeriksaan sudah ditinjau dan siap untuk review akhir.",
+      },
+    },
+    messages: {
+      snCopied: "SN berhasil disalin ke clipboard",
+      copyFailed: "Gagal menyalin",
+      itemReviewBlockedByVoided:
+        "Perintah kerja dibatalkan, tidak dapat melanjutkan review item pemeriksaan",
+      itemReviewBlockedByStatus:
+        "Item pemeriksaan ini belum disubmit (saat ini: {status}) dan tidak bisa direview",
     },
     buttons: {
       cancel: "Batal",
@@ -936,8 +999,8 @@ export default {
     SiteBasicImportHistory: "Impor Riwayat",
     SurveyArchives: "Arsip Survei",
     SurveyArchiveDetail: "Detail Arsip",
-    OpeningArchives: "Membuka Arsip",
-    OpeningArchiveDetail: "Membuka Detail Arsip",
+    OpeningArchives: "Arsip Instalasi Situs",
+    OpeningArchiveDetail: "Detail Arsip Instalasi Situs",
     SSVArchives: "Arsip SSV",
     SSVArchiveDetail: "Detail Arsip SSV",
     InspectionsMgmt: "Manajemen Inspeksi",

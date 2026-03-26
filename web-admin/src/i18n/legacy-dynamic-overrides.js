@@ -83,7 +83,7 @@ const legacyDynamicOverrides = [
   },
   {
     pattern: /^开站档案_(.*?)_(.*?)_v(.*?)_(.*?)\.(.*?)$/,
-    replace: (_, code, name, ver, ts, ext) => `opening-archive-${code}-${name}-v${ver}-${ts}.${ext}`,
+    replace: (_, code, name, ver, ts, ext) => `site-installation-archive-${code}-${name}-v${ver}-${ts}.${ext}`,
   },
   {
     pattern: /^SSV档案_(.*?)_(.*?)_v(.*?)_(.*?)\.(.*?)$/,

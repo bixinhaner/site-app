@@ -347,7 +347,7 @@ async def export_archive_zip(
     mem_zip = build_archive_zip(
         overview=overview,
         content=a.content or {},
-        archive_title=localized_text("开站档案", locale_code, "Opening Archive", "Arsip Pembukaan"),
+        archive_title=localized_text("开站档案", locale_code, "Site Installation Archive", "Arsip Instalasi Situs"),
     )
     # 构造更有信息量的文件名
     site_code = a.site.site_code if a.site else None
@@ -359,7 +359,7 @@ async def export_archive_zip(
         s = str(s or '').strip().replace(' ', '_')
         return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
     ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
-    human_base = f"{localized_text('开站档案', locale_code, 'Opening Archive', 'Arsip Pembukaan')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    human_base = f"{localized_text('开站档案', locale_code, 'Site Installation Archive', 'Arsip Instalasi Situs')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
     from urllib.parse import quote
     headers = {
         "Content-Disposition": f"attachment; filename={ascii_base}.zip; filename*=UTF-8''{quote(human_base + '.zip')}"
@@ -426,7 +426,7 @@ async def export_archive_pdf(
         canvas.drawString(
             2*cm,
             A4[1]-0.85*cm,
-            localized_text("开站档案报告", locale_code, "Opening Archive Report", "Laporan Arsip Pembukaan"),
+            localized_text("开站档案报告", locale_code, "Site Installation Archive Report", "Laporan Arsip Instalasi Situs"),
         )
         # footer
         canvas.setStrokeColor(primary)
@@ -443,7 +443,7 @@ async def export_archive_pdf(
 
     story = []
     # 封面标题
-    story.append(Paragraph(localized_text("开站档案报告", locale_code, "Opening Archive Report", "Laporan Arsip Pembukaan"), styles["ArchivePdfTitle"]))
+    story.append(Paragraph(localized_text("开站档案报告", locale_code, "Site Installation Archive Report", "Laporan Arsip Instalasi Situs"), styles["ArchivePdfTitle"]))
 
     # Meta 卡片（两列表格）
     meta_rows = [
@@ -478,9 +478,15 @@ async def export_archive_pdf(
         story.append(Spacer(1, 8))
         story.append(Paragraph(localized_text("目录", locale_code, "Contents", "Daftar Isi"), styles["ArchivePdfH2"]))
         for i, cat in enumerate(cats, start=1):
-            cat_name = pick_localized_text(cat.get("category_name") or str(cat.get("category_id") or "未命名分类"), cat.get("category_name_i18n"), locale_code)
+            cat_name = pick_localized_text(
+                cat.get("category_name") or str(cat.get("category_id") or localized_text("未命名分类", locale_code, "Unnamed Category", "Kategori Tanpa Nama")),
+                cat.get("category_name_i18n"),
+                locale_code,
+            )
             cnt = len(cat.get("items") or [])
-            story.append(Paragraph(f"{i}. {cat_name}（{cnt}项）", styles["ArchivePdfMeta"]))
+            cnt_text = localized_text("{count}项", locale_code, "{count} items", "{count} item").format(count=cnt)
+            cnt_suffix = f"（{cnt_text}）" if str(locale_code).startswith("zh") else f"({cnt_text})"
+            story.append(Paragraph(f"{i}. {cat_name} {cnt_suffix}", styles["ArchivePdfMeta"]))
         story.append(PageBreak())
 
     # 内容（字段值/层级/照片，不占位：空字段/空照片不展示）
@@ -720,10 +726,15 @@ async def export_archive_pdf(
         return True
 
     for ci, cat in enumerate(cats, start=1):
-        story.append(Paragraph(f"{ci}. {pick_localized_text(cat.get('category_name') or str(cat.get('category_id') or '未命名分类'), cat.get('category_name_i18n'), locale_code)}", styles["ArchivePdfH2"]))
+        story.append(
+            Paragraph(
+                f"{ci}. {pick_localized_text(cat.get('category_name') or str(cat.get('category_id') or localized_text('未命名分类', locale_code, 'Unnamed Category', 'Kategori Tanpa Nama')), cat.get('category_name_i18n'), locale_code)}",
+                styles["ArchivePdfH2"],
+            )
+        )
         items = cat.get("items") or []
         for ii, it in enumerate(items, start=1):
-            title = f"{ci}.{ii} {pick_localized_text(it.get('item_name') or it.get('item_id') or '未命名检查项', it.get('item_name_i18n'), locale_code)}"
+            title = f"{ci}.{ii} {pick_localized_text(it.get('item_name') or it.get('item_id') or localized_text('未命名检查项', locale_code, 'Unnamed Check Item', 'Item Pemeriksaan Tanpa Nama'), it.get('item_name_i18n'), locale_code)}"
             story.append(Paragraph(title, styles["ArchivePdfH3"]))
 
             fields = it.get("fields") or []
@@ -747,7 +758,7 @@ async def export_archive_pdf(
                 )
                 if not sec_blocks:
                     continue
-                story.append(Paragraph(f"{localized_text('扇区', locale_code, 'Sector', 'Sektor')}：{sec_id}", styles["ArchivePdfH4"]))
+                story.append(Paragraph(f"{localized_text('扇区', locale_code, 'Sector', 'Sektor')}: {sec_id}", styles["ArchivePdfH4"]))
                 append_value_blocks(
                     sec_blocks,
                     header_bg=colors.HexColor("#FDEFE6"),
@@ -763,11 +774,11 @@ async def export_archive_pdf(
                 )
                 if not cell_blocks:
                     continue
-                head = f"{localized_text('小区', locale_code, 'Cell', 'Sel') }：{cell_id}"
+                head = f"{localized_text('小区', locale_code, 'Cell', 'Sel')}: {cell_id}"
                 if cell.get("sector_id"):
-                    head += f"（扇区 {cell.get('sector_id')}）"
+                    head += f" ({localized_text('扇区', locale_code, 'Sector', 'Sektor')} {cell.get('sector_id')})"
                 if cell.get("band"):
-                    head += f" 频段 {cell.get('band')}"
+                    head += f" {localized_text('频段', locale_code, 'Band', 'Band')} {cell.get('band')}"
                 story.append(Paragraph(head, styles["ArchivePdfH4"]))
                 append_value_blocks(
                     cell_blocks,
@@ -854,7 +865,7 @@ async def export_archive_pdf(
         s = str(s or '').strip().replace(' ', '_')
         return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
     ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
-    human_base = f"{localized_text('开站档案', locale_code, 'Opening Archive', 'Arsip Pembukaan')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    human_base = f"{localized_text('开站档案', locale_code, 'Site Installation Archive', 'Arsip Instalasi Situs')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
     from urllib.parse import quote
     headers = {
         "Content-Disposition": f"attachment; filename={ascii_base}.pdf; filename*=UTF-8''{quote(human_base + '.pdf')}"

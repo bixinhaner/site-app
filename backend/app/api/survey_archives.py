@@ -26,6 +26,7 @@ from app.utils.archive_pdf import (
     localized_text,
     normalize_locale,
     pick_localized_text,
+    register_pdf_fonts,
 )
 from datetime import datetime
 import os
@@ -433,32 +434,9 @@ async def export_archive_pdf(
 
     locale_code = normalize_locale(locale)
 
-    # 字体
+    # 字体：统一走公共字体注册策略，减少不同档案/不同机器的渲染差异
     def register_cn_fonts() -> tuple[str, str]:
-        fonts_dir = os.path.join("backend", "fonts")
-        candidates = [
-            ("NotoSansSC-Regular.ttf", "NotoSansSC-Bold.ttf"),
-            ("SourceHanSansSC-Regular.ttf", "SourceHanSansSC-Bold.ttf"),
-            ("NotoSansCJKsc-Regular.otf", "NotoSansCJKsc-Bold.otf"),
-        ]
-        for reg, bold in candidates:
-            reg_p = os.path.join(fonts_dir, reg)
-            bold_p = os.path.join(fonts_dir, bold)
-            if os.path.exists(reg_p):
-                try:
-                    pdfmetrics.registerFont(TTFont("CN", reg_p))
-                    if os.path.exists(bold_p):
-                        pdfmetrics.registerFont(TTFont("CN-Bold", bold_p))
-                    else:
-                        pdfmetrics.registerFont(TTFont("CN-Bold", reg_p))
-                    return "CN", "CN-Bold"
-                except Exception:
-                    pass
-        try:
-            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-            return "STSong-Light", "STSong-Light"
-        except Exception:
-            return "Helvetica", "Helvetica-Bold"
+        return register_pdf_fonts()
 
     FONT_MAIN, FONT_BOLD = register_cn_fonts()
     primary = colors.HexColor("#F56C3A")
@@ -551,7 +529,8 @@ async def export_archive_pdf(
             )
             cnt = len(cat.get("items") or [])
             cnt_text = localized_text("{count}项", locale_code, "{count} items", "{count} item").format(count=cnt)
-            story.append(Paragraph(f"{i}. {cat_name}（{cnt_text}）", styles["MetaCN"]))
+            cnt_suffix = f"（{cnt_text}）" if str(locale_code).startswith("zh") else f"({cnt_text})"
+            story.append(Paragraph(f"{i}. {cat_name} {cnt_suffix}", styles["MetaCN"]))
         story.append(PageBreak())
 
     # 内容（字段值/层级/照片）
@@ -873,7 +852,7 @@ async def export_archive_pdf(
                 )
                 if not sec_blocks:
                     continue
-                story.append(Paragraph(f"{localized_text('扇区', locale_code, 'Sector', 'Sektor')}：{sec_id}", styles["H4CN"]))
+                story.append(Paragraph(f"{localized_text('扇区', locale_code, 'Sector', 'Sektor')}: {sec_id}", styles["H4CN"]))
                 append_value_blocks(
                     sec_blocks,
                     header_bg=colors.HexColor("#FDEFE6"),
@@ -889,9 +868,9 @@ async def export_archive_pdf(
                 )
                 if not cell_blocks:
                     continue
-                head = f"{localized_text('小区', locale_code, 'Cell', 'Sel')}：{cell_id}"
+                head = f"{localized_text('小区', locale_code, 'Cell', 'Sel')}: {cell_id}"
                 if cell.get("sector_id"):
-                    head += f"（{localized_text('扇区', locale_code, 'Sector', 'Sektor')} {cell.get('sector_id')}）"
+                    head += f" ({localized_text('扇区', locale_code, 'Sector', 'Sektor')} {cell.get('sector_id')})"
                 if cell.get("band"):
                     head += f" {localized_text('频段', locale_code, 'Band', 'Band')} {cell.get('band')}"
                 story.append(Paragraph(head, styles["H4CN"]))

@@ -77,7 +77,7 @@ const dynamicPatternsId = [
   { pattern: '^将 AI 建议写入“审核结果/审核意见”？\\\\n检查项：(.*?)$', replacement: 'Tulis saran AI ke dalam "hasil audit/opini audit"? \\nPeriksa item: $1' },
   { pattern: '^仅比较最近 (.*?) 天内上传的检查项照片$', replacement: 'Bandingkan hanya foto inspeksi yang diunggah dalam $1 hari terakhir' },
   { pattern: '^精细比对阈值 (.*?)%$', replacement: 'Ambang perbandingan halus $1%' },
-  { pattern: '^开站档案_(.*?)_(.*?)_v(.*?)_(.*?)\\.(.*?)$', replacement: 'File pembuka situs_$1_$2_v$3_$4.$5' },
+  { pattern: '^开站档案_(.*?)_(.*?)_v(.*?)_(.*?)\\.(.*?)$', replacement: 'Arsip instalasi situs_$1_$2_v$3_$4.$5' },
   { pattern: '^勘察档案_(.*?)_(.*?)_v(.*?)_(.*?)\\.(.*?)$', replacement: 'File Survei_$1_$2_v$3_$4.$5' },
   { pattern: '^快速筛选阈值 (.*?)$', replacement: 'Ambang filter cepat $1' },
   { pattern: '^来源：(.*?)（匹配照片ID: (.*?)(.*?)）$', replacement: 'Sumber: $1 (cocok dengan ID foto: $2$3)' },

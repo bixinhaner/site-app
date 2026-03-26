@@ -235,7 +235,7 @@ export default {
     currencyPlaceholder: "For example USD / CNY / UGX",
     rulesTitle: "Rule List",
     rulesTip:
-      "Configure whether a node is payable, its ratio or fixed amount, whether it depends on final opening work order approval, and warning discount rules here.",
+      "Configure whether a node is payable, its ratio or fixed amount, whether it depends on final site installation work order approval, and warning discount rules here.",
     empty:
       'No payment rules yet. Click "Add Rule" in the top-right corner to start.',
     ruleCardTitle: "Rule {index}",
@@ -251,7 +251,7 @@ export default {
       amountTypeFixed: "Fixed Amount",
       amountRatio: "Payment Ratio (%)",
       amountFixed: "Payment Amount",
-      requiresApprove: "Depends on Final Opening Work Order Approval",
+      requiresApprove: "Depends on Final Site Installation Work Order Approval",
       warningDiscount: "Warning Discount",
       sortOrder: "Sort Order",
       remark: "Remark / Conditions",
@@ -280,7 +280,7 @@ export default {
     actions: {
       back: "Back",
       surveyArchive: "Survey Archive",
-      openingArchive: "Opening Archive",
+      openingArchive: "Site Installation Archive",
       createResurvey: "Create Re-survey",
       createSurvey: "Create Survey",
       createResurveyDisabledTip:
@@ -338,15 +338,15 @@ export default {
       },
       installCompleted: {
         label: "Install Completed",
-        desc: "First opening work order submission",
+        desc: "First site installation work order submission",
       },
       online: {
         label: "Online",
-        desc: "First opening work order activation",
+        desc: "First site installation work order activation",
       },
       activated: {
         label: "Activated",
-        desc: "First opening work order completion",
+        desc: "First site installation work order completion",
       },
       ssv: {
         label: "SSV",
@@ -394,8 +394,8 @@ export default {
       contractAmount: "Contract Amount",
       contractAmountMissing:
         "This site does not have a contract amount yet. Ratio-based payment nodes cannot be calculated for now.",
-      openingWorkOrder: "Opening Work Order",
-      noOpeningWorkOrder: "No opening work order",
+      openingWorkOrder: "Site Installation Work Order",
+      noOpeningWorkOrder: "No site installation work order",
       empty: "No payment rules configured",
       warningCount: "{count} warning items",
       originalAmount: "Original {amount}",
@@ -511,8 +511,8 @@ export default {
       surveyRequireSuccess: "Site is set back to requiring survey",
       noSurveyArchive: "No survey archive for this site",
       getSurveyArchiveFailed: "Failed to get survey archive",
-      noOpeningArchive: "No opening archive for this site",
-      getOpeningArchiveFailed: "Failed to get opening archive",
+      noOpeningArchive: "No site installation archive for this site",
+      getOpeningArchiveFailed: "Failed to get site installation archive",
     },
     prompts: {
       skipSurveyMessage:
@@ -538,7 +538,7 @@ export default {
         inspections: "Legacy Inspection Records",
         site_surveys: "Survey Records",
         site_survey_archives: "Survey Archives",
-        site_opening_archives: "Opening Archives",
+        site_opening_archives: "Site Installation Archives",
         site_ssv_archives: "SSV Archives",
         equipment_binding_history: "Equipment Binding History",
         site_planning: "Planning Versions",
@@ -833,6 +833,7 @@ export default {
       itemDetailTitle: "Check Item Details",
       checkItemPrefix: "Check item:",
       itemName: "Check Item",
+      scope: "Scope",
       type: "Type",
       status: "Status",
       completedAt: "Completed At",
@@ -855,6 +856,65 @@ export default {
       unit: "Unit",
       photo: "Photos",
       noSubmittedContent: "This check item has no submitted content yet",
+    },
+    filters: {
+      reviewList: {
+        all: "All",
+        pending: "See only for review",
+      },
+      scope: {
+        all: "All scope",
+        site: "Site",
+        sector: "Sector",
+        cell: "Cell",
+        equipment: "Equipment",
+      },
+      distance: {
+        all: "All distance",
+        exceeded: "Only over distance",
+      },
+    },
+    summary: {
+      passCount: "Pass {count}",
+      warningCount: "Warn {count}",
+      failCount: "Unqualified {count}",
+      pendingCount: "Pending {count}",
+    },
+    actions: {
+      aiCheckBatch: "One-click AI Inspection",
+      aiCheckMissing: "Only Missing",
+      aiCheckAll: "All",
+    },
+    scope: {
+      sectorTooltip: "Sector {sector}",
+      cellTooltip: "Sector {sector} / Band {band} / Cell {cell}",
+    },
+    hints: {
+      voided: {
+        text: "Work order is voided",
+        tooltip: "This work order has been voided, and review/edit actions are frozen.",
+      },
+      pending: {
+        text: "{count} pending review",
+        tooltip:
+          "There are still {count} check items pending review. Please complete all item reviews before final review.",
+      },
+      failed: {
+        text: "Contains unqualified items",
+        tooltip: "There are unqualified check items, so the work order cannot be approved.",
+      },
+      ready: {
+        text: "Available for final review",
+        tooltip: "All check items are reviewed and ready for final review.",
+      },
+    },
+    messages: {
+      snCopied: "SN copied to clipboard",
+      copyFailed: "Copy failed",
+      itemReviewBlockedByVoided:
+        "Work order is voided, cannot continue reviewing check items",
+      itemReviewBlockedByStatus:
+        "This check item has not been submitted (current: {status}) and cannot be reviewed",
     },
     buttons: {
       cancel: "Cancel",
@@ -932,8 +992,8 @@ export default {
     SiteBasicImportHistory: "Import History",
     SurveyArchives: "Survey Archives",
     SurveyArchiveDetail: "Archive Details",
-    OpeningArchives: "Opening Archives",
-    OpeningArchiveDetail: "Opening Archive Details",
+    OpeningArchives: "Site Installation Archives",
+    OpeningArchiveDetail: "Site Installation Archive Details",
     SSVArchives: "SSV Archives",
     SSVArchiveDetail: "SSV Archive Details",
     InspectionsMgmt: "Inspection Management",

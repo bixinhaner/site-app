@@ -77,11 +77,42 @@ def localized_text(zh: str, locale: Any, en: Optional[str] = None, id_text: Opti
 
 def _candidate_font_paths() -> Iterable[str]:
     seen = set()
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.abspath(os.path.join(module_dir, "..", ".."))
+    project_font_dir = os.path.join(backend_dir, "fonts")
+
+    project_fonts = [
+        "NotoSansSC-Regular.ttf",
+        "NotoSansSC-Medium.ttf",
+        "NotoSansCJKsc-Regular.otf",
+        "NotoSansCJKSC-Regular.otf",
+        "SourceHanSansSC-Regular.otf",
+        "SourceHanSansCN-Regular.otf",
+        "wqy-microhei.ttc",
+    ]
+    for name in project_fonts:
+        path = os.path.join(project_font_dir, name)
+        if os.path.exists(path) and path not in seen:
+            seen.add(path)
+            yield path
+
     explicit_paths = [
-        "/Library/Fonts/Arial Unicode.ttf",
-        "/Library/Fonts/Arial Unicode MS.ttf",
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKSC-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttf",
+        "/usr/share/fonts/truetype/arphic/ukai.ttc",
+        "C:\\Windows\\Fonts\\msyh.ttc",
+        "C:\\Windows\\Fonts\\simhei.ttf",
+        "C:\\Windows\\Fonts\\simsun.ttc",
+        "C:\\Windows\\Fonts\\arialuni.ttf",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/System/Library/Fonts/Supplemental/Arial Unicode MS.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/Library/Fonts/Arial Unicode MS.ttf",
         "/System/Library/Fonts/Supplemental/Verdana.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica.ttc",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -94,12 +125,13 @@ def _candidate_font_paths() -> Iterable[str]:
 
     if shutil.which("fc-match"):
         families = [
-            "Arial Unicode MS",
-            "PingFang SC",
             "Noto Sans CJK SC",
             "Source Han Sans SC",
-            "Noto Sans SC",
             "WenQuanYi Micro Hei",
+            "Microsoft YaHei",
+            "Songti SC",
+            "Noto Sans SC",
+            "Arial Unicode MS",
         ]
         for family in families:
             try:
@@ -130,7 +162,16 @@ def _register_ttf_font(font_path: str) -> Optional[str]:
         pass
 
     try:
-        pdfmetrics.registerFont(TTFont(font_name, font_path))
+        font_obj = TTFont(font_name, font_path)
+        face = getattr(font_obj, "face", None)
+        cmap = getattr(face, "charToGlyph", None)
+        if not isinstance(cmap, dict):
+            return None
+        # 同时要求基础拉丁和常见中文可覆盖，避免误选仅拉丁字体导致跨平台替换异常
+        required = ("A", "a", "0", "中", "测")
+        if any(ord(ch) not in cmap for ch in required):
+            return None
+        pdfmetrics.registerFont(font_obj)
         return font_name
     except Exception:
         return None

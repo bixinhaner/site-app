@@ -789,6 +789,7 @@ export default {
       itemDetailTitle: "检查项详情",
       checkItemPrefix: "检查项：",
       itemName: "检查项名称",
+      scope: "范围",
       type: "类型",
       status: "状态",
       completedAt: "完成时间",
@@ -811,6 +812,63 @@ export default {
       unit: "单位",
       photo: "照片",
       noSubmittedContent: "该检查项暂无提交内容",
+    },
+    filters: {
+      reviewList: {
+        all: "全部",
+        pending: "仅看需复审",
+      },
+      scope: {
+        all: "全部范围",
+        site: "站点",
+        sector: "扇区",
+        cell: "小区",
+        equipment: "设备",
+      },
+      distance: {
+        all: "全部距离",
+        exceeded: "仅超距",
+      },
+    },
+    summary: {
+      passCount: "通过 {count}",
+      warningCount: "警告 {count}",
+      failCount: "不合格 {count}",
+      pendingCount: "待审 {count}",
+    },
+    actions: {
+      aiCheckBatch: "一键AI检查",
+      aiCheckMissing: "仅未生成",
+      aiCheckAll: "全部",
+    },
+    scope: {
+      sectorTooltip: "扇区 {sector}",
+      cellTooltip: "扇区 {sector} / Band {band} / Cell {cell}",
+    },
+    hints: {
+      voided: {
+        text: "工单已作废",
+        tooltip: "该工单已作废，审核与编辑操作均已冻结。",
+      },
+      pending: {
+        text: "未审核 {count} 项",
+        tooltip:
+          "还有 {count} 项检查项未完成审核，请先完成所有检查项的审核，再进行最终审核。",
+      },
+      failed: {
+        text: "存在不合格",
+        tooltip: "存在不合格检查项，工单无法通过审核。",
+      },
+      ready: {
+        text: "可最终审核",
+        tooltip: "所有检查项已审核完成，可以进行最终审核。",
+      },
+    },
+    messages: {
+      snCopied: "SN已复制到剪贴板",
+      copyFailed: "复制失败",
+      itemReviewBlockedByVoided: "工单已作废，不能继续审核检查项",
+      itemReviewBlockedByStatus: "该检查项未完成提交（当前：{status}），无法审核",
     },
     buttons: {
       cancel: "取消",

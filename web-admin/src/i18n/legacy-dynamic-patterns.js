@@ -77,7 +77,7 @@ const dynamicPatterns = [
   { pattern: '^将 AI 建议写入“审核结果/审核意见”？\\\\n检查项：(.*?)$', replacement: 'Write AI suggestions into "audit results/audit opinions"? \\nCheck item: $1' },
   { pattern: '^仅比较最近 (.*?) 天内上传的检查项照片$', replacement: 'Compare only inspection photos uploaded within the last $1 days' },
   { pattern: '^精细比对阈值 (.*?)%$', replacement: 'Fine comparison threshold $1%' },
-  { pattern: '^开站档案_(.*?)_(.*?)_v(.*?)_(.*?)\\.(.*?)$', replacement: 'Site opening file_$1_$2_v$3_$4.$5' },
+  { pattern: '^开站档案_(.*?)_(.*?)_v(.*?)_(.*?)\\.(.*?)$', replacement: 'Site installation archive_$1_$2_v$3_$4.$5' },
   { pattern: '^勘察档案_(.*?)_(.*?)_v(.*?)_(.*?)\\.(.*?)$', replacement: 'Survey File_$1_$2_v$3_$4.$5' },
   { pattern: '^快速筛选阈值 (.*?)$', replacement: 'Quick filter threshold $1' },
   { pattern: '^来源：(.*?)（匹配照片ID: (.*?)(.*?)）$', replacement: 'Source: $1 (matches photo ID: $2$3)' },

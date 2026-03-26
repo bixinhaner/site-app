@@ -8,8 +8,8 @@ const ARCHIVE_LABELS = {
   },
   opening: {
     'zh-CN': '开站档案',
-    'en-US': 'Opening_Archive',
-    'id-ID': 'Arsip_Pembukaan',
+    'en-US': 'Site_Installation_Archive',
+    'id-ID': 'Arsip_Instalasi_Situs',
   },
   ssv: {
     'zh-CN': 'SSV档案',
@@ -55,4 +55,3 @@ export const buildArchiveExportName = ({
   const raw = `${label}_${code}_${name}_v${ver}_${ts}.${fileExt}`
   return raw.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '_')
 }
-

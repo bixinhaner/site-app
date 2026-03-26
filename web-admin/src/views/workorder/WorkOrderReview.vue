@@ -335,21 +335,39 @@
         </el-card>
         <div class="section-header">
           <div class="section-title">
-            <h3>检查项审核</h3>
+            <h3>{{ t("workOrderReview.labels.itemReviewTitle") }}</h3>
             <el-radio-group v-model="reviewListMode" size="small">
-              <el-radio-button label="全部" />
-              <el-radio-button label="仅看需复审" />
+              <el-radio-button label="all">{{
+                t("workOrderReview.filters.reviewList.all")
+              }}</el-radio-button>
+              <el-radio-button label="pending">{{
+                t("workOrderReview.filters.reviewList.pending")
+              }}</el-radio-button>
             </el-radio-group>
             <el-radio-group v-model="scopeFilter" size="small">
-              <el-radio-button label="全部范围" />
-              <el-radio-button label="站点" />
-              <el-radio-button label="扇区" />
-              <el-radio-button label="小区" />
-              <el-radio-button label="设备" />
+              <el-radio-button label="all">{{
+                t("workOrderReview.filters.scope.all")
+              }}</el-radio-button>
+              <el-radio-button label="site">{{
+                t("workOrderReview.filters.scope.site")
+              }}</el-radio-button>
+              <el-radio-button label="sector">{{
+                t("workOrderReview.filters.scope.sector")
+              }}</el-radio-button>
+              <el-radio-button label="cell">{{
+                t("workOrderReview.filters.scope.cell")
+              }}</el-radio-button>
+              <el-radio-button label="equipment">{{
+                t("workOrderReview.filters.scope.equipment")
+              }}</el-radio-button>
             </el-radio-group>
             <el-radio-group v-model="distanceFilter" size="small">
-              <el-radio-button label="全部距离" />
-              <el-radio-button label="仅超距" />
+              <el-radio-button label="all">{{
+                t("workOrderReview.filters.distance.all")
+              }}</el-radio-button>
+              <el-radio-button label="exceeded">{{
+                t("workOrderReview.filters.distance.exceeded")
+              }}</el-radio-button>
             </el-radio-group>
             <el-dropdown
               style="margin-left: 12px"
@@ -361,15 +379,18 @@
                 type="primary"
                 :disabled="isVoided || itemsLoading || aiCheckProgress.running"
               >
-                <el-icon><MagicStick /></el-icon>一键AI检查
+                <el-icon><MagicStick /></el-icon
+                >{{ t("workOrderReview.actions.aiCheckBatch") }}
                 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="missing"
-                    >仅未生成</el-dropdown-item
+                    >{{ t("workOrderReview.actions.aiCheckMissing") }}</el-dropdown-item
                   >
-                  <el-dropdown-item command="all">全部</el-dropdown-item>
+                  <el-dropdown-item command="all">{{
+                    t("workOrderReview.actions.aiCheckAll")
+                  }}</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -383,7 +404,11 @@
                 size="small"
                 class="review-summary__count-tag"
               >
-                通过 {{ summary.pass_count }}
+                {{
+                  t("workOrderReview.summary.passCount", {
+                    count: summary.pass_count,
+                  })
+                }}
               </el-tag>
               <el-tag
                 type="warning"
@@ -392,7 +417,11 @@
                 size="small"
                 class="review-summary__count-tag"
               >
-                警告 {{ summary.warning_count }}
+                {{
+                  t("workOrderReview.summary.warningCount", {
+                    count: summary.warning_count,
+                  })
+                }}
               </el-tag>
               <el-tag
                 type="danger"
@@ -401,7 +430,11 @@
                 size="small"
                 class="review-summary__count-tag"
               >
-                不合格 {{ summary.fail_count }}
+                {{
+                  t("workOrderReview.summary.failCount", {
+                    count: summary.fail_count,
+                  })
+                }}
               </el-tag>
               <el-tag
                 effect="plain"
@@ -409,7 +442,11 @@
                 size="small"
                 class="review-summary__count-tag"
               >
-                待审 {{ summary.pending_count }}
+                {{
+                  t("workOrderReview.summary.pendingCount", {
+                    count: summary.pending_count,
+                  })
+                }}
               </el-tag>
             </div>
 
@@ -447,20 +484,20 @@
               {{ localizedItemName(row) }}
             </template>
           </el-table-column>
-          <el-table-column label="范围" min-width="180">
+          <el-table-column :label="t('workOrderReview.labels.scope')" min-width="180">
             <template #default="{ row }">
               <div
                 class="scope-cell"
                 :class="{
                   'scope-cell--multiline':
-                    getItemScopeLevel(row) === '设备' && row.equipment_sn,
+                    getItemScopeCode(row) === 'equipment' && row.equipment_sn,
                 }"
               >
                 <el-tag :type="scopeTagType(row)" size="small" class="mr4">
-                  {{ getItemScopeLevel(row) }}
+                  {{ getItemScopeLabel(row) }}
                 </el-tag>
                 <template
-                  v-if="getItemScopeLevel(row) === '设备' && row.equipment_sn"
+                  v-if="getItemScopeCode(row) === 'equipment' && row.equipment_sn"
                 >
                   <div class="scope-sn">
                     <el-tooltip :content="row.equipment_sn" placement="top">
@@ -479,9 +516,15 @@
                     <el-icon><CopyDocument /></el-icon>
                   </el-button>
                 </template>
-                <template v-else-if="getItemScopeLevel(row) === '小区'">
+                <template v-else-if="getItemScopeCode(row) === 'cell'">
                   <el-tooltip
-                    :content="`扇区 ${row.sector_id || '-'} / Band ${row.band || '-'} / Cell ${row.cell_id || '-'}`"
+                    :content="
+                      t('workOrderReview.scope.cellTooltip', {
+                        sector: row.sector_id || '-',
+                        band: row.band || '-',
+                        cell: row.cell_id || '-',
+                      })
+                    "
                     placement="top"
                   >
                     <span class="scope-text">
@@ -491,9 +534,13 @@
                     </span>
                   </el-tooltip>
                 </template>
-                <template v-else-if="getItemScopeLevel(row) === '扇区'">
+                <template v-else-if="getItemScopeCode(row) === 'sector'">
                   <el-tooltip
-                    :content="`扇区 ${row.sector_id || '-'}`"
+                    :content="
+                      t('workOrderReview.scope.sectorTooltip', {
+                        sector: row.sector_id || '-',
+                      })
+                    "
                     placement="top"
                   >
                     <span class="scope-text">S{{ row.sector_id || "-" }}</span>
@@ -502,25 +549,25 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="required_type" label="类型" width="100">
+          <el-table-column prop="required_type" :label="t('workOrderReview.labels.type')" width="100">
             <template #default="{ row }">
               <el-tag
                 v-if="row.required_type === 'photo'"
                 type="info"
                 size="small"
-                >照片</el-tag
+                >{{ t("workOrderReview.types.photo") }}</el-tag
               >
               <el-tag
                 v-else-if="row.required_type === 'data'"
                 type="warning"
                 size="small"
-                >数据</el-tag
+                >{{ t("workOrderReview.types.data") }}</el-tag
               >
               <el-tag
                 v-else-if="row.required_type === 'both'"
                 type="primary"
                 size="small"
-                >数据+照片</el-tag
+                >{{ t("workOrderReview.types.both") }}</el-tag
               >
               <span v-else>{{ row.required_type }}</span>
             </template>
@@ -2044,9 +2091,9 @@ const itemsLoading = ref(false);
 const summary = ref(null);
 const comments = ref("");
 const commentsI18n = reactive({ en: "", id: "" });
-const reviewListMode = ref("全部");
-const scopeFilter = ref("全部范围");
-const distanceFilter = ref("全部距离");
+const reviewListMode = ref("all");
+const scopeFilter = ref("all");
+const distanceFilter = ref("all");
 const photoDetailVisible = ref(false);
 const photoSimilarityDetailVisible = ref(false);
 const selectedPhoto = ref(null);
@@ -2311,8 +2358,57 @@ const pickLocalizedText = (i18nMap, fallback = "") => {
   return normalizeText(translateLegacyText(fallbackText) || fallbackText);
 };
 
-const localizedItemName = (item) =>
-  pickLocalizedText(item?.item_name_i18n, item?.item_name) || "-";
+const SCOPE_LABEL_KEY_MAP = {
+  site: "workOrderReview.filters.scope.site",
+  sector: "workOrderReview.filters.scope.sector",
+  cell: "workOrderReview.filters.scope.cell",
+  equipment: "workOrderReview.filters.scope.equipment",
+};
+
+const SCOPE_TOKEN_CODE_MAP = {
+  站点: "site",
+  site: "site",
+  situs: "site",
+  扇区: "sector",
+  sector: "sector",
+  sektor: "sector",
+  小区: "cell",
+  cell: "cell",
+  sel: "cell",
+  设备: "equipment",
+  equipment: "equipment",
+  peralatan: "equipment",
+};
+
+const normalizeScopeCode = (value) => {
+  const token = String(value || "").trim().toLowerCase();
+  return SCOPE_TOKEN_CODE_MAP[token] || "";
+};
+
+const getScopeLabelByCode = (scopeCode) => {
+  const key = SCOPE_LABEL_KEY_MAP[scopeCode] || SCOPE_LABEL_KEY_MAP.site;
+  return t(key);
+};
+
+const localizeScopedItemName = (rawName) => {
+  const text = String(rawName || "").trim();
+  if (!text) return "";
+  const scopedPattern =
+    /^(.+?)\s*-\s*(设备|扇区|小区|Equipment|Sector|Cell|Peralatan|Sektor|Sel)\s+(.+)$/i;
+  const matches = text.match(scopedPattern);
+  if (!matches) return text;
+  const baseName = String(matches[1] || "").trim();
+  const scopeCode = normalizeScopeCode(matches[2]);
+  const suffixValue = String(matches[3] || "").trim();
+  if (!baseName || !scopeCode || !suffixValue) return text;
+  return `${baseName} - ${getScopeLabelByCode(scopeCode)} ${suffixValue}`;
+};
+
+const localizedItemName = (item) => {
+  const name = pickLocalizedText(item?.item_name_i18n, item?.item_name);
+  const localizedName = localizeScopedItemName(name);
+  return localizedName || "-";
+};
 
 const localizedFieldLabel = (field) =>
   pickLocalizedText(field?.label_i18n, field?.label || field?.field_id) || "-";
@@ -2595,9 +2691,12 @@ const getItemLocationCompareStats = (item) => {
 };
 
 const checkItemReviewDisabledReason = (item) => {
-  if (isVoided.value) return "工单已作废，不能继续审核检查项";
+  if (isVoided.value)
+    return t("workOrderReview.messages.itemReviewBlockedByVoided");
   const statusText = checkItemStatusText(item?.status);
-  return `该检查项未完成提交（当前：${statusText}），无法审核`;
+  return t("workOrderReview.messages.itemReviewBlockedByStatus", {
+    status: statusText,
+  });
 };
 
 // 检查是否有不合格的检查项
@@ -2605,24 +2704,29 @@ const hasFailedItems = computed(() => {
   return items.value.some((item) => item.review_status === "fail");
 });
 
-const getItemScopeLevel = (item) => {
-  if (!item) return "站点";
+const getItemScopeCode = (item) => {
+  if (!item) return "site";
   const equipmentSn = String(item?.equipment_sn || "").trim();
-  if (equipmentSn) return "设备";
+  if (equipmentSn) return "equipment";
   const cellId = String(item?.cell_id || "").trim();
-  if (cellId) return "小区";
+  if (cellId) return "cell";
   const sectorId = String(item?.sector_id || "").trim();
-  if (sectorId) return "扇区";
+  if (sectorId) return "sector";
   const band = String(item?.band || "").trim();
-  if (band) return "小区";
-  return "站点";
+  if (band) return "cell";
+  return "site";
+};
+
+const getItemScopeLabel = (item) => {
+  const scopeCode = getItemScopeCode(item);
+  return getScopeLabelByCode(scopeCode);
 };
 
 const scopeTagType = (item) => {
-  const level = getItemScopeLevel(item);
-  if (level === "设备") return "success";
-  if (level === "小区") return "primary";
-  if (level === "扇区") return "warning";
+  const scopeCode = getItemScopeCode(item);
+  if (scopeCode === "equipment") return "success";
+  if (scopeCode === "cell") return "primary";
+  if (scopeCode === "sector") return "warning";
   return "info";
 };
 
@@ -2631,10 +2735,10 @@ const copyToClipboard = async (text) => {
   if (!v) return;
   const ok = await copyTextToClipboard(v);
   if (ok) {
-    ElMessage.success("SN已复制到剪贴板");
+    ElMessage.success(t("workOrderReview.messages.snCopied"));
     return;
   }
-  ElMessage.error("复制失败");
+  ElMessage.error(t("workOrderReview.messages.copyFailed"));
 };
 
 const handleAiAction = (command, row) => {
@@ -2658,15 +2762,15 @@ const handleReviewAction = (command, row) => {
 
 const displayedItems = computed(() => {
   let list = items.value;
-  if (reviewListMode.value === "仅看需复审") {
+  if (reviewListMode.value === "pending") {
     list = list.filter(
       (item) => !item.review_status || item.review_status === "pending",
     );
   }
-  if (scopeFilter.value && scopeFilter.value !== "全部范围") {
-    list = list.filter((item) => getItemScopeLevel(item) === scopeFilter.value);
+  if (scopeFilter.value && scopeFilter.value !== "all") {
+    list = list.filter((item) => getItemScopeCode(item) === scopeFilter.value);
   }
-  if (distanceFilter.value === "仅超距") {
+  if (distanceFilter.value === "exceeded") {
     list = list.filter(
       (item) => getItemLocationCompareStats(item).exceededCount > 0,
     );
@@ -3005,8 +3109,8 @@ const reviewHeaderHint = computed(() => {
   if (isVoided.value) {
     return {
       type: "warning",
-      text: "工单已作废",
-      tooltip: "该工单已作废，审核与编辑操作均已冻结。",
+      text: t("workOrderReview.hints.voided.text"),
+      tooltip: t("workOrderReview.hints.voided.tooltip"),
       icon: WarningFilled,
     };
   }
@@ -3014,23 +3118,23 @@ const reviewHeaderHint = computed(() => {
     const count = pendingItemsCount.value;
     return {
       type: "warning",
-      text: `未审核 ${count} 项`,
-      tooltip: `还有 ${count} 项检查项未完成审核，请先完成所有检查项的审核，再进行最终审核。`,
+      text: t("workOrderReview.hints.pending.text", { count }),
+      tooltip: t("workOrderReview.hints.pending.tooltip", { count }),
       icon: WarningFilled,
     };
   }
   if (hasFailedItems.value) {
     return {
       type: "danger",
-      text: "存在不合格",
-      tooltip: "存在不合格检查项，工单无法通过审核。",
+      text: t("workOrderReview.hints.failed.text"),
+      tooltip: t("workOrderReview.hints.failed.tooltip"),
       icon: CircleCloseFilled,
     };
   }
   return {
     type: "success",
-    text: "可最终审核",
-    tooltip: "所有检查项已审核完成，可以进行最终审核。",
+    text: t("workOrderReview.hints.ready.text"),
+    tooltip: t("workOrderReview.hints.ready.tooltip"),
     icon: CircleCheckFilled,
   };
 });
