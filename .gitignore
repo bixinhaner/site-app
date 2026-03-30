@@ -77,3 +77,4 @@ test.html
 
 # 数据库备份文件
 backend/db-backups/
+tmp/

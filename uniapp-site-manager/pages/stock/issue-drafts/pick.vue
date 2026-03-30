@@ -137,6 +137,7 @@
 											class="qinput mono"
 											type="number"
 											v-model="row.planned_qty"
+											@input="markAuxEdited(row)"
 											@blur="normalizeAux(idx)"
 											:disabled="!canEdit"
 										/>
@@ -194,8 +195,32 @@
 	const acting = ref(false)
 
 	const snInput = ref('')
+	const auxEditedFlags = ref({})
 
 	const canEdit = computed(() => String(draft.value?.status || '') === 'draft')
+
+	const markAuxEdited = (rowOrIdx) => {
+		let equipmentId = null
+		if (typeof rowOrIdx === 'number') {
+			const row = (draft.value?.aux_items || [])[rowOrIdx]
+			equipmentId = row?.equipment_id
+		} else {
+			equipmentId = rowOrIdx?.equipment_id
+		}
+		const key = String(Number(equipmentId))
+		if (!key || key === 'NaN') return
+		auxEditedFlags.value = {
+			...auxEditedFlags.value,
+			[key]: true,
+		}
+	}
+
+	const hasAnyAuxEdited = () => Object.keys(auxEditedFlags.value).length > 0
+	const isAuxEdited = (equipmentId) => {
+		const key = String(Number(equipmentId))
+		if (!key || key === 'NaN') return false
+		return auxEditedFlags.value[key] === true
+	}
 
 	const normalizeDraftPayload = (rawDraft, { preserveAuxEdits = false } = {}) => {
 		if (!rawDraft) return null
@@ -285,7 +310,8 @@
 				header: getAuthHeaders(userStore.token),
 			})
 			if (res.statusCode === 200 && res.data?.draft) {
-				draft.value = normalizeDraftPayload(res.data.draft, { preserveAuxEdits: false })
+				draft.value = normalizeDraftPayload(res.data.draft, { preserveAuxEdits: hasAnyAuxEdited() })
+				applyAuxDefaultFromRequestQty()
 				if (String(draft.value?.status || '') !== 'draft') {
 					setTimeout(() => {
 						uni.redirectTo({ url: `/pages/stock/issue-drafts/detail?draft_id=${draftId.value}` })
@@ -362,6 +388,7 @@
 			})
 			if (res.statusCode === 200 && res.data?.draft) {
 				draft.value = normalizeDraftPayload(res.data.draft, { preserveAuxEdits: canEdit.value })
+				applyAuxDefaultFromRequestQty()
 				uni.showToast({ title: $t('stock.issueDraftScanSuccess'), icon: 'success' })
 				return
 			}
@@ -439,11 +466,23 @@
 		return Math.max(0, cap - auxPendingQty(row))
 	}
 
+	const applyAuxDefaultFromRequestQty = () => {
+		if (!canEdit.value) return
+		const rows = draft.value?.aux_items || []
+		rows.forEach((row) => {
+			if (isAuxEdited(row.equipment_id)) return
+			const current = Number(row?.planned_qty || 0)
+			if (current > 0) return
+			row.planned_qty = auxPlannedCap(row)
+		})
+	}
+
 	const normalizeAux = (idx) => {
 		if (!canEdit.value) return
 		const rows = draft.value?.aux_items || []
 		const row = rows[idx]
 		if (!row) return
+		markAuxEdited(idx)
 		let n = Number(String(row.planned_qty || '').trim())
 		if (!Number.isFinite(n) || n < 0) n = 0
 		const max = auxPlannedCap(row)
@@ -455,6 +494,7 @@
 		if (!canEdit.value) return
 		const row = (draft.value?.aux_items || [])[idx]
 		if (!row) return
+		markAuxEdited(idx)
 		const max = auxPlannedCap(row)
 		row.planned_qty = Math.min(max, Number(row.planned_qty || 0) + 1)
 	}
@@ -463,6 +503,7 @@
 		if (!canEdit.value) return
 		const row = (draft.value?.aux_items || [])[idx]
 		if (!row) return
+		markAuxEdited(idx)
 		row.planned_qty = Math.max(0, Number(row.planned_qty || 0) - 1)
 	}
 
@@ -470,6 +511,7 @@
 		if (!canEdit.value) return
 		const rows = draft.value?.aux_items || []
 		rows.forEach((r) => {
+			markAuxEdited(r)
 			r.planned_qty = auxPlannedCap(r)
 		})
 		uni.showToast({ title: $t('stock.issueDraftAuxFilled'), icon: 'success' })
@@ -489,6 +531,7 @@
 		})
 		if (res.statusCode === 200 && res.data?.draft) {
 			draft.value = normalizeDraftPayload(res.data.draft, { preserveAuxEdits: false })
+			auxEditedFlags.value = {}
 			return true
 		}
 		if (res.statusCode === 401) {
@@ -584,7 +627,12 @@
 	}
 
 	onLoad((query) => {
-		draftId.value = String(query?.draft_id || '').trim()
+		const nextId = String(query?.draft_id || '').trim()
+		if (nextId !== draftId.value) {
+			auxEditedFlags.value = {}
+			draft.value = null
+		}
+		draftId.value = nextId
 	})
 
 	onMounted(async () => {
