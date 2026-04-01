@@ -213,6 +213,25 @@ def list_history(
     def _unescape(s: str) -> str:
         return str(s).replace('~1', '/').replace('~0', '~')
 
+    def _generic_op_line(op: Dict[str, Any]) -> Optional[str]:
+        typ = str(op.get('op', '')).strip().lower()
+        path = str(op.get('path', '')).strip() or '/'
+        if not typ:
+            return None
+        return f"{typ} {path}"
+
+    def _resolve_operator_name(v: SiteOpeningArchiveVersion) -> str:
+        changer = getattr(v, 'changer', None)
+        full_name = str(getattr(changer, 'full_name', '') or '').strip()
+        if full_name:
+            return full_name
+        username = str(getattr(changer, 'username', '') or '').strip()
+        if username:
+            return username
+        if v.changed_by is not None:
+            return f"用户#{v.changed_by}"
+        return "系统"
+
     results = []
     prev_content = None
     for v in vers:
@@ -226,6 +245,7 @@ def list_history(
             for op in (v.diff or []):
                 path = str(op.get('path', ''))
                 typ = str(op.get('op', '')).lower()
+                handled = False
                 # 值变更：/check_categories/{ci}/items/{ii}/values/{field}
                 if '/values/' in path and typ in ('replace', 'add'):
                     try:
@@ -255,9 +275,14 @@ def list_history(
                                 return '是' if vv else '否'
                             return vv
                         lines.append(f"{cat_name}/{item_name}/{field_label}：{fmt(old_val)} → {fmt(new_val)}")
+                        handled = True
                     except Exception:
                         field_changes += 1
-                        continue
+                        # 解析失败时回退为通用明细，避免前端出现空明细
+                        gline = _generic_op_line(op)
+                        if gline:
+                            lines.append(gline)
+                        handled = True
                 # 照片变更：/check_categories/{ci}/items/{ii}/photos
                 elif '/photos' in path:
                     try:
@@ -274,9 +299,17 @@ def list_history(
                         elif typ == 'remove':
                             photo_removes += 1
                             lines.append(f"{cat_name}/{item_name}：删除照片 1 张")
+                        handled = True
                     except Exception:
-                        # ignore
-                        pass
+                        # 解析失败时回退为通用明细，避免前端出现空明细
+                        gline = _generic_op_line(op)
+                        if gline:
+                            lines.append(gline)
+                        handled = True
+                if not handled:
+                    gline = _generic_op_line(op)
+                    if gline:
+                        lines.append(gline)
         except Exception:
             pass
 
@@ -289,11 +322,16 @@ def list_history(
         if photo_removes:
             parts.append(f"删除照片 {photo_removes} 张")
         summary = '；'.join(parts) if parts else (v.change_summary or ('创建档案' if v.version == 1 else '用户编辑'))
+        if not lines:
+            if int(v.version or 0) == 1:
+                lines = ["new"]
+            elif v.change_summary:
+                lines = [str(v.change_summary)]
 
         results.append({
             "version": v.version,
             "changed_by": v.changed_by,
-            "operator_name": getattr(getattr(v, 'changer', None), 'full_name', None),
+            "operator_name": _resolve_operator_name(v),
             "changed_at": v.changed_at,
             "summary": summary,
             "change_summary": v.change_summary,
