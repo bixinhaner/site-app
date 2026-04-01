@@ -111,7 +111,9 @@
         <el-table-column label="时间" width="180">
           <template #default="{ row }">{{ formatDate(row.changed_at) }}</template>
         </el-table-column>
-        <el-table-column prop="operator_name" label="操作人" width="140" />
+        <el-table-column label="操作人" width="160">
+          <template #default="{ row }">{{ formatOperator(row) }}</template>
+        </el-table-column>
         <el-table-column prop="version" label="版本" width="100" />
         <el-table-column label="摘要">
           <template #default="{ row }">{{ row.summary || row.change_summary || '-' }}</template>
@@ -509,7 +511,22 @@ async function loadHistory() {
   try {
     historyLoading.value = true
     const res = await surveyArchivesApi.history(id)
-    history.value = Array.isArray(res) ? res : []
+    const rows = Array.isArray(res) ? res : []
+    history.value = rows.map((row) => {
+      const rawDetails = row?.details
+      let details = []
+      if (Array.isArray(rawDetails)) {
+        details = rawDetails
+          .map((line) => (line == null ? '' : String(line).trim()))
+          .filter(Boolean)
+      } else if (typeof rawDetails === 'string' && rawDetails.trim()) {
+        details = [rawDetails.trim()]
+      }
+      return {
+        ...row,
+        details,
+      }
+    })
   } catch (e) {
     console.error(e)
   } finally {
@@ -525,6 +542,13 @@ function openHistory() {
 }
 
 function formatDate(v) { return v ? new Date(v).toLocaleString() : '-' }
+
+function formatOperator(row) {
+  const direct = String(row?.operator_name || '').trim()
+  if (direct) return direct
+  if (row?.changed_by != null && row?.changed_by !== '') return `用户#${row.changed_by}`
+  return '-'
+}
 
 	async function onUploadPhoto(payload) {
   try {

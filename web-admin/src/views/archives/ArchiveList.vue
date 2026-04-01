@@ -26,8 +26,16 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="inspector_name" label="勘察人" width="140" />
-        <el-table-column prop="reviewer_name" label="审核人" width="140" />
+        <el-table-column label="勘察人" width="160">
+          <template #default="{ row }">
+            {{ formatPersonName(row.inspector_name, row.inspector_username, row.inspector_id) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="审核人" width="160">
+          <template #default="{ row }">
+            {{ formatPersonName(row.reviewer_name, row.reviewer_username, row.reviewed_by) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="updated_at" label="更新时间" width="180">
           <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
         </el-table-column>
@@ -94,6 +102,14 @@ const reload = async () => {
 }
 
 const formatDate = (v) => v ? new Date(v).toLocaleString() : '-'
+const formatPersonName = (name, username, id) => {
+  const direct = String(name || '').trim()
+  if (direct) return direct
+  const user = String(username || '').trim()
+  if (user) return user
+  if (id != null && id !== '') return `用户#${id}`
+  return '-'
+}
 const surveyRoundText = (round) => {
   const value = Number(round || 1)
   if (isEnglish.value) {

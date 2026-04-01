@@ -104,6 +104,18 @@ def _has_duplicate_photo_hash(photos: List[Dict[str, Any]], file_hash: str) -> b
     return False
 
 
+def _display_user_name(user_obj: Optional[User], user_id: Optional[int] = None) -> Optional[str]:
+    full_name = str(getattr(user_obj, "full_name", "") or "").strip()
+    if full_name:
+        return full_name
+    username = str(getattr(user_obj, "username", "") or "").strip()
+    if username:
+        return username
+    if user_id is not None:
+        return f"用户#{user_id}"
+    return None
+
+
 @router.get("/page")
 def page_archives(
     page: int = 1,
@@ -147,6 +159,11 @@ def page_archives(
 
     items = []
     for a in rows:
+        inspection = getattr(a, "inspection", None)
+        inspector_user = getattr(inspection, "inspector", None)
+        reviewer_user = getattr(inspection, "reviewer", None)
+        inspector_id = getattr(inspection, "inspector_id", None)
+        reviewed_by = getattr(inspection, "reviewed_by", None)
         items.append({
             "id": a.id,
             "site_id": a.site_id,
@@ -157,8 +174,12 @@ def page_archives(
             "template_id": a.template_id,
             "template_version": a.template_version,
             # 列表展示用人的信息
-            "inspector_name": getattr(getattr(a.inspection, 'inspector', None), 'full_name', None),
-            "reviewer_name": getattr(getattr(a.inspection, 'reviewer', None), 'full_name', None),
+            "inspector_name": _display_user_name(inspector_user, inspector_id),
+            "reviewer_name": _display_user_name(reviewer_user, reviewed_by),
+            "inspector_username": str(getattr(inspector_user, "username", "") or "").strip() or None,
+            "reviewer_username": str(getattr(reviewer_user, "username", "") or "").strip() or None,
+            "inspector_id": inspector_id,
+            "reviewed_by": reviewed_by,
             "current_version": a.current_version,
             "updated_at": to_utc_iso(a.updated_at) if a.updated_at else None,
         })
