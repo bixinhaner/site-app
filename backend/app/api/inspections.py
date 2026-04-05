@@ -30,6 +30,7 @@ from app.schemas.inspection_enhanced import (
     SiteInspectionCreate, SiteInspectionUpdate, SiteInspectionResponse,
     InspectionCheckItemUpdate, InspectionCheckItemResponse,
     InspectionPhotoCreate, InspectionPhotoResponse,
+    InspectionPhotoDetailContext, InspectionPhotoDetailResponse,
     InspectionReviewRequest, InspectionAuditLogResponse,
     CheckItemReviewRequest, PhotoReviewRequest, InspectionReviewSummary,
     OfflineInspectionDataCreate, InspectionStatistics,
@@ -1011,6 +1012,43 @@ def _resolve_uploader_name(current_user: User) -> str:
     return (current_user.full_name or current_user.username or "").strip()
 
 
+def _resolve_photo_field_context(
+    check_item: Optional[InspectionCheckItem],
+    field_id: Optional[str],
+) -> Dict[str, Any]:
+    normalized_field_id = str(field_id or "").strip()
+    if not normalized_field_id:
+        return {
+            "field_id": None,
+            "field_label": None,
+            "field_label_i18n": None,
+        }
+
+    fallback = {
+        "field_id": normalized_field_id,
+        "field_label": normalized_field_id,
+        "field_label_i18n": None,
+    }
+    if not check_item:
+        return fallback
+
+    fields = check_item.fields if isinstance(check_item.fields, list) else []
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        current_field_id = str(field.get("field_id") or "").strip()
+        if current_field_id != normalized_field_id:
+            continue
+        field_label = str(field.get("label") or "").strip() or normalized_field_id
+        return {
+            "field_id": normalized_field_id,
+            "field_label": field_label,
+            "field_label_i18n": _as_i18n_dict(field.get("label_i18n")),
+        }
+
+    return fallback
+
+
 def _mark_photo_duplicate_info(
     photo: InspectionPhoto,
     duplicate_detail: Optional[Dict[str, Any]],
@@ -1887,6 +1925,70 @@ async def upload_inspection_photo(
         raise
     
     return _build_photo_response_with_warnings(photo, duplicate_warning, similar_warning)
+
+
+@router.get("/photos/{photo_id}/detail", response_model=InspectionPhotoDetailResponse)
+async def get_inspection_photo_detail(
+    photo_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按照片ID获取独立详情页所需信息（含站点/工单/检查项/字段归属）。"""
+    photo = db.query(InspectionPhoto).filter(InspectionPhoto.id == photo_id).first()
+    if not photo:
+        raise HTTPException(status_code=404, detail="照片不存在")
+
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == photo.inspection_id).first()
+    if not inspection:
+        raise HTTPException(status_code=404, detail="关联检查不存在")
+
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限查看该照片")
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
+
+    check_item = None
+    if photo.check_item_id:
+        check_item = (
+            db.query(InspectionCheckItem)
+            .filter(
+                InspectionCheckItem.id == photo.check_item_id,
+                InspectionCheckItem.inspection_id == inspection.id,
+            )
+            .first()
+        )
+
+    work_order = None
+    if inspection.work_order_id:
+        work_order = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
+
+    field_context = _resolve_photo_field_context(check_item, photo.field_id)
+
+    photo_payload = InspectionPhotoResponse.model_validate(photo, from_attributes=True)
+    context_payload = InspectionPhotoDetailContext(
+        photo_id=str(photo.id),
+        inspection_id=str(inspection.id),
+        site_id=inspection.site_id,
+        site_name=_resolve_site_name_by_id(db, inspection.site_id),
+        work_order_id=getattr(work_order, "id", None),
+        work_order_title=getattr(work_order, "title", None),
+        work_order_type=(
+            str(getattr(getattr(work_order, "type", None), "value", getattr(work_order, "type", "")))
+            if work_order and getattr(work_order, "type", None) is not None
+            else None
+        ),
+        work_order_status=(
+            str(getattr(getattr(work_order, "status", None), "value", getattr(work_order, "status", "")))
+            if work_order and getattr(work_order, "status", None) is not None
+            else None
+        ),
+        check_item_id=getattr(check_item, "id", None),
+        check_item_name=getattr(check_item, "item_name", None),
+        category_name=getattr(check_item, "category_name", None),
+        field_id=field_context.get("field_id"),
+        field_label=field_context.get("field_label"),
+        field_label_i18n=field_context.get("field_label_i18n"),
+    )
+    return InspectionPhotoDetailResponse(photo=photo_payload, context=context_payload)
 
 
 @router.delete("/photos/{photo_id}")

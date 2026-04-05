@@ -1549,7 +1549,28 @@
                   <el-tag type="danger" size="small">是</el-tag>
                   <div class="similar-detail-block">
                     <div>{{ getPhotoSimilarBrief(selectedPhoto) }}</div>
-                    <div>{{ getPhotoSimilarSourceLine(selectedPhoto) }}</div>
+                    <div>
+                      来源：{{ getPhotoSimilarSourceType(selectedPhoto) }}（匹配照片ID:
+                      <el-link
+                        v-if="getPhotoSimilarMatchedPhotoId(selectedPhoto)"
+                        type="primary"
+                        @click="openSimilarPhotoDetail(selectedPhoto)"
+                      >
+                        {{ getPhotoSimilarMatchedPhotoId(selectedPhoto) }}
+                      </el-link>
+                      <span v-else>-</span>
+                      <template
+                        v-if="
+                          Number.isFinite(
+                            getPhotoSimilarPhashDistance(selectedPhoto),
+                          )
+                        "
+                      >
+                        ，pHash距离:
+                        {{ getPhotoSimilarPhashDistance(selectedPhoto) }}
+                      </template>
+                      ）
+                    </div>
                   </div>
                 </template>
                 <span v-else>否</span>
@@ -2048,7 +2069,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import request from "@/utils/request";
 import { copyTextToClipboard } from "@/utils/clipboard";
@@ -2082,6 +2103,7 @@ import {
 } from "@/utils/imageLoader";
 
 const route = useRoute();
+const router = useRouter();
 const { t, locale } = useI18n();
 const userStore = useUserStore();
 const loading = ref(false);
@@ -2968,16 +2990,21 @@ const getPhotoSimilarBrief = (photo) => {
   return `相似来源：${site} / ${uploader} / ${time}${percentText}`;
 };
 
-const getPhotoSimilarSourceLine = (photo) => {
+const getPhotoSimilarSourceType = (photo) => {
   const info = getPhotoSimilarInfo(photo);
-  if (!photo?.is_similar_risk || !info) return "";
-  const source = info.source_type_label || info.source_type || "未知来源";
-  const matchedPhotoId = info.matched_photo_id || "-";
-  const phashDistance = Number(info.phash_distance);
-  const distanceText = Number.isFinite(phashDistance)
-    ? `，pHash距离: ${phashDistance}`
-    : "";
-  return `来源：${source}（匹配照片ID: ${matchedPhotoId}${distanceText}）`;
+  if (!photo?.is_similar_risk || !info) return "未知来源";
+  return info.source_type_label || info.source_type || "未知来源";
+};
+
+const getPhotoSimilarMatchedPhotoId = (photo) => {
+  const info = getPhotoSimilarInfo(photo);
+  const raw = String(info?.matched_photo_id || "").trim();
+  return raw || "";
+};
+
+const getPhotoSimilarPhashDistance = (photo) => {
+  const info = getPhotoSimilarInfo(photo);
+  return Number(info?.phash_distance);
 };
 
 const getItemSimilarStats = (item) => {
@@ -4041,6 +4068,24 @@ const viewPhotoDetail = (photo) => {
   resetZoom();
   isFullscreen.value = false;
   loadSelectedPhotoForViewer();
+};
+
+const openSimilarPhotoDetail = (photo) => {
+  const matchedPhotoId = getPhotoSimilarMatchedPhotoId(photo);
+  if (!matchedPhotoId) {
+    ElMessage.warning("该照片缺少可跳转的相似来源ID");
+    return;
+  }
+  const fromWorkOrderId = String(route.query.id || "").trim();
+  const sourcePhotoId = String(photo?.id || "").trim();
+  const query = {};
+  if (fromWorkOrderId) query.fromWorkOrderId = fromWorkOrderId;
+  if (sourcePhotoId) query.sourcePhotoId = sourcePhotoId;
+  router.push({
+    name: "WorkOrderPhotoDetail",
+    params: { photoId: matchedPhotoId },
+    query,
+  });
 };
 
 const openPhotoSimilarityDetail = () => {

@@ -178,6 +178,7 @@ const routes = [
           { path: 'my-execution', name: 'MyExecutionWorkOrders', component: () => import('../views/workorder/MyExecutionWorkOrders.vue'), meta: { title: '我的执行工单', icon: 'DocumentChecked', accessKey: 'web-workorder-entry' } },
           { path: 'list', name: 'WorkOrderList', component: () => import('../views/workorder/WorkOrderList.vue'), meta: { title: '工单列表', icon: 'List' } },
           { path: 'review', name: 'WorkOrderReview', component: () => import('../views/workorder/WorkOrderReview.vue'), meta: { title: '工单审核台', icon: 'Stamp' } },
+          { path: 'photo/:photoId', name: 'WorkOrderPhotoDetail', component: () => import('../views/workorder/WorkOrderPhotoDetail.vue'), meta: { title: '照片详情', hidden: true } },
           { path: 'execute/:id', name: 'WorkOrderExecute', component: () => import('../views/workorder/WorkOrderExecute.vue'), meta: { title: '工单执行台', hidden: true, accessKey: 'web-workorder-entry' } }
         ]
       },
@@ -338,6 +339,7 @@ const ROUTE_PERMISSION_MAP = {
   MyExecutionWorkOrders: ['workorder:execute:web'],
   WorkOrderList: ['workorder:list:read'],
   WorkOrderReview: ['workorder:review:write'],
+  WorkOrderPhotoDetail: ['workorder:review:write'],
   WorkOrderExecute: ['workorder:execute:web'],
   UserList: ['users:list:read'],
   MobileLocationSettings: ['system:mobile-settings:read'],

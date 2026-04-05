@@ -232,6 +232,30 @@ class InspectionPhotoResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class InspectionPhotoDetailContext(BaseModel):
+    """检查照片详情上下文（用于独立详情页展示归属信息）"""
+    photo_id: str
+    inspection_id: str
+    site_id: Optional[int] = None
+    site_name: Optional[str] = None
+    work_order_id: Optional[str] = None
+    work_order_title: Optional[str] = None
+    work_order_type: Optional[str] = None
+    work_order_status: Optional[str] = None
+    check_item_id: Optional[str] = None
+    check_item_name: Optional[str] = None
+    category_name: Optional[str] = None
+    field_id: Optional[str] = None
+    field_label: Optional[str] = None
+    field_label_i18n: Optional[Dict[str, str]] = None
+
+
+class InspectionPhotoDetailResponse(BaseModel):
+    """检查照片详情响应"""
+    photo: InspectionPhotoResponse
+    context: InspectionPhotoDetailContext
+
 class FieldIssueComment(BaseModel):
     """字段问题备注"""
     field_key: Optional[str] = None
