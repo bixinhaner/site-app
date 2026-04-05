@@ -614,14 +614,20 @@ def _touch_inspection_item_and_clear_review(item: InspectionCheckItem, now: date
     had_review = (
         item.review_status is not None
         or item.review_comments is not None
+        or getattr(item, "review_comments_manual", None) is not None
         or getattr(item, "review_comments_i18n", None) is not None
+        or getattr(item, "field_issue_comments", None) is not None
+        or getattr(item, "field_review_results", None) is not None
         or item.reviewed_by is not None
         or item.reviewed_at is not None
     )
     if had_review:
         item.review_status = None
         item.review_comments = None
+        item.review_comments_manual = None
         item.review_comments_i18n = None
+        item.field_issue_comments = None
+        item.field_review_results = None
         item.reviewed_by = None
         item.reviewed_at = None
     item.updated_at = now

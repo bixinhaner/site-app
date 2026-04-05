@@ -37,7 +37,7 @@ from app.schemas.inspection_enhanced import (
     InspectionSummary, SiteInspectionProgress
 )
 from app.api.auth import get_current_user
-from app.models.work_order import WorkOrder, WorkOrderTypeEnum
+from app.models.work_order import WorkOrder, WorkOrderTypeEnum, AuditEvent
 from app.utils.file_handler import (
     ImageValidationError,
     generate_watermark,
@@ -94,7 +94,6 @@ from app.services.work_order_execution_settings_service import (
 from app.utils.timezone import to_utc_iso
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
-from app.models.work_order import WorkOrder, WorkOrderTypeEnum
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -489,6 +488,7 @@ def _touch_check_item_and_clear_review(check_item: InspectionCheckItem, now: dat
         or getattr(check_item, "review_comments_manual", None) is not None
         or getattr(check_item, "review_comments_i18n", None) is not None
         or getattr(check_item, "field_issue_comments", None) is not None
+        or getattr(check_item, "field_review_results", None) is not None
         or check_item.reviewed_by is not None
         or check_item.reviewed_at is not None
     )
@@ -498,6 +498,7 @@ def _touch_check_item_and_clear_review(check_item: InspectionCheckItem, now: dat
         check_item.review_comments_manual = None
         check_item.review_comments_i18n = None
         check_item.field_issue_comments = None
+        check_item.field_review_results = None
         check_item.reviewed_by = None
         check_item.reviewed_at = None
     check_item.updated_at = now
@@ -574,6 +575,175 @@ def _normalize_field_issue_comments(raw_items: Any, *, fields: Any) -> List[Dict
         }
 
     return list(normalized_by_field_key.values())
+
+
+def _normalize_field_review_results(raw_items: Any, *, fields: Any) -> List[Dict[str, Any]]:
+    if raw_items in (None, "", []):
+        return []
+    if not isinstance(raw_items, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="field_reviews 格式无效",
+        )
+
+    field_meta_map = _build_check_item_field_meta_map(fields)
+    normalized_by_field_key: Dict[str, Dict[str, Any]] = {}
+
+    for index, raw in enumerate(raw_items):
+        current = raw.dict() if hasattr(raw, "dict") else raw
+        if not isinstance(current, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"field_reviews 第 {index + 1} 项格式无效",
+            )
+
+        field_key = str(current.get("field_key") or current.get("field_id") or "").strip()
+        field_id = str(current.get("field_id") or "").strip() or None
+        field_label = str(current.get("field_label") or "").strip()
+        field_label_i18n = _as_i18n_dict(current.get("field_label_i18n"))
+        result = str(current.get("result") or "pending").strip().lower()
+        comment = str(current.get("comment") or "").strip() or None
+        comment_i18n = _as_i18n_dict(current.get("comment_i18n"))
+
+        if not field_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"field_reviews 第 {index + 1} 项缺少 field_key",
+            )
+        if result not in ("pass", "warning", "fail", "pending"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"field_reviews 第 {index + 1} 项 result 无效: {result}",
+            )
+
+        if field_id:
+            field_meta = field_meta_map.get(field_id) or {}
+            if field_meta:
+                field_label = str(field_meta.get("label") or field_id).strip() or field_id
+                field_label_i18n = _as_i18n_dict(field_meta.get("label_i18n")) or field_label_i18n
+            elif not field_label:
+                field_label = field_id
+        elif not field_label:
+            field_label = field_key
+
+        if result in ("warning", "fail") and not comment:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"field_reviews 第 {index + 1} 项为 {result} 时必须填写 comment",
+            )
+
+        normalized_by_field_key[field_key] = {
+            "field_key": field_key,
+            "field_id": field_id,
+            "field_label": field_label,
+            "field_label_i18n": field_label_i18n,
+            "result": result,
+            "comment": comment,
+            "comment_i18n": comment_i18n,
+        }
+
+    return list(normalized_by_field_key.values())
+
+
+def _build_field_issue_comments_from_field_reviews(
+    field_reviews: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    issues: List[Dict[str, Any]] = []
+    for row in field_reviews:
+        if str(row.get("result") or "").strip().lower() not in ("warning", "fail"):
+            continue
+        comment = str(row.get("comment") or "").strip()
+        if not comment:
+            continue
+        issues.append(
+            {
+                "field_key": row.get("field_key"),
+                "field_id": row.get("field_id"),
+                "field_label": row.get("field_label"),
+                "field_label_i18n": _as_i18n_dict(row.get("field_label_i18n")),
+                "comment": comment,
+            }
+        )
+    return issues
+
+
+def _aggregate_check_item_result_from_field_reviews(
+    field_reviews: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if not field_reviews:
+        return {
+            "auto_result": None,
+            "pass_count": 0,
+            "warning_count": 0,
+            "fail_count": 0,
+            "pending_count": 0,
+            "reviewed_count": 0,
+        }
+
+    pass_count = 0
+    warning_count = 0
+    fail_count = 0
+    pending_count = 0
+    for row in field_reviews:
+        result = str(row.get("result") or "pending").strip().lower()
+        if result == "pass":
+            pass_count += 1
+        elif result == "warning":
+            warning_count += 1
+        elif result == "fail":
+            fail_count += 1
+        else:
+            pending_count += 1
+
+    if fail_count > 0:
+        auto_result = "fail"
+    elif warning_count > 0:
+        auto_result = "warning"
+    elif pass_count > 0:
+        auto_result = "pass"
+    else:
+        auto_result = "pending"
+
+    return {
+        "auto_result": auto_result,
+        "pass_count": pass_count,
+        "warning_count": warning_count,
+        "fail_count": fail_count,
+        "pending_count": pending_count,
+        "reviewed_count": pass_count + warning_count + fail_count,
+    }
+
+
+def _resolve_item_review_round_no(
+    db: Session,
+    inspection: SiteInspection,
+    *,
+    reviewed_at: Optional[datetime] = None,
+) -> int:
+    if not inspection or not getattr(inspection, "work_order_id", None):
+        return 1
+
+    point_in_time = reviewed_at or datetime.utcnow()
+    submit_events = (
+        db.query(AuditEvent.created_at)
+        .filter(
+            AuditEvent.resource_type == "work_order",
+            AuditEvent.resource_id == str(inspection.work_order_id),
+            AuditEvent.action.in_(["submit", "resubmit"]),
+            AuditEvent.created_at.is_not(None),
+        )
+        .order_by(AuditEvent.created_at.asc())
+        .all()
+    )
+    if not submit_events:
+        return 1
+
+    round_no = 0
+    for event in submit_events:
+        dt = getattr(event, "created_at", None)
+        if dt and dt <= point_in_time:
+            round_no += 1
+    return max(1, round_no if round_no > 0 else 1)
 
 
 def _build_check_item_review_comment(
@@ -3537,7 +3707,13 @@ async def review_inspection(
 
     inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
     if not inspection:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查记录不存在")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "INSPECTION_NOT_FOUND",
+                "message": "检查记录不存在",
+            },
+        )
 
     old_status = inspection.status
     if old_status not in [InspectionStatusEnum.SUBMITTED, InspectionStatusEnum.UNDER_REVIEW]:
@@ -3592,11 +3768,28 @@ async def review_inspection_item(
     current_user: User = Depends(get_current_user)
 ):
     """检查项审核：pass/fail/warning"""
-    _ensure_review_access(current_user, detail="没有权限执行检查项审核")
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "REVIEW_PERMISSION_REQUIRED",
+                "message": "没有权限执行检查项审核",
+            },
+        )
 
     inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
     if not inspection:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查记录不存在")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "INSPECTION_NOT_FOUND",
+                "message": "检查记录不存在",
+            },
+        )
 
     check_item = db.query(InspectionCheckItem).filter(
         InspectionCheckItem.id == item_id,
@@ -3604,25 +3797,135 @@ async def review_inspection_item(
         InspectionCheckItem.is_active.is_(True),
     ).first()
     if not check_item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="检查项不存在")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "CHECK_ITEM_NOT_FOUND",
+                "message": "检查项不存在",
+            },
+        )
 
     try:
         item_status_value = getattr(check_item.status, "value", check_item.status)
         if str(item_status_value) != CheckItemStatusEnum.COMPLETED.value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"检查项未完成提交，无法审核（当前状态：{item_status_value}）"
+                detail={
+                    "code": "CHECK_ITEM_NOT_COMPLETED",
+                    "message": f"检查项未完成提交，无法审核（当前状态：{item_status_value}）",
+                    "current_status": str(item_status_value),
+                },
             )
         now = datetime.utcnow()
+        reviewed_at_text = to_utc_iso(now)
         manual_comment = str(review.comments or "").strip() or None
-        field_issue_comments = _normalize_field_issue_comments(
-            getattr(review, "field_issue_comments", None),
+        raw_field_reviews = _normalize_field_review_results(
+            getattr(review, "field_reviews", None),
             fields=check_item.fields,
         )
+
+        aggregate = _aggregate_check_item_result_from_field_reviews(raw_field_reviews)
+        auto_result = str(aggregate.get("auto_result") or "").strip().lower()
+        pending_count = int(aggregate.get("pending_count") or 0)
+        pending_fields = [
+            {
+                "field_key": row.get("field_key"),
+                "field_id": row.get("field_id"),
+                "field_label": row.get("field_label"),
+            }
+            for row in raw_field_reviews
+            if str(row.get("result") or "").strip().lower() == "pending"
+        ]
+        result_conflict = bool(
+            raw_field_reviews
+            and auto_result in ("pass", "warning", "fail")
+            and str(review.action or "").strip().lower() != auto_result
+        )
+        conflict_fields = [
+            {
+                "field_key": row.get("field_key"),
+                "field_id": row.get("field_id"),
+                "field_label": row.get("field_label"),
+                "result": row.get("result"),
+            }
+            for row in raw_field_reviews
+            if str(row.get("result") or "").strip().lower()
+            in ("pass", "warning", "fail")
+        ]
+
+        if result_conflict and not bool(getattr(review, "manual_override", False)):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "CHECK_ITEM_MANUAL_OVERRIDE_REQUIRED",
+                    "message": "检查项状态与字段汇总结果冲突，请确认手动主导后再提交。",
+                    "auto_result": auto_result,
+                    "manual_action": review.action,
+                    "pending_count": pending_count,
+                    "conflict_fields": conflict_fields,
+                },
+            )
+
+        requires_override_confirm = result_conflict or pending_count > 0
+        if requires_override_confirm and not bool(getattr(review, "confirm_override", False)):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "CHECK_ITEM_REVIEW_CONFIRM_REQUIRED",
+                    "message": "本次提交包含未审核字段或与字段汇总冲突，请完成二次确认后重试。",
+                    "auto_result": auto_result,
+                    "manual_action": review.action,
+                    "pending_count": pending_count,
+                    "result_conflict": result_conflict,
+                    "pending_fields": pending_fields,
+                    "conflict_fields": conflict_fields,
+                },
+            )
+
+        if raw_field_reviews:
+            enriched_field_reviews: List[Dict[str, Any]] = []
+            for row in raw_field_reviews:
+                current_comment_i18n = _as_i18n_dict(row.get("comment_i18n"))
+                comment_text = str(row.get("comment") or "").strip()
+                if comment_text and not current_comment_i18n:
+                    locale_key = "zh-CN"
+                    if isinstance(review.comments_i18n, dict):
+                        if review.comments_i18n.get("en"):
+                            locale_key = "en"
+                        elif review.comments_i18n.get("id"):
+                            locale_key = "id"
+                    current_comment_i18n = {locale_key: comment_text}
+
+                enriched_field_reviews.append(
+                    {
+                        "field_key": row.get("field_key"),
+                        "field_id": row.get("field_id"),
+                        "field_label": row.get("field_label"),
+                        "field_label_i18n": _as_i18n_dict(row.get("field_label_i18n")),
+                        "result": row.get("result"),
+                        "comment": comment_text or None,
+                        "comment_i18n": current_comment_i18n,
+                        "reviewed_by": current_user.id,
+                        "reviewed_at": reviewed_at_text,
+                    }
+                )
+            field_issue_comments = _build_field_issue_comments_from_field_reviews(
+                enriched_field_reviews
+            )
+        else:
+            enriched_field_reviews = []
+            field_issue_comments = _normalize_field_issue_comments(
+                getattr(review, "field_issue_comments", None),
+                fields=check_item.fields,
+            )
+
         if review.action != "pass" and not manual_comment and not field_issue_comments:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="请输入审核意见或至少填写一条字段问题备注",
+                detail={
+                    "code": "CHECK_ITEM_COMMENT_REQUIRED",
+                    "message": "请输入审核意见或至少填写一条字段问题备注",
+                },
             )
         final_comment = _build_check_item_review_comment(
             field_issue_comments=field_issue_comments,
@@ -3637,11 +3940,21 @@ async def review_inspection_item(
         check_item.review_comments_manual = manual_comment
         check_item.review_comments_i18n = final_comment_i18n
         check_item.field_issue_comments = field_issue_comments or None
+        if raw_field_reviews:
+            check_item.field_review_results = enriched_field_reviews
+        elif getattr(review, "field_reviews", None) == []:
+            check_item.field_review_results = None
         check_item.reviewed_by = current_user.id
         check_item.reviewed_at = now
         check_item.updated_at = now
         db.commit()
         db.refresh(check_item)
+
+        round_no = _resolve_item_review_round_no(
+            db,
+            inspection,
+            reviewed_at=now,
+        )
 
         # 写审核日志
         audit_log = InspectionAuditLog(
@@ -3656,6 +3969,16 @@ async def review_inspection_item(
                 "item_id": item_id,
                 "result": review.action,
                 "field_issue_count": len(field_issue_comments),
+                "field_review_count": len(enriched_field_reviews),
+                "field_review_pending_count": pending_count,
+                "field_review_auto_result": auto_result or None,
+                "manual_override": bool(getattr(review, "manual_override", False)),
+                "confirm_override": bool(getattr(review, "confirm_override", False)),
+                "round_no": int(round_no),
+                "manual_comment": manual_comment,
+                "manual_comment_i18n": _as_i18n_dict(getattr(review, "comments_i18n", None)),
+                "field_issue_comments": field_issue_comments or [],
+                "field_reviews": enriched_field_reviews,
             }
         )
         db.add(audit_log)
@@ -3665,9 +3988,218 @@ async def review_inspection_item(
         _update_inspection_result_from_item_reviews(db, inspection_id)
 
         return {"message": "检查项审核成功"}
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"检查项审核失败: {str(e)}")
+
+
+@router.get("/detail/{inspection_id}/items/{item_id}/field-reviews/history")
+async def get_inspection_item_field_review_history(
+    inspection_id: str,
+    item_id: str,
+    field_key: Optional[str] = None,
+    field_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取检查项字段审核历史（按轮次分组，组内按时间倒序）。"""
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin", "manager", "reviewer"],
+        permission_codes=["workorder:review:write"],
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "REVIEW_PERMISSION_REQUIRED",
+                "message": "没有权限查看字段审核历史",
+            },
+        )
+
+    inspection = db.query(SiteInspection).filter(SiteInspection.id == inspection_id).first()
+    if not inspection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "INSPECTION_NOT_FOUND",
+                "message": "检查记录不存在",
+            },
+        )
+
+    if _is_field_worker(current_user) and inspection.inspector_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "INSPECTION_ACCESS_DENIED",
+                "message": "没有权限访问此检查记录",
+            },
+        )
+    _ensure_surveyor_inspection_type(db, current_user, inspection)
+
+    check_item = db.query(InspectionCheckItem).filter(
+        InspectionCheckItem.id == item_id,
+        InspectionCheckItem.inspection_id == inspection_id,
+        InspectionCheckItem.is_active.is_(True),
+    ).first()
+    if not check_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "CHECK_ITEM_NOT_FOUND",
+                "message": "检查项不存在",
+            },
+        )
+
+    normalized_field_key = str(field_key or "").strip()
+    normalized_field_id = str(field_id or "").strip()
+
+    logs = (
+        db.query(InspectionAuditLog)
+        .filter(
+            InspectionAuditLog.inspection_id == inspection_id,
+            InspectionAuditLog.action == "item_review",
+        )
+        .order_by(InspectionAuditLog.created_at.desc())
+        .all()
+    )
+
+    submit_marks: List[datetime] = []
+    if inspection.work_order_id:
+        submit_rows = (
+            db.query(AuditEvent.created_at)
+            .filter(
+                AuditEvent.resource_type == "work_order",
+                AuditEvent.resource_id == str(inspection.work_order_id),
+                AuditEvent.action.in_(["submit", "resubmit"]),
+                AuditEvent.created_at.is_not(None),
+            )
+            .order_by(AuditEvent.created_at.asc())
+            .all()
+        )
+        submit_marks = [row.created_at for row in submit_rows if getattr(row, "created_at", None)]
+
+    def _resolve_round_from_dt(dt: Optional[datetime], fallback: int = 1) -> int:
+        if not dt or not submit_marks:
+            return max(1, fallback)
+        cnt = 0
+        for mark in submit_marks:
+            if mark <= dt:
+                cnt += 1
+        return max(1, cnt if cnt > 0 else fallback)
+
+    operator_ids = {
+        int(log.operator_id)
+        for log in logs
+        if getattr(log, "operator_id", None) is not None
+    }
+    users = (
+        db.query(User).filter(User.id.in_(list(operator_ids))).all()
+        if operator_ids
+        else []
+    )
+    user_map = {u.id: u for u in users}
+
+    rounds_map: Dict[int, List[Dict[str, Any]]] = {}
+    fallback_round = 1
+
+    for log in logs:
+        details = log.details if isinstance(log.details, dict) else {}
+        if str(details.get("item_id") or "").strip() != str(item_id):
+            continue
+
+        round_no_raw = details.get("round_no")
+        try:
+            round_no = int(round_no_raw)
+        except Exception:
+            round_no = _resolve_round_from_dt(getattr(log, "created_at", None), fallback=fallback_round)
+        fallback_round = max(fallback_round, round_no)
+
+        field_reviews_raw = details.get("field_reviews")
+        field_reviews = field_reviews_raw if isinstance(field_reviews_raw, list) else []
+
+        if not field_reviews:
+            legacy_issues = details.get("field_issue_comments")
+            if isinstance(legacy_issues, list):
+                for legacy in legacy_issues:
+                    if not isinstance(legacy, dict):
+                        continue
+                    field_reviews.append(
+                        {
+                            "field_key": legacy.get("field_key"),
+                            "field_id": legacy.get("field_id"),
+                            "field_label": legacy.get("field_label"),
+                            "field_label_i18n": legacy.get("field_label_i18n"),
+                            "result": "warning",
+                            "comment": legacy.get("comment"),
+                            "comment_i18n": None,
+                        }
+                    )
+
+        if normalized_field_key:
+            field_reviews = [
+                row
+                for row in field_reviews
+                if str(row.get("field_key") or "").strip() == normalized_field_key
+            ]
+        if normalized_field_id:
+            field_reviews = [
+                row
+                for row in field_reviews
+                if str(row.get("field_id") or "").strip() == normalized_field_id
+            ]
+        if (normalized_field_key or normalized_field_id) and not field_reviews:
+            continue
+
+        operator = user_map.get(log.operator_id)
+        records = rounds_map.setdefault(round_no, [])
+        records.append(
+            {
+                "log_id": log.id,
+                "round_no": round_no,
+                "reviewed_at": to_utc_iso(log.created_at) if log.created_at else None,
+                "reviewer_id": log.operator_id,
+                "reviewer_name": (operator.full_name if operator else None) or (operator.username if operator else None) or "未知",
+                "reviewer_username": operator.username if operator else None,
+                "result": details.get("result"),
+                "field_review_auto_result": details.get("field_review_auto_result"),
+                "field_review_pending_count": details.get("field_review_pending_count"),
+                "manual_override": bool(details.get("manual_override")),
+                "confirm_override": bool(details.get("confirm_override")),
+                "manual_comment": details.get("manual_comment") or log.comments,
+                "manual_comment_i18n": _as_i18n_dict(details.get("manual_comment_i18n")),
+                "field_issue_comments": details.get("field_issue_comments") if isinstance(details.get("field_issue_comments"), list) else [],
+                "field_reviews": field_reviews,
+            }
+        )
+
+    round_items = []
+    for round_no in sorted(rounds_map.keys(), reverse=True):
+        records = sorted(
+            rounds_map.get(round_no) or [],
+            key=lambda row: str(row.get("reviewed_at") or ""),
+            reverse=True,
+        )
+        round_items.append(
+            {
+                "round_no": round_no,
+                "record_count": len(records),
+                "records": records,
+            }
+        )
+
+    return {
+        "inspection_id": inspection_id,
+        "item_id": item_id,
+        "field_key": normalized_field_key or None,
+        "field_id": normalized_field_id or None,
+        "rounds": round_items,
+        "total_rounds": len(round_items),
+        "total_records": sum(item.get("record_count", 0) for item in round_items),
+    }
+
 
 @router.post("/detail/{inspection_id}/photos/{photo_id}/review")
 async def review_inspection_photo(

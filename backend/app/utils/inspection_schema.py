@@ -26,6 +26,7 @@ def ensure_inspection_schema(engine: Engine) -> None:
             "review_comments_manual": "review_comments_manual TEXT",
             "review_comments_i18n": "review_comments_i18n TEXT",
             "field_issue_comments": "field_issue_comments TEXT",
+            "field_review_results": "field_review_results TEXT",
             "ai_status": "ai_status TEXT",
             "ai_mode": "ai_mode TEXT",
             "ai_model": "ai_model TEXT",

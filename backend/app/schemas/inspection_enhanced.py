@@ -264,6 +264,24 @@ class FieldIssueComment(BaseModel):
     field_label_i18n: Optional[Dict[str, str]] = None
     comment: str
 
+
+class FieldReviewResult(BaseModel):
+    """字段级审核结果（当前态/历史记录条目）。"""
+    field_key: str
+    field_id: Optional[str] = None
+    field_label: str
+    field_label_i18n: Optional[Dict[str, str]] = None
+    result: str = Field(..., pattern="^(pass|warning|fail|pending)$")
+    comment: Optional[str] = None
+    comment_i18n: Optional[Dict[str, str]] = None
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+
+    @field_serializer("reviewed_at")
+    def _serialize_reviewed_at(self, dt: Optional[datetime]) -> Optional[str]:
+        return to_utc_iso(dt)
+
+
 class InspectionCheckItemResponse(BaseModel):
     """检查项响应"""
     id: str
@@ -292,6 +310,7 @@ class InspectionCheckItemResponse(BaseModel):
     review_comments_manual: Optional[str] = None
     review_comments_i18n: Optional[Dict[str, str]] = None
     field_issue_comments: Optional[List[FieldIssueComment]] = None
+    field_review_results: Optional[List[FieldReviewResult]] = None
     reviewed_at: Optional[datetime]
     ai_status: Optional[str] = None
     ai_mode: Optional[str] = None
@@ -452,6 +471,11 @@ class CheckItemReviewRequest(BaseModel):
     comments: Optional[str] = None
     comments_i18n: Optional[Dict[str, str]] = None
     field_issue_comments: Optional[List[FieldIssueComment]] = None
+    field_reviews: Optional[List[FieldReviewResult]] = None
+    # 手动主导检查项审核状态（与字段汇总结果冲突时）
+    manual_override: bool = False
+    # 冲突/未全审风险确认（前端完成双重确认后传 true）
+    confirm_override: bool = False
 
 class PhotoReviewRequest(BaseModel):
     """照片审核请求"""

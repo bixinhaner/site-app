@@ -1,10 +1,14 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>相似照片详情</h1>
+      <h1>{{ t('workOrderPhotoDetail.title') }}</h1>
       <div>
-        <el-button @click="goBack">返回</el-button>
-        <el-button type="primary" @click="loadDetail">刷新</el-button>
+        <el-button @click="goBack">{{
+          t('workOrderPhotoDetail.buttons.back')
+        }}</el-button>
+        <el-button type="primary" @click="loadDetail">{{
+          t('workOrderPhotoDetail.buttons.refresh')
+        }}</el-button>
       </div>
     </div>
 
@@ -22,47 +26,52 @@
                 class="photo-image"
               >
                 <template #error>
-                  <div class="photo-image-error">图片加载失败</div>
+                  <div class="photo-image-error">
+                    {{ t('workOrderPhotoDetail.imageLoadFailed') }}
+                  </div>
                 </template>
               </el-image>
-              <el-empty v-else description="未找到图片地址" />
+              <el-empty
+                v-else
+                :description="t('workOrderPhotoDetail.imageNotFound')"
+              />
             </div>
           </el-col>
 
           <el-col :span="8">
             <el-descriptions :column="1" border size="small">
-              <el-descriptions-item label="照片ID">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.photoId')">
                 {{ photo.id || '-' }}
               </el-descriptions-item>
-              <el-descriptions-item label="文件名">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.fileName')">
                 {{ photo.original_name || '-' }}
               </el-descriptions-item>
-              <el-descriptions-item label="拍摄时间">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.takenAt')">
                 {{ formatDateTime(photo.taken_at) }}
               </el-descriptions-item>
-              <el-descriptions-item label="文件大小">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.fileSize')">
                 {{ formatFileSize(photo.file_size) }}
               </el-descriptions-item>
-              <el-descriptions-item label="纬度">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.latitude')">
                 {{ formatCoordinate(photo.latitude) }}
               </el-descriptions-item>
-              <el-descriptions-item label="经度">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.longitude')">
                 {{ formatCoordinate(photo.longitude) }}
               </el-descriptions-item>
-              <el-descriptions-item label="GPS精度">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.gpsAccuracy')">
                 {{
                   Number.isFinite(Number(photo.gps_accuracy))
                     ? `${Number(photo.gps_accuracy).toFixed(1)} m`
                     : '-'
                 }}
               </el-descriptions-item>
-              <el-descriptions-item label="地址">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.address')">
                 {{ photo.address || '-' }}
               </el-descriptions-item>
-              <el-descriptions-item label="站点">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.site')">
                 {{ siteText }}
               </el-descriptions-item>
-              <el-descriptions-item label="工单">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.workOrder')">
                 <template v-if="context.work_order_id">
                   <el-link
                     type="primary"
@@ -73,15 +82,15 @@
                 </template>
                 <span v-else>-</span>
               </el-descriptions-item>
-              <el-descriptions-item label="检查项">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.checkItem')">
                 {{ checkItemText }}
               </el-descriptions-item>
-              <el-descriptions-item label="字段">
+              <el-descriptions-item :label="t('workOrderPhotoDetail.labels.field')">
                 {{ fieldText }}
               </el-descriptions-item>
               <el-descriptions-item
                 v-if="sourcePhotoId"
-                label="来源照片ID"
+                :label="t('workOrderPhotoDetail.labels.sourcePhotoId')"
               >
                 {{ sourcePhotoId }}
               </el-descriptions-item>
@@ -90,7 +99,10 @@
         </el-row>
       </template>
 
-      <el-empty v-else description="未找到照片详情" />
+      <el-empty
+        v-else
+        :description="t('workOrderPhotoDetail.detailNotFound')"
+      />
     </el-card>
   </div>
 </template>
@@ -98,12 +110,14 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import { inspectionExecutionApi } from '@/api/workorder';
 import { resolveImageUrl } from '@/utils/imageLoader';
 
 const route = useRoute();
 const router = useRouter();
+const { t, locale } = useI18n();
 
 const loading = ref(false);
 const detail = ref(null);
@@ -124,10 +138,12 @@ const siteText = computed(() => {
   const siteName = String(context.value.site_name || '').trim();
   const siteId = context.value.site_id;
   if (siteName && siteId !== null && siteId !== undefined) {
-    return `${siteName} (ID:${siteId})`;
+    return t('workOrderPhotoDetail.siteText.withId', { siteName, siteId });
   }
   if (siteName) return siteName;
-  if (siteId !== null && siteId !== undefined) return `站点ID:${siteId}`;
+  if (siteId !== null && siteId !== undefined) {
+    return t('workOrderPhotoDetail.siteText.idFallback', { siteId });
+  }
   return '-';
 });
 
@@ -138,9 +154,17 @@ const workOrderText = computed(() => {
   const type = String(context.value.work_order_type || '').trim();
   const status = String(context.value.work_order_status || '').trim();
   const parts = [
-    title ? title : `工单ID:${workOrderId}`,
-    type ? `类型:${type}` : '',
-    status ? `状态:${status}` : '',
+    title
+      ? title
+      : t('workOrderPhotoDetail.workOrderText.idFallback', { workOrderId }),
+    type ? t('workOrderPhotoDetail.workOrderText.typePart', { type }) : '',
+    status
+      ? t('workOrderPhotoDetail.workOrderText.statusPart', {
+          status:
+            status ||
+            t('workOrderPhotoDetail.status.unknown'),
+        })
+      : '',
   ].filter(Boolean);
   return parts.join(' / ');
 });
@@ -169,9 +193,14 @@ const loadDetail = async () => {
   try {
     detail.value = await inspectionExecutionApi.getInspectionPhotoDetail(id);
   } catch (error) {
-    console.error('加载照片详情失败:', error);
+    console.error('Failed to load photo detail:', error);
     detail.value = null;
-    ElMessage.error(error?.response?.data?.detail || '加载照片详情失败');
+    const backendDetail = error?.response?.data?.detail;
+    const backendMessage =
+      typeof backendDetail === 'string'
+        ? backendDetail
+        : backendDetail?.message || backendDetail?.detail;
+    ElMessage.error(backendMessage || t('workOrderPhotoDetail.messages.loadFailed'));
   } finally {
     loading.value = false;
   }
@@ -202,7 +231,10 @@ const formatDateTime = (value) => {
   if (!value) return '-';
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return '-';
-  return dt.toLocaleString();
+  const localeKey = String(locale.value || '').trim();
+  if (localeKey === 'en-US') return dt.toLocaleString('en-US');
+  if (localeKey === 'id-ID') return dt.toLocaleString('id-ID');
+  return dt.toLocaleString('zh-CN');
 };
 
 const formatFileSize = (size) => {

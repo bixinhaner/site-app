@@ -918,6 +918,9 @@ export default {
         "Work order is voided, cannot continue reviewing check items",
       itemReviewBlockedByStatus:
         "This check item has not been submitted (current: {status}) and cannot be reviewed",
+      submitSuccess: "Submitted",
+      submitFailed: "Submission failed",
+      similarSourceMissing: "This photo has no similar-source photo ID for navigation",
     },
     buttons: {
       cancel: "Cancel",
@@ -961,6 +964,106 @@ export default {
       summaryTitle: "Field Issue Summary:",
       supplementTitle: "Additional Notes:",
       summaryFallbackField: "Field {index}",
+    },
+    fieldReview: {
+      helpTitle: "{label} description/notes",
+      historyButton: "History",
+      valueLabel: "Value: ",
+      unitLabel: "Unit: ",
+      resultLabel: "Field Review: ",
+      commentLabel: "Field Remark: ",
+      results: {
+        pass: "Pass",
+        warning: "Warn",
+        fail: "Unqualified",
+        pending: "Pending",
+      },
+      historyDrawerTitle: "Field Review History (All Rounds)",
+      historyFieldLabel: "Field: {field}",
+      historyEmpty: "No history records",
+      historyRoundTitle: "Round {round} ({count} record(s))",
+      historyOpinionLabel: "Opinion: ",
+      historyFieldCommentLabel: "Field Remark: ",
+      fullWidthColon: ": ",
+      historyContextMissing:
+        "Missing check-item context, unable to view field review history",
+      historyLoadFailed: "Failed to load field review history",
+      historyErrors: {
+        inspectionNotFound: "Inspection record not found",
+        itemNotFound: "Check item not found",
+        accessDenied: "No permission to access this inspection record",
+        permissionDenied: "No permission to view field review history",
+      },
+      confirm: {
+        pendingLine:
+          "{count} field(s) are still pending review. Workflow will continue with the check-item result.",
+        conflictLine:
+          "Manual check-item result ({action}) conflicts with field aggregate ({autoResult}).",
+        firstQuestion: "Are you sure you want to continue submitting?",
+        firstTitle: "First Confirmation",
+        continueButton: "Continue",
+        secondMessage:
+          "Second confirmation: submit with the current result as final?",
+        secondTitle: "Second Confirmation",
+        submitButton: "Confirm Submit",
+      },
+      errors: {
+        manualOverrideRequired:
+          "Manual check-item result ({action}) conflicts with field aggregate ({autoResult}). Confirm manual override and retry.",
+        confirmRequired:
+          "This submission has conflict risk. Complete the second confirmation and retry.",
+        confirmRequiredWithPending:
+          "{count} field(s) are still pending review. Complete the second confirmation and retry.",
+        confirmRequiredWithPendingAndConflict:
+          "{count} field(s) are pending and the check-item result conflicts with field aggregate. Complete the second confirmation and retry.",
+        itemNotCompleted:
+          "The check item is not completed and cannot be reviewed (current: {status})",
+        commentRequired:
+          "Enter review comments or provide at least one field issue remark",
+        itemNotFound: "Check item not found",
+        inspectionNotFound: "Inspection record not found",
+        permissionDenied: "No permission to review this check item",
+      },
+    },
+  },
+  workOrderPhotoDetail: {
+    title: "Similar Photo Details",
+    buttons: {
+      back: "Back",
+      refresh: "Refresh",
+    },
+    labels: {
+      photoId: "Photo ID",
+      fileName: "File Name",
+      takenAt: "Taken At",
+      fileSize: "File Size",
+      latitude: "Latitude",
+      longitude: "Longitude",
+      gpsAccuracy: "GPS Accuracy",
+      address: "Address",
+      site: "Site",
+      workOrder: "Work Order",
+      checkItem: "Check Item",
+      field: "Field",
+      sourcePhotoId: "Source Photo ID",
+    },
+    imageLoadFailed: "Failed to load image",
+    imageNotFound: "Image URL not found",
+    detailNotFound: "Photo detail not found",
+    status: {
+      unknown: "Unknown",
+    },
+    siteText: {
+      idFallback: "Site ID:{siteId}",
+      withId: "{siteName} (ID:{siteId})",
+    },
+    workOrderText: {
+      idFallback: "Work Order ID:{workOrderId}",
+      typePart: "Type:{type}",
+      statusPart: "Status:{status}",
+    },
+    messages: {
+      loadFailed: "Failed to load photo detail",
     },
   },
   route: {
@@ -1006,6 +1109,7 @@ export default {
     MyExecutionWorkOrders: "My Execution Work Orders",
     WorkOrderList: "Work Order List",
     WorkOrderReview: "Work Order Review Desk",
+    WorkOrderPhotoDetail: "Similar Photo Details",
     WorkOrderExecute: "Work Order Execute Desk",
     UsersMgmt: "User Management",
     UserList: "User List",

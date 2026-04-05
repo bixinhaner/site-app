@@ -924,6 +924,10 @@ export default {
         "Perintah kerja dibatalkan, tidak dapat melanjutkan review item pemeriksaan",
       itemReviewBlockedByStatus:
         "Item pemeriksaan ini belum disubmit (saat ini: {status}) dan tidak bisa direview",
+      submitSuccess: "Berhasil dikirim",
+      submitFailed: "Gagal mengirim",
+      similarSourceMissing:
+        "Foto ini tidak memiliki ID sumber serupa untuk dibuka",
     },
     buttons: {
       cancel: "Batal",
@@ -969,6 +973,106 @@ export default {
       supplementTitle: "Catatan Tambahan:",
       summaryFallbackField: "Field {index}",
     },
+    fieldReview: {
+      helpTitle: "Deskripsi/catatan {label}",
+      historyButton: "Riwayat",
+      valueLabel: "Nilai: ",
+      unitLabel: "Satuan: ",
+      resultLabel: "Review Field: ",
+      commentLabel: "Catatan Field: ",
+      results: {
+        pass: "Lulus",
+        warning: "Peringatan",
+        fail: "Tidak Lulus",
+        pending: "Belum Ditinjau",
+      },
+      historyDrawerTitle: "Riwayat Review Field (Semua Putaran)",
+      historyFieldLabel: "Field: {field}",
+      historyEmpty: "Belum ada riwayat",
+      historyRoundTitle: "Putaran {round} ({count} catatan)",
+      historyOpinionLabel: "Pendapat: ",
+      historyFieldCommentLabel: "Catatan Field: ",
+      fullWidthColon: ": ",
+      historyContextMissing:
+        "Konteks item pemeriksaan tidak lengkap, riwayat field tidak bisa ditampilkan",
+      historyLoadFailed: "Gagal memuat riwayat review field",
+      historyErrors: {
+        inspectionNotFound: "Data inspeksi tidak ditemukan",
+        itemNotFound: "Item pemeriksaan tidak ditemukan",
+        accessDenied: "Tidak memiliki izin mengakses data inspeksi ini",
+        permissionDenied: "Tidak memiliki izin melihat riwayat review field",
+      },
+      confirm: {
+        pendingLine:
+          "Masih ada {count} field yang belum ditinjau. Alur tetap lanjut berdasarkan kesimpulan item pemeriksaan.",
+        conflictLine:
+          "Kesimpulan manual item pemeriksaan ({action}) bertentangan dengan agregasi field ({autoResult}).",
+        firstQuestion: "Yakin ingin melanjutkan submit?",
+        firstTitle: "Konfirmasi Pertama",
+        continueButton: "Lanjut",
+        secondMessage:
+          "Konfirmasi kedua: submit dengan hasil saat ini sebagai hasil akhir?",
+        secondTitle: "Konfirmasi Kedua",
+        submitButton: "Konfirmasi Submit",
+      },
+      errors: {
+        manualOverrideRequired:
+          "Kesimpulan manual item pemeriksaan ({action}) bertentangan dengan agregasi field ({autoResult}). Konfirmasi override manual lalu coba lagi.",
+        confirmRequired:
+          "Pengiriman ini memiliki risiko konflik. Selesaikan konfirmasi kedua lalu coba lagi.",
+        confirmRequiredWithPending:
+          "Masih ada {count} field yang belum ditinjau. Selesaikan konfirmasi kedua lalu coba lagi.",
+        confirmRequiredWithPendingAndConflict:
+          "Masih ada {count} field belum ditinjau dan kesimpulan item bertentangan dengan agregasi field. Selesaikan konfirmasi kedua lalu coba lagi.",
+        itemNotCompleted:
+          "Item pemeriksaan belum selesai submit dan tidak dapat direview (status saat ini: {status})",
+        commentRequired:
+          "Masukkan komentar review atau isi minimal satu catatan masalah field",
+        itemNotFound: "Item pemeriksaan tidak ditemukan",
+        inspectionNotFound: "Data inspeksi tidak ditemukan",
+        permissionDenied: "Tidak memiliki izin untuk me-review item pemeriksaan ini",
+      },
+    },
+  },
+  workOrderPhotoDetail: {
+    title: "Detail Foto Serupa",
+    buttons: {
+      back: "Kembali",
+      refresh: "Muat Ulang",
+    },
+    labels: {
+      photoId: "ID Foto",
+      fileName: "Nama File",
+      takenAt: "Waktu Ambil",
+      fileSize: "Ukuran File",
+      latitude: "Lintang",
+      longitude: "Bujur",
+      gpsAccuracy: "Akurasi GPS",
+      address: "Alamat",
+      site: "Situs",
+      workOrder: "Perintah Kerja",
+      checkItem: "Item Pemeriksaan",
+      field: "Field",
+      sourcePhotoId: "ID Foto Sumber",
+    },
+    imageLoadFailed: "Gagal memuat gambar",
+    imageNotFound: "URL gambar tidak ditemukan",
+    detailNotFound: "Detail foto tidak ditemukan",
+    status: {
+      unknown: "Tidak diketahui",
+    },
+    siteText: {
+      idFallback: "ID Situs:{siteId}",
+      withId: "{siteName} (ID:{siteId})",
+    },
+    workOrderText: {
+      idFallback: "ID Perintah Kerja:{workOrderId}",
+      typePart: "Tipe:{type}",
+      statusPart: "Status:{status}",
+    },
+    messages: {
+      loadFailed: "Gagal memuat detail foto",
+    },
   },
   route: {
     Login: "Login",
@@ -1013,6 +1117,7 @@ export default {
     MyExecutionWorkOrders: "Perintah Kerja Eksekusi Saya",
     WorkOrderList: "Daftar Perintah Kerja",
     WorkOrderReview: "Meja Peninjauan Perintah Kerja",
+    WorkOrderPhotoDetail: "Detail Foto Serupa",
     WorkOrderExecute: "Meja Eksekusi Perintah Kerja",
     UsersMgmt: "Manajemen Pengguna",
     UserList: "Daftar Pengguna",

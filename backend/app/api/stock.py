@@ -1270,6 +1270,10 @@ def _get_blocking_bindings(
 def _clear_check_item_review_fields(check_item: InspectionCheckItem, now: datetime) -> None:
     check_item.review_status = None
     check_item.review_comments = None
+    check_item.review_comments_manual = None
+    check_item.review_comments_i18n = None
+    check_item.field_issue_comments = None
+    check_item.field_review_results = None
     check_item.reviewed_by = None
     check_item.reviewed_at = None
     check_item.updated_at = now

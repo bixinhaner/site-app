@@ -1132,12 +1132,13 @@
         <!-- 数据内容 -->
         <div v-if="itemDetailFieldRows.length > 0" style="margin-top: 20px">
           <h4>{{ t("workOrderReview.labels.fieldDataSection") }}</h4>
-          <el-table :data="itemDetailFieldRows" size="small" border>
-            <el-table-column
-              :label="t('workOrderReview.labels.fieldName')"
-              min-width="260"
+          <div class="field-review-list">
+            <div
+              v-for="row in itemDetailFieldRows"
+              :key="row.key"
+              class="field-review-card"
             >
-              <template #default="{ row }">
+              <div class="field-review-card__header">
                 <div class="field-name-cell">
                   <span>{{ row.label }}</span>
                   <span v-if="row.required" class="field-required-mark">*</span>
@@ -1146,12 +1147,20 @@
                     placement="top-start"
                     trigger="click"
                     width="360"
-                    :title="`${row.label} 描述/注意事项`"
+                    :title="
+                      t('workOrderReview.fieldReview.helpTitle', {
+                        label: row.label,
+                      })
+                    "
                   >
                     <template #reference>
                       <el-icon
                         class="field-help-icon"
-                        :title="`${row.label} 描述/注意事项`"
+                        :title="
+                          t('workOrderReview.fieldReview.helpTitle', {
+                            label: row.label,
+                          })
+                        "
                       >
                         <QuestionFilled />
                       </el-icon>
@@ -1159,58 +1168,74 @@
                     <div class="field-help-text">{{ row.help_text }}</div>
                   </el-popover>
                 </div>
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="display_value"
-              :label="t('workOrderReview.labels.fieldValue')"
-              min-width="180"
-              show-overflow-tooltip
-            />
-            <el-table-column
-              prop="unit"
-              :label="t('workOrderReview.labels.unit')"
-              width="120"
-            >
-              <template #default="{ row }">{{ row.unit || "-" }}</template>
-            </el-table-column>
-            <el-table-column
-              :label="t('workOrderReview.labels.photo')"
-              min-width="260"
-            >
-              <template #default="{ row }">
-                <div
-                  v-if="row.photos && row.photos.length"
-                  class="field-photo-strip"
+                <el-button
+                  link
+                  size="small"
+                  type="primary"
+                  @click="openFieldReviewHistory(row)"
                 >
-                  <ProgressImage
-                    v-for="(p, idx) in row.photos.slice(0, 4)"
-                    :key="p.id || idx"
-                    :src="getImageUrl(p.file_path)"
-                    class="field-photo-img"
-                    fit="cover"
-                    @click.stop="viewPhotoDetail(p)"
-                  />
-                  <el-tag
-                    v-if="row.photos.length > 4"
-                    size="small"
-                    effect="plain"
-                    type="info"
-                    class="field-photo-more"
-                  >
-                    +{{ row.photos.length - 4 }}
-                  </el-tag>
+                  {{ t("workOrderReview.fieldReview.historyButton") }}
+                </el-button>
+              </div>
+
+              <div class="field-review-card__meta">
+                <div class="field-review-card__value">
+                  <span class="field-review-card__meta-label">{{
+                    t("workOrderReview.fieldReview.valueLabel")
+                  }}</span>
+                  <span>{{ row.display_value }}</span>
                 </div>
-              </template>
-            </el-table-column>
-            <el-table-column
-              :label="t('workOrderReview.fieldIssues.columnLabel')"
-              min-width="280"
-            >
-              <template #default="{ row }">
-                <template
-                  v-if="row.field_key && canEditSelectedItemFieldIssues"
+                <div class="field-review-card__unit">
+                  <span class="field-review-card__meta-label">{{
+                    t("workOrderReview.fieldReview.unitLabel")
+                  }}</span>
+                  <span>{{ row.unit || "-" }}</span>
+                </div>
+              </div>
+
+              <div v-if="row.photos && row.photos.length" class="field-photo-strip">
+                <ProgressImage
+                  v-for="(p, idx) in row.photos"
+                  :key="p.id || idx"
+                  :src="getImageUrl(p.file_path)"
+                  class="field-photo-img"
+                  fit="cover"
+                  @click.stop="viewPhotoDetail(p)"
+                />
+              </div>
+
+              <div class="field-review-card__status">
+                <span class="field-review-card__meta-label">{{
+                  t("workOrderReview.fieldReview.resultLabel")
+                }}</span>
+                <el-radio-group
+                  :model-value="row.field_review_result"
+                  size="small"
+                  :disabled="!canEditSelectedItemFieldIssues"
+                  @change="
+                    (value) => updateFieldReviewResultDraft(row.field_key, value)
+                  "
                 >
+                  <el-radio-button label="pass">{{
+                    t("workOrderReview.fieldReview.results.pass")
+                  }}</el-radio-button>
+                  <el-radio-button label="warning">{{
+                    t("workOrderReview.fieldReview.results.warning")
+                  }}</el-radio-button>
+                  <el-radio-button label="fail">{{
+                    t("workOrderReview.fieldReview.results.fail")
+                  }}</el-radio-button>
+                  <el-radio-button label="pending">{{
+                    t("workOrderReview.fieldReview.results.pending")
+                  }}</el-radio-button>
+                </el-radio-group>
+              </div>
+
+              <div class="field-review-card__comment">
+                <span class="field-review-card__meta-label">{{
+                  t("workOrderReview.fieldReview.commentLabel")
+                }}</span>
+                <template v-if="row.field_key && canEditSelectedItemFieldIssues">
                   <el-input
                     :model-value="row.issue_comment"
                     type="textarea"
@@ -1230,9 +1255,9 @@
                   </div>
                   <span v-else>-</span>
                 </template>
-              </template>
-            </el-table-column>
-          </el-table>
+              </div>
+            </div>
+          </div>
 
           <div v-if="itemDetailExtraPhotos.length" style="margin-top: 12px">
             <el-divider />
@@ -1347,13 +1372,7 @@
         <el-button @click="itemDetailVisible = false">{{
           t("workOrderReview.buttons.close")
         }}</el-button>
-        <template
-          v-if="
-            selectedItem &&
-            (!selectedItem.review_status ||
-              selectedItem.review_status === 'pending')
-          "
-        >
+        <template v-if="selectedItem">
           <el-button
             type="success"
             :disabled="!canReviewCheckItem(selectedItem)"
@@ -1382,6 +1401,84 @@
         </template>
       </template>
     </el-dialog>
+
+    <el-drawer
+      v-model="fieldReviewHistoryVisible"
+      :title="t('workOrderReview.fieldReview.historyDrawerTitle')"
+      size="560px"
+      :destroy-on-close="false"
+    >
+      <div v-loading="fieldReviewHistoryLoading">
+        <div v-if="fieldReviewHistoryTarget" class="field-history-target">
+          {{
+            t("workOrderReview.fieldReview.historyFieldLabel", {
+              field:
+                fieldReviewHistoryTarget.label || fieldReviewHistoryTarget.field_key,
+            })
+          }}
+        </div>
+        <el-empty
+          v-if="!fieldReviewHistoryLoading && fieldReviewHistoryRounds.length === 0"
+          :description="t('workOrderReview.fieldReview.historyEmpty')"
+        />
+        <el-collapse v-else>
+          <el-collapse-item
+            v-for="round in fieldReviewHistoryRounds"
+            :key="`round-${round.round_no}`"
+            :name="String(round.round_no)"
+          >
+            <template #title>
+              {{
+                t("workOrderReview.fieldReview.historyRoundTitle", {
+                  round: round.round_no,
+                  count: round.record_count,
+                })
+              }}
+            </template>
+            <div
+              v-for="record in round.records"
+              :key="record.log_id"
+              class="field-history-record"
+            >
+              <div class="field-history-record__meta">
+                <el-tag size="small" :type="fieldReviewTagType(record.result)">
+                  {{ fieldReviewStatusText(record.result) }}
+                </el-tag>
+                <span class="field-history-record__time">
+                  {{ formatDateTime(record.reviewed_at) }}
+                </span>
+                <span class="field-history-record__operator">
+                  {{ record.reviewer_name || "-" }}
+                </span>
+              </div>
+              <div class="field-history-record__comment">
+                <strong>{{ t("workOrderReview.fieldReview.historyOpinionLabel") }}</strong>
+                {{ localizedHistoryComment(record) || "-" }}
+              </div>
+              <div
+                v-if="
+                  Array.isArray(record.field_reviews) &&
+                  record.field_reviews.length > 0
+                "
+                class="field-history-record__field-comment"
+              >
+                <strong>{{
+                  t("workOrderReview.fieldReview.historyFieldCommentLabel")
+                }}</strong>
+                <div
+                  v-for="(fieldRow, idx) in record.field_reviews"
+                  :key="`${record.log_id}-${idx}`"
+                >
+                  {{ fieldRow.field_label || fieldRow.field_key
+                  }}{{ t("workOrderReview.fieldReview.fullWidthColon") }}
+                  {{ localizedFieldHistoryComment(fieldRow) || "-" }}
+                </div>
+              </div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+    </el-drawer>
 
     <!-- 照片详情弹窗 -->
     <el-dialog
@@ -2072,6 +2169,7 @@ import { ref, reactive, computed, onMounted, nextTick, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import request from "@/utils/request";
+import { inspectionExecutionApi } from "@/api/workorder";
 import { copyTextToClipboard } from "@/utils/clipboard";
 import { translateLegacyText } from "@/i18n/translator";
 import { ElMessage, ElMessageBox, ElLoading } from "element-plus";
@@ -2121,6 +2219,10 @@ const photoSimilarityDetailVisible = ref(false);
 const selectedPhoto = ref(null);
 const itemDetailVisible = ref(false);
 const selectedItem = ref(null);
+const fieldReviewHistoryVisible = ref(false);
+const fieldReviewHistoryLoading = ref(false);
+const fieldReviewHistoryTarget = ref(null);
+const fieldReviewHistoryRounds = ref([]);
 const isFullscreen = ref(false);
 const zoomLevel = ref(1);
 const translateX = ref(0);
@@ -2241,23 +2343,63 @@ const itemReviewComments = ref("");
 const itemReviewCommentsI18n = reactive({ en: "", id: "" });
 const itemReviewSubmitting = ref(false);
 const itemFieldIssueDrafts = reactive({});
+const itemFieldReviewResultDrafts = reactive({});
+
+const normalizeFieldReviewResult = (value) => {
+  const result = String(value || "").trim().toLowerCase();
+  if (["pass", "warning", "fail", "pending"].includes(result)) return result;
+  return "";
+};
 
 const clearItemFieldIssueDrafts = () => {
   Object.keys(itemFieldIssueDrafts).forEach((key) => {
     delete itemFieldIssueDrafts[key];
   });
+  Object.keys(itemFieldReviewResultDrafts).forEach((key) => {
+    delete itemFieldReviewResultDrafts[key];
+  });
 };
 
 const resetItemFieldIssueDrafts = (fieldIssueComments = []) => {
   clearItemFieldIssueDrafts();
+  const currentItem = selectedItem.value || itemReviewRow.value || null;
+  const existingFieldReviews = Array.isArray(currentItem?.field_review_results)
+    ? currentItem.field_review_results
+    : [];
+  existingFieldReviews.forEach((item) => {
+    const fieldKey = String(
+      item?.field_key || item?.field_id || item?.field_label || "",
+    ).trim();
+    if (!fieldKey) return;
+    const status = normalizeFieldReviewResult(item?.result) || "pending";
+    const comment = String(item?.comment || "").trim();
+    itemFieldReviewResultDrafts[fieldKey] = status;
+    if (comment) {
+      itemFieldIssueDrafts[fieldKey] = comment;
+    }
+  });
+
   if (!Array.isArray(fieldIssueComments)) return;
   fieldIssueComments.forEach((item) => {
     const fieldId = String(
       item?.field_key || item?.field_id || item?.field_label || "",
     ).trim();
     const comment = String(item?.comment || "").trim();
-    if (fieldId && comment) itemFieldIssueDrafts[fieldId] = comment;
+    if (!fieldId) return;
+    if (!itemFieldReviewResultDrafts[fieldId]) {
+      itemFieldReviewResultDrafts[fieldId] = "warning";
+    }
+    if (comment && !itemFieldIssueDrafts[fieldId]) {
+      itemFieldIssueDrafts[fieldId] = comment;
+    }
   });
+};
+
+const updateFieldReviewResultDraft = (fieldKey, result) => {
+  const key = String(fieldKey || "").trim();
+  if (!key) return;
+  itemFieldReviewResultDrafts[key] =
+    normalizeFieldReviewResult(result) || "pending";
 };
 
 const updateFieldIssueDraft = (fieldKey, value) => {
@@ -2273,10 +2415,19 @@ const updateFieldIssueDraft = (fieldKey, value) => {
 
 const itemFieldIssueDraftMap = computed(() => {
   const result = {};
-  Object.entries(itemFieldIssueDrafts).forEach(([fieldId, comment]) => {
+  const keys = new Set([
+    ...Object.keys(itemFieldIssueDrafts),
+    ...Object.keys(itemFieldReviewResultDrafts),
+  ]);
+  keys.forEach((fieldId) => {
     const key = String(fieldId || "").trim();
-    const text = String(comment || "").trim();
-    if (key && text) result[key] = text;
+    if (!key) return;
+    result[key] = {
+      result:
+        normalizeFieldReviewResult(itemFieldReviewResultDrafts[key]) ||
+        "pending",
+      comment: String(itemFieldIssueDrafts[key] || "").trim(),
+    };
   });
   return result;
 });
@@ -3717,12 +3868,151 @@ const reviewItem = async (row, action) => {
   itemReviewVisible.value = true;
 };
 
+const confirmFieldReviewOverrideTwice = async ({
+  pendingCount,
+  resultConflict,
+  action,
+  autoResult,
+}) => {
+  if (!resultConflict && pendingCount <= 0) {
+    return false;
+  }
+  const lines = [];
+  if (pendingCount > 0) {
+    lines.push(
+      t("workOrderReview.fieldReview.confirm.pendingLine", {
+        count: pendingCount,
+      }),
+    );
+  }
+  if (resultConflict) {
+    lines.push(
+      t("workOrderReview.fieldReview.confirm.conflictLine", {
+        action: fieldReviewStatusText(action),
+        autoResult: fieldReviewStatusText(autoResult),
+      }),
+    );
+  }
+  await ElMessageBox.confirm(
+    `${lines.join("\n")}\n\n${t(
+      "workOrderReview.fieldReview.confirm.firstQuestion",
+    )}`,
+    t("workOrderReview.fieldReview.confirm.firstTitle"),
+    {
+      type: "warning",
+      confirmButtonText: t("workOrderReview.fieldReview.confirm.continueButton"),
+      cancelButtonText: t("workOrderReview.buttons.cancel"),
+      closeOnClickModal: false,
+    },
+  );
+  await ElMessageBox.confirm(
+    t("workOrderReview.fieldReview.confirm.secondMessage"),
+    t("workOrderReview.fieldReview.confirm.secondTitle"),
+    {
+      type: "warning",
+      confirmButtonText: t("workOrderReview.fieldReview.confirm.submitButton"),
+      cancelButtonText: t("workOrderReview.buttons.cancel"),
+      closeOnClickModal: false,
+    },
+  );
+  return true;
+};
+
+const extractApiErrorDetail = (error) => {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "string") {
+    return { code: "", message: detail, data: null };
+  }
+  if (detail && typeof detail === "object") {
+    return {
+      code: String(detail.code || "").trim(),
+      message: String(detail.message || detail.detail || "").trim(),
+      data: detail,
+    };
+  }
+  return { code: "", message: "", data: null };
+};
+
+const resolveItemReviewErrorMessage = (error) => {
+  const parsed = extractApiErrorDetail(error);
+  const code = parsed.code;
+  const data = parsed.data || {};
+  if (code === "CHECK_ITEM_MANUAL_OVERRIDE_REQUIRED") {
+    return t("workOrderReview.fieldReview.errors.manualOverrideRequired", {
+      action: fieldReviewStatusText(data?.manual_action),
+      autoResult: fieldReviewStatusText(data?.auto_result),
+    });
+  }
+  if (code === "CHECK_ITEM_REVIEW_CONFIRM_REQUIRED") {
+    const pendingCount = Number(data?.pending_count || 0);
+    const resultConflict = !!data?.result_conflict;
+    if (pendingCount > 0 && resultConflict) {
+      return t(
+        "workOrderReview.fieldReview.errors.confirmRequiredWithPendingAndConflict",
+        {
+          count: pendingCount,
+        },
+      );
+    }
+    if (pendingCount > 0) {
+      return t("workOrderReview.fieldReview.errors.confirmRequiredWithPending", {
+        count: pendingCount,
+      });
+    }
+    return t("workOrderReview.fieldReview.errors.confirmRequired");
+  }
+  if (code === "CHECK_ITEM_NOT_COMPLETED") {
+    return t("workOrderReview.fieldReview.errors.itemNotCompleted", {
+      status: String(data?.current_status || "-"),
+    });
+  }
+  if (code === "CHECK_ITEM_COMMENT_REQUIRED") {
+    return t("workOrderReview.fieldReview.errors.commentRequired");
+  }
+  if (code === "CHECK_ITEM_NOT_FOUND") {
+    return t("workOrderReview.fieldReview.errors.itemNotFound");
+  }
+  if (code === "INSPECTION_NOT_FOUND") {
+    return t("workOrderReview.fieldReview.errors.inspectionNotFound");
+  }
+  if (code === "REVIEW_PERMISSION_REQUIRED") {
+    return t("workOrderReview.fieldReview.errors.permissionDenied");
+  }
+  return parsed.message || t("workOrderReview.messages.submitFailed");
+};
+
+const resolveFieldReviewHistoryErrorMessage = (error) => {
+  const parsed = extractApiErrorDetail(error);
+  const code = parsed.code;
+  if (code === "INSPECTION_NOT_FOUND") {
+    return t("workOrderReview.fieldReview.historyErrors.inspectionNotFound");
+  }
+  if (code === "CHECK_ITEM_NOT_FOUND") {
+    return t("workOrderReview.fieldReview.historyErrors.itemNotFound");
+  }
+  if (code === "INSPECTION_ACCESS_DENIED") {
+    return t("workOrderReview.fieldReview.historyErrors.accessDenied");
+  }
+  if (code === "REVIEW_PERMISSION_REQUIRED") {
+    return t("workOrderReview.fieldReview.historyErrors.permissionDenied");
+  }
+  return parsed.message || t("workOrderReview.fieldReview.historyLoadFailed");
+};
+
 const submitItemReview = async () => {
   const id = route.query.id;
   if (!id || !itemReviewRow.value) return;
 
   const action = itemReviewAction.value;
   const baseText = String(itemReviewComments.value || "");
+  const fieldReviews = itemReviewFieldReviews.value;
+  const aggregateInfo = aggregateFieldReviewResult(fieldReviews);
+  const autoResult = normalizeFieldReviewResult(aggregateInfo.autoResult);
+  const pendingCount = Number(aggregateInfo.pendingCount || 0);
+  const resultConflict =
+    !!autoResult &&
+    ["pass", "warning", "fail"].includes(autoResult) &&
+    autoResult !== action;
   const fieldIssueComments = itemReviewFieldIssues.value;
   if (
     action !== "pass" &&
@@ -3733,15 +4023,30 @@ const submitItemReview = async () => {
     return;
   }
 
+  let confirmOverride = false;
+  try {
+    confirmOverride = await confirmFieldReviewOverrideTwice({
+      pendingCount,
+      resultConflict,
+      action,
+      autoResult,
+    });
+  } catch {
+    return;
+  }
+
   const payload = {
     action,
     comments: baseText.trim() ? baseText : undefined,
     comments_i18n: baseText.trim()
       ? normalizeI18nPayload(itemReviewCommentsI18n)
       : undefined,
+    field_reviews: fieldReviews.length ? fieldReviews : undefined,
     field_issue_comments: fieldIssueComments.length
       ? fieldIssueComments
       : undefined,
+    manual_override: resultConflict,
+    confirm_override: confirmOverride,
   };
 
   try {
@@ -3759,7 +4064,7 @@ const submitItemReview = async () => {
         payload,
       );
     }
-    ElMessage.success("已提交");
+    ElMessage.success(t("workOrderReview.messages.submitSuccess"));
     itemReviewVisible.value = false;
     // 审核成功后自动关闭“检查项详情”弹窗（不切换下一条）
     itemDetailVisible.value = false;
@@ -3767,7 +4072,7 @@ const submitItemReview = async () => {
     await Promise.all([loadItems(), loadSummary()]);
   } catch (e) {
     console.error(e);
-    ElMessage.error(e?.response?.data?.detail || "提交失败");
+    ElMessage.error(resolveItemReviewErrorMessage(e));
   } finally {
     itemReviewSubmitting.value = false;
   }
@@ -3847,8 +4152,10 @@ const buildFieldIssueCommentsPayload = (sourceRows, draftMap = {}) => {
       normalizeText(row?.label);
     if (!fieldKey || seen.has(fieldKey)) return;
     seen.add(fieldKey);
-    const comment = normalizeText(draftMap[fieldKey]);
-    if (!comment) return;
+    const draft = draftMap[fieldKey] || {};
+    const comment = normalizeText(draft?.comment);
+    const result = normalizeFieldReviewResult(draft?.result) || "pending";
+    if (!comment || !["warning", "fail"].includes(result)) return;
     const fieldLabelI18n = {
       ...(normalizeI18nPayload(row?.field_label_i18n) || {}),
     };
@@ -3868,6 +4175,83 @@ const buildFieldIssueCommentsPayload = (sourceRows, draftMap = {}) => {
     });
   });
   return payloadRows;
+};
+
+const buildFieldReviewPayload = (sourceRows, draftMap = {}) => {
+  if (!Array.isArray(sourceRows)) return [];
+  const payloadRows = [];
+  const seen = new Set();
+  const localeKey = currentReviewLocaleKey.value;
+  sourceRows.forEach((row) => {
+    const fieldKey =
+      normalizeText(row?.field_key) ||
+      normalizeText(row?.field_id) ||
+      normalizeText(row?.label);
+    if (!fieldKey || seen.has(fieldKey)) return;
+    seen.add(fieldKey);
+    const draft = draftMap[fieldKey] || {};
+    const result = normalizeFieldReviewResult(draft?.result) || "pending";
+    const comment = normalizeText(draft?.comment) || undefined;
+    const fieldLabelI18n = {
+      ...(normalizeI18nPayload(row?.field_label_i18n) || {}),
+    };
+    const displayLabel =
+      normalizeText(row?.field_label_base) || normalizeText(row?.label) || fieldKey;
+    if (localeKey && displayLabel && !fieldLabelI18n[localeKey]) {
+      fieldLabelI18n[localeKey] = displayLabel;
+    }
+    const commentI18n =
+      comment && localeKey
+        ? {
+            [localeKey]: comment,
+          }
+        : undefined;
+    payloadRows.push({
+      field_key: fieldKey,
+      field_id: normalizeText(row?.field_id) || undefined,
+      field_label: displayLabel,
+      field_label_i18n: normalizeI18nPayload(fieldLabelI18n),
+      result,
+      comment,
+      comment_i18n: commentI18n,
+    });
+  });
+  return payloadRows;
+};
+
+const aggregateFieldReviewResult = (fieldReviews) => {
+  const reviews = Array.isArray(fieldReviews) ? fieldReviews : [];
+  if (reviews.length === 0) {
+    return {
+      autoResult: null,
+      pendingCount: 0,
+      passCount: 0,
+      warningCount: 0,
+      failCount: 0,
+    };
+  }
+  let passCount = 0;
+  let warningCount = 0;
+  let failCount = 0;
+  let pendingCount = 0;
+  reviews.forEach((row) => {
+    const result = normalizeFieldReviewResult(row?.result) || "pending";
+    if (result === "pass") passCount += 1;
+    else if (result === "warning") warningCount += 1;
+    else if (result === "fail") failCount += 1;
+    else pendingCount += 1;
+  });
+  let autoResult = "pending";
+  if (failCount > 0) autoResult = "fail";
+  else if (warningCount > 0) autoResult = "warning";
+  else if (passCount > 0) autoResult = "pass";
+  return {
+    autoResult,
+    pendingCount,
+    passCount,
+    warningCount,
+    failCount,
+  };
 };
 
 const buildFieldIssueSummaryText = (fieldIssues) => {
@@ -3916,7 +4300,7 @@ const formatFieldValueForReview = (val) => {
   return String(val);
 };
 
-const buildItemDetailFieldRows = (item, issueCommentMap = {}) => {
+const buildItemDetailFieldRows = (item, reviewDraftMap = {}) => {
   if (!item) return [];
   const defs = Array.isArray(item.fields) ? item.fields : [];
   const dataList = Array.isArray(item.data_value) ? item.data_value : [];
@@ -3970,7 +4354,11 @@ const buildItemDetailFieldRows = (item, issueCommentMap = {}) => {
       unit: normalizeText(dv?.unit) || "",
       is_defined: true,
       photos: fid ? photoMap.get(fid) || [] : [],
-      issue_comment: normalizeText(issueCommentMap[fid || baseLabel]),
+      field_review_result:
+        normalizeFieldReviewResult(
+          reviewDraftMap[fid || baseLabel]?.result,
+        ) || "pending",
+      issue_comment: normalizeText(reviewDraftMap[fid || baseLabel]?.comment),
     });
   });
 
@@ -3999,7 +4387,13 @@ const buildItemDetailFieldRows = (item, issueCommentMap = {}) => {
       unit: normalizeText(dv?.unit) || "",
       is_defined: false,
       photos: [],
-      issue_comment: normalizeText(issueCommentMap[`name:${fieldName}`]),
+      field_review_result:
+        normalizeFieldReviewResult(
+          reviewDraftMap[`name:${fieldName}`]?.result,
+        ) || "pending",
+      issue_comment: normalizeText(
+        reviewDraftMap[`name:${fieldName}`]?.comment,
+      ),
     });
   });
 
@@ -4031,6 +4425,12 @@ const itemReviewFieldIssues = computed(() =>
     itemFieldIssueDraftMap.value,
   ),
 );
+const itemReviewFieldReviews = computed(() =>
+  buildFieldReviewPayload(
+    itemReviewSourceRows.value,
+    itemFieldIssueDraftMap.value,
+  ),
+);
 const itemReviewFieldIssueCount = computed(
   () => itemReviewFieldIssues.value.length,
 );
@@ -4051,6 +4451,70 @@ const itemDetailExtraPhotos = computed(() => {
     return !fid || !known.has(fid);
   });
 });
+
+const fieldReviewStatusText = (status) => {
+  const value = normalizeFieldReviewResult(status) || "pending";
+  return t(`workOrderReview.fieldReview.results.${value}`);
+};
+
+const fieldReviewTagType = (status) => {
+  const value = normalizeFieldReviewResult(status) || "pending";
+  if (value === "pass") return "success";
+  if (value === "warning") return "warning";
+  if (value === "fail") return "danger";
+  return "info";
+};
+
+const localizedHistoryComment = (record) => {
+  const localeKey = currentReviewLocaleKey.value;
+  if (localeKey) {
+    const localized = normalizeText(record?.manual_comment_i18n?.[localeKey]);
+    if (localized) return localized;
+  }
+  return normalizeText(record?.manual_comment);
+};
+
+const localizedFieldHistoryComment = (row) => {
+  const localeKey = currentReviewLocaleKey.value;
+  if (localeKey) {
+    const localized = normalizeText(row?.comment_i18n?.[localeKey]);
+    if (localized) return localized;
+  }
+  return normalizeText(row?.comment);
+};
+
+const openFieldReviewHistory = async (row) => {
+  const inspectionId = String(order.value?.inspection_id || "").trim();
+  const itemId = String(selectedItem.value?.id || "").trim();
+  if (!inspectionId || !itemId) {
+    ElMessage.warning(t("workOrderReview.fieldReview.historyContextMissing"));
+    return;
+  }
+  fieldReviewHistoryTarget.value = row || null;
+  fieldReviewHistoryVisible.value = true;
+  fieldReviewHistoryLoading.value = true;
+  try {
+    const params = {};
+    const fieldKey = normalizeText(row?.field_key);
+    const fieldId = normalizeText(row?.field_id);
+    if (fieldKey) params.field_key = fieldKey;
+    if (fieldId) params.field_id = fieldId;
+    const res = await inspectionExecutionApi.getCheckItemFieldReviewHistory(
+      inspectionId,
+      itemId,
+      params,
+    );
+    fieldReviewHistoryRounds.value = Array.isArray(res?.rounds)
+      ? res.rounds
+      : [];
+  } catch (error) {
+    console.error("Failed to load field review history:", error);
+    fieldReviewHistoryRounds.value = [];
+    ElMessage.error(resolveFieldReviewHistoryErrorMessage(error));
+  } finally {
+    fieldReviewHistoryLoading.value = false;
+  }
+};
 
 const viewItemDetail = (item) => {
   selectedItem.value = item;
@@ -4073,7 +4537,7 @@ const viewPhotoDetail = (photo) => {
 const openSimilarPhotoDetail = (photo) => {
   const matchedPhotoId = getPhotoSimilarMatchedPhotoId(photo);
   if (!matchedPhotoId) {
-    ElMessage.warning("该照片缺少可跳转的相似来源ID");
+    ElMessage.warning(t("workOrderReview.messages.similarSourceMissing"));
     return;
   }
   const fromWorkOrderId = String(route.query.id || "").trim();
@@ -4204,6 +4668,13 @@ watch(photoDetailVisible, (visible) => {
     photoViewerProgress.value = 0;
     cleanupPhotoViewerObjectUrl();
   }
+});
+
+watch(itemDetailVisible, (visible) => {
+  if (visible) return;
+  fieldReviewHistoryVisible.value = false;
+  fieldReviewHistoryTarget.value = null;
+  fieldReviewHistoryRounds.value = [];
 });
 
 const handleWheel = (e) => {
@@ -4846,6 +5317,84 @@ onMounted(refresh);
   word-break: break-word;
   color: #606266;
   line-height: 1.5;
+}
+
+.field-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field-review-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.field-review-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.field-review-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.field-review-card__meta-label {
+  color: #6b7280;
+  margin-right: 4px;
+}
+
+.field-review-card__status {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.field-review-card__comment {
+  margin-top: 6px;
+}
+
+.field-history-target {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.field-history-record {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #fafafa;
+}
+
+.field-history-record__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.field-history-record__time,
+.field-history-record__operator {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.field-history-record__comment,
+.field-history-record__field-comment {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
 }
 
 /* 审核历史样式 */

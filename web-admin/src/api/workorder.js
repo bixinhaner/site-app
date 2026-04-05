@@ -109,6 +109,9 @@ export const inspectionExecutionApi = {
   getInspectionPhotoDetail: (photoId) =>
     request.get(`/api/inspections/photos/${photoId}/detail`),
 
+  getCheckItemFieldReviewHistory: (inspectionId, itemId, params = {}) =>
+    request.get(`/api/inspections/detail/${inspectionId}/items/${itemId}/field-reviews/history`, { params }),
+
   updateInspectionItem: (inspectionId, itemId, data) =>
     request.put(`/api/inspections/detail/${inspectionId}/items/${itemId}`, data),
 

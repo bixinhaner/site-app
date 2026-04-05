@@ -196,6 +196,8 @@ class InspectionCheckItem(Base):
     review_comments_manual = Column(Text)
     review_comments_i18n = Column(JSON)
     field_issue_comments = Column(JSON)
+    # 字段级审核结果快照（当前态）：[{field_key, field_id, field_label, result, comment, comment_i18n, reviewed_at, reviewed_by}]
+    field_review_results = Column(JSON)
     reviewed_by = Column(Integer, ForeignKey("users.id"))
     reviewed_at = Column(DateTime)
 
