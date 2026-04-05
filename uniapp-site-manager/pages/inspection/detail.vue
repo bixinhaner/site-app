@@ -53,7 +53,7 @@
 			:class="{ 'template-sync-banner--info': inspectionData?.template_sync?.has_pending_update && !inspectionData?.template_sync?.just_applied }"
 		>
 			<text class="template-sync-banner__title">
-				{{ inspectionData?.template_sync?.just_applied ? '检查模板已更新' : '模板同步提示' }}
+				{{ inspectionData?.template_sync?.just_applied ? $t('inspection.templateSyncAppliedTitle') : $t('inspection.templateSyncHintTitle') }}
 			</text>
 			<text class="template-sync-banner__text">{{ inspectionData?.template_sync?.message }}</text>
 		</view>
@@ -658,6 +658,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl, API_ENDPOINTS } from '@/config/api.js'
 	import { createPhotoCacheContext, ensurePhotoCached } from '@/utils/photoCache.js'
+	import { localizeInspectionBackendMessage as localizeInspectionBackendMessageRaw } from '@/utils/inspection-error-i18n.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	
@@ -694,6 +695,13 @@
 		}
 		return base
 	}
+
+	const localizeInspectionBackendMessage = (input, options = {}) =>
+		localizeInspectionBackendMessageRaw(input, {
+			t: $t,
+			currentLocale: languageStore.currentLocale,
+			...options
+		})
 	
 	// 页面参数
 	const inspectionId = ref('')
@@ -934,7 +942,9 @@
 				}
 				return
 			}
-			throw new Error(response.data?.detail || 'load failed')
+			throw new Error(localizeInspectionBackendMessage(response.data, {
+				fallbackKey: 'messages.dataLoadFailed'
+			}))
 		} catch (e) {
 			// 接口失败：仅在“能确认站点有绑定设备”时显示未知
 			if (hasBoundDevicesHint.value) {
@@ -1077,7 +1087,9 @@
 			if (response.statusCode === 200) {
 				bindingHistory.value = response.data.history || []
 			} else {
-				throw new Error(response.data.detail || $t('messages.dataLoadFailed'))
+				throw new Error(localizeInspectionBackendMessage(response.data, {
+					fallbackKey: 'messages.dataLoadFailed'
+				}))
 			}
 		} catch (error) {
 			console.error('获取绑定历史失败:', error)

@@ -3,22 +3,73 @@
  * 与后端验证逻辑保持一致
  */
 
+const FALLBACK_MESSAGES = {
+	required: '{field}为必填项',
+	minSelection: '{field}至少选择一项',
+	validationFailed: '验证失败: {reason}',
+	textType: '{field}必须是文本',
+	minLength: '{field}长度不能少于{min}个字符',
+	maxLength: '{field}长度不能超过{max}个字符',
+	patternInvalid: '{field}格式不正确',
+	numberType: '{field}必须是数字',
+	minValue: '{field}不能小于{min}',
+	maxValue: '{field}不能大于{max}',
+	booleanType: '{field}必须是是/否',
+	invalidOption: '{field}选项无效',
+	arrayType: '{field}必须是数组',
+	containsInvalidOptions: '{field}包含无效选项: {options}',
+	dateType: '{field}日期格式不正确',
+	dateFormat: '{field}日期格式不正确（应为YYYY-MM-DD）',
+	invalidDate: '{field}是无效的日期',
+	timeType: '{field}时间格式不正确',
+	timeFormat: '{field}时间格式不正确（应为HH:MM）',
+	invalidTime: '{field}是无效的时间',
+	datetimeType: '{field}日期时间格式不正确',
+	datetimeFormat: '{field}日期时间格式不正确',
+	invalidDatetime: '{field}是无效的日期时间',
+	requiredFieldMissing: '必填字段{field}未提交'
+}
+
+const interpolate = (template, params = {}) =>
+	String(template || '').replace(/\{(\w+)\}/g, (_, k) =>
+		params[k] === undefined || params[k] === null ? '' : String(params[k])
+	)
+
+const buildMessage = (translate, key, params = {}) => {
+	if (typeof translate === 'function') {
+		const translated = translate(key, params)
+		if (translated !== null && translated !== undefined) {
+			const text = String(translated).trim()
+			if (text && text !== key) return text
+		}
+	}
+	return interpolate(FALLBACK_MESSAGES[key] || '', params)
+}
+
+const normalizeFieldLabel = (field) => {
+	const label = String(field?.label || field?.field_id || '').trim()
+	return label || '字段'
+}
+
 /**
  * 验证单个字段值
  * @param {Object} field - 字段定义
  * @param {*} value - 字段值
  * @param {Boolean} strict - 是否严格验证
+ * @param {Function} translate - 可选翻译函数，签名 (key, params) => string
  * @returns {Object} { valid: boolean, error: string }
  */
-export function validateField(field, value, strict = true) {
+export function validateField(field, value, strict = true, translate = null) {
 	try {
+		const fieldLabel = normalizeFieldLabel(field)
+
 		// 检查必填
 		if (field.required && strict) {
 			if (value === undefined || value === null || value === '') {
-				return { valid: false, error: `${field.label}为必填项` }
+				return { valid: false, error: buildMessage(translate, 'required', { field: fieldLabel }) }
 			}
 			if (field.type === 'select_multi' && (!Array.isArray(value) || value.length === 0)) {
-				return { valid: false, error: `${field.label}至少选择一项` }
+				return { valid: false, error: buildMessage(translate, 'minSelection', { field: fieldLabel }) }
 			}
 		}
 		
@@ -37,44 +88,45 @@ export function validateField(field, value, strict = true) {
 		switch (field.type) {
 			case 'text':
 			case 'rich_text':
-				return validateText(field, value)
+				return validateText(field, value, translate)
 				
 			case 'number':
-				return validateNumber(field, value)
+				return validateNumber(field, value, translate)
 				
 			case 'boolean':
-				return validateBoolean(field, value)
+				return validateBoolean(field, value, translate)
 				
 			case 'select_single':
-				return validateSelectSingle(field, value)
+				return validateSelectSingle(field, value, translate)
 				
 			case 'select_multi':
-				return validateSelectMulti(field, value)
+				return validateSelectMulti(field, value, translate)
 				
 			case 'date':
-				return validateDate(field, value)
+				return validateDate(field, value, translate)
 				
 			case 'time':
-				return validateTime(field, value)
+				return validateTime(field, value, translate)
 				
 			case 'datetime':
-				return validateDatetime(field, value)
+				return validateDatetime(field, value, translate)
 				
 			default:
 				return { valid: true, error: null }
 		}
 	} catch (e) {
 		console.error('字段验证出错:', e)
-		return { valid: false, error: `验证失败: ${e.message}` }
+		return { valid: false, error: buildMessage(translate, 'validationFailed', { reason: e?.message || '' }) }
 	}
 }
 
 /**
  * 验证文本字段
  */
-function validateText(field, value) {
+function validateText(field, value, translate) {
+	const fieldLabel = normalizeFieldLabel(field)
 	if (typeof value !== 'string') {
-		return { valid: false, error: `${field.label}必须是文本` }
+		return { valid: false, error: buildMessage(translate, 'textType', { field: fieldLabel }) }
 	}
 	
 	// 支持两种约束定义方式：field.constraints.xxx 或 field.xxx
@@ -85,12 +137,12 @@ function validateText(field, value) {
 	
 	// 最小长度
 	if (minLength !== undefined && value.length < minLength) {
-		return { valid: false, error: `${field.label}长度不能少于${minLength}个字符` }
+		return { valid: false, error: buildMessage(translate, 'minLength', { field: fieldLabel, min: minLength }) }
 	}
 	
 	// 最大长度
 	if (maxLength !== undefined && value.length > maxLength) {
-		return { valid: false, error: `${field.label}长度不能超过${maxLength}个字符` }
+		return { valid: false, error: buildMessage(translate, 'maxLength', { field: fieldLabel, max: maxLength }) }
 	}
 	
 	// 正则表达式
@@ -98,7 +150,7 @@ function validateText(field, value) {
 		try {
 			const regex = new RegExp(pattern)
 			if (!regex.test(value)) {
-				return { valid: false, error: `${field.label}格式不正确` }
+				return { valid: false, error: buildMessage(translate, 'patternInvalid', { field: fieldLabel }) }
 			}
 		} catch (e) {
 			console.error('正则表达式错误:', e)
@@ -111,11 +163,12 @@ function validateText(field, value) {
 /**
  * 验证数字字段
  */
-function validateNumber(field, value) {
+function validateNumber(field, value, translate) {
+	const fieldLabel = normalizeFieldLabel(field)
 	const numValue = parseFloat(value)
 	
 	if (isNaN(numValue)) {
-		return { valid: false, error: `${field.label}必须是数字` }
+		return { valid: false, error: buildMessage(translate, 'numberType', { field: fieldLabel }) }
 	}
 	
 	// 支持两种约束定义方式：field.constraints.xxx 或 field.xxx
@@ -125,12 +178,12 @@ function validateNumber(field, value) {
 	
 	// 最小值
 	if (min !== undefined && numValue < min) {
-		return { valid: false, error: `${field.label}不能小于${min}` }
+		return { valid: false, error: buildMessage(translate, 'minValue', { field: fieldLabel, min }) }
 	}
 	
 	// 最大值
 	if (max !== undefined && numValue > max) {
-		return { valid: false, error: `${field.label}不能大于${max}` }
+		return { valid: false, error: buildMessage(translate, 'maxValue', { field: fieldLabel, max }) }
 	}
 	
 	return { valid: true, error: null }
@@ -139,9 +192,10 @@ function validateNumber(field, value) {
 /**
  * 验证布尔字段
  */
-function validateBoolean(field, value) {
+function validateBoolean(field, value, translate) {
+	const fieldLabel = normalizeFieldLabel(field)
 	if (typeof value !== 'boolean' && value !== 'true' && value !== 'false' && value !== 0 && value !== 1) {
-		return { valid: false, error: `${field.label}必须是是/否` }
+		return { valid: false, error: buildMessage(translate, 'booleanType', { field: fieldLabel }) }
 	}
 	
 	return { valid: true, error: null }
@@ -150,7 +204,8 @@ function validateBoolean(field, value) {
 /**
  * 验证单选字段
  */
-function validateSelectSingle(field, value) {
+function validateSelectSingle(field, value, translate) {
+	const fieldLabel = normalizeFieldLabel(field)
 	if (!field.options || field.options.length === 0) {
 		return { valid: true, error: null }
 	}
@@ -158,7 +213,7 @@ function validateSelectSingle(field, value) {
 	const validValues = field.options.map(opt => opt.value)
 	
 	if (!validValues.includes(value)) {
-		return { valid: false, error: `${field.label}选项无效` }
+		return { valid: false, error: buildMessage(translate, 'invalidOption', { field: fieldLabel }) }
 	}
 	
 	return { valid: true, error: null }
@@ -167,9 +222,10 @@ function validateSelectSingle(field, value) {
 /**
  * 验证多选字段
  */
-function validateSelectMulti(field, value) {
+function validateSelectMulti(field, value, translate) {
+	const fieldLabel = normalizeFieldLabel(field)
 	if (!Array.isArray(value)) {
-		return { valid: false, error: `${field.label}必须是数组` }
+		return { valid: false, error: buildMessage(translate, 'arrayType', { field: fieldLabel }) }
 	}
 	
 	if (!field.options || field.options.length === 0) {
@@ -180,7 +236,13 @@ function validateSelectMulti(field, value) {
 	const invalidValues = value.filter(v => !validValues.includes(v))
 	
 	if (invalidValues.length > 0) {
-		return { valid: false, error: `${field.label}包含无效选项: ${invalidValues.join(', ')}` }
+		return {
+			valid: false,
+			error: buildMessage(translate, 'containsInvalidOptions', {
+				field: fieldLabel,
+				options: invalidValues.join(', ')
+			})
+		}
 	}
 	
 	return { valid: true, error: null }
@@ -189,21 +251,22 @@ function validateSelectMulti(field, value) {
 /**
  * 验证日期字段
  */
-function validateDate(field, value) {
+function validateDate(field, value, translate) {
+	const fieldLabel = normalizeFieldLabel(field)
 	if (typeof value !== 'string') {
-		return { valid: false, error: `${field.label}日期格式不正确` }
+		return { valid: false, error: buildMessage(translate, 'dateType', { field: fieldLabel }) }
 	}
 	
 	// 验证格式 YYYY-MM-DD
 	const dateRegex = /^\d{4}-\d{2}-\d{2}$/
 	if (!dateRegex.test(value)) {
-		return { valid: false, error: `${field.label}日期格式不正确（应为YYYY-MM-DD）` }
+		return { valid: false, error: buildMessage(translate, 'dateFormat', { field: fieldLabel }) }
 	}
 	
 	// 验证日期有效性
 	const date = new Date(value)
 	if (isNaN(date.getTime())) {
-		return { valid: false, error: `${field.label}是无效的日期` }
+		return { valid: false, error: buildMessage(translate, 'invalidDate', { field: fieldLabel }) }
 	}
 	
 	return { valid: true, error: null }
@@ -212,15 +275,16 @@ function validateDate(field, value) {
 /**
  * 验证时间字段
  */
-function validateTime(field, value) {
+function validateTime(field, value, translate) {
+	const fieldLabel = normalizeFieldLabel(field)
 	if (typeof value !== 'string') {
-		return { valid: false, error: `${field.label}时间格式不正确` }
+		return { valid: false, error: buildMessage(translate, 'timeType', { field: fieldLabel }) }
 	}
 	
 	// 验证格式 HH:MM 或 HH:MM:SS
 	const timeRegex = /^\d{2}:\d{2}(:\d{2})?$/
 	if (!timeRegex.test(value)) {
-		return { valid: false, error: `${field.label}时间格式不正确（应为HH:MM）` }
+		return { valid: false, error: buildMessage(translate, 'timeFormat', { field: fieldLabel }) }
 	}
 	
 	// 验证时间有效性
@@ -229,7 +293,7 @@ function validateTime(field, value) {
 	const minutes = parseInt(parts[1])
 	
 	if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-		return { valid: false, error: `${field.label}是无效的时间` }
+		return { valid: false, error: buildMessage(translate, 'invalidTime', { field: fieldLabel }) }
 	}
 	
 	return { valid: true, error: null }
@@ -238,21 +302,22 @@ function validateTime(field, value) {
 /**
  * 验证日期时间字段
  */
-function validateDatetime(field, value) {
+function validateDatetime(field, value, translate) {
+	const fieldLabel = normalizeFieldLabel(field)
 	if (typeof value !== 'string') {
-		return { valid: false, error: `${field.label}日期时间格式不正确` }
+		return { valid: false, error: buildMessage(translate, 'datetimeType', { field: fieldLabel }) }
 	}
 	
 	// 验证格式 YYYY-MM-DD HH:MM 或 YYYY-MM-DDTHH:MM:SS
 	const datetimeRegex = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/
 	if (!datetimeRegex.test(value)) {
-		return { valid: false, error: `${field.label}日期时间格式不正确` }
+		return { valid: false, error: buildMessage(translate, 'datetimeFormat', { field: fieldLabel }) }
 	}
 	
 	// 验证日期时间有效性
 	const datetime = new Date(value.replace(' ', 'T'))
 	if (isNaN(datetime.getTime())) {
-		return { valid: false, error: `${field.label}是无效的日期时间` }
+		return { valid: false, error: buildMessage(translate, 'invalidDatetime', { field: fieldLabel }) }
 	}
 	
 	return { valid: true, error: null }
@@ -263,9 +328,10 @@ function validateDatetime(field, value) {
  * @param {Array} fields - 字段定义数组
  * @param {Array} dataValues - 数据值数组 [{ field_name, value }]
  * @param {Boolean} strict - 是否严格验证
+ * @param {Function} translate - 可选翻译函数，签名 (key, params) => string
  * @returns {Object} { valid: boolean, errors: { field_id: error } }
  */
-export function validateAllFields(fields, dataValues, strict = true) {
+export function validateAllFields(fields, dataValues, strict = true, translate = null) {
 	const errors = {}
 	
 	// 创建字段映射
@@ -283,7 +349,7 @@ export function validateAllFields(fields, dataValues, strict = true) {
 	// 验证每个字段
 	fields.forEach(field => {
 		const value = valuesMap[field.field_id]
-		const result = validateField(field, value, strict)
+		const result = validateField(field, value, strict, translate)
 		
 		if (!result.valid) {
 			errors[field.field_id] = result.error
@@ -295,7 +361,9 @@ export function validateAllFields(fields, dataValues, strict = true) {
 		const submittedFields = new Set(dataValues.map(item => item.field_name))
 		fields.forEach(field => {
 			if (field.required && !submittedFields.has(field.field_id)) {
-				errors[field.field_id] = `必填字段${field.label}未提交`
+				errors[field.field_id] = buildMessage(translate, 'requiredFieldMissing', {
+					field: normalizeFieldLabel(field)
+				})
 			}
 		})
 	}

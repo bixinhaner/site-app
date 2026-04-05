@@ -22,6 +22,23 @@ SITE_PAYMENT_MILESTONE_OPTIONS = [
     "customer_approved",
     "pac",
 ]
+SITE_PAYMENT_CURRENCY_PRESET_OPTIONS = [
+    "USD",
+    "CNY",
+    "EUR",
+    "JPY",
+    "IDR",
+    "ZAR",
+    "NGN",
+    "EGP",
+    "KES",
+    "GHS",
+    "TZS",
+    "UGX",
+    "XOF",
+    "XAF",
+    "ETB",
+]
 
 DEFAULT_SITE_PAYMENT_SETTINGS: Dict[str, Any] = {
     "config_version": 1,
@@ -93,6 +110,13 @@ MILESTONE_LABEL_MAP = {
 }
 
 
+def normalize_site_payment_currency(value: Any) -> str:
+    currency = str(value or DEFAULT_SITE_PAYMENT_SETTINGS["currency"]).strip().upper() or "USD"
+    if len(currency) > 20:
+        currency = currency[:20]
+    return currency
+
+
 def _clone_default_settings() -> Dict[str, Any]:
     rules = [dict(rule) for rule in DEFAULT_SITE_PAYMENT_SETTINGS["rules"]]
     return {
@@ -162,7 +186,7 @@ def normalize_site_payment_settings(raw_settings: Optional[Dict[str, Any]]) -> D
     except (TypeError, ValueError):
         config_version = int(DEFAULT_SITE_PAYMENT_SETTINGS["config_version"])
 
-    currency = str(src.get("currency") or DEFAULT_SITE_PAYMENT_SETTINGS["currency"]).strip().upper() or "USD"
+    currency = normalize_site_payment_currency(src.get("currency"))
 
     normalized_rules.sort(key=lambda item: (int(item.get("sort_order") or 0), item.get("name") or ""))
 
@@ -197,6 +221,13 @@ def get_site_payment_milestone_options() -> List[Dict[str, str]]:
     return [
         {"value": code, "label": MILESTONE_LABEL_MAP.get(code, code)}
         for code in SITE_PAYMENT_MILESTONE_OPTIONS
+    ]
+
+
+def get_site_payment_currency_options() -> List[Dict[str, str]]:
+    return [
+        {"value": code, "label": code}
+        for code in SITE_PAYMENT_CURRENCY_PRESET_OPTIONS
     ]
 
 

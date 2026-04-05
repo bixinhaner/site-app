@@ -208,6 +208,7 @@ export default {
       "保存时会按当前版本落库；如需强制递增，可后续再补并发校验。",
     currency: "币种",
     currencyPlaceholder: "例如 USD / CNY / UGX",
+    currencyTip: "可从预设列表选择，也可直接输入自定义币种代码（保存后自动转大写）。",
     rulesTitle: "规则列表",
     rulesTip:
       "节点是否付款、付款比例/金额、是否依赖开站工单最终 approve、warning 折减都在这里配置。",
@@ -234,6 +235,7 @@ export default {
     messages: {
       loadFailed: "加载站点付款规则失败",
       incompleteRule: "请先补全规则名称和节点",
+      currencyTooLong: "币种代码长度不能超过 20 个字符",
       saveSuccess: "保存成功",
       saveFailed: "保存站点付款规则失败",
     },

@@ -8,8 +8,10 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import User
 from app.services.site_payment_service import (
+    get_site_payment_currency_options,
     get_site_payment_milestone_options,
     load_site_payment_settings,
+    normalize_site_payment_currency,
     normalize_site_payment_rule,
     save_site_payment_settings,
 )
@@ -33,7 +35,7 @@ class SitePaymentRulePayload(BaseModel):
 
 class SitePaymentSettingsPayload(BaseModel):
     config_version: int = Field(1, ge=1)
-    currency: str = Field("USD", min_length=1, max_length=10)
+    currency: str = Field("USD", min_length=1, max_length=20)
     rules: List[SitePaymentRulePayload] = Field(default_factory=list)
 
 
@@ -42,6 +44,7 @@ class SitePaymentSettingsResponse(BaseModel):
     currency: str
     rules: List[Dict[str, Any]]
     milestone_options: List[Dict[str, str]]
+    currency_options: List[Dict[str, str]]
 
 
 def _ensure_admin(user: User) -> None:
@@ -62,6 +65,7 @@ def get_site_payment_settings(
         currency=str(settings["currency"]),
         rules=list(settings["rules"]),
         milestone_options=get_site_payment_milestone_options(),
+        currency_options=get_site_payment_currency_options(),
     )
 
 
@@ -80,7 +84,7 @@ def update_site_payment_settings(
         db,
         {
             "config_version": int(payload.config_version),
-            "currency": str(payload.currency).strip().upper() or "USD",
+            "currency": normalize_site_payment_currency(payload.currency),
             "rules": normalized_rules,
         },
     )
@@ -89,4 +93,5 @@ def update_site_payment_settings(
         currency=str(settings["currency"]),
         rules=list(settings["rules"]),
         milestone_options=get_site_payment_milestone_options(),
+        currency_options=get_site_payment_currency_options(),
     )

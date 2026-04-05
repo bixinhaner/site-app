@@ -30,12 +30,23 @@
           <div class="tip">{{ t('sitePaymentSettings.configVersionTip') }}</div>
         </el-form-item>
         <el-form-item :label="t('sitePaymentSettings.currency')">
-          <el-input
+          <el-select
             v-model="form.currency"
-            maxlength="10"
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
             :placeholder="t('sitePaymentSettings.currencyPlaceholder')"
-            style="max-width: 240px;"
-          />
+            style="max-width: 280px;"
+          >
+            <el-option
+              v-for="option in mergedCurrencyOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+          <div class="tip">{{ t('sitePaymentSettings.currencyTip') }}</div>
         </el-form-item>
       </el-form>
     </el-card>
@@ -137,6 +148,26 @@ const form = ref({
   rules: [],
 })
 const milestoneOptions = ref([])
+const currencyOptions = ref([])
+const fallbackCurrencyOptions = [
+  'USD',
+  'CNY',
+  'EUR',
+  'JPY',
+  'IDR',
+  'ZAR',
+  'NGN',
+  'EGP',
+  'KES',
+  'GHS',
+  'TZS',
+  'UGX',
+  'XOF',
+  'XAF',
+  'ETB',
+]
+
+const normalizeCurrencyCode = (value) => String(value || '').trim().toUpperCase()
 
 const createRule = (rule = {}, index = 0) => ({
   local_id: `${rule.id || rule.milestone_code || 'rule'}_${Date.now()}_${index}_${Math.random().toString(16).slice(2, 8)}`,
@@ -153,16 +184,42 @@ const createRule = (rule = {}, index = 0) => ({
   remark: rule.remark || '',
 })
 
-const normalizedCurrency = computed(() => String(form.value.currency || '').trim().toUpperCase() || 'USD')
+const normalizedCurrency = computed(() => normalizeCurrencyCode(form.value.currency) || 'USD')
+
+const mergedCurrencyOptions = computed(() => {
+  const seen = new Set()
+  const list = []
+  const pushCurrency = (value, label) => {
+    const code = normalizeCurrencyCode(value)
+    if (!code || seen.has(code)) return
+    seen.add(code)
+    list.push({
+      value: code,
+      label: normalizeCurrencyCode(label) || code,
+    })
+  }
+
+  fallbackCurrencyOptions.forEach((code) => pushCurrency(code, code))
+  ;(currencyOptions.value || []).forEach((item) => {
+    if (typeof item === 'string') {
+      pushCurrency(item, item)
+      return
+    }
+    pushCurrency(item?.value, item?.label)
+  })
+  pushCurrency(form.value.currency, form.value.currency)
+  return list
+})
 
 const loadSettings = async () => {
   try {
     loading.value = true
     const res = await request.get('/api/system/site-payment-settings')
     form.value.config_version = Number(res?.config_version || 1)
-    form.value.currency = res?.currency || 'USD'
+    form.value.currency = normalizeCurrencyCode(res?.currency) || 'USD'
     form.value.rules = Array.isArray(res?.rules) ? res.rules.map((rule, index) => createRule(rule, index)) : []
     milestoneOptions.value = Array.isArray(res?.milestone_options) ? res.milestone_options : []
+    currencyOptions.value = Array.isArray(res?.currency_options) ? res.currency_options : []
   } catch (error) {
     console.error(error)
     ElMessage.error(error?.response?.data?.detail || t('sitePaymentSettings.messages.loadFailed'))
@@ -199,6 +256,10 @@ const saveSettings = async () => {
     ElMessage.warning(t('sitePaymentSettings.messages.incompleteRule'))
     return
   }
+  if (normalizedCurrency.value.length > 20) {
+    ElMessage.warning(t('sitePaymentSettings.messages.currencyTooLong'))
+    return
+  }
 
   try {
     saving.value = true
@@ -208,9 +269,10 @@ const saveSettings = async () => {
       rules: payloadRules,
     })
     form.value.config_version = Number(res?.config_version || form.value.config_version || 1)
-    form.value.currency = res?.currency || normalizedCurrency.value
+    form.value.currency = normalizeCurrencyCode(res?.currency) || normalizedCurrency.value
     form.value.rules = Array.isArray(res?.rules) ? res.rules.map((rule, index) => createRule(rule, index)) : []
     milestoneOptions.value = Array.isArray(res?.milestone_options) ? res.milestone_options : milestoneOptions.value
+    currencyOptions.value = Array.isArray(res?.currency_options) ? res.currency_options : currencyOptions.value
     ElMessage.success(t('sitePaymentSettings.messages.saveSuccess'))
   } catch (error) {
     console.error(error)

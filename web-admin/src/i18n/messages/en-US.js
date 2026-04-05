@@ -233,6 +233,8 @@ export default {
       "The current version is stored as-is when saving. If strict version incrementing is needed, concurrency checks can be added later.",
     currency: "Currency",
     currencyPlaceholder: "For example USD / CNY / UGX",
+    currencyTip:
+      "Choose from preset options, or type a custom currency code (it will be uppercased when saved).",
     rulesTitle: "Rule List",
     rulesTip:
       "Configure whether a node is payable, its ratio or fixed amount, whether it depends on final site installation work order approval, and warning discount rules here.",
@@ -261,6 +263,7 @@ export default {
     messages: {
       loadFailed: "Failed to load site payment rules",
       incompleteRule: "Please complete the rule name and milestone first",
+      currencyTooLong: "Currency code cannot exceed 20 characters",
       saveSuccess: "Saved successfully",
       saveFailed: "Failed to save site payment rules",
     },

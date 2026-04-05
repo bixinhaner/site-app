@@ -236,6 +236,8 @@ export default {
       "Saat disimpan, versi saat ini akan langsung disimpan. Jika perlu kenaikan versi yang ketat, pemeriksaan konkurensi bisa ditambahkan nanti.",
     currency: "Mata Uang",
     currencyPlaceholder: "Contoh USD / CNY / UGX",
+    currencyTip:
+      "Pilih dari daftar preset, atau ketik kode mata uang kustom (akan diubah ke huruf besar saat disimpan).",
     rulesTitle: "Daftar Aturan",
     rulesTip:
       "Atur apakah sebuah node dibayar, rasio atau jumlah tetapnya, apakah bergantung pada approval akhir work order instalasi situs, dan aturan diskon warning di sini.",
@@ -264,6 +266,7 @@ export default {
     messages: {
       loadFailed: "Gagal memuat aturan pembayaran situs",
       incompleteRule: "Harap lengkapi nama aturan dan node terlebih dahulu",
+      currencyTooLong: "Kode mata uang tidak boleh lebih dari 20 karakter",
       saveSuccess: "Berhasil disimpan",
       saveFailed: "Gagal menyimpan aturan pembayaran situs",
     },

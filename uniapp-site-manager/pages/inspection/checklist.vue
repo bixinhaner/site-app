@@ -590,7 +590,7 @@
 								class="unlinked-photos"
 								v-if="isFieldPhotoMode() && getUnlinkedPhotos().length > 0"
 							>
-								<text class="section-label">未关联照片 ({{ getUnlinkedPhotos().length }})</text>
+								<text class="section-label">{{ $t('inspection.unlinkedPhotos') }} ({{ getUnlinkedPhotos().length }})</text>
 								<view class="photo-grid">
 									<view
 										class="photo-item"
@@ -742,6 +742,7 @@
 	import { createPhotoCacheContext, ensurePhotoCached, saveLocalPhotoToCache, removeCachedPhoto } from '@/utils/photoCache.js'
 	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { validateField, validateAllFields } from '@/utils/field-validator.js'
+	import { localizeInspectionBackendMessage as localizeInspectionBackendMessageRaw } from '@/utils/inspection-error-i18n.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import { 
@@ -792,6 +793,13 @@
 		}
 
 		const hasChinese = (value) => /[\u4e00-\u9fff]/.test(String(value || ''))
+		const fieldValidationT = (key, params = {}) => $t(`inspection.fieldValidation.${key}`, params)
+		const localizeInspectionBackendMessage = (input, options = {}) =>
+			localizeInspectionBackendMessageRaw(input, {
+				t: $t,
+				currentLocale: languageStore.currentLocale,
+				...options
+			})
 
 	const normalizeUnit = (unit) => {
 		const raw = String(unit || '').trim()
@@ -1106,7 +1114,7 @@
 						data: {
 							sns: picked,
 							work_order_id: workOrderId || undefined,
-							notes: '设备更换退库申请'
+							notes: $t('inspection.replacementReturnAutoNote')
 						}
 					})
 				})
@@ -1120,8 +1128,9 @@
 					userStore.logout()
 					return
 				}
-				const detail = response.data?.detail
-				const msg = typeof detail === 'string' ? detail : (detail?.message || response.data?.message)
+				const msg = localizeInspectionBackendMessage(response.data, {
+					fallbackKey: 'inspection.replacementReturnFailed'
+				})
 				uni.showToast({ title: String(msg || $t('inspection.replacementReturnFailed')), icon: 'none', duration: 3000 })
 			} catch (err) {
 				console.error('发起退库失败:', err)
@@ -1191,7 +1200,9 @@
 					}
 					return
 				}
-				throw new Error(response.data?.detail || 'load failed')
+				throw new Error(localizeInspectionBackendMessage(response.data, {
+					fallbackKey: 'messages.dataLoadFailed'
+				}))
 			} catch (e) {
 				// 接口失败：仅在“能确认站点有绑定设备”时显示未知
 				if (hasBoundDevicesHint.value) {
@@ -3290,7 +3301,7 @@
 		if (!field) return
 		
 		// 使用验证工具进行验证（非严格模式，允许部分填写）
-		const result = validateField(field, field.value, false)
+		const result = validateField(field, field.value, false, fieldValidationT)
 		
 		// 将验证结果存储在字段对象上
 		field.error = result.error
@@ -3368,7 +3379,7 @@
 				if (!empty) hasAnyValue = true
 				if (field.required === true && empty) requiredMissing = true
 
-				const result = validateField(field, field.value, true)
+				const result = validateField(field, field.value, true, fieldValidationT)
 				field.error = result.error
 			})
 
@@ -3396,7 +3407,8 @@
 		const validationResult = validateAllFields(
 			currentItem.value.dataFields,
 			dataValues,
-			false // 非严格模式，允许部分填写
+			false, // 非严格模式，允许部分填写
+			fieldValidationT
 		)
 		
 		// 更新每个字段的错误信息
@@ -4479,22 +4491,26 @@
 		// 获取字段帮助提示
 		const getFieldHint = (field) => {
 			const hints = []
+			const constraints = field?.constraints || {}
+			const min = constraints.min !== undefined ? constraints.min : field?.min
+			const max = constraints.max !== undefined ? constraints.max : field?.max
+			const maxLength = constraints.max_length !== undefined ? constraints.max_length : field?.max_length
 		
 		// 数字约束提示
-		if (field.type === 'number' && field.constraints) {
-			if (field.constraints.min !== undefined && field.constraints.max !== undefined) {
-				hints.push($t('common.rangeWithMinMax', { min: field.constraints.min, max: field.constraints.max }))
-			} else if (field.constraints.min !== undefined) {
-				hints.push($t('common.minWithValue', { min: field.constraints.min }))
-			} else if (field.constraints.max !== undefined) {
-				hints.push($t('common.maxWithValue', { max: field.constraints.max }))
+		if (field.type === 'number') {
+			if (min !== undefined && max !== undefined) {
+				hints.push($t('common.rangeWithMinMax', { min, max }))
+			} else if (min !== undefined) {
+				hints.push($t('common.minWithValue', { min }))
+			} else if (max !== undefined) {
+				hints.push($t('common.maxWithValue', { max }))
 			}
 		}
 		
 		// 文本长度提示
-		if ((field.type === 'text' || field.type === 'rich_text') && field.constraints) {
-			if (field.constraints.max_length) {
-				hints.push($t('common.maxChars', { count: field.constraints.max_length }))
+		if ((field.type === 'text' || field.type === 'rich_text') && maxLength) {
+			if (maxLength) {
+				hints.push($t('common.maxChars', { count: maxLength }))
 			}
 		}
 		
@@ -4504,7 +4520,9 @@
 		const showFieldHelp = (field) => {
 			const content = String(field?.help_text || '').trim()
 			if (!content) return
-			const title = `${field?.label || field?.field_id || $t('inspection.dataEntry')} 描述/注意事项`
+			const title = $t('inspection.fieldHelpTitle', {
+				field: field?.label || field?.field_id || $t('inspection.dataEntry')
+			})
 			uni.showModal({
 				title,
 				content,
@@ -4552,7 +4570,7 @@
 							if (/^\d{8,}$/.test(raw)) {
 								uni.showModal({
 									title: $t('stock.invalidBarcode'),
-									content: `识别到纯数字码：${raw}\n\n工单检查绑定设备只支持设备SN二维码/Code128条形码。\n如确认该码就是设备SN，请联系管理员调整识别规则。`,
+									content: $t('inspection.invalidBarcodeNumericContent', { code: raw }),
 									showCancel: false,
 									confirmText: $t('common.ok')
 								})
@@ -4561,14 +4579,16 @@
 							if (snText && /^\d{8,}$/.test(snText)) {
 								uni.showModal({
 									title: $t('stock.invalidBarcode'),
-									content: `识别到SN为纯数字：${snText}\n\n为避免误扫，此入口默认不接受纯数字SN。\n如确认该SN合法，请联系管理员调整识别规则。`,
+									content: $t('inspection.invalidBarcodeNumericSnContent', { sn: snText }),
 									showCancel: false,
 									confirmText: $t('common.ok')
 								})
 								return
 							}
 							uni.showToast({
-								title: scanned?.parsed?.error || $t('stock.invalidBarcode'),
+								title: localizeInspectionBackendMessage(scanned?.parsed?.error, {
+									fallbackKey: 'stock.invalidBarcode'
+								}),
 								icon: 'none'
 							})
 							return
@@ -4627,7 +4647,9 @@
 					}
 					
 					if (checkResponse.statusCode !== 200) {
-						throw new Error(checkResponse.data?.detail || $t('inspection.equipmentValidateFailed'))
+						throw new Error(localizeInspectionBackendMessage(checkResponse.data, {
+							fallbackKey: 'inspection.equipmentValidateFailed'
+						}))
 					}
 					
 					// 绑定设备到小区
@@ -4659,17 +4681,32 @@
 						uni.hideLoading()
 						return uni.showModal({
 							title: $t('inspection.bindConflictTitle'),
-							content: bindResponse.data?.detail || $t('inspection.bindConflictContent', { sn: parsedBarcode.sn }),
+							content: localizeInspectionBackendMessage(bindResponse.data, {
+								fallbackKey: 'inspection.bindConflictContent',
+								fallbackParams: { sn: parsedBarcode.sn }
+							}),
 							showCancel: false
 						})
 					}
 					if (bindResponse.statusCode === 403) {
 						uni.hideLoading()
-						return uni.showToast({ title: bindResponse.data?.detail || $t('inspection.equipmentNotPickedUp'), icon: 'none', duration: 3000 })
+						return uni.showToast({
+							title: localizeInspectionBackendMessage(bindResponse.data, {
+								fallbackKey: 'inspection.equipmentNotPickedUp'
+							}),
+							icon: 'none',
+							duration: 3000
+						})
 					}
 					if (bindResponse.statusCode === 400) {
 						uni.hideLoading()
-						return uni.showToast({ title: bindResponse.data?.detail || $t('inspection.bindFailed'), icon: 'none', duration: 3000 })
+						return uni.showToast({
+							title: localizeInspectionBackendMessage(bindResponse.data, {
+								fallbackKey: 'inspection.bindFailed'
+							}),
+							icon: 'none',
+							duration: 3000
+						})
 					}
 					
 					if (bindResponse.statusCode === 200 && bindResponse.data.success) {
@@ -4713,14 +4750,18 @@
 							}
 						})
 					} else {
-						throw new Error(bindResponse.data?.detail || $t('inspection.bindFailed'))
+						throw new Error(localizeInspectionBackendMessage(bindResponse.data, {
+							fallbackKey: 'inspection.bindFailed'
+						}))
 					}
 					
 				} catch (error) {
 					uni.hideLoading()
 					console.error('设备绑定失败:', error)
 					uni.showToast({
-						title: error.message || $t('inspection.bindFailed'),
+						title: localizeInspectionBackendMessage(error?.message || error, {
+							fallbackKey: 'inspection.bindFailed'
+						}),
 						icon: 'none',
 						duration: 3000
 					})
