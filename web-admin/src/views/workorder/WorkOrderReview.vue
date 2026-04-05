@@ -912,9 +912,24 @@
     <!-- 检查项详情弹窗 -->
     <el-dialog
       v-model="itemDetailVisible"
-      :title="t('workOrderReview.labels.itemDetailTitle')"
       width="800px"
     >
+      <template #header>
+        <div class="item-detail-dialog-header">
+          <span class="el-dialog__title item-detail-dialog-header__title">
+            {{ t("workOrderReview.labels.itemDetailTitle") }}
+          </span>
+          <el-button
+            v-if="selectedItem"
+            link
+            type="primary"
+            class="item-detail-dialog-header__history-btn"
+            @click="openItemReviewHistory"
+          >
+            {{ t("workOrderReview.itemReviewHistory.button") }}
+          </el-button>
+        </div>
+      </template>
       <div v-if="selectedItem">
         <el-descriptions :column="2" border>
           <el-descriptions-item :label="t('workOrderReview.labels.itemName')">{{
@@ -1472,6 +1487,119 @@
                   {{ fieldRow.field_label || fieldRow.field_key
                   }}{{ t("workOrderReview.fieldReview.fullWidthColon") }}
                   {{ localizedFieldHistoryComment(fieldRow) || "-" }}
+                </div>
+              </div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+    </el-drawer>
+
+    <el-drawer
+      v-model="itemReviewHistoryVisible"
+      :title="t('workOrderReview.itemReviewHistory.drawerTitle')"
+      size="720px"
+      :destroy-on-close="false"
+    >
+      <div v-loading="itemReviewHistoryLoading">
+        <el-empty
+          v-if="!itemReviewHistoryLoading && itemReviewHistoryRounds.length === 0"
+          :description="t('workOrderReview.itemReviewHistory.empty')"
+        />
+        <el-collapse v-else v-model="itemReviewHistoryActiveRounds">
+          <el-collapse-item
+            v-for="round in itemReviewHistoryRounds"
+            :key="`item-round-${round.round_no}`"
+            :name="String(round.round_no)"
+          >
+            <template #title>
+              {{
+                t("workOrderReview.itemReviewHistory.roundTitle", {
+                  round: round.round_no,
+                  count: round.record_count,
+                })
+              }}
+            </template>
+            <div
+              v-for="record in round.records"
+              :key="record.log_id"
+              class="item-history-record"
+            >
+              <div class="item-history-record__meta">
+                <el-tag size="small" :type="fieldReviewTagType(record.result)">
+                  {{ fieldReviewStatusText(record.result) }}
+                </el-tag>
+                <el-tag
+                  v-if="record.manual_override"
+                  size="small"
+                  type="warning"
+                >
+                  {{ t("workOrderReview.itemReviewHistory.manualOverrideTag") }}
+                </el-tag>
+                <el-tag
+                  v-if="record.confirm_override"
+                  size="small"
+                  type="info"
+                >
+                  {{ t("workOrderReview.itemReviewHistory.confirmOverrideTag") }}
+                </el-tag>
+                <span class="item-history-record__time">
+                  {{ formatDateTime(record.reviewed_at) }}
+                </span>
+                <span class="item-history-record__operator">
+                  {{ record.reviewer_name || "-" }}
+                </span>
+              </div>
+              <div class="item-history-record__summary">
+                <span>
+                  {{
+                    t("workOrderReview.itemReviewHistory.autoResultLabel", {
+                      result: fieldReviewStatusText(record.field_review_auto_result),
+                    })
+                  }}
+                </span>
+                <span>
+                  {{
+                    t("workOrderReview.itemReviewHistory.pendingCountLabel", {
+                      count: Number(record.field_review_pending_count || 0),
+                    })
+                  }}
+                </span>
+              </div>
+              <div class="item-history-record__comment">
+                <strong>{{
+                  t("workOrderReview.itemReviewHistory.opinionLabel")
+                }}</strong>
+                {{ localizedHistoryComment(record) || "-" }}
+              </div>
+              <div
+                v-if="
+                  Array.isArray(record.field_reviews) &&
+                  record.field_reviews.length > 0
+                "
+                class="item-history-record__fields"
+              >
+                <div class="item-history-record__fields-title">
+                  {{ t("workOrderReview.itemReviewHistory.fieldDetailsTitle") }}
+                </div>
+                <div
+                  v-for="(fieldRow, idx) in record.field_reviews"
+                  :key="`${record.log_id}-field-${idx}`"
+                  class="item-history-field-row"
+                >
+                  <el-tag size="small" :type="fieldReviewTagType(fieldRow.result)">
+                    {{ fieldReviewStatusText(fieldRow.result) }}
+                  </el-tag>
+                  <span class="item-history-field-row__label">
+                    {{
+                      fieldRow.field_label ||
+                      fieldRow.field_key ||
+                      t("workOrderReview.itemReviewHistory.fieldLabelFallback")
+                    }}
+                  </span>
+                  <span class="item-history-field-row__comment">
+                    {{ localizedFieldHistoryComment(fieldRow) || "-" }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -2223,6 +2351,10 @@ const fieldReviewHistoryVisible = ref(false);
 const fieldReviewHistoryLoading = ref(false);
 const fieldReviewHistoryTarget = ref(null);
 const fieldReviewHistoryRounds = ref([]);
+const itemReviewHistoryVisible = ref(false);
+const itemReviewHistoryLoading = ref(false);
+const itemReviewHistoryRounds = ref([]);
+const itemReviewHistoryActiveRounds = ref([]);
 const isFullscreen = ref(false);
 const zoomLevel = ref(1);
 const translateX = ref(0);
@@ -3999,6 +4131,24 @@ const resolveFieldReviewHistoryErrorMessage = (error) => {
   return parsed.message || t("workOrderReview.fieldReview.historyLoadFailed");
 };
 
+const resolveItemReviewHistoryErrorMessage = (error) => {
+  const parsed = extractApiErrorDetail(error);
+  const code = parsed.code;
+  if (code === "INSPECTION_NOT_FOUND") {
+    return t("workOrderReview.itemReviewHistory.errors.inspectionNotFound");
+  }
+  if (code === "CHECK_ITEM_NOT_FOUND") {
+    return t("workOrderReview.itemReviewHistory.errors.itemNotFound");
+  }
+  if (code === "INSPECTION_ACCESS_DENIED") {
+    return t("workOrderReview.itemReviewHistory.errors.accessDenied");
+  }
+  if (code === "REVIEW_PERMISSION_REQUIRED") {
+    return t("workOrderReview.itemReviewHistory.errors.permissionDenied");
+  }
+  return parsed.message || t("workOrderReview.itemReviewHistory.loadFailed");
+};
+
 const submitItemReview = async () => {
   const id = route.query.id;
   if (!id || !itemReviewRow.value) return;
@@ -4483,6 +4633,35 @@ const localizedFieldHistoryComment = (row) => {
   return normalizeText(row?.comment);
 };
 
+const openItemReviewHistory = async () => {
+  const inspectionId = String(order.value?.inspection_id || "").trim();
+  const itemId = String(selectedItem.value?.id || "").trim();
+  if (!inspectionId || !itemId) {
+    ElMessage.warning(t("workOrderReview.itemReviewHistory.contextMissing"));
+    return;
+  }
+  itemReviewHistoryVisible.value = true;
+  itemReviewHistoryLoading.value = true;
+  itemReviewHistoryActiveRounds.value = [];
+  try {
+    const res = await inspectionExecutionApi.getCheckItemReviewHistory(
+      inspectionId,
+      itemId,
+    );
+    const rounds = Array.isArray(res?.rounds) ? res.rounds : [];
+    itemReviewHistoryRounds.value = rounds;
+    itemReviewHistoryActiveRounds.value = rounds.length
+      ? [String(rounds[0]?.round_no)]
+      : [];
+  } catch (error) {
+    console.error("Failed to load check item review history:", error);
+    itemReviewHistoryRounds.value = [];
+    ElMessage.error(resolveItemReviewHistoryErrorMessage(error));
+  } finally {
+    itemReviewHistoryLoading.value = false;
+  }
+};
+
 const openFieldReviewHistory = async (row) => {
   const inspectionId = String(order.value?.inspection_id || "").trim();
   const itemId = String(selectedItem.value?.id || "").trim();
@@ -4675,6 +4854,9 @@ watch(itemDetailVisible, (visible) => {
   fieldReviewHistoryVisible.value = false;
   fieldReviewHistoryTarget.value = null;
   fieldReviewHistoryRounds.value = [];
+  itemReviewHistoryVisible.value = false;
+  itemReviewHistoryRounds.value = [];
+  itemReviewHistoryActiveRounds.value = [];
 });
 
 const handleWheel = (e) => {
@@ -5363,6 +5545,38 @@ onMounted(refresh);
   margin-top: 6px;
 }
 
+.item-detail-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.item-detail-dialog-header__title {
+  line-height: 1.2;
+}
+
+.item-detail-dialog-header__history-btn {
+  margin-right: 24px;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .item-detail-dialog-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .item-detail-dialog-header__title {
+    max-width: 100%;
+  }
+
+  .item-detail-dialog-header__history-btn {
+    margin-right: 0;
+  }
+}
+
 .field-history-target {
   margin-bottom: 8px;
   font-size: 13px;
@@ -5395,6 +5609,72 @@ onMounted(refresh);
   font-size: 12px;
   color: #374151;
   line-height: 1.6;
+}
+
+.item-history-record {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fafafa;
+}
+
+.item-history-record__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.item-history-record__time,
+.item-history-record__operator {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.item-history-record__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: #4b5563;
+  margin-bottom: 8px;
+}
+
+.item-history-record__comment {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.item-history-record__fields {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #d1d5db;
+}
+
+.item-history-record__fields-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 6px;
+}
+
+.item-history-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #374151;
+  margin-bottom: 6px;
+}
+
+.item-history-field-row__label {
+  font-weight: 500;
+}
+
+.item-history-field-row__comment {
+  color: #4b5563;
 }
 
 /* 审核历史样式 */

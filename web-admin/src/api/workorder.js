@@ -112,6 +112,9 @@ export const inspectionExecutionApi = {
   getCheckItemFieldReviewHistory: (inspectionId, itemId, params = {}) =>
     request.get(`/api/inspections/detail/${inspectionId}/items/${itemId}/field-reviews/history`, { params }),
 
+  getCheckItemReviewHistory: (inspectionId, itemId) =>
+    request.get(`/api/inspections/detail/${inspectionId}/items/${itemId}/reviews/history`),
+
   updateInspectionItem: (inspectionId, itemId, data) =>
     request.put(`/api/inspections/detail/${inspectionId}/items/${itemId}`, data),
 

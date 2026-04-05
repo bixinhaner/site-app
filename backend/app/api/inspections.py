@@ -4201,6 +4201,28 @@ async def get_inspection_item_field_review_history(
     }
 
 
+@router.get("/detail/{inspection_id}/items/{item_id}/reviews/history")
+async def get_inspection_item_review_history(
+    inspection_id: str,
+    item_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取检查项审核历史（全部轮次，包含嵌套字段审核明细）。"""
+    result = await get_inspection_item_field_review_history(
+        inspection_id=inspection_id,
+        item_id=item_id,
+        field_key=None,
+        field_id=None,
+        db=db,
+        current_user=current_user,
+    )
+    if isinstance(result, dict):
+        result.pop("field_key", None)
+        result.pop("field_id", None)
+    return result
+
+
 @router.post("/detail/{inspection_id}/photos/{photo_id}/review")
 async def review_inspection_photo(
     inspection_id: str,

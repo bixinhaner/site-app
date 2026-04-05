@@ -1033,6 +1033,28 @@ export default {
         permissionDenied: "Tidak memiliki izin untuk me-review item pemeriksaan ini",
       },
     },
+    itemReviewHistory: {
+      button: "Riwayat Review Item (Semua Putaran)",
+      drawerTitle: "Riwayat Review Item (Semua Putaran)",
+      empty: "Belum ada riwayat",
+      roundTitle: "Putaran {round} ({count} catatan)",
+      manualOverrideTag: "Override Manual",
+      confirmOverrideTag: "Konfirmasi Kedua",
+      autoResultLabel: "Agregasi Field: {result}",
+      pendingCountLabel: "Field Belum Ditinjau: {count}",
+      opinionLabel: "Pendapat: ",
+      fieldDetailsTitle: "Detail Review Field",
+      fieldLabelFallback: "Field Tanpa Nama",
+      contextMissing:
+        "Konteks item pemeriksaan tidak lengkap, riwayat review item tidak bisa ditampilkan",
+      loadFailed: "Gagal memuat riwayat review item pemeriksaan",
+      errors: {
+        inspectionNotFound: "Data inspeksi tidak ditemukan",
+        itemNotFound: "Item pemeriksaan tidak ditemukan",
+        accessDenied: "Tidak memiliki izin mengakses data inspeksi ini",
+        permissionDenied: "Tidak memiliki izin melihat riwayat review item pemeriksaan",
+      },
+    },
   },
   workOrderPhotoDetail: {
     title: "Detail Foto Serupa",

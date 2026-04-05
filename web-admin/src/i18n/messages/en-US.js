@@ -1025,6 +1025,28 @@ export default {
         permissionDenied: "No permission to review this check item",
       },
     },
+    itemReviewHistory: {
+      button: "Check Item Review History (All Rounds)",
+      drawerTitle: "Check Item Review History (All Rounds)",
+      empty: "No history records",
+      roundTitle: "Round {round} ({count} record(s))",
+      manualOverrideTag: "Manual Override",
+      confirmOverrideTag: "Second Confirmed",
+      autoResultLabel: "Field Aggregate: {result}",
+      pendingCountLabel: "Pending Fields: {count}",
+      opinionLabel: "Opinion: ",
+      fieldDetailsTitle: "Field Review Details",
+      fieldLabelFallback: "Unnamed Field",
+      contextMissing:
+        "Missing check-item context, unable to view check-item review history",
+      loadFailed: "Failed to load check-item review history",
+      errors: {
+        inspectionNotFound: "Inspection record not found",
+        itemNotFound: "Check item not found",
+        accessDenied: "No permission to access this inspection record",
+        permissionDenied: "No permission to view check-item review history",
+      },
+    },
   },
   workOrderPhotoDetail: {
     title: "Similar Photo Details",
