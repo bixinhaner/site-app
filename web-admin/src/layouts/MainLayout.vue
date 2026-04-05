@@ -94,7 +94,7 @@
       </el-aside>
 
       <!-- 主内容区 -->
-      <el-main class="layout-main">
+      <el-main class="layout-main" @wheel="handleLayoutWheel">
         <!-- 面包屑导航 -->
         <div class="breadcrumb-container">
           <el-breadcrumb separator="/">
@@ -242,6 +242,51 @@ const handleLogout = async () => {
     console.error('退出登录失败:', error)
     ElMessage.error(t('common.logoutFailed'))
   }
+}
+
+const isScrollableY = (el) => {
+  if (!el || !(el instanceof HTMLElement)) return false
+  const style = window.getComputedStyle(el)
+  const overflowY = style.overflowY
+  if (overflowY !== 'auto' && overflowY !== 'scroll') return false
+  return el.scrollHeight > el.clientHeight + 1
+}
+
+const findScrollableWithin = (startEl, stopEl) => {
+  let el = startEl instanceof Element ? startEl : null
+  while (el && el !== stopEl && el !== document.body) {
+    if (isScrollableY(el)) return el
+    el = el.parentElement
+  }
+  return null
+}
+
+const handleLayoutWheel = (e) => {
+  if (e.defaultPrevented || e.ctrlKey) return
+
+  const absX = Math.abs(e.deltaX || 0)
+  const absY = Math.abs(e.deltaY || 0)
+  if (absY <= absX) return
+
+  const layoutMain = e.currentTarget
+  if (!layoutMain || !(layoutMain instanceof HTMLElement)) return
+
+  const target = e.target instanceof Element ? e.target : null
+  if (!target) return
+  if (!target.closest('.el-table, .el-table-v2')) return
+
+  const internalScrollable = findScrollableWithin(target, layoutMain)
+  if (internalScrollable && internalScrollable !== layoutMain) return
+
+  const maxTop = layoutMain.scrollHeight - layoutMain.clientHeight
+  if (maxTop <= 0) return
+
+  const prev = layoutMain.scrollTop
+  const next = Math.max(0, Math.min(maxTop, prev + e.deltaY))
+  if (next === prev) return
+
+  layoutMain.scrollTop = next
+  e.preventDefault()
 }
 
 // 初始化用户信息

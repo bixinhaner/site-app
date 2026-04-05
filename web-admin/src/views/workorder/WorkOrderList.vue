@@ -72,124 +72,126 @@
       </div>
     </el-card>
     <el-card>
-      <el-table 
-        :data="items" 
-        v-loading="loading" 
-        stripe
-        @selection-change="handleSelectionChange"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="title" :label="t('workOrderList.table.title')" min-width="220">
-          <template #default="{ row }">
-            <div>
-              <div class="title-with-duplicate">
-                <span>{{ row.title }}</span>
-                <el-tooltip
-                  v-if="row.has_duplicate_photos"
-                  :content="t('workOrderList.tooltips.duplicatePhotos')"
-                  placement="top"
-                >
-                  <el-icon class="duplicate-warning-icon"><WarningFilled /></el-icon>
-                </el-tooltip>
-                <el-tooltip
-                  v-if="row.has_similar_photos"
-                  :content="t('workOrderList.tooltips.similarPhotos')"
-                  placement="top"
-                >
-                  <el-icon class="similar-warning-icon"><WarningFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="work-order-id">ID: {{ row.id }}</div>
-              <div v-if="row.status === 'VOIDED'" class="work-order-void-meta">
-                {{ t('workOrderList.voidMeta.label') }}：{{ row.void_reason || t('workOrderList.voidMeta.noReason') }}
-                <span v-if="row.voided_by_name"> · {{ row.voided_by_name }}</span>
-                <span v-if="row.voided_at"> · {{ formatDateTime(row.voided_at) }}</span>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="type" :label="t('workOrderList.table.type')" width="160">
-          <template #default="{ row }">{{ typeText(row.type) }}</template>
-        </el-table-column>
-        <el-table-column prop="site_name" :label="t('workOrderList.table.site')" width="160">
-          <template #default="{ row }">{{ row.site_name || row.site_id }}</template>
-        </el-table-column>
-        <el-table-column prop="assignee_name" :label="t('workOrderList.table.assignee')" width="140" />
-        <el-table-column prop="priority" :label="t('workOrderList.table.priority')" width="100">
-          <template #default="{ row }"><el-tag>{{ priorityText(row.priority) }}</el-tag></template>
-        </el-table-column>
-        <el-table-column prop="status" :label="t('workOrderList.table.status')" width="240">
-          <template #default="{ row }">
-            <div class="status-progress-card">
-              <div class="status-progress-head">
-                <el-tag :type="statusTagType(row.status)" size="small">{{ statusText(row.status, row.type) }}</el-tag>
-                <span
-                  v-if="row._progress?.text"
-                  class="status-progress-value"
-                  :class="`is-${row._progress.tone}`"
-                >
-                  {{ row._progress.text }}
-                </span>
-              </div>
-              <div
-                class="status-progress-track"
-                :class="[`is-${row._progress?.tone || 'pending'}`, { 'is-exception': row._progress?.isException }]"
-              >
-                <div class="status-progress-rail">
-                  <div
-                    v-if="!row._progress?.isException"
-                    class="status-progress-fill"
-                    :style="{ width: row._progress?.fillWidth || '0%' }"
-                  />
-                </div>
-                <div class="status-progress-dots">
+      <div class="table-wheel-area" @wheel.capture="handleTableWheel">
+        <el-table 
+          :data="items" 
+          v-loading="loading" 
+          stripe
+          @selection-change="handleSelectionChange"
+        >
+          <el-table-column type="selection" width="55" />
+          <el-table-column prop="title" :label="t('workOrderList.table.title')" min-width="220">
+            <template #default="{ row }">
+              <div>
+                <div class="title-with-duplicate">
+                  <span>{{ row.title }}</span>
                   <el-tooltip
-                    v-for="dot in row._progress?.dots || []"
-                    :key="dot.index"
-                    :content="progressDotTooltip(row, dot)"
+                    v-if="row.has_duplicate_photos"
+                    :content="t('workOrderList.tooltips.duplicatePhotos')"
                     placement="top"
                   >
-                    <span
-                      class="status-progress-dot"
-                      :class="[`is-${dot.state}`, `is-${row._progress?.tone || 'pending'}`]"
-                    />
+                    <el-icon class="duplicate-warning-icon"><WarningFilled /></el-icon>
+                  </el-tooltip>
+                  <el-tooltip
+                    v-if="row.has_similar_photos"
+                    :content="t('workOrderList.tooltips.similarPhotos')"
+                    placement="top"
+                  >
+                    <el-icon class="similar-warning-icon"><WarningFilled /></el-icon>
                   </el-tooltip>
                 </div>
+                <div class="work-order-id">ID: {{ row.id }}</div>
+                <div v-if="row.status === 'VOIDED'" class="work-order-void-meta">
+                  {{ t('workOrderList.voidMeta.label') }}：{{ row.void_reason || t('workOrderList.voidMeta.noReason') }}
+                  <span v-if="row.voided_by_name"> · {{ row.voided_by_name }}</span>
+                  <span v-if="row.voided_at"> · {{ formatDateTime(row.voided_at) }}</span>
+                </div>
               </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="assigned_at" :label="t('workOrderList.table.assignedAt')" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
-        </el-table-column>
-        <el-table-column :label="t('workOrderList.table.actions')" width="420" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEdit(row)" v-if="canEdit(row)">
-              <el-icon><Edit /></el-icon>{{ t('workOrderList.actions.edit') }}
-            </el-button>
-            <el-button link type="primary" size="small" @click="openReview(row)">
-              <el-icon><Stamp /></el-icon>{{ t('workOrderList.actions.review') }}
-            </el-button>
-            <el-button link type="warning" size="small" @click="confirmVoid(row)" v-if="canVoid(row)">
-              {{ t('workOrderList.actions.void') }}
-            </el-button>
-            <el-button link type="danger" size="small" @click="confirmDelete(row)" v-if="canDelete(row)">
-              <el-icon><Delete /></el-icon>{{ t('workOrderList.actions.delete') }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+            </template>
+          </el-table-column>
+          <el-table-column prop="type" :label="t('workOrderList.table.type')" width="160">
+            <template #default="{ row }">{{ typeText(row.type) }}</template>
+          </el-table-column>
+          <el-table-column prop="site_name" :label="t('workOrderList.table.site')" width="160">
+            <template #default="{ row }">{{ row.site_name || row.site_id }}</template>
+          </el-table-column>
+          <el-table-column prop="assignee_name" :label="t('workOrderList.table.assignee')" width="140" />
+          <el-table-column prop="priority" :label="t('workOrderList.table.priority')" width="100">
+            <template #default="{ row }"><el-tag>{{ priorityText(row.priority) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="status" :label="t('workOrderList.table.status')" width="240">
+            <template #default="{ row }">
+              <div class="status-progress-card">
+                <div class="status-progress-head">
+                  <el-tag :type="statusTagType(row.status)" size="small">{{ statusText(row.status, row.type) }}</el-tag>
+                  <span
+                    v-if="row._progress?.text"
+                    class="status-progress-value"
+                    :class="`is-${row._progress.tone}`"
+                  >
+                    {{ row._progress.text }}
+                  </span>
+                </div>
+                <div
+                  class="status-progress-track"
+                  :class="[`is-${row._progress?.tone || 'pending'}`, { 'is-exception': row._progress?.isException }]"
+                >
+                  <div class="status-progress-rail">
+                    <div
+                      v-if="!row._progress?.isException"
+                      class="status-progress-fill"
+                      :style="{ width: row._progress?.fillWidth || '0%' }"
+                    />
+                  </div>
+                  <div class="status-progress-dots">
+                    <el-tooltip
+                      v-for="dot in row._progress?.dots || []"
+                      :key="dot.index"
+                      :content="progressDotTooltip(row, dot)"
+                      placement="top"
+                    >
+                      <span
+                        class="status-progress-dot"
+                        :class="[`is-${dot.state}`, `is-${row._progress?.tone || 'pending'}`]"
+                      />
+                    </el-tooltip>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="assigned_at" :label="t('workOrderList.table.assignedAt')" width="180">
+            <template #default="{ row }">{{ formatDateTime(row.assigned_at) }}</template>
+          </el-table-column>
+          <el-table-column :label="t('workOrderList.table.actions')" width="420" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openEdit(row)" v-if="canEdit(row)">
+                <el-icon><Edit /></el-icon>{{ t('workOrderList.actions.edit') }}
+              </el-button>
+              <el-button link type="primary" size="small" @click="openReview(row)">
+                <el-icon><Stamp /></el-icon>{{ t('workOrderList.actions.review') }}
+              </el-button>
+              <el-button link type="warning" size="small" @click="confirmVoid(row)" v-if="canVoid(row)">
+                {{ t('workOrderList.actions.void') }}
+              </el-button>
+              <el-button link type="danger" size="small" @click="confirmDelete(row)" v-if="canDelete(row)">
+                <el-icon><Delete /></el-icon>{{ t('workOrderList.actions.delete') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
-      <div class="pagination">
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="load"
-          @current-change="load"
-        />
+        <div class="pagination">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :total="total"
+            :page-sizes="[10, 20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @size-change="load"
+            @current-change="load"
+          />
+        </div>
       </div>
     </el-card>
   </div>
@@ -1347,6 +1349,49 @@ const replacementTargetLabel = (opt) => t('workOrderList.form.replacementTargetO
 })
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
 
+const isScrollableY = (el) => {
+  if (!el || !(el instanceof HTMLElement)) return false
+  const style = window.getComputedStyle(el)
+  const overflowY = style.overflowY
+  if (overflowY !== 'auto' && overflowY !== 'scroll') return false
+  return el.scrollHeight > el.clientHeight + 1
+}
+
+const findScrollableWithin = (startEl, stopEl) => {
+  let el = startEl instanceof Element ? startEl : null
+  while (el && el !== stopEl && el !== document.body) {
+    if (isScrollableY(el)) return el
+    el = el.parentElement
+  }
+  return null
+}
+
+const handleTableWheel = (e) => {
+  if (e.ctrlKey) return
+  const absX = Math.abs(e.deltaX || 0)
+  const absY = Math.abs(e.deltaY || 0)
+  if (absY <= absX) return
+
+  const currentTarget = e.currentTarget
+  if (!currentTarget || !(currentTarget instanceof HTMLElement)) return
+
+  const internalScrollable = findScrollableWithin(e.target, currentTarget)
+  if (internalScrollable) return
+
+  const scrollEl = currentTarget.closest('.layout-main')
+  if (!scrollEl) return
+
+  const maxTop = scrollEl.scrollHeight - scrollEl.clientHeight
+  if (maxTop <= 0) return
+
+  const prev = scrollEl.scrollTop
+  const next = Math.max(0, Math.min(maxTop, prev + e.deltaY))
+  if (next === prev) return
+
+  scrollEl.scrollTop = next
+  e.preventDefault()
+}
+
 // 批量操作相关函数
 const handleSelectionChange = (selection) => {
   selectedWorkOrders.value = selection
@@ -1594,6 +1639,7 @@ onBeforeUnmount(() => {
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .header-actions { display:flex; gap: 8px; align-items:center; }
+.table-wheel-area { width: 100%; }
 .pagination { margin-top: 12px; display:flex; justify-content: flex-end; }
 .sort-panel :deep(.el-radio-group) { width: 100%; }
 .sort-panel :deep(.el-radio-button) { width: 50%; }
