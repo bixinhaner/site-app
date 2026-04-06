@@ -559,6 +559,7 @@ export default {
       type: "类型",
       site: "站点",
       assignee: "分配给",
+      reviewer: "审核人",
       priority: "优先级",
       status: "状态",
       assignedAt: "分配时间",

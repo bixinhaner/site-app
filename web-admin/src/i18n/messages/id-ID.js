@@ -596,6 +596,7 @@ export default {
       type: "Jenis",
       site: "Situs",
       assignee: "Ditugaskan Ke",
+      reviewer: "Peninjau",
       priority: "Prioritas",
       status: "Status",
       assignedAt: "Waktu Penugasan",

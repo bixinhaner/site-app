@@ -268,19 +268,19 @@
 			</view>
 			
 			<!-- 审核信息 -->
-			<view class="detail-card" v-if="inspectionData.reviewed_by || inspectionData.review_comments">
-				<view class="card-header">
-					<text class="card-title">{{ $t('inspection.reviewInfo') }}</text>
-				</view>
-				<view class="card-content">
-					<view class="info-row" v-if="inspectionData.reviewer_name">
-						<text class="info-label">{{ $t('inspection.reviewer') }}:</text>
-						<text class="info-value">{{ inspectionData.reviewer_name }}</text>
+				<view class="detail-card" v-if="inspectionData.reviewed_by || inspectionData.review_comments || inspectionReviewerName">
+					<view class="card-header">
+						<text class="card-title">{{ $t('inspection.reviewInfo') }}</text>
 					</view>
-					<view class="info-row" v-if="inspectionData.reviewed_at">
-						<text class="info-label">{{ $t('inspection.reviewTime') }}:</text>
-						<text class="info-value">{{ formatDateTime(inspectionData.reviewed_at) }}</text>
-					</view>
+					<view class="card-content">
+						<view class="info-row" v-if="inspectionReviewerName">
+							<text class="info-label">{{ $t('inspection.reviewer') }}:</text>
+							<text class="info-value">{{ inspectionReviewerName }}</text>
+						</view>
+						<view class="info-row" v-if="inspectionData.reviewed_at">
+							<text class="info-label">{{ $t('inspection.reviewTime') }}:</text>
+							<text class="info-value">{{ formatDateTime(inspectionData.reviewed_at) }}</text>
+						</view>
 					<view class="info-row" v-if="inspectionData.review_comments">
 						<text class="info-label">{{ $t('inspection.reviewComments') }}:</text>
 						<text class="info-value">{{ getI18nText(inspectionData.review_comments, inspectionData.review_comments_i18n) }}</text>
@@ -814,6 +814,12 @@
 			return checkItems.value.filter(isIssueItem)
 		}
 		return checkItems.value.filter(item => item.status === currentFilter.value)
+	})
+
+	const inspectionReviewerName = computed(() => {
+		const inspectionReviewer = String(inspectionData.value?.reviewer_name || '').trim()
+		if (inspectionReviewer) return inspectionReviewer
+		return String(workOrderData.value?.reviewer_name || '').trim()
 	})
 	
 	const canContinue = computed(() => {

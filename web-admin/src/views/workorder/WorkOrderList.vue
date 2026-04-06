@@ -116,6 +116,9 @@
             <template #default="{ row }">{{ row.site_name || row.site_id }}</template>
           </el-table-column>
           <el-table-column prop="assignee_name" :label="t('workOrderList.table.assignee')" width="140" />
+          <el-table-column prop="reviewer_name" :label="t('workOrderList.table.reviewer')" width="140">
+            <template #default="{ row }">{{ row.reviewer_name || '' }}</template>
+          </el-table-column>
           <el-table-column prop="priority" :label="t('workOrderList.table.priority')" width="100">
             <template #default="{ row }"><el-tag>{{ priorityText(row.priority) }}</el-tag></template>
           </el-table-column>

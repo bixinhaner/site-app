@@ -592,6 +592,7 @@ export default {
       type: "Type",
       site: "Site",
       assignee: "Assignee",
+      reviewer: "Reviewer",
       priority: "Priority",
       status: "Status",
       assignedAt: "Assigned At",

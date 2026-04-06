@@ -969,10 +969,58 @@ def _enrich_work_order_response(
         u = db.query(User).filter(User.id == wo.assigned_to).first()
         if u:
             data["assignee_name"] = u.full_name or u.username
-    if wo.reviewer_id:
-        u = db.query(User).filter(User.id == wo.reviewer_id).first()
+
+    # 审核人优先取工单当前 reviewer_id；旧数据兼容回退到检查/审核日志。
+    reviewer_statuses = {
+        WorkOrderStatusEnum.UNDER_REVIEW,
+        WorkOrderStatusEnum.APPROVED,
+        WorkOrderStatusEnum.ACTIVATED,
+        WorkOrderStatusEnum.REJECTED,
+        WorkOrderStatusEnum.COMPLETED,
+        WorkOrderStatusEnum.VOIDED,
+    }
+    reviewer_status_values = {s.value for s in reviewer_statuses}
+    reviewer_id = wo.reviewer_id
+    reviewer_name = None
+
+    if reviewer_id:
+        u = db.query(User).filter(User.id == reviewer_id).first()
         if u:
-            data["reviewer_name"] = u.full_name or u.username
+            reviewer_name = u.full_name or u.username
+    else:
+        allow_fallback = bool(wo.reviewed_at) or (_enum_value(wo.status) in reviewer_status_values)
+        if allow_fallback:
+            inspection_reviewer_id = None
+            if wo.inspection_id:
+                inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()
+                inspection_reviewer_id = getattr(inspection, "reviewed_by", None) if inspection else None
+
+            if inspection_reviewer_id:
+                reviewer_id = inspection_reviewer_id
+                u = db.query(User).filter(User.id == reviewer_id).first()
+                if u:
+                    reviewer_name = u.full_name or u.username
+            else:
+                last_review_log = (
+                    db.query(AuditEvent)
+                    .filter(
+                        AuditEvent.resource_type == "work_order",
+                        AuditEvent.resource_id == wo.id,
+                        AuditEvent.action.in_(["final_review", "review_start"]),
+                    )
+                    .order_by(AuditEvent.created_at.desc())
+                    .first()
+                )
+                if last_review_log and getattr(last_review_log, "operator_id", None):
+                    reviewer_id = last_review_log.operator_id
+                    u = db.query(User).filter(User.id == reviewer_id).first()
+                    if u:
+                        reviewer_name = u.full_name or u.username
+
+    data["reviewer_id"] = reviewer_id
+    if reviewer_name:
+        data["reviewer_name"] = reviewer_name
+
     if getattr(wo, "voided_by", None):
         u = db.query(User).filter(User.id == wo.voided_by).first()
         if u:
@@ -2360,6 +2408,7 @@ async def start_review(
     if wo.status != WorkOrderStatusEnum.SUBMITTED:
         raise HTTPException(status_code=400, detail=f"只能从 submitted 认领，当前：{wo.status}")
     old = wo.status
+    wo.reviewer_id = current_user.id
     wo.status = WorkOrderStatusEnum.UNDER_REVIEW
     db.commit()
     _audit(db, "work_order", work_order_id, "review_start", current_user.id, from_status=old.value, to_status=wo.status.value)
@@ -2726,7 +2775,7 @@ async def final_review(
     else:
         _finalize_work_order_rejection(db, wo, req, current_user)
 
-    wo.reviewed_by = current_user.id
+    wo.reviewer_id = current_user.id
     wo.reviewed_at = datetime.utcnow()
     wo.review_comments = req.comments
     wo.review_comments_i18n = req.comments_i18n
@@ -3003,7 +3052,6 @@ async def submit_work_order(
         # 1. 清除工单级别的审核信息
         wo.review_comments = None
         wo.review_comments_i18n = None
-        wo.reviewed_by = None
         wo.reviewed_at = None
         
         # 2. 清除关联检查的审核信息
@@ -3017,8 +3065,8 @@ async def submit_work_order(
                 inspection.reviewed_by = None
                 inspection.reviewed_at = None
     
-    # 分配审核人（默认分配给分配人，即管理员）
-    wo.reviewer_id = wo.assigned_by
+    # 提交后尚未认领审核，审核人置空；在认领审核/最终审核时写入 reviewer_id。
+    wo.reviewer_id = None
     
     # 同步状态
     sync_service = get_work_order_sync_service(db)
@@ -3102,6 +3150,7 @@ def recall_work_order(
     old_status = wo.status
     wo.status = WorkOrderStatusEnum.ACTIVE
     wo.submitted_at = None
+    wo.reviewer_id = None
     wo.updated_at = datetime.utcnow()
 
     # 同步到检查

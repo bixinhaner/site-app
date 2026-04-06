@@ -90,6 +90,10 @@
                   <text class="order-type-text">{{ typeText(wo.type) }}</text>
                 </view>
               </view>
+              <view class="order-row" v-if="wo.reviewer_name">
+                <uni-icons class="row-icon" type="person-filled" size="28rpx" color="#9ca3af" />
+                <text class="row-text row-reviewer">{{ $t('inspection.reviewer') }}: {{ wo.reviewer_name }}</text>
+              </view>
               <!-- 开站工单：设备上线/激活（ever）状态（不触发 OMC 实时查询） -->
               <view v-if="shouldShowOmcTags(wo)" class="omc-tags-row">
                 <text
@@ -871,6 +875,10 @@ onUnmounted(() => {
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		-webkit-box-orient: vertical;
+	}
+
+	.row-reviewer {
+		color: var(--text-secondary);
 	}
 
 	.order-type-tag {
