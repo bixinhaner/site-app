@@ -36,7 +36,7 @@ class SitePlanningSector(Base):
     planning_id = Column(Integer, ForeignKey("site_planning.id"), nullable=False, index=True)
     sector_index = Column(Integer, nullable=False)  # 1..N
     azimuth_deg = Column(Float)  # 0-360
-    downtilt_deg = Column(Float)  # 0-30
+    downtilt_deg = Column(Float)  # Aggregated tilt, supports negative values
     bands = Column(JSON)  # list of strings
 
     created_at = Column(DateTime, server_default=func.now())

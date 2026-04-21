@@ -875,12 +875,12 @@
         <el-row :gutter="16">
           <el-col :span="8">
             <el-form-item label="机械下倾(度)">
-              <el-input-number v-model="cellEditForm.mechanical_downtilt_deg" :min="0" :max="90" />
+              <el-input-number v-model="cellEditForm.mechanical_downtilt_deg" :min="-90" :max="90" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
             <el-form-item label="电子下倾(度)">
-              <el-input-number v-model="cellEditForm.electrical_downtilt_deg" :min="0" :max="90" />
+              <el-input-number v-model="cellEditForm.electrical_downtilt_deg" :min="-90" :max="90" />
             </el-form-item>
           </el-col>
           <el-col :span="8">

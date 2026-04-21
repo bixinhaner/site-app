@@ -11,7 +11,7 @@ ALLOWED_BANDS = {"n41", "n78", "n1", "n3", "B1", "B3"}
 class PlanningSector(BaseModel):
     sector_index: int = Field(..., ge=1)
     azimuth_deg: float = Field(..., ge=0, le=360)
-    downtilt_deg: float = Field(..., ge=0, le=30)
+    downtilt_deg: float = Field(..., ge=-180, le=180)
     bands: List[str] = Field(default_factory=list)
 
     @validator("bands", each_item=True)
@@ -455,8 +455,8 @@ class PlanningCellCreate(BaseModel):
     band_in_file: Optional[str] = None
     frequency: Optional[int] = None
     bandwidth: Optional[str] = None
-    mechanical_downtilt_deg: Optional[float] = Field(None, ge=0, le=90, description="Mechanical downtilt in degrees")
-    electrical_downtilt_deg: Optional[float] = Field(None, ge=0, le=90, description="Electrical downtilt in degrees")
+    mechanical_downtilt_deg: Optional[float] = Field(None, ge=-90, le=90, description="Mechanical downtilt in degrees")
+    electrical_downtilt_deg: Optional[float] = Field(None, ge=-90, le=90, description="Electrical downtilt in degrees")
     azimuth_deg: Optional[float] = Field(None, ge=0, le=360, description="Azimuth in degrees")
     tower_height: Optional[float] = None
     antenna_height: Optional[float] = None
@@ -607,8 +607,8 @@ class PlanningCellUpdate(BaseModel):
     band_in_file: Optional[str] = None
     frequency: Optional[int] = None
     bandwidth: Optional[str] = None
-    mechanical_downtilt_deg: Optional[float] = Field(None, ge=0, le=90, description="Mechanical downtilt in degrees")
-    electrical_downtilt_deg: Optional[float] = Field(None, ge=0, le=90, description="Electrical downtilt in degrees")
+    mechanical_downtilt_deg: Optional[float] = Field(None, ge=-90, le=90, description="Mechanical downtilt in degrees")
+    electrical_downtilt_deg: Optional[float] = Field(None, ge=-90, le=90, description="Electrical downtilt in degrees")
     azimuth_deg: Optional[float] = Field(None, ge=0, le=360, description="Azimuth in degrees")
     tower_height: Optional[float] = None
     antenna_height: Optional[float] = None

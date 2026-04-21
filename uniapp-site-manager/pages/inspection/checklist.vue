@@ -1514,7 +1514,7 @@
 					)
 					break
 				case 'antenna_downtilt':
-					fields.push(makeField('下倾角', { type: 'number', unit: '°', min: 0, max: 20 }))
+					fields.push(makeField('下倾角', { type: 'number', unit: '°', min: -20, max: 20 }))
 					break
 				case 'azimuth_check':
 					fields.push(makeField('方位角', { type: 'number', unit: '°', min: 0, max: 360 }))

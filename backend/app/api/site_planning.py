@@ -1558,12 +1558,12 @@ def _validate_cell_data(cell_data: dict, operation: str = "create") -> List[str]
         errors.append("方位角必须在0到360度之间")
 
     mechanical_downtilt_deg = cell_data.get("mechanical_downtilt_deg")
-    if mechanical_downtilt_deg is not None and (mechanical_downtilt_deg < 0 or mechanical_downtilt_deg > 90):
-        errors.append("机械下倾角必须在0到90度之间")
+    if mechanical_downtilt_deg is not None and (mechanical_downtilt_deg < -90 or mechanical_downtilt_deg > 90):
+        errors.append("机械下倾角必须在-90到90度之间")
 
     electrical_downtilt_deg = cell_data.get("electrical_downtilt_deg")
-    if electrical_downtilt_deg is not None and (electrical_downtilt_deg < 0 or electrical_downtilt_deg > 90):
-        errors.append("电子下倾角必须在0到90度之间")
+    if electrical_downtilt_deg is not None and (electrical_downtilt_deg < -90 or electrical_downtilt_deg > 90):
+        errors.append("电子下倾角必须在-90到90度之间")
 
     # Local Cell ID验证
     local_cell_id = cell_data.get("local_cell_id")
