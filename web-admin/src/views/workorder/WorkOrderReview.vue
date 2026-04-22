@@ -912,7 +912,7 @@
     <!-- 检查项详情弹窗 -->
     <el-dialog
       v-model="itemDetailVisible"
-      width="800px"
+      width="min(1040px, 92vw)"
     >
       <template #header>
         <div class="item-detail-dialog-header">
@@ -930,8 +930,8 @@
           </el-button>
         </div>
       </template>
-      <div v-if="selectedItem">
-        <el-descriptions :column="2" border>
+      <div v-if="selectedItem" class="item-detail-layout">
+        <el-descriptions :column="2" border class="item-detail-overview">
           <el-descriptions-item :label="t('workOrderReview.labels.itemName')">{{
             localizedItemName(selectedItem)
           }}</el-descriptions-item>
@@ -971,21 +971,11 @@
             :label="t('workOrderReview.labels.reviewStatus')"
           >
             <el-tag
-              v-if="selectedItem.review_status === 'pass'"
-              type="success"
-              >{{ t("workOrderReview.buttons.pass") }}</el-tag
+              :type="fieldReviewTagType(selectedItem.review_status)"
+              effect="light"
             >
-            <el-tag
-              v-else-if="selectedItem.review_status === 'warning'"
-              type="warning"
-              >{{ t("workOrderReview.buttons.warning") }}</el-tag
-            >
-            <el-tag
-              v-else-if="selectedItem.review_status === 'fail'"
-              type="danger"
-              >{{ t("workOrderReview.buttons.fail") }}</el-tag
-            >
-            <span v-else>{{ t("workOrderReview.statuses.pending") }}</span>
+              {{ checkItemReviewResultText(selectedItem.review_status) }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item
             :label="t('workOrderReview.labels.reviewComments')"
@@ -998,18 +988,12 @@
         </el-descriptions>
 
         <!-- AI 建议 -->
-        <div style="margin-top: 16px">
-          <div
-            style="
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-            "
-          >
-            <h4 style="margin: 0">
+        <section class="item-detail-section item-detail-section--ai">
+          <div class="item-detail-section__header">
+            <h4 class="item-detail-section__title">
               {{ t("workOrderReview.labels.aiSuggestion") }}
             </h4>
-            <el-space>
+            <el-space wrap>
               <el-button
                 size="small"
                 type="primary"
@@ -1029,203 +1013,273 @@
             </el-space>
           </div>
 
-          <div style="margin-top: 8px">
-            <el-tag
-              v-if="selectedItem.ai_status === 'running'"
-              type="info"
-              size="small"
-              >{{ t("workOrderReview.statuses.running") }}</el-tag
-            >
-            <el-tooltip
-              v-else-if="selectedItem.ai_status === 'failed'"
-              :content="selectedItem.ai_error || 'AI检查失败'"
-              placement="top"
-            >
-              <el-tag type="danger" size="small">{{
-                t("workOrderReview.statuses.failed")
+          <div class="ai-suggestion-panel">
+            <div class="ai-suggestion-panel__status-row">
+              <el-tag
+                v-if="selectedItem.ai_status === 'running'"
+                type="info"
+                size="small"
+                effect="light"
+                >{{ t("workOrderReview.statuses.running") }}</el-tag
+              >
+              <el-tooltip
+                v-else-if="selectedItem.ai_status === 'failed'"
+                :content="selectedItem.ai_error || 'AI检查失败'"
+                placement="top"
+              >
+                <el-tag type="danger" size="small" effect="light">{{
+                  t("workOrderReview.statuses.failed")
+                }}</el-tag>
+              </el-tooltip>
+              <el-tag
+                v-else-if="selectedItem.ai_status === 'done'"
+                type="success"
+                size="small"
+                effect="light"
+                >{{ t("workOrderReview.statuses.generated") }}</el-tag
+              >
+              <el-tag v-else size="small" effect="plain">{{
+                t("workOrderReview.statuses.notGenerated")
               }}</el-tag>
-            </el-tooltip>
-            <el-tag
-              v-else-if="selectedItem.ai_status === 'done'"
-              type="success"
-              size="small"
-              >{{ t("workOrderReview.statuses.generated") }}</el-tag
-            >
-            <el-tag v-else size="small">{{
-              t("workOrderReview.statuses.notGenerated")
-            }}</el-tag>
-          </div>
-
-          <div
-            v-if="selectedItem.ai_status === 'done' && selectedItem.ai_result"
-            style="margin-top: 10px"
-          >
-            <el-descriptions :column="3" size="small" border>
-              <el-descriptions-item
-                :label="t('workOrderReview.labels.suggestedConclusion')"
-              >
-                <el-tag
-                  :type="
-                    aiSuggestedTagType(
-                      selectedItem.ai_result?.suggested_review_status,
-                    )
-                  "
-                  size="small"
-                >
-                  {{
-                    aiSuggestedStatusText(
-                      selectedItem.ai_result?.suggested_review_status,
-                    )
-                  }}
-                </el-tag>
-              </el-descriptions-item>
-              <el-descriptions-item
-                :label="t('workOrderReview.labels.suggestedScore')"
-              >
-                {{ selectedItem.ai_result?.suggested_score ?? "-" }}
-              </el-descriptions-item>
-              <el-descriptions-item
-                :label="t('workOrderReview.labels.confidence')"
-              >
-                {{ selectedItem.ai_result?.confidence ?? "-" }}
-              </el-descriptions-item>
-            </el-descriptions>
-
-            <el-alert
-              v-if="selectedItem.ai_result?.summary"
-              type="info"
-              :closable="false"
-              show-icon
-              style="margin-top: 10px"
-              :title="selectedItem.ai_result.summary"
-            />
-
-            <div
-              v-if="
-                Array.isArray(selectedItem.ai_result?.analysis) &&
-                selectedItem.ai_result.analysis.length
-              "
-              style="margin-top: 10px"
-            >
-              <div style="font-weight: 600; margin-bottom: 6px">
-                {{ t("workOrderReview.labels.analysisPoints") }}
-              </div>
-              <ul style="margin: 0; padding-left: 18px">
-                <li
-                  v-for="(it, idx) in selectedItem.ai_result.analysis"
-                  :key="idx"
-                >
-                  {{ it }}
-                </li>
-              </ul>
             </div>
 
             <div
-              v-if="
-                Array.isArray(selectedItem.ai_result?.missing_evidence) &&
-                selectedItem.ai_result.missing_evidence.length
-              "
-              style="margin-top: 10px"
+              v-if="selectedItem.ai_status === 'done' && selectedItem.ai_result"
+              class="ai-suggestion-panel__content"
             >
-              <div style="font-weight: 600; margin-bottom: 6px">
-                {{ t("workOrderReview.labels.missingEvidence") }}
+              <div class="ai-suggestion-metrics">
+                <div class="ai-suggestion-metric">
+                  <div class="ai-suggestion-metric__label">
+                    {{ t("workOrderReview.labels.suggestedConclusion") }}
+                  </div>
+                  <div class="ai-suggestion-metric__value">
+                    <el-tag
+                      :type="
+                        aiSuggestedTagType(
+                          selectedItem.ai_result?.suggested_review_status,
+                        )
+                      "
+                      size="small"
+                    >
+                      {{
+                        aiSuggestedStatusText(
+                          selectedItem.ai_result?.suggested_review_status,
+                        )
+                      }}
+                    </el-tag>
+                  </div>
+                </div>
+                <div class="ai-suggestion-metric">
+                  <div class="ai-suggestion-metric__label">
+                    {{ t("workOrderReview.labels.suggestedScore") }}
+                  </div>
+                  <div class="ai-suggestion-metric__value">
+                    {{ selectedItem.ai_result?.suggested_score ?? "-" }}
+                  </div>
+                </div>
+                <div class="ai-suggestion-metric">
+                  <div class="ai-suggestion-metric__label">
+                    {{ t("workOrderReview.labels.confidence") }}
+                  </div>
+                  <div class="ai-suggestion-metric__value">
+                    {{ selectedItem.ai_result?.confidence ?? "-" }}
+                  </div>
+                </div>
               </div>
-              <el-space wrap>
-                <el-tag
-                  v-for="(it, idx) in selectedItem.ai_result.missing_evidence"
-                  :key="idx"
-                  type="warning"
-                  size="small"
-                >
-                  {{ it }}
-                </el-tag>
-              </el-space>
+
+              <el-alert
+                v-if="selectedItem.ai_result?.summary"
+                type="info"
+                :closable="false"
+                show-icon
+                class="ai-suggestion-panel__summary"
+                :title="selectedItem.ai_result.summary"
+              />
+
+              <div
+                v-if="
+                  Array.isArray(selectedItem.ai_result?.analysis) &&
+                  selectedItem.ai_result.analysis.length
+                "
+                class="ai-suggestion-panel__block"
+              >
+                <div class="ai-suggestion-panel__block-title">
+                  {{ t("workOrderReview.labels.analysisPoints") }}
+                </div>
+                <ul class="ai-suggestion-panel__list">
+                  <li
+                    v-for="(it, idx) in selectedItem.ai_result.analysis"
+                    :key="idx"
+                  >
+                    {{ it }}
+                  </li>
+                </ul>
+              </div>
+
+              <div
+                v-if="
+                  Array.isArray(selectedItem.ai_result?.missing_evidence) &&
+                  selectedItem.ai_result.missing_evidence.length
+                "
+                class="ai-suggestion-panel__block"
+              >
+                <div class="ai-suggestion-panel__block-title">
+                  {{ t("workOrderReview.labels.missingEvidence") }}
+                </div>
+                <el-space wrap>
+                  <el-tag
+                    v-for="(it, idx) in selectedItem.ai_result.missing_evidence"
+                    :key="idx"
+                    type="warning"
+                    size="small"
+                  >
+                    {{ it }}
+                  </el-tag>
+                </el-space>
+              </div>
             </div>
           </div>
-        </div>
+        </section>
 
         <!-- 数据内容 -->
-        <div v-if="itemDetailFieldRows.length > 0" style="margin-top: 20px">
-          <h4>{{ t("workOrderReview.labels.fieldDataSection") }}</h4>
+        <section v-if="itemDetailFieldRows.length > 0" class="item-detail-section">
+          <div class="item-detail-section__header item-detail-section__header--stack">
+            <h4 class="item-detail-section__title">
+              {{ t("workOrderReview.labels.fieldDataSection") }}
+            </h4>
+            <div class="field-review-summary">
+              <span
+                v-for="chip in itemDetailFieldSummaryChips"
+                :key="chip.key"
+                class="field-review-summary__chip"
+                :class="`field-review-summary__chip--${chip.tone}`"
+              >
+                {{ chip.label }}
+              </span>
+            </div>
+          </div>
           <div class="field-review-list">
             <div
               v-for="row in itemDetailFieldRows"
               :key="row.key"
               class="field-review-card"
+              :class="`field-review-card--${row.card_tone}`"
             >
               <div class="field-review-card__header">
-                <div class="field-name-cell">
-                  <span>{{ row.label }}</span>
-                  <span v-if="row.required" class="field-required-mark">*</span>
-                  <el-popover
-                    v-if="row.help_text"
-                    placement="top-start"
-                    trigger="click"
-                    width="360"
-                    :title="
-                      t('workOrderReview.fieldReview.helpTitle', {
-                        label: row.label,
-                      })
-                    "
+                <div class="field-review-card__title-block">
+                  <div class="field-name-cell">
+                    <span>{{ row.label }}</span>
+                    <span v-if="row.required" class="field-required-mark">*</span>
+                    <el-popover
+                      v-if="row.help_text"
+                      placement="top-start"
+                      trigger="click"
+                      width="360"
+                      :title="
+                        t('workOrderReview.fieldReview.helpTitle', {
+                          label: row.label,
+                        })
+                      "
+                    >
+                      <template #reference>
+                        <el-icon
+                          class="field-help-icon"
+                          :title="
+                            t('workOrderReview.fieldReview.helpTitle', {
+                              label: row.label,
+                            })
+                          "
+                        >
+                          <QuestionFilled />
+                        </el-icon>
+                      </template>
+                      <div class="field-help-text">{{ row.help_text }}</div>
+                    </el-popover>
+                  </div>
+                  <div class="field-review-card__badges">
+                    <span
+                      v-for="badge in buildFieldReviewBadgeList(row)"
+                      :key="badge.key"
+                      class="field-review-card__badge"
+                      :class="`field-review-card__badge--${badge.tone}`"
+                    >
+                      {{ badge.label }}
+                    </span>
+                  </div>
+                </div>
+                <div class="field-review-card__header-actions">
+                  <span
+                    class="field-review-card__status-pill"
+                    :class="`field-review-card__status-pill--${row.card_tone}`"
                   >
-                    <template #reference>
-                      <el-icon
-                        class="field-help-icon"
-                        :title="
-                          t('workOrderReview.fieldReview.helpTitle', {
-                            label: row.label,
-                          })
-                        "
-                      >
-                        <QuestionFilled />
-                      </el-icon>
-                    </template>
-                    <div class="field-help-text">{{ row.help_text }}</div>
-                  </el-popover>
+                    {{ fieldReviewStatusText(row.field_review_result) }}
+                  </span>
+                  <el-button
+                    link
+                    size="small"
+                    type="primary"
+                    class="field-review-card__history-btn"
+                    @click="openFieldReviewHistory(row)"
+                  >
+                    <el-icon><Clock /></el-icon>
+                    {{ t("workOrderReview.fieldReview.historyButton") }}
+                  </el-button>
                 </div>
-                <el-button
-                  link
-                  size="small"
-                  type="primary"
-                  @click="openFieldReviewHistory(row)"
+              </div>
+
+              <div
+                class="field-review-card__value-panel"
+                :class="`field-review-card__value-panel--${row.card_tone}`"
+              >
+                <div class="field-review-card__value-topline">
+                  <span class="field-review-card__value-kicker">{{
+                    row.is_empty
+                      ? t("workOrderReview.fieldReview.emptyValueLabel")
+                      : t("workOrderReview.fieldReview.currentValueLabel")
+                  }}</span>
+                  <div class="field-review-card__value-meta">
+                    <span class="field-review-card__meta-chip">
+                      {{ t("workOrderReview.labels.unit") }}
+                      <strong>{{ row.unit || "-" }}</strong>
+                    </span>
+                    <span class="field-review-card__meta-chip">
+                      {{ t("workOrderReview.labels.photo") }}
+                      <strong>{{ row.photo_count }}</strong>
+                    </span>
+                  </div>
+                </div>
+                <div
+                  class="field-review-card__value-main"
+                  :class="{ 'field-review-card__value-main--empty': row.is_empty }"
                 >
-                  {{ t("workOrderReview.fieldReview.historyButton") }}
-                </el-button>
-              </div>
-
-              <div class="field-review-card__meta">
-                <div class="field-review-card__value">
-                  <span class="field-review-card__meta-label">{{
-                    t("workOrderReview.fieldReview.valueLabel")
-                  }}</span>
-                  <span>{{ row.display_value }}</span>
-                </div>
-                <div class="field-review-card__unit">
-                  <span class="field-review-card__meta-label">{{
-                    t("workOrderReview.fieldReview.unitLabel")
-                  }}</span>
-                  <span>{{ row.unit || "-" }}</span>
+                  {{ row.display_value }}
                 </div>
               </div>
 
-              <div v-if="row.photos && row.photos.length" class="field-photo-strip">
-                <ProgressImage
-                  v-for="(p, idx) in row.photos"
-                  :key="p.id || idx"
-                  :src="getImageUrl(p.file_path)"
-                  class="field-photo-img"
-                  fit="cover"
-                  @click.stop="viewPhotoDetail(p)"
-                />
+              <div v-if="row.photos && row.photos.length" class="field-photo-block">
+                <div class="field-review-card__section-title">
+                  {{ t("workOrderReview.labels.photo") }}
+                </div>
+                <div class="field-photo-strip">
+                  <ProgressImage
+                    v-for="(p, idx) in row.photos"
+                    :key="p.id || idx"
+                    :src="getImageUrl(p.file_path)"
+                    class="field-photo-img"
+                    fit="cover"
+                    @click.stop="viewPhotoDetail(p)"
+                  />
+                </div>
               </div>
 
               <div class="field-review-card__status">
-                <span class="field-review-card__meta-label">{{
-                  t("workOrderReview.fieldReview.resultLabel")
+                <span class="field-review-card__section-title">{{
+                  t("workOrderReview.fieldReview.actionTitle")
                 }}</span>
                 <el-radio-group
                   :model-value="row.field_review_result"
                   size="small"
+                  class="field-review-card__result-group"
                   :disabled="!canEditSelectedItemFieldIssues"
                   @change="
                     (value) => updateFieldReviewResultDraft(row.field_key, value)
@@ -1247,8 +1301,8 @@
               </div>
 
               <div class="field-review-card__comment">
-                <span class="field-review-card__meta-label">{{
-                  t("workOrderReview.fieldReview.commentLabel")
+                <span class="field-review-card__section-title">{{
+                  t("workOrderReview.fieldReview.commentTitle")
                 }}</span>
                 <template v-if="row.field_key && canEditSelectedItemFieldIssues">
                   <el-input
@@ -1256,6 +1310,7 @@
                     type="textarea"
                     :rows="2"
                     resize="none"
+                    class="field-review-card__comment-input"
                     maxlength="200"
                     show-word-limit
                     :placeholder="t('workOrderReview.fieldIssues.placeholder')"
@@ -1268,7 +1323,9 @@
                   <div v-if="row.issue_comment" class="field-issue-text">
                     {{ row.issue_comment }}
                   </div>
-                  <span v-else>-</span>
+                  <div v-else class="field-issue-text field-issue-text--empty">
+                    {{ t("workOrderReview.fieldReview.commentEmpty") }}
+                  </div>
                 </template>
               </div>
             </div>
@@ -1304,7 +1361,7 @@
               </el-col>
             </el-row>
           </div>
-        </div>
+        </section>
 
         <!-- 照片内容 -->
         <div
@@ -4450,6 +4507,42 @@ const formatFieldValueForReview = (val) => {
   return String(val);
 };
 
+const isFieldReviewDisplayEmpty = (value) => {
+  const text = normalizeText(value);
+  return !text || text === "-";
+};
+
+const resolveFieldReviewCardTone = ({ result, isEmpty, required }) => {
+  if (result === "fail" || (required && isEmpty)) return "danger";
+  if (result === "warning") return "warning";
+  if (result === "pass") return "success";
+  if (isEmpty) return "muted";
+  return "neutral";
+};
+
+const decorateFieldReviewRow = (row) => {
+  const displayValue = normalizeText(row?.display_value) || "-";
+  const result = normalizeFieldReviewResult(row?.field_review_result) || "pending";
+  const photos = Array.isArray(row?.photos) ? row.photos : [];
+  const issueComment = normalizeText(row?.issue_comment);
+  const isEmpty = isFieldReviewDisplayEmpty(displayValue);
+  return {
+    ...row,
+    display_value: displayValue,
+    field_review_result: result,
+    issue_comment: issueComment,
+    photos,
+    photo_count: photos.length,
+    is_empty: isEmpty,
+    needs_comment: ["warning", "fail"].includes(result) && !issueComment,
+    card_tone: resolveFieldReviewCardTone({
+      result,
+      isEmpty,
+      required: row?.required === true,
+    }),
+  };
+};
+
 const buildItemDetailFieldRows = (item, reviewDraftMap = {}) => {
   if (!item) return [];
   const defs = Array.isArray(item.fields) ? item.fields : [];
@@ -4490,8 +4583,11 @@ const buildItemDetailFieldRows = (item, reviewDraftMap = {}) => {
     if (dv) usedFieldNames.add(normalizeText(dv.field_name));
     const helpText = localizedFieldHelpText(def);
     const fid = normalizeText(def?.field_id);
-
-    rows.push({
+    const fieldReviewResult =
+      normalizeFieldReviewResult(reviewDraftMap[fid || baseLabel]?.result) ||
+      "pending";
+    const issueComment = normalizeText(reviewDraftMap[fid || baseLabel]?.comment);
+    rows.push(decorateFieldReviewRow({
       key: normalizeText(def?.field_id) || baseLabel,
       field_key: fid || baseLabel,
       field_id: fid || null,
@@ -4504,12 +4600,9 @@ const buildItemDetailFieldRows = (item, reviewDraftMap = {}) => {
       unit: normalizeText(dv?.unit) || "",
       is_defined: true,
       photos: fid ? photoMap.get(fid) || [] : [],
-      field_review_result:
-        normalizeFieldReviewResult(
-          reviewDraftMap[fid || baseLabel]?.result,
-        ) || "pending",
-      issue_comment: normalizeText(reviewDraftMap[fid || baseLabel]?.comment),
-    });
+      field_review_result: fieldReviewResult,
+      issue_comment: issueComment,
+    }));
   });
 
   // 追加未在字段定义中出现的数据（兼容历史/异常数据）
@@ -4524,7 +4617,13 @@ const buildItemDetailFieldRows = (item, reviewDraftMap = {}) => {
     );
     if (matched) return;
 
-    rows.push({
+    const fieldReviewResult =
+      normalizeFieldReviewResult(reviewDraftMap[`name:${fieldName}`]?.result) ||
+      "pending";
+    const issueComment = normalizeText(
+      reviewDraftMap[`name:${fieldName}`]?.comment,
+    );
+    rows.push(decorateFieldReviewRow({
       key: `__extra__${fieldName}`,
       field_key: `name:${fieldName}`,
       field_id: null,
@@ -4537,14 +4636,9 @@ const buildItemDetailFieldRows = (item, reviewDraftMap = {}) => {
       unit: normalizeText(dv?.unit) || "",
       is_defined: false,
       photos: [],
-      field_review_result:
-        normalizeFieldReviewResult(
-          reviewDraftMap[`name:${fieldName}`]?.result,
-        ) || "pending",
-      issue_comment: normalizeText(
-        reviewDraftMap[`name:${fieldName}`]?.comment,
-      ),
-    });
+      field_review_result: fieldReviewResult,
+      issue_comment: issueComment,
+    }));
   });
 
   return rows;
@@ -4553,6 +4647,62 @@ const buildItemDetailFieldRows = (item, reviewDraftMap = {}) => {
 const itemDetailFieldRows = computed(() =>
   buildItemDetailFieldRows(selectedItem.value, itemFieldIssueDraftMap.value),
 );
+const itemDetailFieldSummary = computed(() => {
+  const stats = {
+    total: itemDetailFieldRows.value.length,
+    missing: 0,
+    pending: 0,
+    warning: 0,
+    fail: 0,
+  };
+  itemDetailFieldRows.value.forEach((row) => {
+    if (row.is_empty) stats.missing += 1;
+    if (row.field_review_result === "pending") stats.pending += 1;
+    if (row.field_review_result === "warning") stats.warning += 1;
+    if (row.field_review_result === "fail") stats.fail += 1;
+  });
+  return stats;
+});
+const itemDetailFieldSummaryChips = computed(() => {
+  const stats = itemDetailFieldSummary.value;
+  return [
+    {
+      key: "total",
+      tone: "neutral",
+      label: t("workOrderReview.fieldReview.summary.total", {
+        count: stats.total,
+      }),
+    },
+    {
+      key: "missing",
+      tone: stats.missing > 0 ? "muted" : "neutral",
+      label: t("workOrderReview.fieldReview.summary.missing", {
+        count: stats.missing,
+      }),
+    },
+    {
+      key: "pending",
+      tone: stats.pending > 0 ? "info" : "neutral",
+      label: t("workOrderReview.fieldReview.summary.pending", {
+        count: stats.pending,
+      }),
+    },
+    {
+      key: "warning",
+      tone: stats.warning > 0 ? "warning" : "neutral",
+      label: t("workOrderReview.fieldReview.summary.warning", {
+        count: stats.warning,
+      }),
+    },
+    {
+      key: "fail",
+      tone: stats.fail > 0 ? "danger" : "neutral",
+      label: t("workOrderReview.fieldReview.summary.fail", {
+        count: stats.fail,
+      }),
+    },
+  ];
+});
 const canEditSelectedItemFieldIssues = computed(() =>
   Boolean(selectedItem.value && canReviewCheckItem(selectedItem.value)),
 );
@@ -4613,6 +4763,38 @@ const fieldReviewTagType = (status) => {
   if (value === "warning") return "warning";
   if (value === "fail") return "danger";
   return "info";
+};
+
+const buildFieldReviewBadgeList = (row) => {
+  const badges = [];
+  if (row?.required && row?.is_empty) {
+    badges.push({
+      key: "required-missing",
+      tone: "danger",
+      label: t("workOrderReview.fieldReview.requiredMissingTag"),
+    });
+  } else if (row?.required) {
+    badges.push({
+      key: "required",
+      tone: "neutral",
+      label: t("workOrderReview.fieldReview.requiredTag"),
+    });
+  }
+  if (!row?.required && row?.is_empty) {
+    badges.push({
+      key: "empty",
+      tone: "muted",
+      label: t("workOrderReview.fieldReview.emptyTag"),
+    });
+  }
+  if (row?.needs_comment) {
+    badges.push({
+      key: "comment-missing",
+      tone: row?.field_review_result === "fail" ? "danger" : "warning",
+      label: t("workOrderReview.fieldReview.commentMissingTag"),
+    });
+  }
+  return badges;
 };
 
 const localizedHistoryComment = (record) => {
@@ -5438,6 +5620,11 @@ onMounted(refresh);
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
 }
 
 .field-required-mark {
@@ -5473,21 +5660,203 @@ onMounted(refresh);
   color: #303133;
 }
 
+.item-detail-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.item-detail-overview {
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.item-detail-overview :deep(.el-descriptions__table) {
+  border-radius: 18px;
+}
+
+.item-detail-overview :deep(.el-descriptions__label.el-descriptions__cell) {
+  width: 148px;
+  background: linear-gradient(180deg, #f5f9ff 0%, #eef5ff 100%);
+  color: #475569;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.item-detail-overview :deep(.el-descriptions__content.el-descriptions__cell) {
+  color: #111827;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.item-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.item-detail-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.item-detail-section__header--stack {
+  align-items: flex-start;
+}
+
+.item-detail-section__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.ai-suggestion-panel {
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  padding: 16px 18px;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 28%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.ai-suggestion-panel__status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-suggestion-panel__content {
+  margin-top: 14px;
+}
+
+.ai-suggestion-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ai-suggestion-metric {
+  border: 1px solid rgba(59, 130, 246, 0.14);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.82);
+  min-height: 76px;
+}
+
+.ai-suggestion-metric__label {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.ai-suggestion-metric__value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.ai-suggestion-panel__summary {
+  margin-top: 12px;
+}
+
+.ai-suggestion-panel__block {
+  margin-top: 14px;
+}
+
+.ai-suggestion-panel__block-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.ai-suggestion-panel__list {
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+  line-height: 1.7;
+}
+
+.field-review-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field-review-summary__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.field-review-summary__chip--neutral {
+  border-color: #dbe4f0;
+  background: #f8fafc;
+}
+
+.field-review-summary__chip--muted {
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.field-review-summary__chip--info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.field-review-summary__chip--warning {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.field-review-summary__chip--danger {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.field-photo-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .field-photo-strip {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .field-photo-img {
-  width: 52px;
-  height: 52px;
-  border-radius: 6px;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
   overflow: hidden;
-  border: 1px solid #ebeef5;
+  border: 1px solid #dbe3ee;
   cursor: pointer;
   background: #fff;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
 }
 
 .field-photo-more {
@@ -5495,54 +5864,321 @@ onMounted(refresh);
 }
 
 .field-issue-text {
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #f8fafc;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #606266;
+  color: #374151;
   line-height: 1.5;
+}
+
+.field-issue-text--empty {
+  color: #94a3b8;
 }
 
 .field-review-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
 .field-review-card {
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: #fff;
+  border-radius: 20px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(148, 163, 184, 0.08), transparent 28%),
+    #ffffff;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.05);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.field-review-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+.field-review-card--neutral {
+  border-color: #dbe4f0;
+}
+
+.field-review-card--muted {
+  border-color: #d1d5db;
+}
+
+.field-review-card--warning {
+  border-color: rgba(245, 158, 11, 0.4);
+  box-shadow: 0 14px 30px rgba(245, 158, 11, 0.08);
+}
+
+.field-review-card--danger {
+  border-color: rgba(239, 68, 68, 0.4);
+  box-shadow: 0 14px 30px rgba(239, 68, 68, 0.08);
+}
+
+.field-review-card--success {
+  border-color: rgba(34, 197, 94, 0.35);
+  box-shadow: 0 14px 30px rgba(34, 197, 94, 0.06);
 }
 
 .field-review-card__header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
-.field-review-card__meta {
+.field-review-card__title-block {
+  min-width: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: #374151;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.field-review-card__meta-label {
-  color: #6b7280;
+.field-review-card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.field-review-card__history-btn {
+  padding: 0;
+}
+
+.field-review-card__history-btn :deep(.el-button) {
+  padding: 0;
+}
+
+.field-review-card__history-btn .el-icon {
   margin-right: 4px;
 }
 
+.field-review-card__badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field-review-card__badge,
+.field-review-card__status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.field-review-card__badge {
+  border: 1px solid #dbe4f0;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.field-review-card__badge--neutral {
+  border-color: #dbe4f0;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.field-review-card__badge--muted {
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.field-review-card__badge--warning {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.field-review-card__badge--danger {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.field-review-card__status-pill {
+  border: 1px solid #dbe4f0;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.field-review-card__status-pill--neutral,
+.field-review-card__status-pill--muted {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.field-review-card__status-pill--warning {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.field-review-card__status-pill--danger {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.field-review-card__status-pill--success {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.field-review-card__value-panel {
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  background: linear-gradient(180deg, #f9fafb 0%, #ffffff 100%);
+}
+
+.field-review-card__value-panel--neutral {
+  border-color: #dbe4f0;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.field-review-card__value-panel--muted {
+  border-color: #d1d5db;
+  background: linear-gradient(180deg, #f3f4f6 0%, #ffffff 100%);
+}
+
+.field-review-card__value-panel--warning {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 100%);
+}
+
+.field-review-card__value-panel--danger {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: linear-gradient(180deg, #fef2f2 0%, #ffffff 100%);
+}
+
+.field-review-card__value-panel--success {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
+}
+
+.field-review-card__value-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.field-review-card__value-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.field-review-card__value-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field-review-card__meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field-review-card__meta-chip strong {
+  color: #0f172a;
+}
+
+.field-review-card__value-main {
+  font-size: 26px;
+  line-height: 1.4;
+  font-weight: 800;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.field-review-card__value-main--empty {
+  color: #94a3b8;
+}
+
+.field-review-card__section-title {
+  display: inline-block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
 .field-review-card__status {
-  margin-top: 8px;
-  margin-bottom: 8px;
+  margin-top: 14px;
 }
 
 .field-review-card__comment {
-  margin-top: 6px;
+  margin-top: 14px;
+}
+
+.field-review-card__comment-input :deep(.el-textarea__inner) {
+  min-height: 86px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.field-review-card__result-group {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.field-review-card__result-group :deep(.el-radio-button__inner) {
+  min-width: 92px;
+  border-radius: 12px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.field-review-card__result-group
+  :deep(.el-radio-button:first-child .el-radio-button__inner) {
+  border-radius: 12px;
+}
+
+.field-review-card__result-group
+  :deep(.el-radio-button:last-child .el-radio-button__inner) {
+  border-radius: 12px;
+}
+
+.field-review-card__result-group :deep(.el-radio-button + .el-radio-button) {
+  margin-left: 8px;
+}
+
+.field-review-card__result-group
+  :deep(.el-radio-button.is-active .el-radio-button__inner) {
+  box-shadow: none;
 }
 
 .item-detail-dialog-header {
@@ -5574,6 +6210,44 @@ onMounted(refresh);
 
   .item-detail-dialog-header__history-btn {
     margin-right: 0;
+  }
+
+  .item-detail-overview :deep(.el-descriptions__label.el-descriptions__cell) {
+    width: 112px;
+  }
+
+  .item-detail-section__header,
+  .field-review-card__header,
+  .field-review-card__header-actions,
+  .field-review-card__value-topline {
+    align-items: flex-start;
+  }
+
+  .ai-suggestion-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .field-review-card {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .field-review-card__value-panel {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .field-review-card__value-main {
+    font-size: 20px;
+  }
+
+  .field-review-card__result-group :deep(.el-radio-button__inner) {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .field-review-card__result-group :deep(.el-radio-button) {
+    flex: 1 1 calc(50% - 8px);
   }
 }
 
