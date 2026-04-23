@@ -709,6 +709,7 @@ def _apply_spec_to_check_item(
     changed = False
     reopened = False
 
+    # equipment_sn is runtime binding state; template sync must not silently bind/unbind devices.
     for field_name in (
         "item_id",
         "template_item_id",
@@ -719,7 +720,6 @@ def _apply_spec_to_check_item(
         "sector_id",
         "band",
         "cell_id",
-        "equipment_sn",
         "required_type",
     ):
         next_value = spec.get(field_name)
