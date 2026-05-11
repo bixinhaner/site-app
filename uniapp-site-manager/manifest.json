@@ -2,8 +2,8 @@
     "name" : "Baicells Sites Manager",
     "appid" : "__UNI__D81AC36",
     "description" : "Modern Site Information Management System",
-    "versionName" : "1.0.41",
-    "versionCode" : 10041,
+    "versionName" : "1.0.44",
+    "versionCode" : 10044,
     "transformPx" : false,
     "app-plus" : {
         "usingComponents" : true,

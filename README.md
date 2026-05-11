@@ -8,7 +8,7 @@
 - **后端**: Python FastAPI + SQLAlchemy + SQLite/MySQL
 - **移动端**: UniApp + Vue 3 + Pinia (支持 Android/H5/小程序)
 - **Web管理端**: Vue 3 + Element Plus + Vite
-- **数据库**: SQLite (开发) / MySQL (生产)
+- **数据库**: SQLite (默认部署) / MySQL (可扩展)
 - **认证**: JWT Token 认证，30分钟过期
 
 ### 项目结构
@@ -93,6 +93,9 @@ npm run build:prod            # 构建 App 版本
 - 现在可以直接用浏览器跑 `uniapp-site-manager` 的 H5 登录、首页和库存工作台，不再停留在白屏或只到登录页。
 - 本地联调前，请先把移动端接口地址切到本机后端（例如 `http://127.0.0.1:8000`）；否则 H5 仍会沿用本地缓存里的线上地址。
 - 退库收货页会按当前账号的库存范围动态说明数据口径：普通账号不会进入该页，仓库负责人显示“管理仓”，全仓角色显示“全部仓库”。
+- **App 领料扫码提示国际化（2026-04-27）**
+- 移动端 `Picking / 自助领料` 的扫码错误会跟随当前语言显示，不再把后端中文错误直接弹给英文或印尼语用户。
+- 已覆盖常见扫码失败场景：SN 被其它领料单占用、SN 不在库存、仓库不匹配、型号不在申请单、可领数量不足等。
 - **App 列表默认 100 条上限修复（2026-03-10）**
 - 移动端 `站点/工单` 在未传分页参数时，已改为自动翻页聚合，不再被后端默认 `limit=100` 截断；首页 `Total Sites / Operational / Maintenance` 和工单统计会基于完整数据计算。
 - 需要分页的页面（例如检查前“选择站点”）仍可继续传 `skip/limit` 按页取数，避免一次性加载过多数据。
@@ -181,6 +184,16 @@ npm run build                  # 生产构建
 - **后端脚本清理（2026-03-26）**：
 - 已删除 backend 中业务无关的历史测试/临时脚本（如 `test_*.py`、`sites.py.backup`、一次性回滚/补数脚本）。
 - 需保留但不属于主业务链路的迁移/修复脚本已归档到 `temp/backend_script_archive_20260326/`。
+- **站点整包删除临时脚本（2026-05-11）**：
+- 新增一次性维护脚本 `temp/delete_site_bundle.py`，用于在 SQLite 部署里按“先 dry-run、再备份、最后执行”的方式删除测试站点及其关联数据。
+- 脚本会覆盖站点主表、规划表、规划子表、巡检/勘察子表、档案版本表、生命周期快照、操作日志，以及 `backend/uploads/` 下可确认归属到目标站点的上传文件。
+- 默认只做预演；只有显式传入 `--execute --yes-delete` 才会真正删除。执行前会先生成数据库备份到 `temp/site_delete_backups/`。
+- 示例：
+```bash
+backend/venv/bin/python temp/delete_site_bundle.py --site-id 32 --site-id 33
+backend/venv/bin/python temp/delete_site_bundle.py --site-code KA3503-FDD --site-code KA3503-TDD
+backend/venv/bin/python temp/delete_site_bundle.py --site-id 32 --site-id 33 --execute --yes-delete
+```
 - **站点模块国际化补齐（2026-03）**：
 - 已补齐“仪表盘-站点概况”“仪表盘-站点事件趋势”“站点地图”以及路由 `SiteMap` 的中英文词条；切换英文后不再出现中英混杂（包括站点趋势图例、站点地图页面标题/筛选项/按钮/图例/提示文案）。
 - **LLD 规划总览站点搜索（2026-03-26）**：
