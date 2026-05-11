@@ -68,6 +68,9 @@ request.interceptors.request.use(
 // 响应拦截器 - 处理token过期和自动刷新
 request.interceptors.response.use(
   (response) => {
+    if (response.config?.rawResponse) {
+      return response
+    }
     // 成功响应直接返回data
     return response.data
   },

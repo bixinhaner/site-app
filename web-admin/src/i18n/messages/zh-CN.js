@@ -568,6 +568,7 @@ export default {
     },
     actions: {
       refresh: "刷新",
+      export: "导出",
       create: "新建工单",
       clearSelection: "取消选择",
       batchAssign: "批量重新分配",
@@ -778,6 +779,10 @@ export default {
       batchAssignFailed: "批量重新分配失败",
       batchPrioritySuccess: "成功修改 {count} 个工单优先级",
       batchPriorityFailed: "批量修改优先级失败",
+      exportEmpty: "当前没有可导出的工单",
+      exportSuccess: "导出成功",
+      exportFailed: "导出失败",
+      exportFailedWithReason: "导出失败：{message}",
     },
   },
   operation: {

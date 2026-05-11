@@ -16,6 +16,13 @@ export const workOrderAPI = {
     return request.get(`/api/work-orders/search?${searchParams.toString()}`)
   },
 
+  exportWorkOrders: (params = {}) => request.get('/api/work-orders/export', {
+    params,
+    responseType: 'blob',
+    rawResponse: true,
+    timeout: config.LONG_REQUEST_TIMEOUT || config.TIMEOUT,
+  }),
+
   // 获取工单列表
   getWorkOrders: (params = {}) => {
     return request.get('/api/work-orders', { params })

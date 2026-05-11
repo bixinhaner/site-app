@@ -1,10 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy import false, or_, func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime
+from urllib.parse import quote
+import io
 import uuid
 import json
+import pandas as pd
 
 from app.core.database import get_db
 from app.api.auth import get_current_user
@@ -91,10 +96,12 @@ from app.services.work_order_execution_settings_service import (
 )
 from app.services.photo_duplicate_guard import delete_registry_records_by_source
 from app.services.site_progress_service import rebuild_site_progress
+from app.utils.archive_pdf import localized_text, normalize_locale
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
 WEB_ADMIN_CLIENT = "web-admin"
+WORK_ORDER_EXPORT_MAX_ROWS = 5000
 VOIDABLE_WORK_ORDER_STATUSES = (
     WorkOrderStatusEnum.PENDING,
     WorkOrderStatusEnum.ACTIVE,
@@ -142,6 +149,74 @@ REPLACEMENT_IN_PROGRESS_STATUSES = (
     WorkOrderStatusEnum.APPROVED,
     WorkOrderStatusEnum.ACTIVATED,
 )
+WORK_ORDER_SORT_FIELDS = {
+    "created_at": WorkOrder.created_at,
+    "updated_at": WorkOrder.updated_at,
+    "assigned_at": WorkOrder.assigned_at,
+    "due_date": WorkOrder.due_date,
+    "priority": WorkOrder.priority,
+    "status": WorkOrder.status,
+    "type": WorkOrder.type,
+    "site_code": Site.site_code,
+    "site_name": Site.site_name,
+}
+WORK_ORDER_EXPORT_LABEL = ("工单列表", "Work Orders", "Daftar Perintah Kerja")
+WORK_ORDER_EXPORT_SHEET_NAME = ("工单列表", "Work Orders", "Daftar Work Order")
+WORK_ORDER_EXPORT_COLUMNS = [
+    ("id", ("工单ID", "Work Order ID", "ID Perintah Kerja")),
+    ("title", ("工单标题", "Work Order Title", "Judul Perintah Kerja")),
+    ("type", ("工单类型", "Work Order Type", "Jenis Perintah Kerja")),
+    ("site_code", ("站点编码", "Site Code", "Kode Situs")),
+    ("site_name", ("站点名称", "Site Name", "Nama Situs")),
+    ("status", ("当前状态", "Current Status", "Status Saat Ini")),
+    ("priority", ("优先级", "Priority", "Prioritas")),
+    ("assignee_name", ("执行人", "Assignee", "Pelaksana")),
+    ("reviewer_name", ("审核人", "Reviewer", "Peninjau")),
+    ("assigned_at", ("指派时间", "Assigned At", "Waktu Penugasan")),
+    ("accepted_at", ("接单时间", "Accepted At", "Waktu Diterima")),
+    ("submitted_at", ("提交时间", "Submitted At", "Waktu Dikirim")),
+    ("reviewed_at", ("审核时间", "Reviewed At", "Waktu Ditinjau")),
+    ("completed_at", ("完成时间", "Completed At", "Waktu Selesai")),
+    ("due_date", ("截止时间", "Due Date", "Batas Waktu")),
+    ("is_voided", ("是否作废", "Voided", "Dibatalkan")),
+    ("void_reason", ("作废原因", "Void Reason", "Alasan Pembatalan")),
+    ("description", ("描述", "Description", "Deskripsi")),
+    ("duplicate_photo_risk", ("重复照片风险", "Duplicate Photo Risk", "Risiko Foto Duplikat")),
+    ("similar_photo_risk", ("相似照片风险", "Similar Photo Risk", "Risiko Foto Serupa")),
+]
+WORK_ORDER_TYPE_LABELS = {
+    WorkOrderTypeEnum.OPENING_INSPECTION.value: ("新站安装", "New Site Installation", "Instalasi Situs Baru"),
+    WorkOrderTypeEnum.MAINTENANCE.value: ("维护检查", "Maintenance Inspection", "Inspeksi Pemeliharaan"),
+    WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT.value: ("设备更换", "Equipment Replacement", "Penggantian Peralatan"),
+    WorkOrderTypeEnum.POWER_ISSUE.value: ("断电问题", "Power Issue", "Masalah Daya"),
+    WorkOrderTypeEnum.TRANSMISSION_ISSUE.value: ("传输问题", "Transmission Issue", "Masalah Transmisi"),
+    WorkOrderTypeEnum.GPS_ISSUE.value: ("GPS问题", "GPS Issue", "Masalah GPS"),
+    WorkOrderTypeEnum.SIGNAL_ISSUE.value: ("信号问题", "Signal Issue", "Masalah Sinyal"),
+    WorkOrderTypeEnum.SITE_SURVEY.value: ("站点勘查", "Site Survey", "Survei Situs"),
+    WorkOrderTypeEnum.SSV.value: ("SSV 验收", "SSV Acceptance", "Penerimaan SSV"),
+}
+WORK_ORDER_STATUS_LABELS = {
+    WorkOrderStatusEnum.PENDING.value: ("待分配", "Pending Assignment", "Menunggu Penugasan"),
+    WorkOrderStatusEnum.ACTIVE.value: ("已分配", "Assigned", "Sudah Ditugaskan"),
+    WorkOrderStatusEnum.SUBMITTED.value: ("已提交", "Submitted", "Sudah Dikirim"),
+    WorkOrderStatusEnum.UNDER_REVIEW.value: ("审核中", "Under Review", "Sedang Ditinjau"),
+    WorkOrderStatusEnum.APPROVED.value: ("已通过/待上线", "Approved / Waiting Online", "Disetujui / Menunggu Online"),
+    WorkOrderStatusEnum.ACTIVATED.value: ("已开通(上线阶段)", "Online Stage", "Tahap Online"),
+    WorkOrderStatusEnum.REJECTED.value: ("已驳回", "Rejected", "Ditolak"),
+    WorkOrderStatusEnum.COMPLETED.value: ("已完成", "Completed", "Selesai"),
+    WorkOrderStatusEnum.VOIDED.value: ("已作废", "Voided", "Dibatalkan"),
+}
+WORK_ORDER_STATUS_OVERRIDE_LABELS = {
+    WorkOrderStatusEnum.APPROVED.value: ("待上线", "Ready for Online", "Siap Online"),
+    WorkOrderStatusEnum.ACTIVATED.value: ("已上线待激活", "Online, Pending Activation", "Sudah Online, Menunggu Aktivasi"),
+    WorkOrderStatusEnum.COMPLETED.value: ("已激活", "Activated", "Sudah Diaktifkan"),
+}
+WORK_ORDER_PRIORITY_LABELS = {
+    WorkOrderPriorityEnum.LOW.value: ("低", "Low", "Rendah"),
+    WorkOrderPriorityEnum.NORMAL.value: ("普通", "Normal", "Normal"),
+    WorkOrderPriorityEnum.HIGH.value: ("高", "High", "Tinggi"),
+    WorkOrderPriorityEnum.URGENT.value: ("紧急", "Urgent", "Mendesak"),
+}
 
 
 def _enum_value(value):
@@ -730,6 +805,373 @@ def _get_template_id_from_extra_data(extra_data):
         return default_template_id
 
 
+def _localized_tuple_text(values, locale_code: str) -> str:
+    zh, en, id_text = values
+    return localized_text(zh, locale_code, en, id_text)
+
+
+def _format_work_order_export_datetime(value: Optional[datetime]) -> str:
+    if not value:
+        return ""
+    try:
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return str(value)
+
+
+def _localize_work_order_type(type_value, locale_code: str) -> str:
+    raw = _enum_value(type_value)
+    label = WORK_ORDER_TYPE_LABELS.get(raw)
+    if label:
+        return _localized_tuple_text(label, locale_code)
+    return str(raw or "")
+
+
+def _localize_work_order_status(status_value, work_order_type, locale_code: str) -> str:
+    raw_status = _enum_value(status_value)
+    raw_type = _enum_value(work_order_type)
+    if raw_type in (
+        WorkOrderTypeEnum.OPENING_INSPECTION.value,
+        WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT.value,
+    ):
+        override = WORK_ORDER_STATUS_OVERRIDE_LABELS.get(raw_status)
+        if override:
+            return _localized_tuple_text(override, locale_code)
+
+    label = WORK_ORDER_STATUS_LABELS.get(raw_status)
+    if label:
+        return _localized_tuple_text(label, locale_code)
+    return str(raw_status or "")
+
+
+def _localize_work_order_priority(priority_value, locale_code: str) -> str:
+    raw = _enum_value(priority_value)
+    label = WORK_ORDER_PRIORITY_LABELS.get(raw)
+    if label:
+        return _localized_tuple_text(label, locale_code)
+    return str(raw or "")
+
+
+def _localize_bool(flag: bool, locale_code: str) -> str:
+    return localized_text("是", locale_code, "Yes", "Ya") if flag else localized_text("否", locale_code, "No", "Tidak")
+
+
+def _build_attachment_disposition(filename: str) -> str:
+    ascii_fallback = "".join(
+        ch if ch.isascii() and (ch.isalnum() or ch in "._-") else "_"
+        for ch in filename
+    ) or "work_orders.xlsx"
+    return f"attachment; filename={ascii_fallback}; filename*=UTF-8''{quote(filename)}"
+
+
+def _has_work_order_list_access(user: User) -> bool:
+    return _has_access(
+        user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:list:read"],
+    )
+
+
+def _has_work_order_admin_scope(user: User) -> bool:
+    return _has_access(
+        user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:dispatch:write", "workorder:review:write", "workorder:batch:write"],
+    )
+
+
+def _parse_work_order_status_values(status_in: Optional[str]) -> List[WorkOrderStatusEnum]:
+    values: List[WorkOrderStatusEnum] = []
+    if not status_in:
+        return values
+
+    for raw in str(status_in).split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        try:
+            values.append(WorkOrderStatusEnum(token))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"不支持的状态值: {token}")
+    return values
+
+
+def _parse_work_order_type_values(type_in: Optional[str]) -> List[WorkOrderTypeEnum]:
+    values: List[WorkOrderTypeEnum] = []
+    if not type_in:
+        return values
+
+    for raw in str(type_in).split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        try:
+            values.append(WorkOrderTypeEnum(token))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"不支持的工单类型值: {token}")
+    return values
+
+
+def _build_work_order_search_query(
+    db: Session,
+    request: Request,
+    current_user: User,
+    *,
+    keyword: Optional[str] = None,
+    status: Optional[WorkOrderStatusEnum] = None,
+    status_in: Optional[str] = None,
+    type: Optional[WorkOrderTypeEnum] = None,
+    type_in: Optional[str] = None,
+    web_execution_scope: Optional[str] = None,
+    assigned_to: Optional[int] = None,
+    priority: Optional[WorkOrderPriorityEnum] = None,
+    site_id: Optional[int] = None,
+):
+    is_admin_or_manager = _has_work_order_admin_scope(current_user)
+    is_field_worker = _is_field_worker(current_user)
+
+    query = db.query(WorkOrder).join(Site, WorkOrder.site_id == Site.id, isouter=True)
+
+    if keyword:
+        query = query.filter(
+            or_(
+                WorkOrder.title.contains(keyword),
+                WorkOrder.description.contains(keyword),
+                Site.site_name.contains(keyword),
+                Site.site_code.contains(keyword),
+            )
+        )
+
+    status_values = _parse_work_order_status_values(status_in)
+    if status:
+        query = query.filter(WorkOrder.status == status)
+    elif status_values:
+        query = query.filter(WorkOrder.status.in_(status_values))
+
+    type_values = _parse_work_order_type_values(type_in)
+    if type:
+        query = query.filter(WorkOrder.type == type)
+    elif type_values:
+        query = query.filter(WorkOrder.type.in_(type_values))
+
+    execution_scope = str(web_execution_scope or "").strip().lower()
+    if execution_scope:
+        if execution_scope not in ("visible", "editable"):
+            raise HTTPException(status_code=400, detail="web_execution_scope 仅支持 visible 或 editable")
+        if not is_web_admin_request(request):
+            raise HTTPException(status_code=400, detail="web_execution_scope 仅支持 Web 管理端请求")
+        if resolve_web_work_order_access_mode(db, current_user) == WEB_WORK_ORDER_ACCESS_HIDDEN:
+            query = query.filter(false())
+        else:
+            effective_settings = get_effective_work_order_execution_settings(db, current_user)
+            allowed_type_key = (
+                WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY
+                if execution_scope == "visible"
+                else WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY
+            )
+            allowed_types = effective_settings.get(allowed_type_key) or []
+            if not allowed_types:
+                query = query.filter(false())
+            else:
+                query = query.filter(WorkOrder.type.in_([WorkOrderTypeEnum(item) for item in allowed_types]))
+        query = query.filter(WorkOrder.assigned_to == current_user.id)
+
+    if is_field_worker:
+        query = query.filter(WorkOrder.status != WorkOrderStatusEnum.VOIDED)
+        if _is_surveyor(current_user):
+            query = query.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
+    elif is_admin_or_manager and assigned_to and not execution_scope:
+        query = query.filter(WorkOrder.assigned_to == assigned_to)
+
+    if priority and is_admin_or_manager:
+        query = query.filter(WorkOrder.priority == priority)
+
+    if site_id:
+        query = query.filter(WorkOrder.site_id == site_id)
+
+    return query
+
+
+def _apply_work_order_sort(query, *, sort_by: Optional[str], sort_order: Optional[str]):
+    sort_key = (sort_by or "created_at").strip()
+    sort_col = WORK_ORDER_SORT_FIELDS.get(sort_key)
+    if not sort_col:
+        raise HTTPException(status_code=400, detail="不支持的排序字段")
+
+    order = (sort_order or "desc").strip().lower()
+    if order not in ["asc", "desc"]:
+        raise HTTPException(status_code=400, detail="不支持的排序方向")
+
+    primary = sort_col.asc() if order == "asc" else sort_col.desc()
+    secondary = WorkOrder.id.asc() if order == "asc" else WorkOrder.id.desc()
+    return query.order_by(primary, secondary)
+
+
+def _build_work_order_export_rows(
+    db: Session,
+    work_orders: List[WorkOrder],
+    locale_code: str,
+) -> List[dict]:
+    if not work_orders:
+        return []
+
+    site_ids = {wo.site_id for wo in work_orders if getattr(wo, "site_id", None)}
+    sites_by_id = {}
+    if site_ids:
+        sites_by_id = {
+            site.id: site
+            for site in db.query(Site).filter(Site.id.in_(site_ids)).all()
+        }
+
+    reviewer_status_values = {
+        WorkOrderStatusEnum.UNDER_REVIEW.value,
+        WorkOrderStatusEnum.APPROVED.value,
+        WorkOrderStatusEnum.ACTIVATED.value,
+        WorkOrderStatusEnum.REJECTED.value,
+        WorkOrderStatusEnum.COMPLETED.value,
+        WorkOrderStatusEnum.VOIDED.value,
+    }
+
+    inspection_ids = {wo.inspection_id for wo in work_orders if wo.inspection_id}
+    inspection_reviewer_by_id = {}
+    duplicate_counts = {}
+    similar_counts = {}
+    if inspection_ids:
+        inspection_reviewer_by_id = {
+            inspection.id: getattr(inspection, "reviewed_by", None)
+            for inspection in db.query(SiteInspection)
+            .filter(SiteInspection.id.in_(inspection_ids))
+            .all()
+        }
+        duplicate_counts = {
+            inspection_id: int(count or 0)
+            for inspection_id, count in db.query(
+                InspectionPhoto.inspection_id,
+                func.count(InspectionPhoto.id),
+            )
+            .filter(
+                InspectionPhoto.inspection_id.in_(inspection_ids),
+                InspectionPhoto.is_duplicate_global.is_(True),
+            )
+            .group_by(InspectionPhoto.inspection_id)
+            .all()
+        }
+        similar_counts = {
+            inspection_id: int(count or 0)
+            for inspection_id, count in db.query(
+                InspectionPhoto.inspection_id,
+                func.count(InspectionPhoto.id),
+            )
+            .filter(
+                InspectionPhoto.inspection_id.in_(inspection_ids),
+                InspectionPhoto.is_similar_risk.is_(True),
+            )
+            .group_by(InspectionPhoto.inspection_id)
+            .all()
+        }
+
+    inspection_fallback_reviewers = {}
+    audit_fallback_ids = []
+    for wo in work_orders:
+        if getattr(wo, "reviewer_id", None):
+            continue
+        if not (wo.reviewed_at or _enum_value(wo.status) in reviewer_status_values):
+            continue
+
+        fallback_reviewer_id = None
+        if wo.inspection_id:
+            fallback_reviewer_id = inspection_reviewer_by_id.get(wo.inspection_id)
+
+        if fallback_reviewer_id:
+            inspection_fallback_reviewers[wo.id] = fallback_reviewer_id
+        else:
+            audit_fallback_ids.append(wo.id)
+
+    latest_review_logs = {}
+    if audit_fallback_ids:
+        review_logs = (
+            db.query(AuditEvent)
+            .filter(
+                AuditEvent.resource_type == "work_order",
+                AuditEvent.resource_id.in_(audit_fallback_ids),
+                AuditEvent.action.in_(["final_review", "review_start"]),
+            )
+            .order_by(AuditEvent.resource_id.asc(), AuditEvent.created_at.desc())
+            .all()
+        )
+        for log in review_logs:
+            latest_review_logs.setdefault(log.resource_id, log)
+
+    user_ids = {
+        user_id
+        for user_id in [
+            *[wo.assigned_to for wo in work_orders if getattr(wo, "assigned_to", None)],
+            *[wo.reviewer_id for wo in work_orders if getattr(wo, "reviewer_id", None)],
+            *[wo.voided_by for wo in work_orders if getattr(wo, "voided_by", None)],
+            *inspection_fallback_reviewers.values(),
+            *[
+                getattr(log, "operator_id", None)
+                for log in latest_review_logs.values()
+                if getattr(log, "operator_id", None)
+            ],
+        ]
+        if user_id
+    }
+    users_by_id = {}
+    if user_ids:
+        users_by_id = {
+            user.id: user
+            for user in db.query(User).filter(User.id.in_(user_ids)).all()
+        }
+
+    localized_columns = [
+        (field_key, _localized_tuple_text(label, locale_code))
+        for field_key, label in WORK_ORDER_EXPORT_COLUMNS
+    ]
+
+    rows = []
+    for wo in work_orders:
+        site = sites_by_id.get(wo.site_id)
+        assignee = users_by_id.get(getattr(wo, "assigned_to", None))
+
+        reviewer_id = getattr(wo, "reviewer_id", None)
+        if not reviewer_id:
+            reviewer_id = inspection_fallback_reviewers.get(wo.id)
+        if not reviewer_id:
+            reviewer_id = getattr(latest_review_logs.get(wo.id), "operator_id", None)
+        reviewer = users_by_id.get(reviewer_id)
+
+        duplicate_count = int(duplicate_counts.get(wo.inspection_id, 0) or 0)
+        similar_count = int(similar_counts.get(wo.inspection_id, 0) or 0)
+        is_voided = _enum_value(wo.status) == WorkOrderStatusEnum.VOIDED.value or bool(getattr(wo, "voided_at", None))
+
+        raw_row = {
+            "id": wo.id,
+            "title": wo.title or "",
+            "type": _localize_work_order_type(wo.type, locale_code),
+            "site_code": getattr(site, "site_code", "") or "",
+            "site_name": getattr(site, "site_name", "") or "",
+            "status": _localize_work_order_status(wo.status, wo.type, locale_code),
+            "priority": _localize_work_order_priority(wo.priority, locale_code),
+            "assignee_name": (getattr(assignee, "full_name", None) or getattr(assignee, "username", None) or ""),
+            "reviewer_name": (getattr(reviewer, "full_name", None) or getattr(reviewer, "username", None) or ""),
+            "assigned_at": _format_work_order_export_datetime(getattr(wo, "assigned_at", None)),
+            "accepted_at": _format_work_order_export_datetime(getattr(wo, "accepted_at", None)),
+            "submitted_at": _format_work_order_export_datetime(getattr(wo, "submitted_at", None)),
+            "reviewed_at": _format_work_order_export_datetime(getattr(wo, "reviewed_at", None)),
+            "completed_at": _format_work_order_export_datetime(getattr(wo, "completed_at", None)),
+            "due_date": _format_work_order_export_datetime(getattr(wo, "due_date", None)),
+            "is_voided": _localize_bool(bool(is_voided), locale_code),
+            "void_reason": getattr(wo, "void_reason", None) or "",
+            "description": getattr(wo, "description", None) or "",
+            "duplicate_photo_risk": _localize_bool(duplicate_count > 0, locale_code),
+            "similar_photo_risk": _localize_bool(similar_count > 0, locale_code),
+        }
+        rows.append({column_label: raw_row[field_key] for field_key, column_label in localized_columns})
+
+    return rows
+
+
 @router.get("/search", response_model=WorkOrderListResponse)
 async def search_work_orders(
     request: Request,
@@ -756,134 +1198,33 @@ async def search_work_orders(
     current_user: User = Depends(get_current_user)
 ):
     """搜索工单（带分页和筛选）"""
-    from sqlalchemy import false, or_
     import math
 
-    # 权限说明：
-    # - 现场人员（inspector/surveyor）仅能查看自己的工单；surveyor 仅能查看勘察工单
-    # - 其他角色默认可查看全部（与 /api/work-orders 列表接口保持一致）
-    is_admin_or_manager = _has_access(
+    execution_scope = str(web_execution_scope or "").strip().lower()
+    query = _build_work_order_search_query(
+        db,
+        request,
         current_user,
-        role_codes=["admin", "manager"],
-        permission_codes=["workorder:dispatch:write", "workorder:review:write", "workorder:batch:write"],
+        keyword=keyword,
+        status=status,
+        status_in=status_in,
+        type=type,
+        type_in=type_in,
+        web_execution_scope=web_execution_scope,
+        assigned_to=assigned_to,
+        priority=priority,
+        site_id=site_id,
     )
-    is_field_worker = _is_field_worker(current_user)
-
-    query = db.query(WorkOrder).join(Site, WorkOrder.site_id == Site.id, isouter=True)
-
-    # 关键词搜索
-    if keyword:
-        query = query.filter(
-            or_(
-                WorkOrder.title.contains(keyword),
-                WorkOrder.description.contains(keyword),
-                Site.site_name.contains(keyword),
-                Site.site_code.contains(keyword)
-            )
-        )
-
-    # 状态筛选
-    status_values = []
-    if status_in:
-        for raw in str(status_in).split(","):
-            token = raw.strip()
-            if not token:
-                continue
-            try:
-                status_values.append(WorkOrderStatusEnum(token))
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"不支持的状态值: {token}")
-
-    if status:
-        query = query.filter(WorkOrder.status == status)
-    elif status_values:
-        query = query.filter(WorkOrder.status.in_(status_values))
-
-    # 类型筛选
-    type_values = []
-    if type_in:
-        for raw in str(type_in).split(","):
-            token = raw.strip()
-            if not token:
-                continue
-            try:
-                type_values.append(WorkOrderTypeEnum(token))
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"不支持的工单类型值: {token}")
-
-    if type:
-        query = query.filter(WorkOrder.type == type)
-    elif type_values:
-        query = query.filter(WorkOrder.type.in_(type_values))
-
-    execution_scope = str(web_execution_scope or '').strip().lower()
-    if execution_scope:
-        if execution_scope not in ('visible', 'editable'):
-            raise HTTPException(status_code=400, detail='web_execution_scope 仅支持 visible 或 editable')
-        if not is_web_admin_request(request):
-            raise HTTPException(status_code=400, detail='web_execution_scope 仅支持 Web 管理端请求')
-        if resolve_web_work_order_access_mode(db, current_user) == WEB_WORK_ORDER_ACCESS_HIDDEN:
-            query = query.filter(false())
-        else:
-            effective_settings = get_effective_work_order_execution_settings(db, current_user)
-            allowed_type_key = (
-                WORK_ORDER_EXECUTION_VISIBLE_TYPES_KEY
-                if execution_scope == 'visible'
-                else WORK_ORDER_EXECUTION_EDITABLE_TYPES_KEY
-            )
-            allowed_types = effective_settings.get(allowed_type_key) or []
-            if not allowed_types:
-                query = query.filter(false())
-            else:
-                query = query.filter(WorkOrder.type.in_([WorkOrderTypeEnum(item) for item in allowed_types]))
-        # “我的执行工单”入口无论角色如何，都只返回当前登录人被指派的工单。
-        query = query.filter(WorkOrder.assigned_to == current_user.id)
-
-    # 分配人筛选与角色可见范围
-    if is_field_worker:
-        query = query.filter(WorkOrder.status != WorkOrderStatusEnum.VOIDED)
-        if _is_surveyor(current_user):
-            query = query.filter(WorkOrder.type == WorkOrderTypeEnum.SITE_SURVEY)
-    elif is_admin_or_manager and assigned_to and not execution_scope:
-        query = query.filter(WorkOrder.assigned_to == assigned_to)
-
-    # 优先级筛选
-    if priority and is_admin_or_manager:
-        query = query.filter(WorkOrder.priority == priority)
-
-    # 站点筛选
-    if site_id:
-        query = query.filter(WorkOrder.site_id == site_id)
 
     # 计算总数
     total = query.count()
 
     # 分页查询
-    allowed_sort_fields = {
-        "created_at": WorkOrder.created_at,
-        "updated_at": WorkOrder.updated_at,
-        "assigned_at": WorkOrder.assigned_at,
-        "due_date": WorkOrder.due_date,
-        "priority": WorkOrder.priority,
-        "status": WorkOrder.status,
-        "type": WorkOrder.type,
-        "site_code": Site.site_code,
-        "site_name": Site.site_name,
-    }
-
-    sort_key = (sort_by or "created_at").strip()
-    sort_col = allowed_sort_fields.get(sort_key)
-    if not sort_col:
-        raise HTTPException(status_code=400, detail="不支持的排序字段")
-
-    order = (sort_order or "desc").strip().lower()
-    if order not in ["asc", "desc"]:
-        raise HTTPException(status_code=400, detail="不支持的排序方向")
-
-    primary = sort_col.asc() if order == "asc" else sort_col.desc()
-    secondary = WorkOrder.id.asc() if order == "asc" else WorkOrder.id.desc()
-
-    work_orders = query.order_by(primary, secondary).offset(skip).limit(limit).all()
+    work_orders = _apply_work_order_sort(
+        query,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    ).offset(skip).limit(limit).all()
 
     # 计算分页信息
     page = (skip // limit) + 1
@@ -906,6 +1247,95 @@ async def search_work_orders(
         page=page,
         size=limit,
         pages=pages
+    )
+
+
+@router.get("/export")
+async def export_work_orders(
+    request: Request,
+    keyword: Optional[str] = Query(None, description="搜索工单标题/描述/站点名称/编码"),
+    status: Optional[WorkOrderStatusEnum] = Query(None),
+    status_in: Optional[str] = Query(None, description="多状态筛选，逗号分隔，如 SUBMITTED,UNDER_REVIEW"),
+    type: Optional[WorkOrderTypeEnum] = Query(None),
+    type_in: Optional[str] = Query(None, description="多类型筛选，逗号分隔，如 site_survey,opening_inspection"),
+    web_execution_scope: Optional[str] = Query(
+        None,
+        description="Web 执行工单口径：visible|editable，仅 Web 管理端执行入口使用",
+    ),
+    assigned_to: Optional[int] = Query(None),
+    priority: Optional[WorkOrderPriorityEnum] = Query(None),
+    site_id: Optional[int] = Query(None),
+    sort_by: Optional[str] = Query(
+        None,
+        description="排序字段: created_at|updated_at|assigned_at|due_date|priority|status|type|site_code|site_name",
+    ),
+    sort_order: str = Query("desc", description="排序方向: asc|desc"),
+    locale: Optional[str] = Query(None, description="导出语言，支持 zh-CN / en-US / id-ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    locale_code = normalize_locale(locale)
+    if not _has_work_order_list_access(current_user):
+        raise HTTPException(
+            status_code=403,
+            detail=localized_text("无权导出工单", locale_code, "You do not have permission to export work orders", "Anda tidak memiliki izin untuk mengekspor perintah kerja"),
+        )
+
+    query = _build_work_order_search_query(
+        db,
+        request,
+        current_user,
+        keyword=keyword,
+        status=status,
+        status_in=status_in,
+        type=type,
+        type_in=type_in,
+        web_execution_scope=web_execution_scope,
+        assigned_to=assigned_to,
+        priority=priority,
+        site_id=site_id,
+    )
+    total = query.count()
+    if total > WORK_ORDER_EXPORT_MAX_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=localized_text(
+                "当前筛选结果超过 {limit} 条，请先缩小筛选范围再导出",
+                locale_code,
+                "The current filtered result exceeds {limit} rows. Narrow the filters before exporting.",
+                "Hasil filter saat ini melebihi {limit} baris. Persempit filter sebelum mengekspor.",
+            ).format(limit=WORK_ORDER_EXPORT_MAX_ROWS),
+        )
+
+    work_orders = _apply_work_order_sort(
+        query,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    ).limit(WORK_ORDER_EXPORT_MAX_ROWS).all()
+
+    rows = _build_work_order_export_rows(db, work_orders, locale_code)
+    column_labels = [_localized_tuple_text(label, locale_code) for _, label in WORK_ORDER_EXPORT_COLUMNS]
+    df = pd.DataFrame(rows, columns=column_labels)
+
+    output = io.BytesIO()
+    sheet_name = _localized_tuple_text(WORK_ORDER_EXPORT_SHEET_NAME, locale_code)
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+        worksheet = writer.sheets[sheet_name]
+        for idx, column_name in enumerate(column_labels, start=1):
+            max_length = len(str(column_name))
+            if not df.empty:
+                max_length = max(max_length, *(len(str(value or "")) for value in df.iloc[:, idx - 1].tolist()))
+            worksheet.column_dimensions[worksheet.cell(row=1, column=idx).column_letter].width = min(max(max_length + 2, 12), 36)
+
+    output.seek(0)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M")
+    filename = f"{_localized_tuple_text(WORK_ORDER_EXPORT_LABEL, locale_code)}_{timestamp}.xlsx"
+    headers = {"Content-Disposition": _build_attachment_disposition(filename)}
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
     )
 
 

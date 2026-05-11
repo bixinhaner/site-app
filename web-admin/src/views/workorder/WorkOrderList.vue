@@ -53,6 +53,9 @@
           </div>
         </el-popover>
         <el-button @click="load"><el-icon><Refresh /></el-icon>{{ t('workOrderList.actions.refresh') }}</el-button>
+        <el-button :loading="exporting" @click="exportCurrentFilters">
+          <el-icon><Download /></el-icon>{{ t('workOrderList.actions.export') }}
+        </el-button>
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>{{ t('workOrderList.actions.create') }}</el-button>
       </div>
     </div>
@@ -422,14 +425,14 @@ import { useI18n } from 'vue-i18n'
 import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Search, Refresh, Plus, Sort, WarningFilled } from '@element-plus/icons-vue'
+import { Edit, Delete, Search, Refresh, Plus, Sort, WarningFilled, Download } from '@element-plus/icons-vue'
 import { createDebouncedTracker } from '@/utils/operationTrack'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const loading = ref(false)
 const items = ref([])
 const total = ref(0)
@@ -441,21 +444,35 @@ const typeFilter = ref('')
 const searchKeyword = ref('')
 const sortBy = ref('created_at')
 const sortOrder = ref('desc')
+const exporting = ref(false)
+
+const buildSearchParams = ({ includePagination = true, includeLocale = false } = {}) => {
+  const params = {}
+  if (includePagination) {
+    params.skip = (currentPage.value - 1) * pageSize.value
+    params.limit = pageSize.value
+  }
+  if (searchKeyword.value) params.keyword = searchKeyword.value
+  if (statusFilter.value) {
+    params.status = statusFilter.value
+  } else if (statusInFilter.value.length > 0) {
+    params.status_in = statusInFilter.value.join(',')
+  }
+  if (typeFilter.value) params.type = typeFilter.value
+  if (sortBy.value) params.sort_by = sortBy.value
+  if (sortOrder.value) params.sort_order = sortOrder.value
+  if (includeLocale) params.locale = locale.value
+  return params
+}
 
 const trackSearchDebounced = createDebouncedTracker(800)
 const trackSearch = () => {
+  const params = buildSearchParams({ includePagination: false })
   trackSearchDebounced({
     module: '工单管理',
     action: '查询',
     object_type: '工单',
-    data: {
-      keyword: searchKeyword.value || undefined,
-      status: statusFilter.value || undefined,
-      status_in: statusInFilter.value.length ? statusInFilter.value.join(',') : undefined,
-      type: typeFilter.value || undefined,
-      sort_by: sortBy.value || undefined,
-      sort_order: sortOrder.value || undefined,
-    },
+    data: params,
   })
 }
 
@@ -532,20 +549,7 @@ const resetSort = () => {
 const load = async () => {
   try {
     loading.value = true
-    const params = {
-      skip: (currentPage.value - 1) * pageSize.value,
-      limit: pageSize.value,
-    }
-    if (searchKeyword.value) params.keyword = searchKeyword.value
-    if (statusFilter.value) {
-      params.status = statusFilter.value
-    } else if (statusInFilter.value.length > 0) {
-      params.status_in = statusInFilter.value.join(',')
-    }
-    if (typeFilter.value) params.type = typeFilter.value
-    if (sortBy.value) params.sort_by = sortBy.value
-    if (sortOrder.value) params.sort_order = sortOrder.value
-
+    const params = buildSearchParams()
     const response = await workOrderAPI.searchWorkOrders(params)
     const list = Array.isArray(response?.work_orders) ? response.work_orders : []
     items.value = list.map((item) => ({
@@ -1351,6 +1355,89 @@ const replacementTargetLabel = (opt) => t('workOrderList.form.replacementTargetO
   band: opt?.band ?? '-',
 })
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
+
+const formatExportDate = () => {
+  const now = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`
+}
+
+const downloadBlob = (blob, filename) => {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+const parseFilenameFromDisposition = (disposition) => {
+  const raw = String(disposition || '')
+  if (!raw) return ''
+  const utf8Match = raw.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+  const fallbackMatch = raw.match(/filename="?([^";]+)"?/i)
+  return fallbackMatch?.[1] || ''
+}
+
+const buildFallbackExportFilename = () => {
+  if (locale.value === 'en-US') return `Work_Orders_${formatExportDate()}.xlsx`
+  if (locale.value === 'id-ID') return `Daftar_Perintah_Kerja_${formatExportDate()}.xlsx`
+  return `工单列表_${formatExportDate()}.xlsx`
+}
+
+const extractErrorDetail = async (error) => {
+  const data = error?.response?.data
+  if (!data) return error?.message || t('workOrderList.messages.exportFailed')
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      try {
+        const parsed = JSON.parse(text)
+        if (typeof parsed?.detail === 'string') return parsed.detail
+        return text || error?.message || t('workOrderList.messages.exportFailed')
+      } catch {
+        return text || error?.message || t('workOrderList.messages.exportFailed')
+      }
+    } catch {
+      return error?.message || t('workOrderList.messages.exportFailed')
+    }
+  }
+  if (typeof data?.detail === 'string') return data.detail
+  return error?.message || t('workOrderList.messages.exportFailed')
+}
+
+const exportCurrentFilters = async () => {
+  if (exporting.value) return
+  if (!Number(total.value || 0)) {
+    ElMessage.warning(t('workOrderList.messages.exportEmpty'))
+    return
+  }
+
+  try {
+    exporting.value = true
+    const response = await workOrderAPI.exportWorkOrders(
+      buildSearchParams({ includePagination: false, includeLocale: true }),
+    )
+    const filename = parseFilenameFromDisposition(response?.headers?.['content-disposition']) || buildFallbackExportFilename()
+    downloadBlob(response?.data, filename)
+    ElMessage.success(t('workOrderList.messages.exportSuccess'))
+  } catch (error) {
+    console.error(error)
+    const detail = await extractErrorDetail(error)
+    ElMessage.error(t('workOrderList.messages.exportFailedWithReason', { message: detail }))
+  } finally {
+    exporting.value = false
+  }
+}
 
 const isScrollableY = (el) => {
   if (!el || !(el instanceof HTMLElement)) return false

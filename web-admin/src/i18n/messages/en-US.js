@@ -601,6 +601,7 @@ export default {
     },
     actions: {
       refresh: "Refresh",
+      export: "Export",
       create: "Create Work Order",
       clearSelection: "Clear Selection",
       batchAssign: "Batch Reassign",
@@ -823,6 +824,10 @@ export default {
       batchPrioritySuccess:
         "Updated the priority of {count} work order(s) successfully",
       batchPriorityFailed: "Batch priority update failed",
+      exportEmpty: "There are no work orders to export",
+      exportSuccess: "Export completed",
+      exportFailed: "Export failed",
+      exportFailedWithReason: "Export failed: {message}",
     },
   },
   operation: {

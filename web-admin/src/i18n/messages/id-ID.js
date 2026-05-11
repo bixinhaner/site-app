@@ -605,6 +605,7 @@ export default {
     },
     actions: {
       refresh: "Segarkan",
+      export: "Ekspor",
       create: "Buat Perintah Kerja",
       clearSelection: "Batalkan Pilihan",
       batchAssign: "Tugaskan Ulang Massal",
@@ -825,6 +826,10 @@ export default {
       batchPrioritySuccess:
         "Berhasil mengubah prioritas {count} perintah kerja",
       batchPriorityFailed: "Gagal mengubah prioritas secara massal",
+      exportEmpty: "Tidak ada perintah kerja yang bisa diekspor",
+      exportSuccess: "Ekspor berhasil",
+      exportFailed: "Ekspor gagal",
+      exportFailedWithReason: "Ekspor gagal: {message}",
     },
   },
   operation: {
