@@ -148,6 +148,7 @@
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 	import { formatDateTime } from '@/utils/time.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
+	import { extractIssueDraftErrorMessage } from '@/utils/issue-draft-error-i18n.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
@@ -163,12 +164,7 @@
 	const refreshing = ref(false)
 	const acting = ref(false)
 
-	const extractErrorMessage = (data, fallback = '') => {
-		const detail = data?.detail
-		if (!detail) return fallback || $t('messages.operationFailed')
-		if (typeof detail === 'string') return detail
-		return detail?.message || fallback || $t('messages.operationFailed')
-	}
+	const extractErrorMessage = (data, fallback = '') => extractIssueDraftErrorMessage(data, $t, fallback)
 
 	const formatDt = (ts) => formatDateTime(ts) || ''
 
