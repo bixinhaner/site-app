@@ -15,10 +15,19 @@
         <el-table-column prop="contact_person" label="联系人" width="120" />
         <el-table-column prop="contact_phone" label="电话" width="140" />
         <el-table-column prop="manager_name" label="管理员" width="140" />
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="openEdit(row)">
               编辑
+            </el-button>
+            <el-button
+              type="danger"
+              link
+              size="small"
+              :loading="deletingId === row.id"
+              @click="handleDelete(row)"
+            >
+              <el-icon><Delete /></el-icon>删除
             </el-button>
           </template>
         </el-table-column>
@@ -66,13 +75,14 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { stockApi } from '../../api/stock'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/utils/request'
 
 const loading = ref(false)
 const warehouses = ref([])
 const formVisible = ref(false)
 const saving = ref(false)
+const deletingId = ref(null)
 const formRef = ref()
 const editingId = ref(null)
 const form = ref({
@@ -164,6 +174,32 @@ const submit = async () => {
     }
   } finally {
     saving.value = false
+  }
+}
+
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `删除后，仓库「${row.warehouse_name}」不会再出现在入库、出库、申请、退库选仓列表；历史出入库记录仍保留。确定删除？`,
+      '删除仓库',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger',
+      }
+    )
+    deletingId.value = row.id
+    await stockApi.deleteWarehouse(row.id)
+    ElMessage.success('仓库已删除')
+    await load()
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') {
+      console.error(e)
+      ElMessage.error(e?.response?.data?.detail || '删除失败')
+    }
+  } finally {
+    deletingId.value = null
   }
 }
 

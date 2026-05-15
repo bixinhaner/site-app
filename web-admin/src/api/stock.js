@@ -55,6 +55,10 @@ export const stockApi = {
   updateWarehouse: (id, data) =>
     request.put(`/api/stock/warehouses/${id}`, data),
 
+  // 删除仓库（后端实际做停用，历史记录保留）
+  deleteWarehouse: (id) =>
+    request.delete(`/api/stock/warehouses/${id}`),
+
   // SN批量导入相关
   importSN: (data) => 
     request.post('/api/stock/import-sn', data),

@@ -216,7 +216,12 @@ async def get_inventory_list(
     current_user: User = Depends(get_current_user)
 ):
     """获取库存列表"""
-    query = db.query(Inventory).join(Equipment).join(Warehouse)
+    query = (
+        db.query(Inventory)
+        .join(Equipment)
+        .join(Warehouse)
+        .filter(Warehouse.status == EquipmentStatusEnum.ACTIVE)
+    )
     
     if warehouse_id:
         query = query.filter(Inventory.warehouse_id == warehouse_id)
@@ -258,24 +263,30 @@ async def get_inventory_dashboard(
     current_user: User = Depends(get_current_user)
 ):
     """库存看板统计"""
+    active_inventory = (
+        db.query(Inventory)
+        .join(Warehouse)
+        .filter(Warehouse.status == EquipmentStatusEnum.ACTIVE)
+    )
+
     # 总体统计
-    total_items = db.query(func.count(Inventory.id)).scalar()
-    low_stock_items = db.query(func.count(Inventory.id)).filter(
+    total_items = active_inventory.with_entities(func.count(Inventory.id)).scalar()
+    low_stock_items = active_inventory.with_entities(func.count(Inventory.id)).filter(
         Inventory.current_stock <= Inventory.min_stock
     ).scalar()
     
     # 主设备库存总量
-    main_device_total_stock = db.query(func.sum(Inventory.current_stock)).join(Equipment).filter(
+    main_device_total_stock = active_inventory.join(Equipment).with_entities(func.sum(Inventory.current_stock)).filter(
         Equipment.category == "main_device"
     ).scalar() or 0
     
     # 主设备类型数量
-    main_device_count = db.query(func.count(Inventory.id)).join(Equipment).filter(
+    main_device_count = active_inventory.join(Equipment).with_entities(func.count(Inventory.id)).filter(
         Equipment.category == "main_device"
     ).scalar()
     
     # 辅材库存
-    auxiliaries = db.query(Inventory).join(Equipment).filter(
+    auxiliaries = active_inventory.join(Equipment).filter(
         Equipment.category == "auxiliary"
     ).all()
     
@@ -2090,6 +2101,7 @@ async def create_stock_in(
     warehouse_id = stock_in_data.get("warehouse_id", 1)  # 默认仓库
     if not _warehouse_in_scope(db, current_user, warehouse_id):
         raise HTTPException(status_code=403, detail="无权限操作该仓库")
+    _ensure_active_warehouse(db, int(warehouse_id))
     items = stock_in_data.get("items", [])
     offline_document_id = stock_in_data.get("offline_document_id")
     offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
@@ -2723,6 +2735,93 @@ async def delete_stock_transaction_document(
 
 # ===== 仓库管理 =====
 
+def _collect_warehouse_delete_blockers(db: Session, warehouse_id: int) -> List[str]:
+    stock_row = (
+        db.query(
+            func.coalesce(func.sum(Inventory.current_stock), 0),
+            func.coalesce(func.sum(Inventory.available_stock), 0),
+            func.coalesce(func.sum(Inventory.reserved_stock), 0),
+            func.coalesce(func.sum(Inventory.allocated_stock), 0),
+        )
+        .filter(Inventory.warehouse_id == warehouse_id)
+        .one()
+    )
+    current_stock = int(stock_row[0] or 0)
+    available_stock = int(stock_row[1] or 0)
+    reserved_stock = int(stock_row[2] or 0)
+    allocated_stock = int(stock_row[3] or 0)
+
+    blockers: List[str] = []
+    if any(qty > 0 for qty in (current_stock, available_stock, reserved_stock, allocated_stock)):
+        blockers.append(
+            f"还有库存数量（当前{current_stock}、可用{available_stock}、预留{reserved_stock}、占用{allocated_stock}）"
+        )
+
+    active_instance_count = (
+        db.query(func.count(EquipmentInstance.id))
+        .filter(
+            EquipmentInstance.warehouse_id == warehouse_id,
+            or_(EquipmentInstance.is_voided.is_(False), EquipmentInstance.is_voided.is_(None)),
+        )
+        .scalar()
+        or 0
+    )
+    if active_instance_count:
+        blockers.append(f"还有 {active_instance_count} 台设备实例在该仓库")
+
+    open_material_request_count = (
+        db.query(func.count(MaterialRequest.id))
+        .filter(
+            MaterialRequest.warehouse_id == warehouse_id,
+            MaterialRequest.status.in_(
+                [
+                    MaterialRequestStatusEnum.DRAFT,
+                    MaterialRequestStatusEnum.SUBMITTED,
+                    MaterialRequestStatusEnum.APPROVED,
+                    MaterialRequestStatusEnum.PARTIALLY_APPROVED,
+                ]
+            ),
+        )
+        .scalar()
+        or 0
+    )
+    if open_material_request_count:
+        blockers.append(f"还有 {open_material_request_count} 张未完成物料申请")
+
+    open_issue_draft_count = (
+        db.query(func.count(IssueDraft.id))
+        .filter(
+            IssueDraft.warehouse_id == warehouse_id,
+            IssueDraft.status.in_(
+                [
+                    IssueDraftStatusEnum.DRAFT,
+                    IssueDraftStatusEnum.PENDING_CONFIRM,
+                    IssueDraftStatusEnum.PARTIALLY_CONFIRMED,
+                ]
+            ),
+        )
+        .scalar()
+        or 0
+    )
+    if open_issue_draft_count:
+        blockers.append(f"还有 {open_issue_draft_count} 张未完成领料单")
+
+    pending_return_count = (
+        db.query(func.count(StockTransaction.id))
+        .filter(
+            StockTransaction.warehouse_id == warehouse_id,
+            StockTransaction.transaction_type == TransactionTypeEnum.RETURN,
+            StockTransaction.approval_status.in_(["pending_receive", "partially_received"]),
+        )
+        .scalar()
+        or 0
+    )
+    if pending_return_count:
+        blockers.append(f"还有 {pending_return_count} 张待处理退库单")
+
+    return blockers
+
+
 @router.get("/warehouses")
 async def get_warehouses(
     db: Session = Depends(get_db),
@@ -2795,9 +2894,13 @@ async def update_warehouse(
     ):
         raise HTTPException(status_code=403, detail="权限不足")
     
-    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    warehouse = (
+        db.query(Warehouse)
+        .filter(Warehouse.id == warehouse_id, Warehouse.status == EquipmentStatusEnum.ACTIVE)
+        .first()
+    )
     if not warehouse:
-        raise HTTPException(status_code=404, detail="仓库不存在")
+        raise HTTPException(status_code=404, detail="仓库不存在或已删除")
     
     # 如果修改编码，需要检查唯一性
     new_code = warehouse_data.get("warehouse_code")
@@ -2824,6 +2927,59 @@ async def update_warehouse(
     return {
         "message": "仓库更新成功",
         "warehouse_id": warehouse.id
+    }
+
+@router.delete("/warehouses/{warehouse_id}")
+async def delete_warehouse(
+    warehouse_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """删除仓库：实际停用仓库，保留历史出入库追溯。"""
+    if not user_has_any_role_or_permission(
+        current_user,
+        role_codes=["admin"],
+        permission_codes=["inventory:warehouse:write"],
+    ):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    warehouse = (
+        db.query(Warehouse)
+        .filter(Warehouse.id == warehouse_id, Warehouse.status == EquipmentStatusEnum.ACTIVE)
+        .first()
+    )
+    if not warehouse:
+        raise HTTPException(status_code=404, detail="仓库不存在或已删除")
+
+    blockers = _collect_warehouse_delete_blockers(db, warehouse_id)
+    if blockers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"仓库仍在使用，无法删除：{'；'.join(blockers)}。请先清库存并处理未完成单据后再删除。",
+        )
+
+    old_status = warehouse.status.value if hasattr(warehouse.status, "value") else str(warehouse.status)
+    warehouse.status = EquipmentStatusEnum.INACTIVE
+    _add_audit_event(
+        db,
+        resource_type="warehouse",
+        resource_id=str(warehouse.id),
+        action="delete",
+        operator_id=current_user.id,
+        comments=f"删除仓库 {warehouse.warehouse_name}",
+        details={
+            "warehouse_code": warehouse.warehouse_code,
+            "warehouse_name": warehouse.warehouse_name,
+        },
+        from_status=old_status,
+        to_status=EquipmentStatusEnum.INACTIVE.value,
+    )
+    db.commit()
+
+    return {
+        "message": "仓库删除成功",
+        "warehouse_id": warehouse.id,
+        "status": EquipmentStatusEnum.INACTIVE.value,
     }
 
 # ===== SN批量导入管理 =====
@@ -2869,6 +3025,7 @@ async def import_sn_batch(
         warehouse_id = file_data["warehouse_id"]
         if not _warehouse_in_scope(db, current_user, warehouse_id):
             raise HTTPException(status_code=403, detail="无权限操作该仓库")
+        _ensure_active_warehouse(db, int(warehouse_id))
         
         # 读取Excel文件
         excel_data = pd.read_excel(io.BytesIO(file_content))

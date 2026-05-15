@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Set
 
 from sqlalchemy.orm import Session
 
-from app.models.equipment import Warehouse
+from app.models.equipment import EquipmentStatusEnum, Warehouse
 from app.models.user import User
 from app.services.authz_service import user_has_any_role_or_permission
 
@@ -21,7 +21,14 @@ def get_managed_warehouse_ids(db: Session, user: Optional[User]) -> Optional[Set
         return set()
     if has_global_inventory_scope(user):
         return None
-    rows = db.query(Warehouse.id).filter(Warehouse.manager_id == user.id).all()
+    rows = (
+        db.query(Warehouse.id)
+        .filter(
+            Warehouse.manager_id == user.id,
+            Warehouse.status == EquipmentStatusEnum.ACTIVE,
+        )
+        .all()
+    )
     return {int(row[0]) for row in rows if row and row[0] is not None}
 
 
