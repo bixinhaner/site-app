@@ -341,6 +341,7 @@ backend/venv/bin/python temp/delete_site_bundle.py --site-id 32 --site-id 33 --e
 - **模板驱动**: JSON 格式的检查模板，支持站点级和扇区级检查项
 - **App 检查页国际化漏翻修复（2026-04-05）**: `uniapp-site-manager` 已修复检查清单中的多语言漏翻问题，包括：字段校验错误提示不再在英文/印尼语界面混入中文；“设备未出库，无法进行检查”等后端中文报错在非中文界面会映射为对应语言；“未关联照片”、字段帮助弹窗标题、扫码纯数字码提示等页面文案已全部走 i18n；`inspection/detail` 页模板同步横幅标题也改为多语言词条。
 - **App 检查模块错误提示统一本地化（2026-04-05）**: 新增 `uniapp-site-manager/utils/inspection-error-i18n.js`，统一处理 `detail/message/violations` 文案提取与语言映射；`checklist/detail` 页面已接入同一套函数，后端中文错误在英文/印尼语界面会优先映射业务词条，未命中时回退当前语言通用提示，减少不同检查页面提示口径不一致的问题。
+- **App 检查页国际化兜底补强（2026-05-15）**: `inspection/checklist` 与 `inspection/detail` 的模板同步横幅正文现在也会跟随当前语言渲染，不再直接透传后端中文 `message`。同时，`checklist` 页里保存检查项、保存草稿、提交检查、删除照片等失败提示统一补走 `inspection-error-i18n`，避免英文或印尼语界面里再次冒出中文 toast。
 - **App 检查清单国际化补齐（2026-03-20）**: `uniapp-site-manager -> pages/inspection/checklist` 已补齐拍照上传链路里的国际化缺口。现在照片异常/上传失败会先把底部空白、纯白图、解码失败、文件缺失等原始错误原因映射成当前语言，再展示到 toast 和拦截弹窗里；模板同步横幅标题、字段拍照限制提示、字段照片上传校验提示也同步补齐到 `中文 / English / Bahasa Indonesia`，避免同一页继续出现中英夹杂或中文漏出。
 - **检查模板热更新（2026-03-15）**:
 - 已绑定工单后，检查模板可以继续直接修改，不需要再“新建模板 -> 删除已派工单 -> 重新派工”

@@ -48,14 +48,14 @@
 		</view>
 
 		<view
-			v-if="inspectionData?.template_sync?.message"
+			v-if="templateSyncBannerMessage"
 			class="template-sync-banner"
 			:class="{ 'template-sync-banner--info': inspectionData?.template_sync?.has_pending_update && !inspectionData?.template_sync?.just_applied }"
 		>
 			<text class="template-sync-banner__title">
 				{{ inspectionData?.template_sync?.just_applied ? $t('inspection.templateSyncAppliedTitle') : $t('inspection.templateSyncHintTitle') }}
 			</text>
-			<text class="template-sync-banner__text">{{ inspectionData?.template_sync?.message }}</text>
+			<text class="template-sync-banner__text">{{ templateSyncBannerMessage }}</text>
 		</view>
 		
 		<!-- 详情内容 -->
@@ -658,7 +658,10 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, createRequestConfig, getAuthHeaders, buildImageUrl, API_ENDPOINTS } from '@/config/api.js'
 	import { createPhotoCacheContext, ensurePhotoCached } from '@/utils/photoCache.js'
-	import { localizeInspectionBackendMessage as localizeInspectionBackendMessageRaw } from '@/utils/inspection-error-i18n.js'
+	import {
+		localizeInspectionBackendMessage as localizeInspectionBackendMessageRaw,
+		localizeInspectionTemplateSyncMessage as localizeInspectionTemplateSyncMessageRaw
+	} from '@/utils/inspection-error-i18n.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	
@@ -702,6 +705,11 @@
 			currentLocale: languageStore.currentLocale,
 			...options
 		})
+	const localizeInspectionTemplateSyncMessage = (input) =>
+		localizeInspectionTemplateSyncMessageRaw(input, {
+			t: $t,
+			currentLocale: languageStore.currentLocale
+		})
 	
 	// 页面参数
 	const inspectionId = ref('')
@@ -710,6 +718,10 @@
 	const loading = ref(true)
 // 导出占位功能已移除
 	const inspectionData = ref(null)
+	const templateSyncBannerMessage = computed(() => {
+		const syncInfo = inspectionData.value?.template_sync
+		return syncInfo ? localizeInspectionTemplateSyncMessage(syncInfo) : ''
+	})
 	const workOrderProgress = ref(null)
 	const workOrderData = ref(null)
 	const deviceStatus = ref({ checked_at: null, devices: [] })

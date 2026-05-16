@@ -36,14 +36,14 @@
 		</view>
 
 		<view
-			v-if="inspectionData?.template_sync?.message"
+			v-if="templateSyncBannerMessage"
 			class="template-sync-banner"
 			:class="{ 'template-sync-banner--info': inspectionData?.template_sync?.has_pending_update && !inspectionData?.template_sync?.just_applied }"
 		>
 			<text class="template-sync-banner__title">
 				{{ inspectionData?.template_sync?.just_applied ? $t('inspection.templateSyncAppliedTitle') : $t('inspection.templateSyncHintTitle') }}
 			</text>
-			<text class="template-sync-banner__text">{{ inspectionData?.template_sync?.message }}</text>
+			<text class="template-sync-banner__text">{{ templateSyncBannerMessage }}</text>
 		</view>
 
 		<!-- 设备更换：旧设备退库（可选，支持多选） -->
@@ -742,7 +742,10 @@
 	import { createPhotoCacheContext, ensurePhotoCached, saveLocalPhotoToCache, removeCachedPhoto } from '@/utils/photoCache.js'
 	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { validateField, validateAllFields } from '@/utils/field-validator.js'
-	import { localizeInspectionBackendMessage as localizeInspectionBackendMessageRaw } from '@/utils/inspection-error-i18n.js'
+	import {
+		localizeInspectionBackendMessage as localizeInspectionBackendMessageRaw,
+		localizeInspectionTemplateSyncMessage as localizeInspectionTemplateSyncMessageRaw
+	} from '@/utils/inspection-error-i18n.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import { 
@@ -800,6 +803,17 @@
 				currentLocale: languageStore.currentLocale,
 				...options
 			})
+		const localizeInspectionTemplateSyncMessage = (input) =>
+			localizeInspectionTemplateSyncMessageRaw(input, {
+				t: $t,
+				currentLocale: languageStore.currentLocale
+			})
+		const getLocalizedInspectionReason = (input, fallbackKey) => {
+			const fallbackText = String($t(fallbackKey) || '').trim()
+			const localized = String(localizeInspectionBackendMessage(input, { fallbackKey }) || '').trim()
+			if (!localized || localized === fallbackText) return ''
+			return localized
+		}
 
 	const normalizeUnit = (unit) => {
 		const raw = String(unit || '').trim()
@@ -901,6 +915,10 @@
 	
 	// 响应式数据
 		const inspectionData = ref(null)
+		const templateSyncBannerMessage = computed(() => {
+			const syncInfo = inspectionData.value?.template_sync
+			return syncInfo ? localizeInspectionTemplateSyncMessage(syncInfo) : ''
+		})
 		const plannedSiteLocation = ref({
 			latitude: null,
 			longitude: null,
@@ -3224,12 +3242,17 @@
 									icon: 'success'
 								})
 							} else {
-								throw new Error(result.error || $t('messages.deleteFailed'))
+								throw new Error(localizeInspectionBackendMessage(result.error, {
+									fallbackKey: 'messages.deleteFailed'
+								}))
 							}
 						} catch (error) {
 							console.error('删除照片失败:', error)
+							const reason = getLocalizedInspectionReason(error, 'messages.deleteFailed')
 							uni.showToast({
-								title: $t('messages.deleteFailedWithReason', { reason: error.message }),
+								title: reason
+									? $t('messages.deleteFailedWithReason', { reason })
+									: $t('messages.deleteFailed'),
 								icon: 'error',
 								duration: 3000
 							})
@@ -4095,42 +4118,46 @@
 				currentItem.value.id, 
 				updateData
 				)
+
+				if (!result.success) {
+					throw new Error(localizeInspectionBackendMessage(result.error, {
+						fallbackKey: 'inspection.saveFailed'
+					}))
+				}
 				
-				if (result.success) {
-					const updatedItem = result.data || {}
-					// 更新本地数据
-					const itemIndex = checkItems.value.findIndex(item => item.id === currentItem.value.id)
-					if (itemIndex > -1) {
-						checkItems.value[itemIndex] = {
-							...checkItems.value[itemIndex],
-							...updatedItem,
-							// 保留前端编辑态字段（后端不一定返回）
-							dataFields: currentItem.value.dataFields,
-							notes: currentItem.value.notes,
-							checked_at: updateData.checked_at,
-							validation_result: currentItem.value.validation_result,
-							// 确保照片使用后端最新结果（含photo.id、服务器路径）
-							photos: updatedItem.photos || currentItem.value.photos || []
-						}
+				const updatedItem = result.data || {}
+				// 更新本地数据
+				const itemIndex = checkItems.value.findIndex(item => item.id === currentItem.value.id)
+				if (itemIndex > -1) {
+					checkItems.value[itemIndex] = {
+						...checkItems.value[itemIndex],
+						...updatedItem,
+						// 保留前端编辑态字段（后端不一定返回）
+						dataFields: currentItem.value.dataFields,
+						notes: currentItem.value.notes,
+						checked_at: updateData.checked_at,
+						validation_result: currentItem.value.validation_result,
+						// 确保照片使用后端最新结果（含photo.id、服务器路径）
+						photos: updatedItem.photos || currentItem.value.photos || []
 					}
-					
-					// 更新检查进度
-					await updateInspectionProgress()
+				}
 				
-				// 清除自动保存的数据（保存成功后）
-				clearAutoSavedData(currentItem.value.id)
-				
-				uni.showToast({
-					title: $t('inspection.saveSuccess'),
-					icon: 'success'
-				})
-				
-				closeItemModal()
-			}
+				// 更新检查进度
+				await updateInspectionProgress()
+			
+			// 清除自动保存的数据（保存成功后）
+			clearAutoSavedData(currentItem.value.id)
+			
+			uni.showToast({
+				title: $t('inspection.saveSuccess'),
+				icon: 'success'
+			})
+			
+			closeItemModal()
 			
 			} catch (error) {
 				console.error('保存检查项失败:', error)
-				const reason = String(error?.message || '').trim()
+				const reason = getLocalizedInspectionReason(error, 'inspection.saveFailed')
 				uni.showToast({
 					title: reason
 						? $t('messages.saveFailedWithReason', { reason })
@@ -4170,14 +4197,16 @@
 				})
 			} else {
 				uni.showToast({
-					title: result.error || $t('inspection.saveFailed'),
+					title: localizeInspectionBackendMessage(result.error, {
+						fallbackKey: 'inspection.saveFailed'
+					}),
 					icon: 'none'
 				})
 			}
 			
 			} catch (error) {
 				console.error('保存草稿失败:', error)
-				const reason = String(error?.message || '').trim()
+				const reason = getLocalizedInspectionReason(error, 'inspection.saveFailed')
 				uni.showToast({
 					title: reason
 						? $t('messages.saveFailedWithReason', { reason })
@@ -4257,7 +4286,9 @@
 				}, 1500)
 			} else {
 				uni.showToast({
-					title: result.error || $t('inspection.submitFailed'),
+					title: localizeInspectionBackendMessage(result.error, {
+						fallbackKey: 'inspection.submitFailed'
+					}),
 					icon: 'none',
 					duration: 2500
 				})
@@ -4266,7 +4297,9 @@
 		} catch (error) {
 			console.error('提交检查失败:', error)
 			uni.showToast({
-				title: $t('inspection.submitFailed'),
+				title: localizeInspectionBackendMessage(error, {
+					fallbackKey: 'inspection.submitFailed'
+				}),
 				icon: 'error'
 			})
 		} finally {

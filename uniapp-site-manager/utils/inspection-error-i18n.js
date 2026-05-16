@@ -9,6 +9,40 @@ const normalizeLocale = (value) => {
 
 const hasChinese = (value) => /[\u4e00-\u9fff]/.test(String(value || ''))
 
+const normalizeCandidateText = (value) => {
+	const text = typeof value === 'string' ? value.trim() : ''
+	if (!text || text === '[object Object]') return ''
+	return text
+}
+
+const tryParseJsonText = (value) => {
+	const text = normalizeCandidateText(value)
+	if (!text || (text[0] !== '{' && text[0] !== '[')) return null
+	try {
+		return JSON.parse(text)
+	} catch (e) {
+		return null
+	}
+}
+
+const extractFirstTextFromList = (list, visited) => {
+	if (!Array.isArray(list) || !list.length) return ''
+	for (const item of list) {
+		const text = extractInspectionBackendDetailText(item, visited)
+		if (text) return text
+	}
+	return ''
+}
+
+const extractFirstTextFromMap = (value, visited) => {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
+	for (const item of Object.values(value)) {
+		const text = extractInspectionBackendDetailText(item, visited)
+		if (text) return text
+	}
+	return ''
+}
+
 const DEFAULT_ERROR_MAPPINGS = [
 	{
 		test: /(设备未出库|无法进行检查|not\s*(in|into)\s*stock|not\s*stocked|not\s*issued|cannot\s*(do|perform)\s*inspection|cannot\s*inspect)/i,
@@ -20,25 +54,51 @@ const DEFAULT_ERROR_MAPPINGS = [
 	}
 ]
 
-export const extractInspectionBackendDetailText = (input) => {
-	if (typeof input === 'string') return input.trim()
-	if (!input || typeof input !== 'object') return ''
-
-	const detail = input.detail
-	if (typeof detail === 'string') return detail.trim()
-	if (detail && typeof detail === 'object') {
-		if (typeof detail.message === 'string') return detail.message.trim()
-		if (Array.isArray(detail.violations) && detail.violations.length > 0) {
-			const first = detail.violations[0]
-			if (typeof first === 'string') return first.trim()
-			if (first && typeof first === 'object' && typeof first.message === 'string') {
-				return first.message.trim()
-			}
+export const extractInspectionBackendDetailText = (input, visited = new WeakSet()) => {
+	const directText = normalizeCandidateText(input)
+	if (directText) {
+		const parsed = tryParseJsonText(directText)
+		if (parsed && typeof parsed === 'object') {
+			const nestedText = extractInspectionBackendDetailText(parsed, visited)
+			if (nestedText) return nestedText
 		}
+		return directText
+	}
+	if (!input || typeof input !== 'object') return ''
+	if (visited.has(input)) return ''
+	visited.add(input)
+
+	const nestedCandidates = [
+		input.detail,
+		input.data,
+		input.response?.data,
+		input.response,
+		input.error
+	]
+	for (const candidate of nestedCandidates) {
+		const text = extractInspectionBackendDetailText(candidate, visited)
+		if (text) return text
 	}
 
-	if (typeof input.message === 'string') return input.message.trim()
-	return ''
+	const directKeys = ['message', 'reason', 'errMsg']
+	for (const key of directKeys) {
+		const text = normalizeCandidateText(input[key])
+		if (!text) continue
+		const parsed = tryParseJsonText(text)
+		if (parsed && typeof parsed === 'object') {
+			const nestedText = extractInspectionBackendDetailText(parsed, visited)
+			if (nestedText) return nestedText
+		}
+		return text
+	}
+
+	const violationsText = extractFirstTextFromList(input.violations, visited)
+	if (violationsText) return violationsText
+
+	const errorsListText = extractFirstTextFromList(input.errors, visited)
+	if (errorsListText) return errorsListText
+
+	return extractFirstTextFromMap(input.errors, visited)
 }
 
 export const localizeInspectionBackendMessage = (
@@ -71,3 +131,25 @@ export const localizeInspectionBackendMessage = (
 	return raw
 }
 
+const TEMPLATE_SYNC_MESSAGE_KEY_BY_MODE = {
+	applied_now: 'inspection.templateSyncAppliedContent',
+	next_submit: 'inspection.templateSyncPendingContent',
+	frozen: 'inspection.templateSyncFrozenContent'
+}
+
+export const localizeInspectionTemplateSyncMessage = (
+	input,
+	{
+		t = null,
+		currentLocale = 'zh'
+	} = {}
+) => {
+	const raw = extractInspectionBackendDetailText(input)
+	const mode = String(input?.apply_mode || '').trim()
+	const key = input?.just_applied
+		? 'inspection.templateSyncAppliedContent'
+		: TEMPLATE_SYNC_MESSAGE_KEY_BY_MODE[mode]
+
+	if (key && typeof t === 'function') return t(key)
+	return raw
+}
