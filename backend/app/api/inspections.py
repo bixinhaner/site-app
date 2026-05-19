@@ -76,6 +76,7 @@ from app.services.inspection_template_sync import (
     validate_inspection_for_submit,
 )
 from app.services.site_progress_service import rebuild_site_progress
+from app.services.photo_location_compare_service import build_uploaded_location_compare
 from app.services.work_order_execution_settings_service import (
     LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITH_WATERMARK,
     LOCAL_UPLOAD_WITHOUT_GEO_POLICY_ALLOW_WITHOUT_WATERMARK,
@@ -1972,21 +1973,16 @@ async def upload_inspection_photo(
     # 根据是否已有水印决定是否添加水印
     watermarked_path = file_path
     watermark_data = None
-    location_compare = {}
-    if planned_latitude is not None and planned_longitude is not None:
-        location_compare["planned_coordinates"] = f"{planned_latitude:.6f}, {planned_longitude:.6f}"
-    if distance_to_plan_m is not None:
-        location_compare["distance_to_plan_m"] = round(float(distance_to_plan_m), 2)
-    if location_distance_threshold_m is not None:
-        location_compare["distance_threshold_m"] = round(float(location_distance_threshold_m), 2)
-    if location_distance_exceeded is not None:
-        location_compare["distance_exceeded"] = bool(location_distance_exceeded)
-    if plan_coordinate_missing is not None:
-        location_compare["plan_coordinate_missing"] = bool(plan_coordinate_missing)
-    if distance_compare_enabled is not None:
-        location_compare["distance_compare_enabled"] = bool(distance_compare_enabled)
-    if distance_exceed_block_upload is not None:
-        location_compare["distance_exceed_block_upload"] = bool(distance_exceed_block_upload)
+    location_compare = build_uploaded_location_compare(
+        planned_latitude=planned_latitude,
+        planned_longitude=planned_longitude,
+        distance_to_plan_m=distance_to_plan_m,
+        distance_threshold_m=location_distance_threshold_m,
+        distance_exceeded=location_distance_exceeded,
+        plan_coordinate_missing=plan_coordinate_missing,
+        distance_compare_enabled=distance_compare_enabled,
+        distance_exceed_block_upload=distance_exceed_block_upload,
+    )
     
     skip_backend_watermark_for_raw_local_upload = bool(
         is_web_upload_request

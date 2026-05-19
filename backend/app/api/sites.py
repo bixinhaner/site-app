@@ -56,6 +56,7 @@ from app.services.site_progress_service import (
 )
 from app.services.site_payment_service import build_site_payment_records
 from app.services.site_progress_metric_service import get_site_progress_metric_mode
+from app.services.photo_location_compare_service import refresh_site_photo_location_compare_for_site
 from app.utils.timezone import to_utc_iso
 from app.utils.file_handler import save_uploaded_file
 from app.services.omc_monitor import (
@@ -1034,6 +1035,28 @@ def _same_site_field_value(old_value, new_value) -> bool:
     return old_value == new_value
 
 
+def _site_coordinates_changed(site: Site, update_data: Dict[str, object]) -> bool:
+    return (
+        "latitude" in update_data
+        and not _same_site_field_value(site.latitude, update_data.get("latitude"))
+    ) or (
+        "longitude" in update_data
+        and not _same_site_field_value(site.longitude, update_data.get("longitude"))
+    )
+
+
+def _refresh_photo_location_compare_after_coordinate_change(
+    db: Session,
+    site: Site,
+    coordinate_changed: bool,
+    *,
+    reason: str,
+) -> Optional[Dict[str, int]]:
+    if not coordinate_changed:
+        return None
+    return refresh_site_photo_location_compare_for_site(db, site, reason=reason)
+
+
 @router.post("/basic/batch-update-upload", response_model=BasicBatchImportReport)
 async def basic_batch_update_upload(
     file: UploadFile = File(...),
@@ -1249,8 +1272,17 @@ async def basic_batch_update_upload(
             continue
 
         try:
+            coordinates_changed = _site_coordinates_changed(site, update_data)
             for field, value in update_data.items():
                 setattr(site, field, value)
+            refresh_result = _refresh_photo_location_compare_after_coordinate_change(
+                db,
+                site,
+                coordinates_changed,
+                reason="site_basic_batch_update",
+            )
+            if refresh_result and refresh_result.get("updated_count"):
+                warnings.append(f"已刷新{refresh_result['updated_count']}张照片的距规划距离")
             db.commit()
             db.refresh(site)
             success_count += 1
@@ -1935,8 +1967,15 @@ async def batch_update_sites(
             continue
 
         try:
+            coordinates_changed = _site_coordinates_changed(site, update_data)
             for field, value in update_data.items():
                 setattr(site, field, value)
+            refresh_result = _refresh_photo_location_compare_after_coordinate_change(
+                db,
+                site,
+                coordinates_changed,
+                reason="site_batch_update",
+            )
             db.commit()
             db.refresh(site)
             success_count += 1
@@ -2010,8 +2049,15 @@ async def update_site(
         amount_val = float(update_data["contract_amount"])
         if amount_val < 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="站点合同金额不能小于 0")
+    coordinates_changed = _site_coordinates_changed(site, update_data)
     for field, value in update_data.items():
         setattr(site, field, value)
+    _refresh_photo_location_compare_after_coordinate_change(
+        db,
+        site,
+        coordinates_changed,
+        reason="site_update",
+    )
     
     db.commit()
     db.refresh(site)

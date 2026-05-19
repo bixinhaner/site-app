@@ -1810,6 +1810,14 @@
                   >
                     (阈值 {{ selectedPhotoLocationCompare.thresholdM }}m)
                   </span>
+                  <el-tag
+                    v-if="selectedPhotoLocationCompare.refreshedFromCurrentSite"
+                    type="info"
+                    size="small"
+                    style="margin-left: 6px"
+                  >
+                    已按当前站点坐标刷新
+                  </el-tag>
                 </template>
                 <span v-else>-</span>
               </el-descriptions-item>
@@ -3031,6 +3039,10 @@ const getPhotoLocationCompare = (photo) => {
   const hasThreshold = Number.isFinite(thresholdRaw) && thresholdRaw > 0;
   const exceeded = toBool(rawCompare.distance_exceeded);
   const planCoordinateMissing = toBool(rawCompare.plan_coordinate_missing);
+  const refreshedFromCurrentSite =
+    String(rawCompare.planned_coordinate_source || "").trim() ===
+      "current_site" ||
+    Boolean(String(rawCompare.distance_compare_refreshed_at || "").trim());
 
   const plannedCoordinatesText = (() => {
     const text = String(rawCompare.planned_coordinates || "").trim();
@@ -3048,6 +3060,7 @@ const getPhotoLocationCompare = (photo) => {
     thresholdM: hasThreshold ? thresholdRaw : null,
     exceeded,
     planCoordinateMissing,
+    refreshedFromCurrentSite,
     plannedCoordinatesText,
     compared:
       hasDistance || planCoordinateMissing || plannedCoordinatesText !== "",
