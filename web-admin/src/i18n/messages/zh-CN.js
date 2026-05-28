@@ -585,6 +585,7 @@ export default {
       confirmUpdate: "确认修改",
       confirmContinueCreate: "确认继续创建",
       voidConfirm: "确认作废",
+      uploadExpansionLld: "上传目标 LLD",
     },
     dialogs: {
       createTitle: "新建工单",
@@ -612,6 +613,12 @@ export default {
       replacementTargetHint:
         "按站点规划生成的设备位（sector_id + band），支持多选。",
       replacementTargetOption: "扇区 {sectorId} / Band {band}",
+      expansionLld: "目标 LLD",
+      expansionLldHint:
+        "用于已安装站点扩容预览。系统只提取新增设备位，工单完成后才合并为当前规划。",
+      expansionPreviewTitle:
+        "预览通过：当前 {current} 扇区，目标 {target} 扇区，新增 {slots} 个设备位",
+      expansionSlotLabel: "扇区 {sectorId} / Band {band}",
       priority: "优先级",
       dueDate: "截止时间",
       description: "描述",
@@ -659,6 +666,7 @@ export default {
     types: {
       opening_inspection: "新站安装",
       equipment_replacement: "设备更换",
+      sector_expansion: "扇区扩容",
       maintenance: "维护检查",
       power_issue: "断电问题",
       transmission_issue: "传输问题",
@@ -730,6 +738,7 @@ export default {
     },
     validation: {
       selectReplacementTarget: "请选择要更换的设备位",
+      uploadExpansionLld: "请上传并通过目标 LLD 预览",
       selectSite: "请选择站点",
       selectType: "请选择类型",
       selectAssignee: "请选择分配对象",
@@ -761,6 +770,9 @@ export default {
       loadFailed: "加载工单失败",
       planningNotFound: "站点规划未找到或无权限，无法加载设备位",
       replacementTargetRequired: "设备更换工单必须选择要更换的设备位",
+      expansionTargetRequired: "扇区扩容工单必须先上传目标 LLD",
+      expansionPreviewSuccess: "目标 LLD 预览通过",
+      expansionPreviewFailed: "目标 LLD 预览失败",
       createSuccess: "创建成功",
       createFailed: "创建失败",
       updateSuccess: "更新成功",

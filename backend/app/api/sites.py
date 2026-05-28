@@ -62,6 +62,7 @@ from app.utils.file_handler import save_uploaded_file
 from app.services.omc_monitor import (
     advance_opening_work_orders_by_ever,
     advance_replacement_work_orders_by_ever,
+    advance_sector_expansion_work_orders_by_ever,
 )
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -2346,6 +2347,7 @@ async def get_site_omc_devices(
         try:
             advance_opening_work_orders_by_ever(db, site_id)
             advance_replacement_work_orders_by_ever(db, site_id)
+            advance_sector_expansion_work_orders_by_ever(db, site_id)
             db.commit()
         except Exception as exc:  # pragma: no cover
             db.rollback()

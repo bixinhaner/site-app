@@ -185,11 +185,49 @@
           </div>
         </el-card>
 
-        <!-- 开站/设备更换工单：设备在线/激活状态 -->
+        <!-- 扇区扩容工单信息 -->
+        <el-card
+          v-if="order.type === 'sector_expansion'"
+          style="margin-bottom: 16px"
+        >
+          <template #header>
+            <div class="card-header">
+              <span>扇区扩容信息</span>
+            </div>
+          </template>
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="扩容扇区">
+              <span>
+                {{ expansionSummary.current_sector_count ?? "-" }} →
+                {{ expansionSummary.target_sector_count ?? "-" }}
+              </span>
+            </el-descriptions-item>
+            <el-descriptions-item label="目标规划版本">
+              <span>{{ expansionSummary.current_planning_version || "-" }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="新增设备位" :span="2">
+              <el-space wrap>
+                <el-tag
+                  v-for="t in expansionTargets"
+                  :key="`${t.sector_id}__${t.band}`"
+                  size="small"
+                  type="success"
+                  effect="plain"
+                >
+                  S{{ t.sector_id }}/{{ t.band }}
+                </el-tag>
+                <span v-if="!expansionTargets.length" class="muted">-</span>
+              </el-space>
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+
+        <!-- 开站/设备更换/扇区扩容工单：设备在线/激活状态 -->
         <el-card
           v-if="
             order.type === 'opening_inspection' ||
-            order.type === 'equipment_replacement'
+            order.type === 'equipment_replacement' ||
+            order.type === 'sector_expansion'
           "
           class="mb16"
           v-loading="deviceStatusLoading"
@@ -199,7 +237,9 @@
               <span>{{
                 order.type === "opening_inspection"
                   ? "开站设备在线 / 激活状态"
-                  : "换机设备在线 / 激活状态"
+                  : order.type === "sector_expansion"
+                    ? "扩容设备在线 / 激活状态"
+                    : "换机设备在线 / 激活状态"
               }}</span>
               <div>
                 <span
@@ -2472,6 +2512,16 @@ const replacementInitiatorId = computed(() => {
   return v != null ? String(v) : "";
 });
 
+const expansionTargets = computed(() => {
+  const list = order.value?.extra_data?.expansion_targets;
+  return Array.isArray(list) ? list : [];
+});
+
+const expansionSummary = computed(() => {
+  const summary = order.value?.extra_data?.expansion_summary;
+  return summary && typeof summary === "object" ? summary : {};
+});
+
 const replacementReturnCandidates = computed(() => {
   const sns = [];
   for (const row of replacementHistory.value || []) {
@@ -2917,6 +2967,7 @@ const VOIDABLE_STATUSES = [
 const types = [
   { label: "新站点设备安装", value: "opening_inspection" },
   { label: "设备更换", value: "equipment_replacement" },
+  { label: "扇区扩容", value: "sector_expansion" },
   { label: "维护检查", value: "maintenance" },
   { label: "断电问题", value: "power_issue" },
   { label: "传输问题", value: "transmission_issue" },
@@ -5093,7 +5144,7 @@ const formatFileSize = (size) => {
 };
 
 const statusText = (status, type) => {
-  if (type === "opening_inspection" || type === "equipment_replacement") {
+  if (["opening_inspection", "equipment_replacement", "sector_expansion"].includes(type)) {
     if (status === "APPROVED") return "待上线 (80%)";
     if (status === "ACTIVATED") return "已上线待激活 (90%)";
     if (status === "COMPLETED") return "已激活 (100%)";
@@ -5193,10 +5244,10 @@ const loadDeviceStatus = async (refresh = false) => {
     );
     return;
   }
-  // 仅开站/设备更换工单需要设备状态
+  // 仅开站/设备更换/扇区扩容工单需要设备状态
   if (
     !order.value ||
-    !["opening_inspection", "equipment_replacement"].includes(order.value.type)
+    !["opening_inspection", "equipment_replacement", "sector_expansion"].includes(order.value.type)
   ) {
     devices.value = [];
     deviceStatusCheckedAt.value = null;
@@ -5208,10 +5259,23 @@ const loadDeviceStatus = async (refresh = false) => {
     const res = await request.get(
       `/api/sites/${order.value.site_id}/omc/devices`,
       {
-        params: { refresh: refresh ? 1 : 0, include_expected_slots: 1 },
+        params: {
+          refresh: refresh ? 1 : 0,
+          include_expected_slots: order.value.type === "sector_expansion" ? 0 : 1,
+        },
       },
     );
-    devices.value = Array.isArray(res.devices) ? res.devices : [];
+    const list = Array.isArray(res.devices) ? res.devices : [];
+    if (order.value.type === "sector_expansion") {
+      const targetKeys = new Set(
+        expansionTargets.value.map((t) => `${String(t.sector_id || "").trim()}__${String(t.band || "").trim()}`),
+      );
+      devices.value = list.filter((row) =>
+        targetKeys.has(`${String(row?.sector_id || "").trim()}__${String(row?.band || "").trim()}`),
+      );
+    } else {
+      devices.value = list;
+    }
     deviceStatusCheckedAt.value = res.checked_at || null;
     manualConfirmEnabled.value = !!res.manual_confirm_enabled;
 

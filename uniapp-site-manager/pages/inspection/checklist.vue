@@ -228,7 +228,7 @@
 									<text class="bound-sn">{{ currentItem.equipment_sn }}</text>
 								</view>
 								<view class="bind-actions">
-									<button v-if="isEquipmentReplacement" class="replace-btn" @click="scanEquipmentForBinding">
+									<button v-if="canDirectReplaceDevice" class="replace-btn" @click="scanEquipmentForBinding">
 										<text class="btn-icon">📷</text>
 										<text>{{ $t('inspection.scanReplace') }}</text>
 									</button>
@@ -1081,6 +1081,8 @@
 
 		const isOpeningInspection = computed(() => String(workOrderData.value?.type || '') === 'opening_inspection')
 		const isEquipmentReplacement = computed(() => String(workOrderData.value?.type || '') === 'equipment_replacement')
+		const isSectorExpansion = computed(() => String(workOrderData.value?.type || '') === 'sector_expansion')
+		const canDirectReplaceDevice = computed(() => isEquipmentReplacement.value || isSectorExpansion.value)
 		const hasBoundDevicesHint = computed(() => (checkItems.value || []).some((it) => !!it?.equipment_sn))
 
 		// 设备更换：从工单 extra_data.replacement_history 提取可退库的旧设备 SN（去重）
@@ -4640,7 +4642,7 @@
 				// 设备更换工单：允许已绑定情况下直接换绑（先确认再提交）
 				const oldSn = String(targetItem?.equipment_sn || '').trim()
 				const newSn = String(parsedBarcode.sn || '').trim()
-				if (oldSn && newSn && oldSn !== newSn && isEquipmentReplacement.value) {
+				if (oldSn && newSn && oldSn !== newSn && canDirectReplaceDevice.value) {
 					const bindTarget = targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id
 					const confirmed = await new Promise((resolve) => {
 						uni.showModal({
@@ -4767,7 +4769,7 @@
 						
 						uni.hideLoading()
 						const bindTarget = targetItem.band ? `${targetItem.sector_id}_${targetItem.band}` : targetItem.sector_id
-						const isReplace = !!(oldSn && String(parsedBarcode.sn || '').trim() && oldSn !== String(parsedBarcode.sn || '').trim() && isEquipmentReplacement.value)
+						const isReplace = !!(oldSn && String(parsedBarcode.sn || '').trim() && oldSn !== String(parsedBarcode.sn || '').trim() && canDirectReplaceDevice.value)
 						uni.showModal({
 							title: isReplace ? $t('inspection.replaceSuccessTitle') : $t('inspection.bindSuccessTitle'),
 							content: isReplace

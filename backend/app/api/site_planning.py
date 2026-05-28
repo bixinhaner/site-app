@@ -26,6 +26,7 @@ from app.models.planning import (
     SitePlanningCell,
 )
 from app.services.authz_service import user_has_any_role_or_permission
+from app.services.sector_expansion import validate_expansion_target_cells
 from app.services.site_progress_service import rebuild_site_progress
 from app.utils.planning_schema import LLD_CELL_EXTRA_FIELD_CANDIDATES
 from app.utils.timezone import to_utc_iso
@@ -2780,6 +2781,155 @@ async def lld_upload_planning_for_site(
         nr_cell_count=target_work.get("nr_cell_count"),
         bands=target_work.get("bands"),
     )
+
+
+def _dump_import_issue(issue: ImportIssue) -> Dict[str, Any]:
+    if hasattr(issue, "model_dump"):
+        return issue.model_dump()
+    return issue.dict()
+
+
+@router.post("/{site_id}/planning/expansion-preview")
+async def preview_sector_expansion_planning(
+    site_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    扇区扩容目标 LLD 预览：只校验差异，不写入当前规划。
+
+    这个接口用于已安装/已开通站点。目标 LLD 必须保留现有 Cell 的关键字段，
+    并至少新增 1 个设备位；真正合并规划会在扩容工单完成后执行。
+    """
+    _ensure_planning_editor(current_user)
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="仅支持 Excel(.xlsx/.xls)")
+
+    content = await file.read()
+    try:
+        excel = pd.ExcelFile(io.BytesIO(content))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Excel 解析失败: {exc}")
+
+    rows_by_site_code, issues = _validate_lld_excel_and_collect_rows(excel)
+    site_work: Dict[str, Dict[str, Any]] = {}
+
+    for site_code, metas in rows_by_site_code.items():
+        current_site = db.query(Site).filter(Site.site_code == site_code).first()
+        if not current_site:
+            issues.append(
+                ImportIssue(
+                    code="LLD_SITE_NOT_FOUND",
+                    message="站点不存在：请先在“站点信息导入”创建站点并完成勘察",
+                    site_code=site_code,
+                )
+            )
+            continue
+
+        file_site_name = (metas[0].get("site_name_in_file") or "").strip() if metas else ""
+        sys_site_name = (current_site.site_name or "").strip()
+        if not file_site_name:
+            issues.append(
+                ImportIssue(
+                    code="LLD_REQUIRED",
+                    message="SITE NAME 不能为空",
+                    site_code=site_code,
+                    site_id=current_site.id,
+                    column="SITE NAME",
+                )
+            )
+        elif file_site_name != sys_site_name:
+            issues.append(
+                ImportIssue(
+                    code="LLD_SITE_NAME_MISMATCH",
+                    message=f"站点名称与系统不一致（Excel='{file_site_name}'，系统='{sys_site_name}'）",
+                    site_code=site_code,
+                    site_id=current_site.id,
+                )
+            )
+
+        cell_dicts: List[dict] = []
+        for meta in metas or []:
+            cell = _build_cell_dict_from_row(current_site.id, meta.get("tower_id"), meta)
+            if cell.get("local_cell_id") is None:
+                issues.append(
+                    ImportIssue(
+                        code="LLD_REQUIRED",
+                        message="Sector ID 不能为空且必须为整数",
+                        sheet=meta.get("sheet_name"),
+                        row=meta.get("excel_row"),
+                        column="Sector ID Local ID",
+                        site_code=site_code,
+                        site_id=current_site.id,
+                    )
+                )
+                continue
+            cell_dicts.append(cell)
+
+        if not cell_dicts:
+            issues.append(
+                ImportIssue(
+                    code="LLD_NO_VALID_ROWS",
+                    message="该站点在 LLD 中没有满足最低字段要求的小区行",
+                    site_code=site_code,
+                    site_id=current_site.id,
+                )
+            )
+            continue
+
+        site_work[site_code] = {
+            "site": current_site,
+            "cell_dicts": cell_dicts,
+            "lte_cell_count": sum(1 for c in cell_dicts if c.get("rat") == "LTE"),
+            "nr_cell_count": sum(1 for c in cell_dicts if c.get("rat") == "NR"),
+            "bands": sorted({c.get("band_code") for c in cell_dicts if c.get("band_code")}),
+        }
+
+    if site.site_code not in rows_by_site_code:
+        issues.append(
+            ImportIssue(
+                code="LLD_SITE_NOT_IN_FILE",
+                message=f"LLD 文件中未找到与站点编码 {site.site_code} 匹配的 SiteCode 行",
+                site_code=site.site_code,
+                site_id=site.id,
+            )
+        )
+
+    if issues:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "目标 LLD 校验失败",
+                "issues": [_dump_import_issue(issue) for issue in issues],
+            },
+        )
+
+    target_work = site_work.get(site.site_code)
+    if not target_work:
+        raise HTTPException(status_code=400, detail="未找到可预览的目标 LLD 数据")
+
+    result = validate_expansion_target_cells(
+        db,
+        site,
+        target_work["cell_dicts"],
+        check_active_work_order=True,
+    )
+    return {
+        "success": True,
+        "site_id": site.id,
+        "site_code": site.site_code,
+        "site_name": site.site_name,
+        "filename": file.filename,
+        "lte_cell_count": target_work.get("lte_cell_count"),
+        "nr_cell_count": target_work.get("nr_cell_count"),
+        **result,
+    }
 
 
 @router.get("/{site_id}/planning/lld", response_model=SitePlanningLldResponse)

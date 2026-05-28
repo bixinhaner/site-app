@@ -202,7 +202,7 @@
     </el-card>
   </div>
 
-  <el-dialog v-model="createVisible" :title="t('workOrderList.dialogs.createTitle')" width="560px">
+  <el-dialog v-model="createVisible" :title="t('workOrderList.dialogs.createTitle')" width="680px">
     <el-form :model="createForm" label-width="96px" :rules="rules" ref="formRef">
       <el-form-item :label="t('workOrderList.form.site')" prop="site_id">
         <el-select
@@ -258,6 +258,45 @@
           <el-option v-for="opt in replacementTargetOptions" :key="opt.key" :label="replacementTargetLabel(opt)" :value="opt.key" />
         </el-select>
         <div class="form-hint">{{ t('workOrderList.form.replacementTargetHint') }}</div>
+      </el-form-item>
+      <el-form-item v-if="createForm.type === 'sector_expansion'" :label="t('workOrderList.form.expansionLld')" prop="expansion_target_cells">
+        <div class="expansion-upload-row">
+          <el-upload
+            :auto-upload="false"
+            :show-file-list="false"
+            accept=".xlsx,.xls"
+            :on-change="handleExpansionFileChange"
+          >
+            <el-button :loading="expansionPreviewLoading">
+              <el-icon><Upload /></el-icon>
+              {{ t('workOrderList.actions.uploadExpansionLld') }}
+            </el-button>
+          </el-upload>
+          <span v-if="expansionFileName" class="expansion-file-name">{{ expansionFileName }}</span>
+        </div>
+        <div class="form-hint">{{ t('workOrderList.form.expansionLldHint') }}</div>
+        <div v-if="expansionPreview" class="expansion-preview">
+          <el-alert
+            type="success"
+            :closable="false"
+            show-icon
+            :title="t('workOrderList.form.expansionPreviewTitle', {
+              current: expansionPreview.current_sector_count,
+              target: expansionPreview.target_sector_count,
+              slots: expansionPreview.new_slots?.length || 0,
+            })"
+          />
+          <div class="expansion-slot-list">
+            <el-tag
+              v-for="slot in expansionPreview.new_slots || []"
+              :key="`${slot.sector_id}_${slot.band}`"
+              type="success"
+              effect="plain"
+            >
+              {{ t('workOrderList.form.expansionSlotLabel', { sectorId: slot.sector_id, band: slot.band }) }}
+            </el-tag>
+          </div>
+        </div>
       </el-form-item>
       <el-form-item :label="t('workOrderList.form.priority')">
         <el-select v-model="createForm.priority" :placeholder="t('workOrderList.form.placeholders.selectPriority')" style="width: 100%">
@@ -424,8 +463,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import request from '@/utils/request'
 import { workOrderAPI } from '../../api/workorder'
+import { sitePlanningApi } from '@/api/sitePlanning'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Search, Refresh, Plus, Sort, WarningFilled, Download } from '@element-plus/icons-vue'
+import { Edit, Delete, Search, Refresh, Plus, Sort, WarningFilled, Download, Upload } from '@element-plus/icons-vue'
 import { createDebouncedTracker } from '@/utils/operationTrack'
 import { useUserStore } from '@/stores/user'
 
@@ -521,7 +561,7 @@ const normalizeStatusList = (list) => {
   }
   return out
 }
-const createTypeValues = ['site_survey', 'opening_inspection', 'equipment_replacement', 'ssv']
+const createTypeValues = ['site_survey', 'opening_inspection', 'equipment_replacement', 'sector_expansion', 'ssv']
 const sortFieldOptions = computed(() => [
   { label: t('workOrderList.sort.fields.createdAt'), value: 'created_at' },
   { label: t('workOrderList.sort.fields.updatedAt'), value: 'updated_at' },
@@ -583,6 +623,7 @@ const createForm = ref({
   template_id: null,
   // 设备更换工单：多选设备位（用 key 数组承载，提交时转换为 [{sector_id, band}]）
   replacement_targets: [],
+  expansion_target_cells: [],
 })
 const SITE_SUGGEST_LIMIT = 20
 const SITE_SEARCH_LIMIT = 50
@@ -600,6 +641,9 @@ const formRef = ref()
 const replacementTargetOptions = ref([])
 const replacementTargetsLoading = ref(false)
 const lastReplacementTargetsSiteId = ref(null)
+const expansionPreview = ref(null)
+const expansionFileName = ref('')
+const expansionPreviewLoading = ref(false)
 
 // 重复安装工单对话框
 const dupVisible = ref(false)
@@ -630,12 +674,25 @@ const validateReplacementTargets = (rule, value, callback) => {
   callback(new Error(t('workOrderList.validation.selectReplacementTarget')))
 }
 
+const validateExpansionTargetCells = (rule, value, callback) => {
+  if (createForm.value.type !== 'sector_expansion') {
+    callback()
+    return
+  }
+  if (Array.isArray(value) && value.length > 0 && expansionPreview.value) {
+    callback()
+    return
+  }
+  callback(new Error(t('workOrderList.validation.uploadExpansionLld')))
+}
+
 const rules = computed(() => ({
   site_id: [{ required: true, message: t('workOrderList.validation.selectSite'), trigger: 'change' }],
   type: [{ required: true, message: t('workOrderList.validation.selectType'), trigger: 'change' }],
   assigned_to: [{ required: true, message: t('workOrderList.validation.selectAssignee'), trigger: 'change' }],
   title: [{ required: true, message: t('workOrderList.validation.enterTitle'), trigger: 'blur' }],
   replacement_targets: [{ validator: validateReplacementTargets, trigger: 'change' }],
+  expansion_target_cells: [{ validator: validateExpansionTargetCells, trigger: 'change' }],
 }))
 
 const siteSelectNoDataText = computed(() => {
@@ -713,11 +770,13 @@ const openCreate = () => {
     description: '',
     template_id: null,
     replacement_targets: [],
+    expansion_target_cells: [],
   }
   resetSiteSearchState()
   templateOptions.value = []
   replacementTargetOptions.value = []
   lastReplacementTargetsSiteId.value = null
+  resetExpansionPreview()
   createVisible.value = true
 }
 
@@ -899,6 +958,7 @@ const handleSiteDropdownVisible = async (visible) => {
 }
 
 const handleSiteChange = async (siteId) => {
+  resetExpansionPreview()
   if (siteId) {
     await ensureSiteOption(siteId)
   } else {
@@ -936,6 +996,54 @@ const _parseReplacementTargetKey = (key) => {
   const band = String(parts[1] || '').trim()
   if (!sectorId || !band) return null
   return { sector_id: sectorId, band }
+}
+
+const resetExpansionPreview = () => {
+  expansionPreview.value = null
+  expansionFileName.value = ''
+  if (createForm.value) {
+    createForm.value.expansion_target_cells = []
+  }
+}
+
+const _extractExpansionPreviewError = (detail) => {
+  if (typeof detail === 'string') return detail
+  if (detail?.message) return detail.message
+  const issues = Array.isArray(detail?.issues) ? detail.issues : []
+  if (issues.length) {
+    return issues
+      .slice(0, 3)
+      .map((issue) => issue?.message || issue?.code)
+      .filter(Boolean)
+      .join('；')
+  }
+  return t('workOrderList.messages.expansionPreviewFailed')
+}
+
+const handleExpansionFileChange = async (uploadFile) => {
+  const siteId = createForm.value.site_id
+  const file = uploadFile?.raw
+  if (!siteId) {
+    ElMessage.warning(t('workOrderList.validation.selectSite'))
+    return
+  }
+  if (!file) return
+
+  expansionPreviewLoading.value = true
+  try {
+    const preview = await sitePlanningApi.previewSectorExpansion(siteId, file)
+    expansionPreview.value = preview
+    expansionFileName.value = file.name || uploadFile.name || ''
+    createForm.value.expansion_target_cells = Array.isArray(preview?.target_cells) ? preview.target_cells : []
+    ElMessage.success(t('workOrderList.messages.expansionPreviewSuccess'))
+    formRef.value?.validateField?.('expansion_target_cells')
+  } catch (e) {
+    console.error(e)
+    resetExpansionPreview()
+    ElMessage.error(_extractExpansionPreviewError(e?.response?.data?.detail))
+  } finally {
+    expansionPreviewLoading.value = false
+  }
 }
 
 const loadReplacementTargets = async () => {
@@ -984,6 +1092,9 @@ const loadReplacementTargets = async () => {
 }
 
 const onTypeOrSiteChange = async () => {
+  if (createForm.value.type !== 'sector_expansion') {
+    resetExpansionPreview()
+  }
   if (!createForm.value.site_id) {
     replacementTargetOptions.value = []
     createForm.value.replacement_targets = []
@@ -1044,6 +1155,30 @@ const submitCreate = () => {
         }
       } else {
         delete payload.replacement_targets
+      }
+      if (payload.type === 'sector_expansion') {
+        if (!expansionPreview.value || !Array.isArray(expansionPreview.value.target_cells)) {
+          ElMessage.error(t('workOrderList.messages.expansionTargetRequired'))
+          creating.value = false
+          return
+        }
+        payload.expansion_targets = expansionPreview.value.expansion_targets || expansionPreview.value.new_slots || []
+        payload.expansion_target_cells = expansionPreview.value.target_cells
+        payload.expansion_summary = {
+          current_planning_id: expansionPreview.value.current_planning_id,
+          current_planning_version: expansionPreview.value.current_planning_version,
+          current_sector_count: expansionPreview.value.current_sector_count,
+          target_sector_count: expansionPreview.value.target_sector_count,
+          target_cell_count: expansionPreview.value.target_cell_count,
+          bands: expansionPreview.value.bands || [],
+          current_slots: expansionPreview.value.current_slots || [],
+          target_slots: expansionPreview.value.target_slots || [],
+          new_slots: expansionPreview.value.new_slots || [],
+        }
+      } else {
+        delete payload.expansion_targets
+        delete payload.expansion_target_cells
+        delete payload.expansion_summary
       }
       if (payload.due_date) payload.due_date = new Date(payload.due_date).toISOString()
       await request.post('/api/work-orders', payload)
@@ -1302,7 +1437,7 @@ const buildWorkOrderProgress = (row) => {
 }
 
 const progressStageKeys = (type) => (
-  ['opening_inspection', 'equipment_replacement'].includes(type)
+  ['opening_inspection', 'equipment_replacement', 'sector_expansion'].includes(type)
     ? OPENING_PROGRESS_STAGE_KEYS
     : DEFAULT_PROGRESS_STAGE_KEYS
 )
@@ -1326,7 +1461,7 @@ const progressDotTooltip = (row, dot) => {
 }
 
 const statusText = (status, type) => {
-  if (type === 'opening_inspection' || type === 'equipment_replacement') {
+  if (['opening_inspection', 'equipment_replacement', 'sector_expansion'].includes(type)) {
     if (status === 'APPROVED') return t('workOrderList.statusOverrides.APPROVED')
     if (status === 'ACTIVATED') return t('workOrderList.statusOverrides.ACTIVATED')
     if (status === 'COMPLETED') return t('workOrderList.statusOverrides.COMPLETED')
@@ -1911,5 +2046,32 @@ onBeforeUnmount(() => {
   font-size: 12px;
   line-height: 1.4;
   color: #909399;
+}
+
+.expansion-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+
+.expansion-file-name {
+  min-width: 0;
+  color: #606266;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expansion-preview {
+  margin-top: 10px;
+}
+
+.expansion-slot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 </style>

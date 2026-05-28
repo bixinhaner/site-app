@@ -36,6 +36,13 @@ export const sitePlanningApi = {
     const url = `/api/sites/${siteId}/planning/lld-upload?dry_run=${dryRun}`
     return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
+  previewSectorExpansion: (siteId, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request.post(`/api/sites/${siteId}/planning/expansion-preview`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   getLldPlanning: (siteId) => request.get(`/api/sites/${siteId}/planning/lld`),
   listLldPlanning: (params = {}) => request.get('/api/sites/planning/lld-list', { params }),
   listLldCells: (params = {}) => request.get('/api/sites/planning/lld-cells', { params }),

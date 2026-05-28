@@ -1,7 +1,7 @@
 import threading
 import time
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from sqlalchemy.orm import Session
@@ -24,9 +24,17 @@ from app.services.omc_client import (
   is_success_status_payload,
 )
 from app.services.omc_state import (
+  get_bound_slot_rows_for_site,
+  get_device_state_by_sn,
   summarize_site_binding_slots,
   upsert_omc_device_state,
   summarize_site_omc_state,
+)
+from app.models.equipment_binding_history import BindingActionEnum, EquipmentBindingHistory
+from app.services.sector_expansion import (
+  create_planning_version_from_expansion,
+  get_expansion_target_slots_from_work_order,
+  serialize_slot,
 )
 from app.services.site_progress_service import rebuild_site_progress
 
@@ -319,6 +327,195 @@ def refresh_replacement_work_order_omc_status(db: Session, client: OmcClient, wo
   return summary
 
 
+def _summarize_expansion_binding_slots(db: Session, wo: WorkOrder) -> Dict[str, Any]:
+  target_slots = get_expansion_target_slots_from_work_order(wo)
+  all_bound_rows = [
+    row for row in get_bound_slot_rows_for_site(db, wo.site_id, opening_only=False)
+    if row.action != BindingActionEnum.UNBIND and str(row.equipment_sn or "").strip()
+  ]
+  all_slot_map: Dict[Tuple[str, str], EquipmentBindingHistory] = {}
+  for row in all_bound_rows:
+    sector_id = str(row.sector_id or "").strip()
+    band = str(row.band or "").strip().upper()
+    if sector_id and band:
+      all_slot_map[(sector_id, band)] = row
+
+  covered_slots = [slot for slot in target_slots if slot in all_slot_map]
+  missing_slots = [slot for slot in target_slots if slot not in all_slot_map]
+  relevant_rows = [all_slot_map[slot] for slot in covered_slots]
+
+  return {
+    "site_id": wo.site_id,
+    "slot_check_required": True,
+    "expected_slots": [serialize_slot(slot) for slot in target_slots],
+    "expected_slot_count": len(target_slots),
+    "covered_slots": [serialize_slot(slot) for slot in covered_slots],
+    "bound_slot_count": len(covered_slots),
+    "missing_slots": [serialize_slot(slot) for slot in missing_slots],
+    "all_slots_bound": bool(target_slots) and not missing_slots,
+    "rows": relevant_rows,
+    "ready_for_status": bool(target_slots) and bool(relevant_rows) and not missing_slots,
+  }
+
+
+def _summarize_expansion_ever_state(db: Session, wo: WorkOrder) -> Dict[str, Any]:
+  binding_summary = _summarize_expansion_binding_slots(db, wo)
+  binding_rows: List[EquipmentBindingHistory] = list(binding_summary.get("rows") or [])
+  sns = sorted({
+    str(row.equipment_sn).strip()
+    for row in binding_rows
+    if str(row.equipment_sn or "").strip()
+  })
+  devices: List[Dict[str, Any]] = []
+
+  all_ever_online = True
+  all_ever_activated = True
+  for sn in sns:
+    state = get_device_state_by_sn(db, sn)
+    ever_online = bool(state.ever_online) if state else False
+    ever_activated = bool(state.ever_activated) if state else False
+    devices.append(
+      {
+        "sn": sn,
+        "ever_online": ever_online,
+        "ever_activated": ever_activated,
+        "omc_online_raw": state.omc_online_raw if state else None,
+        "omc_active_raw": state.omc_active_raw if state else None,
+        "last_seen_at": to_utc_iso(state.last_seen_at) if state and state.last_seen_at else None,
+      }
+    )
+    if not ever_online:
+      all_ever_online = False
+    if not ever_activated:
+      all_ever_activated = False
+
+  if not sns or not bool(binding_summary.get("ready_for_status")):
+    all_ever_online = False
+    all_ever_activated = False
+
+  return {
+    "site_id": wo.site_id,
+    "sns": sns,
+    "all_ever_online": all_ever_online,
+    "all_ever_activated": all_ever_activated,
+    "devices": devices,
+    "slot_check_required": True,
+    "expected_slot_count": int(binding_summary.get("expected_slot_count") or 0),
+    "bound_slot_count": int(binding_summary.get("bound_slot_count") or 0),
+    "all_slots_bound": bool(binding_summary.get("all_slots_bound")),
+    "missing_slots": list(binding_summary.get("missing_slots") or []),
+  }
+
+
+def _commit_expansion_planning_if_needed(
+  db: Session,
+  wo: WorkOrder,
+  *,
+  operator_id: Optional[int] = None,
+) -> Optional[int]:
+  extra = dict(wo.extra_data or {})
+  if extra.get("expansion_committed_planning_id"):
+    return int(extra.get("expansion_committed_planning_id"))
+
+  target_cells = extra.get("expansion_target_cells") or []
+  if not target_cells:
+    raise ValueError("扇区扩容工单缺少 expansion_target_cells，无法合并规划")
+
+  site = db.query(Site).filter(Site.id == wo.site_id).first()
+  if not site:
+    raise ValueError("扇区扩容工单站点不存在，无法合并规划")
+
+  actor_id = operator_id or wo.reviewer_id or wo.assigned_by or 1
+  planning = create_planning_version_from_expansion(
+    db,
+    site=site,
+    target_cells=target_cells,
+    operator_id=actor_id,
+    work_order_id=wo.id,
+  )
+  extra["expansion_committed_planning_id"] = planning.id
+  extra["expansion_committed_planning_version"] = planning.version
+  extra["expansion_committed_at"] = to_utc_iso(datetime.utcnow())
+  wo.extra_data = extra
+  return int(planning.id)
+
+
+def refresh_sector_expansion_work_order_omc_status(db: Session, client: OmcClient, wo: WorkOrder) -> Dict:
+  """
+  针对“扇区扩容工单”：
+  - 只检查扩容目标新增设备位，不用当前规划的全部槽位做门禁
+  - 新增设备位全部曾经在线后推进到 ACTIVATED
+  - 新增设备位全部曾经激活后完成工单，并将目标 LLD 合并为当前规划
+  """
+  if wo.type != WorkOrderTypeEnum.SECTOR_EXPANSION:
+    return {}
+
+  binding_summary = _summarize_expansion_binding_slots(db, wo)
+  sns = sorted({
+    str(row.equipment_sn).strip()
+    for row in (binding_summary.get("rows") or [])
+    if str(getattr(row, "equipment_sn", "") or "").strip()
+  })
+
+  if not sns:
+    summary = {
+      "sns": [],
+      "online": {},
+      "activated": {},
+      "all_online": False,
+      "all_activated": False,
+      "checked_at": to_utc_iso(datetime.utcnow()),
+    }
+  else:
+    online_map, activated_map = _check_site_devices_status(db, client, sns)
+    binding_ready = bool(binding_summary.get("ready_for_status"))
+    all_online = binding_ready and all(online_map.values()) if sns else False
+    all_activated = binding_ready and bool(activated_map) and all(activated_map.values()) if sns else False
+    summary = {
+      "sns": sns,
+      "online": online_map,
+      "activated": activated_map,
+      "all_online": bool(all_online),
+      "all_activated": bool(all_activated),
+      "checked_at": to_utc_iso(datetime.utcnow()),
+    }
+
+  summary["slot_check_required"] = True
+  summary["expected_slot_count"] = int(binding_summary.get("expected_slot_count") or 0)
+  summary["bound_slot_count"] = int(binding_summary.get("bound_slot_count") or 0)
+  summary["all_slots_bound"] = bool(binding_summary.get("all_slots_bound"))
+  summary["missing_slots"] = list(binding_summary.get("missing_slots") or [])
+
+  ever_summary = _summarize_expansion_ever_state(db, wo)
+  ever_all_online = bool(ever_summary.get("all_ever_online"))
+  ever_all_activated = bool(ever_summary.get("all_ever_activated"))
+  summary["all_ever_online"] = ever_all_online
+  summary["all_ever_activated"] = ever_all_activated
+
+  if ever_all_online and wo.status == WorkOrderStatusEnum.APPROVED:
+    wo.status = WorkOrderStatusEnum.ACTIVATED
+    wo.activated_at = datetime.utcnow()
+
+  if ever_all_activated and wo.status in (
+    WorkOrderStatusEnum.APPROVED,
+    WorkOrderStatusEnum.ACTIVATED,
+  ):
+    wo.status = WorkOrderStatusEnum.COMPLETED
+    wo.completed_at = datetime.utcnow()
+    _commit_expansion_planning_if_needed(db, wo)
+
+  extra = dict(wo.extra_data or {})
+  extra["omc_status"] = summary
+  wo.extra_data = extra
+  wo.updated_at = datetime.utcnow()
+  rebuild_site_progress(
+    db,
+    wo.site_id,
+    reason="refresh_sector_expansion_work_order_omc_status",
+  )
+  return summary
+
+
 def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
   """根据聚合表的 ever 状态推进开站工单/站点状态，不再调用 OMC 实时接口。
 
@@ -373,6 +570,63 @@ def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
     db,
     site_id,
     reason="advance_opening_work_orders_by_ever",
+  )
+  return result
+
+
+def advance_sector_expansion_work_orders_by_ever(db: Session, site_id: int) -> Dict:
+  """根据聚合表的 ever 状态推进扇区扩容工单，并在激活完成后合并目标规划。"""
+  result = {
+    "site_id": site_id,
+    "work_orders": [],
+  }
+
+  wos = db.query(WorkOrder).filter(
+    WorkOrder.site_id == site_id,
+    WorkOrder.type == WorkOrderTypeEnum.SECTOR_EXPANSION,
+    WorkOrder.status.in_([WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED]),
+  ).all()
+
+  for wo in wos:
+    changed = False
+    summary = _summarize_expansion_ever_state(db, wo)
+    ever_all_online = bool(summary.get("all_ever_online"))
+    ever_all_activated = bool(summary.get("all_ever_activated"))
+
+    if ever_all_online and wo.status == WorkOrderStatusEnum.APPROVED:
+      wo.status = WorkOrderStatusEnum.ACTIVATED
+      wo.activated_at = datetime.utcnow()
+      changed = True
+
+    if ever_all_activated and wo.status in (WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED):
+      wo.status = WorkOrderStatusEnum.COMPLETED
+      wo.completed_at = datetime.utcnow()
+      _commit_expansion_planning_if_needed(db, wo)
+      changed = True
+
+    extra = dict(wo.extra_data or {})
+    omc_status = dict(extra.get("omc_status") or {})
+    omc_status.update({
+      "sns": summary.get("sns") or [],
+      "all_ever_online": ever_all_online,
+      "all_ever_activated": ever_all_activated,
+      "slot_check_required": True,
+      "expected_slot_count": int(summary.get("expected_slot_count") or 0),
+      "bound_slot_count": int(summary.get("bound_slot_count") or 0),
+      "all_slots_bound": bool(summary.get("all_slots_bound")),
+      "missing_slots": list(summary.get("missing_slots") or []),
+      "checked_at": to_utc_iso(datetime.utcnow()),
+    })
+    extra["omc_status"] = omc_status
+    wo.extra_data = extra
+
+    if changed:
+      result["work_orders"].append({"id": wo.id, "status": wo.status.value})
+
+  rebuild_site_progress(
+    db,
+    site_id,
+    reason="advance_sector_expansion_work_orders_by_ever",
   )
   return result
 
@@ -439,7 +693,11 @@ def run_omc_check_for_work_order(work_order_id: str) -> None:
   db = SessionLocal()
   try:
     wo = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).first()
-    if not wo or wo.type not in (WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT):
+    if not wo or wo.type not in (
+      WorkOrderTypeEnum.OPENING_INSPECTION,
+      WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
+      WorkOrderTypeEnum.SECTOR_EXPANSION,
+    ):
       return
 
     client = get_omc_client(db)
@@ -451,6 +709,8 @@ def run_omc_check_for_work_order(work_order_id: str) -> None:
       refresh_opening_work_order_omc_status(db, client, wo)
     elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
       refresh_replacement_work_order_omc_status(db, client, wo)
+    elif wo.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
+      refresh_sector_expansion_work_order_omc_status(db, client, wo)
     db.commit()
   except Exception as exc:  # pragma: no cover
     db.rollback()
@@ -478,6 +738,7 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
           .filter(
             WorkOrder.type.in_(
               [WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT]
+              + [WorkOrderTypeEnum.SECTOR_EXPANSION]
             ),
             WorkOrder.status.in_([WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED]),
           )
@@ -490,6 +751,8 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
               refresh_opening_work_order_omc_status(db, client, wo)
             elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
               refresh_replacement_work_order_omc_status(db, client, wo)
+            elif wo.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
+              refresh_sector_expansion_work_order_omc_status(db, client, wo)
           except Exception as exc:
             print(f"[OMC] 定时检查工单 {wo.id} 失败: {exc}")
 

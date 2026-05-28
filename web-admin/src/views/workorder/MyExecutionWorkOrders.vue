@@ -184,6 +184,7 @@ const TYPE_LABEL_MAP = {
   site_survey: '站点勘查',
   opening_inspection: '新站安装',
   equipment_replacement: '设备更换',
+  sector_expansion: '扇区扩容',
   ssv: 'SSV 验收',
   maintenance: '维护检查',
   power_issue: '断电问题',

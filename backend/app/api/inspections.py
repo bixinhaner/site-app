@@ -4448,13 +4448,17 @@ async def bind_equipment_to_sector(
         detail="当前未启用 Web 端设备绑定",
     )
 
-    # 识别工单类型（设备更换工单允许“直接换绑”）
+    # 识别工单类型（设备更换/扇区扩容工单允许“直接换绑”）
     wo: Optional[WorkOrder] = work_order
     is_replacement_wo = False
+    is_sector_expansion_wo = False
     if getattr(inspection, "work_order_id", None):
         wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
         if wo and wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
             is_replacement_wo = True
+        if wo and wo.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
+            is_sector_expansion_wo = True
+    can_direct_rebind_slot = is_replacement_wo or is_sector_expansion_wo
     
     # 验证设备状态（仅在绑定操作时验证）
     equipment_instance = None
@@ -4532,8 +4536,8 @@ async def bind_equipment_to_sector(
 
         slot_current_sn = slot_unique[0] if slot_unique else None
 
-        # 非设备更换工单：仍要求先解绑再绑定，避免误操作覆盖
-        if slot_current_sn and slot_current_sn != str(equipment_sn).strip() and not is_replacement_wo:
+        # 非设备更换/扩容工单：仍要求先解绑再绑定，避免误操作覆盖
+        if slot_current_sn and slot_current_sn != str(equipment_sn).strip() and not can_direct_rebind_slot:
             raise HTTPException(
                 status_code=409,
                 detail=(

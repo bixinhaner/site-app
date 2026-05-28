@@ -21,6 +21,7 @@ class InspectionTypeEnum(str, enum.Enum):
 class TaskTypeEnum(str, enum.Enum):
     OPENING_INSPECTION = "opening_inspection"
     MAINTENANCE = "maintenance"
+    SECTOR_EXPANSION = "sector_expansion"
     POWER_ISSUE = "power_issue"
     TRANSMISSION_ISSUE = "transmission_issue"
     GPS_ISSUE = "gps_issue"

@@ -421,6 +421,7 @@ const workOrderTypeOptions = [
   { value: 'site_survey', label: '站点勘查' },
   { value: 'opening_inspection', label: '新站安装' },
   { value: 'equipment_replacement', label: '设备更换' },
+  { value: 'sector_expansion', label: '扇区扩容' },
   { value: 'ssv', label: 'SSV 验收' },
   { value: 'maintenance', label: '维护检查' },
   { value: 'power_issue', label: '断电问题' },

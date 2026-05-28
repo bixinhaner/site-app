@@ -23,7 +23,11 @@ from app.services.omc_client import (
   is_success_status_payload,
 )
 from app.services.omc_state import upsert_omc_device_state
-from app.services.omc_monitor import advance_opening_work_orders_by_ever
+from app.services.omc_monitor import (
+  advance_opening_work_orders_by_ever,
+  advance_replacement_work_orders_by_ever,
+  advance_sector_expansion_work_orders_by_ever,
+)
 from app.services.work_order_rule_service import (
   get_ssv_create_by_ever_activated_only,
   upsert_work_order_rules,
@@ -425,6 +429,8 @@ async def get_device_status_by_sn(
     ).order_by(EquipmentBindingHistory.operated_at.desc()).first()
     if binding and binding.site_id:
       advance_opening_work_orders_by_ever(db, binding.site_id)
+      advance_replacement_work_orders_by_ever(db, binding.site_id)
+      advance_sector_expansion_work_orders_by_ever(db, binding.site_id)
   except Exception as exc:  # pragma: no cover
     print(f"[OMC] SN={sn} 推进工单/站点状态失败: {exc}")
 

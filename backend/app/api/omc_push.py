@@ -9,6 +9,11 @@ from app.core.database import get_db
 from app.models.equipment_binding_history import EquipmentBindingHistory
 from app.models.inspection import SiteInspection
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
+from app.services.omc_monitor import (
+    advance_opening_work_orders_by_ever,
+    advance_replacement_work_orders_by_ever,
+    advance_sector_expansion_work_orders_by_ever,
+)
 from app.services.omc_state import upsert_omc_device_state
 from app.services.site_progress_service import rebuild_site_progress_for_sites
 
@@ -70,7 +75,11 @@ async def omc_status_callback(
             .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
             .filter(
                 EquipmentBindingHistory.equipment_sn == sn,
-                WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+                WorkOrder.type.in_([
+                    WorkOrderTypeEnum.OPENING_INSPECTION,
+                    WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
+                    WorkOrderTypeEnum.SECTOR_EXPANSION,
+                ]),
                 WorkOrder.status != WorkOrderStatusEnum.VOIDED,
             )
             .distinct()
@@ -84,4 +93,8 @@ async def omc_status_callback(
             reason="omc_status_callback",
             force=True,
         )
+        for site_id in affected_site_ids:
+            advance_opening_work_orders_by_ever(db, site_id)
+            advance_replacement_work_orders_by_ever(db, site_id)
+            advance_sector_expansion_work_orders_by_ever(db, site_id)
     db.commit()

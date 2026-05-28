@@ -622,6 +622,7 @@ export default {
       confirmUpdate: "Konfirmasi Perubahan",
       confirmContinueCreate: "Tetap Buat",
       voidConfirm: "Konfirmasi Pembatalan",
+      uploadExpansionLld: "Unggah LLD Target",
     },
     dialogs: {
       createTitle: "Buat Perintah Kerja",
@@ -650,6 +651,12 @@ export default {
       replacementTargetHint:
         "Dihasilkan dari slot perencanaan situs (sector_id + band). Mendukung pilihan ganda.",
       replacementTargetOption: "Sektor {sectorId} / Band {band}",
+      expansionLld: "LLD Target",
+      expansionLldHint:
+        "Untuk pratinjau ekspansi situs terpasang. Sistem hanya mengambil slot baru dan menggabungkan perencanaan setelah perintah kerja selesai.",
+      expansionPreviewTitle:
+        "Pratinjau lolos: saat ini {current} sektor, target {target} sektor, {slots} slot baru",
+      expansionSlotLabel: "Sektor {sectorId} / Band {band}",
       priority: "Prioritas",
       dueDate: "Batas Waktu",
       description: "Deskripsi",
@@ -699,6 +706,7 @@ export default {
     types: {
       opening_inspection: "Instalasi Situs Baru",
       equipment_replacement: "Penggantian Peralatan",
+      sector_expansion: "Ekspansi Sektor",
       maintenance: "Inspeksi Pemeliharaan",
       power_issue: "Masalah Daya",
       transmission_issue: "Masalah Transmisi",
@@ -771,6 +779,7 @@ export default {
     },
     validation: {
       selectReplacementTarget: "Silakan pilih slot penggantian",
+      uploadExpansionLld: "Silakan unggah dan lolos pratinjau LLD target",
       selectSite: "Silakan pilih situs",
       selectType: "Silakan pilih jenis",
       selectAssignee: "Silakan pilih petugas",
@@ -807,6 +816,10 @@ export default {
         "Perencanaan situs tidak ditemukan atau Anda tidak memiliki izin, sehingga slot penggantian tidak bisa dimuat",
       replacementTargetRequired:
         "Perintah kerja penggantian peralatan harus memilih slot penggantian",
+      expansionTargetRequired:
+        "Perintah kerja ekspansi sektor harus mengunggah LLD target terlebih dahulu",
+      expansionPreviewSuccess: "Pratinjau LLD target lolos",
+      expansionPreviewFailed: "Pratinjau LLD target gagal",
       createSuccess: "Berhasil dibuat",
       createFailed: "Gagal membuat",
       updateSuccess: "Berhasil diperbarui",

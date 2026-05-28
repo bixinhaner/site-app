@@ -19,7 +19,7 @@ from app.models.inspection import (
 )
 from app.models.work_order import WorkOrder, WorkOrderTypeEnum
 from app.schemas.inspection_enhanced import FieldDefinition
-from app.services.cell_generator import CellGenerator
+from app.services.cell_generator import CellGenerator, CellInfo
 from app.utils.field_validator import FieldValidator
 
 
@@ -82,6 +82,14 @@ def _coerce_float(value: Any) -> Optional[float]:
         return float(value)
     except Exception:
         return None
+
+
+def _sum_downtilt(mechanical: Any, electrical: Any) -> Optional[float]:
+    mech = _coerce_float(mechanical)
+    elec = _coerce_float(electrical)
+    if mech is None and elec is None:
+        return None
+    return float(mech or 0.0) + float(elec or 0.0)
 
 
 def _eval_dependency_condition(value: Any, condition: Optional[dict]) -> bool:
@@ -386,36 +394,122 @@ def prepare_generation_context(
     if inspection.work_order_id:
         work_order = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
 
-    if work_order and work_order.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
+    if work_order and work_order.type in (
+        WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
+        WorkOrderTypeEnum.SECTOR_EXPANSION,
+    ):
         extra_data = work_order.extra_data or {}
-        raw_targets = extra_data.get("replacement_targets") or []
+        target_key = (
+            "expansion_targets"
+            if work_order.type == WorkOrderTypeEnum.SECTOR_EXPANSION
+            else "replacement_targets"
+        )
+        raw_targets = extra_data.get(target_key) or []
         target_slots = set()
         for target in raw_targets:
             if not isinstance(target, dict):
                 continue
             sector_id = str(target.get("sector_id") or "").strip()
-            band = str(target.get("band") or "").strip()
+            band = str(target.get("band") or "").strip().upper()
             if sector_id and band:
                 target_slots.add((sector_id, band))
         if not target_slots:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="设备更换工单缺少 replacement_targets，无法同步检查模板",
+                detail=(
+                    "扇区扩容工单缺少 expansion_targets，无法同步检查模板"
+                    if work_order.type == WorkOrderTypeEnum.SECTOR_EXPANSION
+                    else "设备更换工单缺少 replacement_targets，无法同步检查模板"
+                ),
             )
 
-        devices = [device for device in devices if (str(device.sector_id), str(device.band)) in target_slots]
-        carrier_cells = [
-            cell for cell in carrier_cells if (str(cell.sector_id), str(cell.band)) in target_slots
-        ]
+        if work_order.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
+            def _target_slot_sort(slot: Tuple[str, str]) -> Tuple[int, int | str, str]:
+                sector_id, band = slot
+                if str(sector_id).isdigit():
+                    return 0, int(sector_id), band
+                return 1, sector_id, band
 
-        for current in extra_data.get("replacement_old_devices") or []:
-            if not isinstance(current, dict):
-                continue
-            sector_id = str(current.get("sector_id") or "").strip()
-            band = str(current.get("band") or "").strip()
-            old_sn = str(current.get("old_sn") or "").strip()
-            if sector_id and band and old_sn:
-                equipment_sn_map[(sector_id, band)] = old_sn
+            target_cells = [
+                cell for cell in (extra_data.get("expansion_target_cells") or [])
+                if isinstance(cell, dict)
+            ]
+            cells_by_slot: Dict[Tuple[str, str], List[dict]] = {}
+            for cell in target_cells:
+                sector_id_raw = cell.get("local_cell_id")
+                band_raw = cell.get("band_code")
+                if sector_id_raw is None or not band_raw:
+                    continue
+                try:
+                    sector_id = str(int(sector_id_raw))
+                except Exception:
+                    sector_id = str(sector_id_raw).strip()
+                band = str(band_raw).strip().upper()
+                slot = (sector_id, band)
+                if slot in target_slots:
+                    cells_by_slot.setdefault(slot, []).append(cell)
+
+            devices = []
+            for sector_id, band in sorted(target_slots, key=_target_slot_sort):
+                slot_cells = cells_by_slot.get((sector_id, band)) or []
+                first = slot_cells[0] if slot_cells else {}
+                devices.append(
+                    CellInfo(
+                        sector_id=sector_id,
+                        band=band,
+                        cell_id=f"{sector_id}_{band}",
+                        azimuth=_coerce_float(first.get("azimuth_deg")),
+                        downtilt=_sum_downtilt(
+                            first.get("mechanical_downtilt_deg"),
+                            first.get("electrical_downtilt_deg"),
+                        ) if first else None,
+                    )
+                )
+
+            if template_requires_lld_cells(template_data or {}):
+                carrier_cells = []
+                seen_cells = set()
+                for slot, slot_cells in cells_by_slot.items():
+                    sector_id, band = slot
+                    for cell in sorted(slot_cells, key=lambda c: int(c.get("frequency") or 0)):
+                        earfcn = cell.get("frequency")
+                        earfcn_str = str(int(earfcn)) if earfcn is not None else "NA"
+                        cell_key = (sector_id, band, earfcn_str)
+                        if cell_key in seen_cells:
+                            continue
+                        seen_cells.add(cell_key)
+                        carrier_cells.append(
+                            CellInfo(
+                                sector_id=sector_id,
+                                band=band,
+                                cell_id=f"{sector_id}_{band}_{earfcn_str}",
+                                azimuth=_coerce_float(cell.get("azimuth_deg")),
+                                downtilt=_sum_downtilt(
+                                    cell.get("mechanical_downtilt_deg"),
+                                    cell.get("electrical_downtilt_deg"),
+                                ),
+                                earfcn=int(earfcn) if earfcn is not None else None,
+                            )
+                        )
+                if not carrier_cells:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="扇区扩容工单缺少目标 LLD 小区明细，无法生成小区级检查项",
+                    )
+        else:
+            devices = [device for device in devices if (str(device.sector_id), str(device.band).upper()) in target_slots]
+            carrier_cells = [
+                cell for cell in carrier_cells if (str(cell.sector_id), str(cell.band).upper()) in target_slots
+            ]
+
+            for current in extra_data.get("replacement_old_devices") or []:
+                if not isinstance(current, dict):
+                    continue
+                sector_id = str(current.get("sector_id") or "").strip()
+                band = str(current.get("band") or "").strip().upper()
+                old_sn = str(current.get("old_sn") or "").strip()
+                if sector_id and band and old_sn:
+                    equipment_sn_map[(sector_id, band)] = old_sn
 
     sectors = sorted({str(device.sector_id) for device in devices if getattr(device, "sector_id", None) not in (None, "")})
     return InspectionGenerationContext(

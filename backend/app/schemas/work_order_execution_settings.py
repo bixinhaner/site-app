@@ -7,6 +7,7 @@ SUPPORTED_WEB_EXECUTION_WORK_ORDER_TYPES = (
     'site_survey',
     'opening_inspection',
     'equipment_replacement',
+    'sector_expansion',
     'ssv',
     'maintenance',
     'power_issue',

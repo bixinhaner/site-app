@@ -618,6 +618,7 @@ export default {
       confirmUpdate: "Confirm Update",
       confirmContinueCreate: "Create Anyway",
       voidConfirm: "Confirm Void",
+      uploadExpansionLld: "Upload Target LLD",
     },
     dialogs: {
       createTitle: "Create Work Order",
@@ -646,6 +647,12 @@ export default {
       replacementTargetHint:
         "Generated from site planning slots (sector_id + band). Multiple selection is supported.",
       replacementTargetOption: "Sector {sectorId} / Band {band}",
+      expansionLld: "Target LLD",
+      expansionLldHint:
+        "For installed site expansion preview. The system only extracts new slots and merges planning after the work order is completed.",
+      expansionPreviewTitle:
+        "Preview passed: current {current} sectors, target {target} sectors, {slots} new slot(s)",
+      expansionSlotLabel: "Sector {sectorId} / Band {band}",
       priority: "Priority",
       dueDate: "Due Date",
       description: "Description",
@@ -695,6 +702,7 @@ export default {
     types: {
       opening_inspection: "New Site Installation",
       equipment_replacement: "Equipment Replacement",
+      sector_expansion: "Sector Expansion",
       maintenance: "Maintenance Inspection",
       power_issue: "Power Issue",
       transmission_issue: "Transmission Issue",
@@ -768,6 +776,7 @@ export default {
     },
     validation: {
       selectReplacementTarget: "Please select at least one replacement slot",
+      uploadExpansionLld: "Please upload and pass target LLD preview",
       selectSite: "Please select a site",
       selectType: "Please select a type",
       selectAssignee: "Please select an assignee",
@@ -804,6 +813,10 @@ export default {
         "Site planning was not found or permission is missing, so replacement slots cannot be loaded",
       replacementTargetRequired:
         "Equipment replacement work orders must choose replacement slots",
+      expansionTargetRequired:
+        "Sector expansion work orders must upload the target LLD first",
+      expansionPreviewSuccess: "Target LLD preview passed",
+      expansionPreviewFailed: "Target LLD preview failed",
       createSuccess: "Created successfully",
       createFailed: "Create failed",
       updateSuccess: "Updated successfully",
