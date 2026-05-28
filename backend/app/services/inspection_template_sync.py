@@ -396,12 +396,12 @@ def prepare_generation_context(
 
     if work_order and work_order.type in (
         WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
-        WorkOrderTypeEnum.SECTOR_EXPANSION,
+        WorkOrderTypeEnum.CELL_EXPANSION,
     ):
         extra_data = work_order.extra_data or {}
         target_key = (
             "expansion_targets"
-            if work_order.type == WorkOrderTypeEnum.SECTOR_EXPANSION
+            if work_order.type == WorkOrderTypeEnum.CELL_EXPANSION
             else "replacement_targets"
         )
         raw_targets = extra_data.get(target_key) or []
@@ -417,13 +417,13 @@ def prepare_generation_context(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "扇区扩容工单缺少 expansion_targets，无法同步检查模板"
-                    if work_order.type == WorkOrderTypeEnum.SECTOR_EXPANSION
+                    "小区扩容工单缺少 expansion_targets，无法同步检查模板"
+                    if work_order.type == WorkOrderTypeEnum.CELL_EXPANSION
                     else "设备更换工单缺少 replacement_targets，无法同步检查模板"
                 ),
             )
 
-        if work_order.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
+        if work_order.type == WorkOrderTypeEnum.CELL_EXPANSION:
             def _target_slot_sort(slot: Tuple[str, str]) -> Tuple[int, int | str, str]:
                 sector_id, band = slot
                 if str(sector_id).isdigit():
@@ -494,7 +494,7 @@ def prepare_generation_context(
                 if not carrier_cells:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="扇区扩容工单缺少目标 LLD 小区明细，无法生成小区级检查项",
+                        detail="小区扩容工单缺少目标 LLD 小区明细，无法生成小区级检查项",
                     )
         else:
             devices = [device for device in devices if (str(device.sector_id), str(device.band).upper()) in target_slots]

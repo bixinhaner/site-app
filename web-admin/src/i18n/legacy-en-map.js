@@ -2014,7 +2014,7 @@ const legacyEnMap = {
   扇区数: "Number of sectors",
   "扇区数: {{ summary.sector_count }}":
     "Number of sectors: {{ summary.sector_count }}",
-  扇区扩容: "Sector Expansion",
+  小区扩容: "Cell Expansion",
   扇区信息: "sector information",
   上传被系统阻断: "Upload blocked by the system",
   上传附件: "Upload attachment",

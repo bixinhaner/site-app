@@ -1081,8 +1081,8 @@
 
 		const isOpeningInspection = computed(() => String(workOrderData.value?.type || '') === 'opening_inspection')
 		const isEquipmentReplacement = computed(() => String(workOrderData.value?.type || '') === 'equipment_replacement')
-		const isSectorExpansion = computed(() => String(workOrderData.value?.type || '') === 'sector_expansion')
-		const canDirectReplaceDevice = computed(() => isEquipmentReplacement.value || isSectorExpansion.value)
+		const isCellExpansion = computed(() => String(workOrderData.value?.type || '') === 'cell_expansion')
+		const canDirectReplaceDevice = computed(() => isEquipmentReplacement.value || isCellExpansion.value)
 		const hasBoundDevicesHint = computed(() => (checkItems.value || []).some((it) => !!it?.equipment_sn))
 
 		// 设备更换：从工单 extra_data.replacement_history 提取可退库的旧设备 SN（去重）

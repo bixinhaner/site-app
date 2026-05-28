@@ -44,11 +44,11 @@ class WorkOrderProgressCalculator:
         """
         base_progress = cls.STATUS_PROGRESS_MAP.get(work_order.status, 0)
         
-        # 针对开站/设备更换/扇区扩容工单，使用 OMC 门禁阶段进度：APPROVED=80, ACTIVATED=90, COMPLETED=100
+        # 针对开站/设备更换/小区扩容工单，使用 OMC 门禁阶段进度：APPROVED=80, ACTIVATED=90, COMPLETED=100
         if work_order.type in (
             WorkOrderTypeEnum.OPENING_INSPECTION,
             WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
-            WorkOrderTypeEnum.SECTOR_EXPANSION,
+            WorkOrderTypeEnum.CELL_EXPANSION,
         ):
             if work_order.status == WorkOrderStatusEnum.APPROVED:
                 base_progress = 80

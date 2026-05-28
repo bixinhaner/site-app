@@ -101,12 +101,130 @@ def device_slot_key(cell: Any) -> Tuple[str, str]:
     return str(int(lcid)), str(band).strip().upper()
 
 
+def _as_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _as_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _get_cell_value(cell: Any, field: str) -> Any:
+    return getattr(cell, field, None) if isinstance(cell, SitePlanningCell) else cell.get(field)
+
+
+def _azimuth_delta(a: float, b: float) -> float:
+    diff = abs((float(a) % 360) - (float(b) % 360))
+    return min(diff, 360 - diff)
+
+
+def _physical_sector_reference(
+    planning: SitePlanning,
+    current_cells: Optional[List[SitePlanningCell]] = None,
+) -> Dict[str, Any]:
+    sector_ids = set()
+    defaults: Dict[int, Dict[str, Any]] = {}
+    azimuth_refs: List[Tuple[int, float]] = []
+    has_planning_sectors = False
+
+    for sector in planning.sectors or []:
+        sector_id = _as_int(sector.sector_index)
+        if sector_id is None:
+            continue
+        has_planning_sectors = True
+        sector_ids.add(sector_id)
+        defaults[sector_id] = {
+            "sector_index": sector_id,
+            "azimuth_deg": _as_float(sector.azimuth_deg) or 0.0,
+            "downtilt_deg": _as_float(sector.downtilt_deg) or 0.0,
+            "bands": sector.bands or [],
+        }
+        if sector.azimuth_deg is not None:
+            azimuth_refs.append((sector_id, float(sector.azimuth_deg)))
+
+    for cell in current_cells or []:
+        lcid = _as_int(getattr(cell, "local_cell_id", None))
+        if lcid is None:
+            continue
+        if not has_planning_sectors or lcid in sector_ids:
+            sector_ids.add(lcid)
+        azimuth = _as_float(getattr(cell, "azimuth_deg", None))
+        if azimuth is not None and lcid in sector_ids:
+            azimuth_refs.append((lcid, azimuth))
+            defaults.setdefault(lcid, {"sector_index": lcid, "azimuth_deg": azimuth, "downtilt_deg": 0.0, "bands": []})
+
+    if not sector_ids and planning.sector_count:
+        sector_ids.update(range(1, int(planning.sector_count) + 1))
+
+    return {
+        "sector_ids": sector_ids,
+        "azimuth_refs": azimuth_refs,
+        "defaults": defaults,
+    }
+
+
+def _infer_physical_sector_id(cell: Any, reference: Dict[str, Any]) -> int:
+    lcid = _as_int(_get_cell_value(cell, "local_cell_id"))
+    sector_ids = reference.get("sector_ids") or set()
+
+    if lcid is not None and lcid in sector_ids:
+        return lcid
+
+    azimuth = _as_float(_get_cell_value(cell, "azimuth_deg"))
+    if azimuth is not None:
+        best_sector = None
+        best_delta = None
+        for sector_id, ref_azimuth in reference.get("azimuth_refs") or []:
+            delta = _azimuth_delta(azimuth, ref_azimuth)
+            if best_delta is None or delta < best_delta:
+                best_sector = sector_id
+                best_delta = delta
+        if best_sector is not None and best_delta is not None and best_delta <= 2.0:
+            return int(best_sector)
+
+    if lcid is not None:
+        for candidate in (lcid % 10, lcid % 100):
+            if candidate and candidate in sector_ids:
+                return int(candidate)
+        return lcid
+
+    return 0
+
+
 def serialize_slot(slot: Tuple[str, str]) -> Dict[str, str]:
     sector_id, band = slot
     return {
         "sector_id": str(sector_id),
         "band": str(band),
         "cell_id": f"{sector_id}_{band}",
+    }
+
+
+def serialize_cell_target(cell: Dict[str, Any], physical_sector_id: int) -> Dict[str, Any]:
+    local_cell_id = int(cell.get("local_cell_id"))
+    band = str(cell.get("band_code") or "").strip().upper()
+    rat = str(cell.get("rat") or "").strip().upper()
+    return {
+        "sector_id": str(local_cell_id),
+        "physical_sector_id": str(physical_sector_id),
+        "local_cell_id": local_cell_id,
+        "rat": rat,
+        "band": band,
+        "cell_id": f"{local_cell_id}_{band}",
+        "display_label": f"扇区 {physical_sector_id} / LCID {local_cell_id} / {band}",
+        "frequency": cell.get("frequency"),
+        "pci": cell.get("pci"),
+        "azimuth": cell.get("azimuth_deg"),
     }
 
 
@@ -140,6 +258,11 @@ def _slot_sort_key(slot: Tuple[str, str]) -> Tuple[int, int | str, str]:
     return 1, sector_id, band
 
 
+def _cell_identity_sort_key(key: Tuple[str, str, int]) -> Tuple[int, str, str]:
+    rat, band, lcid = key
+    return lcid, rat, band
+
+
 def _snapshot(planning: Optional[SitePlanning]) -> Optional[Dict[str, Any]]:
     if planning is None:
         return None
@@ -166,14 +289,17 @@ def _max_version(db: Session, site_id: int) -> int:
     return int(version or 0)
 
 
-def _build_planning_summary_from_cells(cells: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_planning_summary_from_cells(
+    cells: List[Dict[str, Any]],
+    reference: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    reference = reference or {"sector_ids": set(), "azimuth_refs": [], "defaults": {}}
     bands = sorted({str(c.get("band_code")).strip().upper() for c in cells if c.get("band_code")})
-    sector_ids = sorted(
-        {int(c.get("local_cell_id")) for c in cells if c.get("local_cell_id") is not None}
-    )
+    sector_ids = sorted({_infer_physical_sector_id(c, reference) for c in cells if c.get("local_cell_id") is not None})
     sectors = []
     for sector_id in sector_ids:
-        sec_cells = [c for c in cells if int(c.get("local_cell_id") or 0) == sector_id]
+        sec_cells = [c for c in cells if _infer_physical_sector_id(c, reference) == sector_id]
+        defaults = (reference.get("defaults") or {}).get(sector_id, {})
         azimuth = None
         mech = None
         elec = None
@@ -187,11 +313,17 @@ def _build_planning_summary_from_cells(cells: List[Dict[str, Any]]) -> Dict[str,
                 elec = float(cell.get("electrical_downtilt_deg"))
             if cell.get("band_code"):
                 sector_bands.append(str(cell.get("band_code")).strip().upper())
+        if azimuth is None:
+            azimuth = defaults.get("azimuth_deg")
+        if mech is None and elec is None:
+            downtilt = defaults.get("downtilt_deg")
+        else:
+            downtilt = float(mech or 0.0) + float(elec or 0.0)
         sectors.append(
             {
                 "sector_index": sector_id,
                 "azimuth_deg": float(azimuth or 0.0),
-                "downtilt_deg": float(mech or 0.0) + float(elec or 0.0),
+                "downtilt_deg": float(downtilt or 0.0),
                 "bands": sorted(set(sector_bands)),
             }
         )
@@ -221,21 +353,21 @@ def _validate_site_can_expand(site: Site) -> None:
     if status not in EXPANSION_ALLOWED_SITE_STATUSES:
         raise HTTPException(
             status_code=409,
-            detail=f"站点当前状态为 {status or '-'}，不适合创建扇区扩容工单；未安装站点请直接更新 LLD 后创建开站工单。",
+            detail=f"站点当前状态为 {status or '-'}，不适合创建小区扩容工单；未安装站点请直接更新 LLD 后创建开站工单。",
         )
 
 
 def _validate_no_active_expansion_work_order(db: Session, site_id: int, exclude_id: Optional[str] = None) -> None:
     query = db.query(WorkOrder).filter(
         WorkOrder.site_id == site_id,
-        WorkOrder.type == WorkOrderTypeEnum.SECTOR_EXPANSION,
+        WorkOrder.type == WorkOrderTypeEnum.CELL_EXPANSION,
         WorkOrder.status.in_(list(EXPANSION_IN_PROGRESS_STATUSES)),
     )
     if exclude_id:
         query = query.filter(WorkOrder.id != exclude_id)
     existing = query.order_by(WorkOrder.created_at.desc()).first()
     if existing:
-        raise HTTPException(status_code=409, detail="该站点已有进行中的扇区扩容工单")
+        raise HTTPException(status_code=409, detail="该站点已有进行中的小区扩容工单")
 
 
 def validate_expansion_target_cells(
@@ -285,6 +417,7 @@ def validate_expansion_target_cells(
     current_identity_map = {cell_identity_key(cell): cell for cell in current_cells}
     current_keys = set(current_identity_map.keys())
     target_keys = set(target_identity_map.keys())
+    physical_reference = _physical_sector_reference(current_planning, current_cells)
 
     deleted = sorted(current_keys - target_keys)
     if deleted:
@@ -309,25 +442,40 @@ def validate_expansion_target_cells(
 
     current_slots = {device_slot_key(cell) for cell in current_cells}
     target_slots = {device_slot_key(cell) for cell in normalized_cells}
-    new_slots = sorted(target_slots - current_slots, key=_slot_sort_key)
+    new_cell_keys = sorted(target_keys - current_keys, key=_cell_identity_sort_key)
+    new_slots = sorted({device_slot_key(target_identity_map[key]) for key in new_cell_keys}, key=_slot_sort_key)
 
-    if not new_slots:
-        raise HTTPException(status_code=409, detail="目标 LLD 没有新增设备位，无法创建扇区扩容工单")
+    if not new_cell_keys:
+        raise HTTPException(status_code=409, detail="目标 LLD 没有新增小区，无法创建小区扩容工单")
 
-    summary = _build_planning_summary_from_cells(normalized_cells)
+    current_summary = _build_planning_summary_from_cells(
+        [cell_kwargs_from_model(cell) for cell in current_cells],
+        physical_reference,
+    )
+    summary = _build_planning_summary_from_cells(normalized_cells, physical_reference)
+    new_cells = [
+        serialize_cell_target(target_identity_map[key], _infer_physical_sector_id(target_identity_map[key], physical_reference))
+        for key in new_cell_keys
+    ]
     return {
         "site_id": site.id,
         "current_planning_id": current_planning.id,
         "current_planning_version": current_planning.version,
-        "current_sector_count": current_planning.sector_count or 0,
+        "current_sector_count": current_summary["sector_count"],
         "target_sector_count": summary["sector_count"],
+        "current_physical_sector_count": current_summary["sector_count"],
+        "target_physical_sector_count": summary["sector_count"],
+        "current_cell_count": len(current_identity_map),
+        "target_cell_count": len(target_identity_map),
+        "new_cell_count": len(new_cells),
+        "new_device_count": len(new_slots),
         "current_slots": [serialize_slot(slot) for slot in sorted(current_slots, key=_slot_sort_key)],
         "target_slots": [serialize_slot(slot) for slot in sorted(target_slots, key=_slot_sort_key)],
         "new_slots": [serialize_slot(slot) for slot in new_slots],
-        "expansion_targets": [serialize_slot(slot) for slot in new_slots],
+        "new_cells": new_cells,
+        "expansion_targets": new_cells,
         "target_cells": normalized_cells,
         "bands": summary["bands"],
-        "target_cell_count": len(normalized_cells),
     }
 
 
@@ -351,7 +499,13 @@ def create_planning_version_from_expansion(
         exclude_work_order_id=work_order_id,
     )
     normalized_cells = validated["target_cells"]
-    summary = _build_planning_summary_from_cells(normalized_cells)
+    current_cells = (
+        db.query(SitePlanningCell)
+        .filter(SitePlanningCell.site_id == site.id, SitePlanningCell.planning_id == current.id)
+        .all()
+    )
+    physical_reference = _physical_sector_reference(current, current_cells)
+    summary = _build_planning_summary_from_cells(normalized_cells, physical_reference)
     before_snapshot = _snapshot(current)
 
     current.is_current = False
@@ -362,7 +516,7 @@ def create_planning_version_from_expansion(
         version=_max_version(db, site.id) + 1,
         bands=summary["bands"],
         sector_count=summary["sector_count"],
-        notes=f"Sector expansion merged from work order {work_order_id}",
+        notes=f"Cell expansion merged from work order {work_order_id}",
         is_current=True,
         created_by=operator_id,
     )
@@ -389,16 +543,18 @@ def create_planning_version_from_expansion(
         PlanningChangeLog(
             site_id=site.id,
             planning_id=planning.id,
-            operation="expansion_commit",
+            operation="cell_expansion_commit",
             actor_id=operator_id,
-            summary=f"Sector expansion work order {work_order_id}",
+            summary=f"Cell expansion work order {work_order_id}",
             before_snapshot=before_snapshot,
             after_snapshot=after_snapshot,
             diff={
                 "changed_fields": ["cells", "planning", "sectors"],
                 "current_planning_version": validated["current_planning_version"],
                 "new_slots": validated["new_slots"],
+                "new_cells": validated["new_cells"],
                 "target_sector_count": validated["target_sector_count"],
+                "target_cell_count": validated["target_cell_count"],
             },
         )
     )
@@ -406,7 +562,7 @@ def create_planning_version_from_expansion(
     rebuild_site_progress(
         db,
         site.id,
-        reason="sector_expansion_planning_commit",
+        reason="cell_expansion_planning_commit",
         operator_id=operator_id,
     )
     planning.updated_at = datetime.utcnow()

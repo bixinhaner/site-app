@@ -109,7 +109,7 @@ export const resolverAPI = {
 export const TASK_TYPES = {
   OPENING_INSPECTION: 'opening_inspection',
   EQUIPMENT_REPLACEMENT: 'equipment_replacement',
-  SECTOR_EXPANSION: 'sector_expansion',
+  CELL_EXPANSION: 'cell_expansion',
   MAINTENANCE: 'maintenance',
   POWER_ISSUE: 'power_issue',
   TRANSMISSION_ISSUE: 'transmission_issue',
@@ -120,7 +120,7 @@ export const TASK_TYPES = {
 export const TASK_TYPE_LABELS = {
   [TASK_TYPES.OPENING_INSPECTION]: '新站点设备安装',
   [TASK_TYPES.EQUIPMENT_REPLACEMENT]: '设备更换',
-  [TASK_TYPES.SECTOR_EXPANSION]: '扇区扩容',
+  [TASK_TYPES.CELL_EXPANSION]: '小区扩容',
   [TASK_TYPES.MAINTENANCE]: '维护检查',
   [TASK_TYPES.POWER_ISSUE]: '断电问题',
   [TASK_TYPES.TRANSMISSION_ISSUE]: '传输问题',

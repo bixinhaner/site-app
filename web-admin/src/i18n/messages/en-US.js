@@ -619,6 +619,10 @@ export default {
       confirmContinueCreate: "Create Anyway",
       voidConfirm: "Confirm Void",
       uploadExpansionLld: "Upload Target LLD",
+      prepareExpansionLld: "Prepare Target LLD",
+      reprepareExpansionLld: "Prepare Again",
+      downloadExpansionDraft: "Download Draft",
+      useExpansionLld: "Use This Target LLD",
     },
     dialogs: {
       createTitle: "Create Work Order",
@@ -630,6 +634,20 @@ export default {
       batchAssignTitle: "Batch Reassign",
       batchPriorityTitle: "Batch Change Priority",
       batchResultTitle: "Batch Operation Result",
+    },
+    expansionDialog: {
+      title: "Prepare Target LLD",
+      bodyHint:
+        "The draft is exported from the current LLD. Keep existing cells, add the expansion cells, then upload the complete target LLD.",
+      empty:
+        "Download the draft and upload the complete target LLD. The difference preview will appear here.",
+      newCells: "{count} new cell/device target(s)",
+      steps: {
+        download: "Download Draft",
+        upload: "Upload Full LLD",
+        preview: "Difference Preview",
+        use: "Use Target LLD",
+      },
     },
     batch: {
       selectedCount: "{count} work order(s) selected",
@@ -648,11 +666,17 @@ export default {
         "Generated from site planning slots (sector_id + band). Multiple selection is supported.",
       replacementTargetOption: "Sector {sectorId} / Band {band}",
       expansionLld: "Target LLD",
+      expansionLldReady: "Ready",
+      expansionLldPending: "Not Ready",
+      expansionLldNotPrepared: "Target LLD is not prepared",
       expansionLldHint:
-        "For installed site expansion preview. The system only extracts new slots and merges planning after the work order is completed.",
+        "Download the current LLD as a draft, add new cells, then upload the complete target LLD.",
+      cellExpansionTemplateHint:
+        "Cell expansion reuses the new-site installation template. The system first reuses the latest valid opening work order template for this site and only generates check items for new cells/devices.",
       expansionPreviewTitle:
-        "Preview passed: current {current} sectors, target {target} sectors, {slots} new slot(s)",
-      expansionSlotLabel: "Sector {sectorId} / Band {band}",
+        "Preview passed: current {currentSectors} sectors / {currentCells} cells → target {targetSectors} sectors / {targetCells} cells, {newCells} new cell/device target(s)",
+      expansionCellLabel:
+        "Sector {physicalSector} / LCID {localCellId} / Band {band}",
       priority: "Priority",
       dueDate: "Due Date",
       description: "Description",
@@ -664,6 +688,7 @@ export default {
         selectAssignee: "Select assignee",
         enterTitle: "Enter title",
         template: "Auto recommended (optional)",
+        openingTemplateRequired: "Select new-site installation template (required)",
         replacementTargets: "Select replacement slots (multiple)",
         selectPriority: "Select priority",
         description: "Optional work order description",
@@ -702,7 +727,7 @@ export default {
     types: {
       opening_inspection: "New Site Installation",
       equipment_replacement: "Equipment Replacement",
-      sector_expansion: "Sector Expansion",
+      cell_expansion: "Cell Expansion",
       maintenance: "Maintenance Inspection",
       power_issue: "Power Issue",
       transmission_issue: "Transmission Issue",
@@ -780,6 +805,8 @@ export default {
       selectSite: "Please select a site",
       selectType: "Please select a type",
       selectAssignee: "Please select an assignee",
+      selectOpeningTemplate:
+        "Cell expansion work orders must select a new-site installation template",
       enterTitle: "Please enter a title",
       selectNewStatus: "Please select a new status",
       selectAssigneeForBatch: "Please select an assignee",
@@ -814,9 +841,11 @@ export default {
       replacementTargetRequired:
         "Equipment replacement work orders must choose replacement slots",
       expansionTargetRequired:
-        "Sector expansion work orders must upload the target LLD first",
+        "Cell expansion work orders must upload the target LLD first",
       expansionPreviewSuccess: "Target LLD preview passed",
       expansionPreviewFailed: "Target LLD preview failed",
+      expansionDraftDownloaded: "Target LLD draft downloaded",
+      expansionDraftDownloadFailed: "Failed to download the draft",
       createSuccess: "Created successfully",
       createFailed: "Create failed",
       updateSuccess: "Updated successfully",
@@ -878,10 +907,10 @@ export default {
       unit: "Unit",
       photo: "Photos",
       noSubmittedContent: "This check item has no submitted content yet",
-      sectorExpansionInfo: "Sector Expansion Info",
-      expansionSector: "Expansion Sectors",
+      cellExpansionInfo: "Cell Expansion Info",
+      expansionSector: "Sectors / Cells",
       targetPlanningVersion: "Target Planning Version",
-      newSlots: "New Slots",
+      newSlots: "New Cells/Devices",
     },
     filters: {
       reviewList: {

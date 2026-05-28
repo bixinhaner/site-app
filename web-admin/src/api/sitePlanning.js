@@ -36,19 +36,21 @@ export const sitePlanningApi = {
     const url = `/api/sites/${siteId}/planning/lld-upload?dry_run=${dryRun}`
     return request.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
-  previewSectorExpansion: (siteId, file) => {
+  previewCellExpansion: (siteId, file) => {
     const form = new FormData()
     form.append('file', file)
-    return request.post(`/api/sites/${siteId}/planning/expansion-preview`, form, {
+    return request.post(`/api/sites/${siteId}/planning/cell-expansion-preview`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  previewSectorExpansion: (siteId, file) => sitePlanningApi.previewCellExpansion(siteId, file),
   getLldPlanning: (siteId) => request.get(`/api/sites/${siteId}/planning/lld`),
   listLldPlanning: (params = {}) => request.get('/api/sites/planning/lld-list', { params }),
   listLldCells: (params = {}) => request.get('/api/sites/planning/lld-cells', { params }),
   listLldCellsTemplate: (params = {}) => request.get('/api/sites/planning/lld-cells/template', { params }),
   exportLldPlanning: (params = {}) => request.get('/api/sites/planning/lld-list/export', { params, responseType: 'blob' }),
   exportLldCells: (params = {}) => request.get('/api/sites/planning/lld-cells/export', { params, responseType: 'blob' }),
+  exportSiteLldCells: (siteId) => request.get(`/api/sites/${siteId}/planning/lld-cells/export`, { responseType: 'blob', rawResponse: true }),
   // LLD 手动编辑API
   updateLldPlanning: (siteId, baseVersion) => request.put(`/api/sites/${siteId}/planning/lld?base_version=${baseVersion}`),
   createLldCell: (siteId, cellData, baseVersion) => request.post(`/api/sites/${siteId}/planning/lld/cells?base_version=${baseVersion}`, cellData),

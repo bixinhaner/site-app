@@ -70,7 +70,7 @@ from app.services.omc_monitor import (
     run_omc_check_for_work_order,
     advance_opening_work_orders_by_ever,
     advance_replacement_work_orders_by_ever,
-    advance_sector_expansion_work_orders_by_ever,
+    advance_cell_expansion_work_orders_by_ever,
 )
 from app.services.omc_client import get_omc_manual_confirm_enabled
 from app.services.omc_state import (
@@ -96,7 +96,7 @@ from app.services.work_order_execution_settings_service import (
     resolve_web_work_order_access_mode,
 )
 from app.services.photo_duplicate_guard import delete_registry_records_by_source
-from app.services.sector_expansion import (
+from app.services.cell_expansion import (
     create_planning_version_from_expansion,
     validate_expansion_target_cells,
 )
@@ -117,7 +117,7 @@ VOIDABLE_WORK_ORDER_STATUSES = (
 
 SITE_PROGRESS_REBUILD_WORK_ORDER_TYPES = {
     WorkOrderTypeEnum.OPENING_INSPECTION,
-    WorkOrderTypeEnum.SECTOR_EXPANSION,
+    WorkOrderTypeEnum.CELL_EXPANSION,
     WorkOrderTypeEnum.SSV,
     WorkOrderTypeEnum.SITE_SURVEY,
 }
@@ -194,7 +194,7 @@ WORK_ORDER_TYPE_LABELS = {
     WorkOrderTypeEnum.OPENING_INSPECTION.value: ("新站安装", "New Site Installation", "Instalasi Situs Baru"),
     WorkOrderTypeEnum.MAINTENANCE.value: ("维护检查", "Maintenance Inspection", "Inspeksi Pemeliharaan"),
     WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT.value: ("设备更换", "Equipment Replacement", "Penggantian Peralatan"),
-    WorkOrderTypeEnum.SECTOR_EXPANSION.value: ("扇区扩容", "Sector Expansion", "Ekspansi Sektor"),
+    WorkOrderTypeEnum.CELL_EXPANSION.value: ("小区扩容", "Cell Expansion", "Ekspansi Sel"),
     WorkOrderTypeEnum.POWER_ISSUE.value: ("断电问题", "Power Issue", "Masalah Daya"),
     WorkOrderTypeEnum.TRANSMISSION_ISSUE.value: ("传输问题", "Transmission Issue", "Masalah Transmisi"),
     WorkOrderTypeEnum.GPS_ISSUE.value: ("GPS问题", "GPS Issue", "Masalah GPS"),
@@ -840,7 +840,7 @@ def _localize_work_order_status(status_value, work_order_type, locale_code: str)
     if raw_type in (
         WorkOrderTypeEnum.OPENING_INSPECTION.value,
         WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT.value,
-        WorkOrderTypeEnum.SECTOR_EXPANSION.value,
+        WorkOrderTypeEnum.CELL_EXPANSION.value,
     ):
         override = WORK_ORDER_STATUS_OVERRIDE_LABELS.get(raw_status)
         if override:
@@ -1589,13 +1589,13 @@ async def create_work_order(
         if existing_replacement:
             raise HTTPException(status_code=409, detail="该站点已有进行中的设备更换工单")
 
-    # 扇区扩容工单创建规则校验：用目标 LLD 计算新增设备位，但不提前写入当前规划
-    if data.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
+    # 小区扩容工单创建规则校验：用目标 LLD 计算新增小区/设备，但不提前写入当前规划
+    if data.type == WorkOrderTypeEnum.CELL_EXPANSION:
         if not data.template_id:
-            raise HTTPException(status_code=400, detail="扇区扩容工单必须选择检查模板")
+            raise HTTPException(status_code=400, detail="小区扩容工单必须选择检查模板")
         raw_target_cells = getattr(data, "expansion_target_cells", None) or []
         if not raw_target_cells:
-            raise HTTPException(status_code=400, detail="扇区扩容工单必须先上传目标 LLD 并完成预览")
+            raise HTTPException(status_code=400, detail="小区扩容工单必须先上传目标 LLD 并完成预览")
 
         normalized_expansion = validate_expansion_target_cells(
             db,
@@ -1766,7 +1766,7 @@ async def create_work_order(
         extra_data["replacement_targets"] = normalized_replacement_targets or []
         if initiator_id:
             extra_data["initiator_id"] = initiator_id
-    if data.type == WorkOrderTypeEnum.SECTOR_EXPANSION and normalized_expansion:
+    if data.type == WorkOrderTypeEnum.CELL_EXPANSION and normalized_expansion:
         extra_data["expansion_targets"] = normalized_expansion.get("expansion_targets") or []
         extra_data["expansion_target_cells"] = normalized_expansion.get("target_cells") or []
         extra_data["expansion_summary"] = {
@@ -1774,11 +1774,17 @@ async def create_work_order(
             "current_planning_version": normalized_expansion.get("current_planning_version"),
             "current_sector_count": normalized_expansion.get("current_sector_count"),
             "target_sector_count": normalized_expansion.get("target_sector_count"),
+            "current_physical_sector_count": normalized_expansion.get("current_physical_sector_count"),
+            "target_physical_sector_count": normalized_expansion.get("target_physical_sector_count"),
+            "current_cell_count": normalized_expansion.get("current_cell_count"),
             "target_cell_count": normalized_expansion.get("target_cell_count"),
+            "new_cell_count": normalized_expansion.get("new_cell_count"),
+            "new_device_count": normalized_expansion.get("new_device_count"),
             "bands": normalized_expansion.get("bands") or [],
             "current_slots": normalized_expansion.get("current_slots") or [],
             "target_slots": normalized_expansion.get("target_slots") or [],
             "new_slots": normalized_expansion.get("new_slots") or [],
+            "new_cells": normalized_expansion.get("new_cells") or [],
         }
 
     wo = WorkOrder(
@@ -2213,7 +2219,7 @@ async def accept_work_order(
     if (
         template_data
         and _template_requires_lld_cells(template_data)
-        and wo.type != WorkOrderTypeEnum.SECTOR_EXPANSION
+        and wo.type != WorkOrderTypeEnum.CELL_EXPANSION
     ):
         from app.services.cell_generator import CellGenerator
 
@@ -2228,7 +2234,7 @@ async def accept_work_order(
         if not target_cells:
             raise HTTPException(
                 status_code=400,
-                detail="扇区扩容工单缺少目标 LLD 小区明细，无法生成小区级检查项",
+                detail="小区扩容工单缺少目标 LLD 小区明细，无法生成小区级检查项",
             )
 
     # 设备更换工单：接受时将站点切到 maintenance，并记录原状态用于后续回滚
@@ -3119,7 +3125,7 @@ def _finalize_work_order_approval(
             )
     elif work_order.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
         work_order.status = WorkOrderStatusEnum.APPROVED
-    elif work_order.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
+    elif work_order.type == WorkOrderTypeEnum.CELL_EXPANSION:
         work_order.status = WorkOrderStatusEnum.APPROVED
     elif work_order.type == WorkOrderTypeEnum.SSV:
         work_order.status = WorkOrderStatusEnum.COMPLETED
@@ -3150,7 +3156,7 @@ def _finalize_work_order_approval(
         work_order.type in (
             WorkOrderTypeEnum.OPENING_INSPECTION,
             WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
-            WorkOrderTypeEnum.SECTOR_EXPANSION,
+            WorkOrderTypeEnum.CELL_EXPANSION,
         )
         and work_order.status == WorkOrderStatusEnum.APPROVED
     ):
@@ -3165,7 +3171,7 @@ def _finalize_work_order_approval(
             elif work_order.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
                 advance_replacement_work_orders_by_ever(db, work_order.site_id)
             else:
-                advance_sector_expansion_work_orders_by_ever(db, work_order.site_id)
+                advance_cell_expansion_work_orders_by_ever(db, work_order.site_id)
         except Exception as exc:  # pragma: no cover
             print(f"[OMC] 基于 ever 推进失败 site_id={work_order.site_id}: {exc}")
 
@@ -3280,7 +3286,7 @@ async def manual_confirm_opening_omc_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """开站/设备更换/扇区扩容：设备在线/激活状态手工确认。
+    """开站/设备更换/小区扩容：设备在线/激活状态手工确认。
 
     仅在 OMC API 配置开启手工确认开关后可用。
 
@@ -3304,9 +3310,9 @@ async def manual_confirm_opening_omc_status(
     if wo.type not in (
         WorkOrderTypeEnum.OPENING_INSPECTION,
         WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
-        WorkOrderTypeEnum.SECTOR_EXPANSION,
+        WorkOrderTypeEnum.CELL_EXPANSION,
     ):
-        raise HTTPException(status_code=400, detail="仅开站/设备更换/扇区扩容工单支持手工确认设备状态")
+        raise HTTPException(status_code=400, detail="仅开站/设备更换/小区扩容工单支持手工确认设备状态")
     if wo.status in (WorkOrderStatusEnum.REJECTED, WorkOrderStatusEnum.COMPLETED):
         raise HTTPException(status_code=409, detail=f"当前工单状态不允许手工确认：{wo.status}")
 
@@ -3320,8 +3326,8 @@ async def manual_confirm_opening_omc_status(
         raise HTTPException(status_code=400, detail="请至少选择确认“已上线”或“已激活”")
 
     # 校验：只能对当前工单/站点已绑定的设备 SN 进行确认。
-    # 扩容完成前新增槽位尚未进入当前规划，因此不能用站点当前规划槽位做过滤。
-    if wo.type == WorkOrderTypeEnum.SECTOR_EXPANSION and wo.inspection_id:
+    # 扩容完成前新增小区/设备尚未进入当前规划，因此不能用站点当前规划槽位做过滤。
+    if wo.type == WorkOrderTypeEnum.CELL_EXPANSION and wo.inspection_id:
         bound_sns = sorted({
             str(item.equipment_sn).strip()
             for item in db.query(InspectionCheckItem)
@@ -3369,7 +3375,7 @@ async def manual_confirm_opening_omc_status(
         elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
             advance_result = advance_replacement_work_orders_by_ever(db, wo.site_id)
         else:
-            advance_result = advance_sector_expansion_work_orders_by_ever(db, wo.site_id)
+            advance_result = advance_cell_expansion_work_orders_by_ever(db, wo.site_id)
     except Exception as exc:  # pragma: no cover
         print(f"[OMC] 手工确认后推进工单/站点失败 site_id={wo.site_id}: {exc}")
 
@@ -4161,13 +4167,13 @@ async def mark_work_order_completed(
     wo.status = WorkOrderStatusEnum.COMPLETED
     wo.completed_at = datetime.utcnow()
 
-    if wo.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
+    if wo.type == WorkOrderTypeEnum.CELL_EXPANSION:
         extra = dict(wo.extra_data or {})
         if not extra.get("expansion_committed_planning_id"):
             site = db.query(Site).filter(Site.id == wo.site_id).first()
             target_cells = extra.get("expansion_target_cells") or []
             if not site or not target_cells:
-                raise HTTPException(status_code=409, detail="扇区扩容工单缺少目标 LLD，无法完成规划合并")
+                raise HTTPException(status_code=409, detail="小区扩容工单缺少目标 LLD，无法完成规划合并")
             planning = create_planning_version_from_expansion(
                 db,
                 site=site,

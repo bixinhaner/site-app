@@ -26,7 +26,7 @@ from app.services.omc_state import upsert_omc_device_state
 from app.services.omc_monitor import (
   advance_opening_work_orders_by_ever,
   advance_replacement_work_orders_by_ever,
-  advance_sector_expansion_work_orders_by_ever,
+  advance_cell_expansion_work_orders_by_ever,
 )
 from app.services.work_order_rule_service import (
   get_ssv_create_by_ever_activated_only,
@@ -430,7 +430,7 @@ async def get_device_status_by_sn(
     if binding and binding.site_id:
       advance_opening_work_orders_by_ever(db, binding.site_id)
       advance_replacement_work_orders_by_ever(db, binding.site_id)
-      advance_sector_expansion_work_orders_by_ever(db, binding.site_id)
+      advance_cell_expansion_work_orders_by_ever(db, binding.site_id)
   except Exception as exc:  # pragma: no cover
     print(f"[OMC] SN={sn} 推进工单/站点状态失败: {exc}")
 

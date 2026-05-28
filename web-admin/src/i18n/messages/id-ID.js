@@ -623,6 +623,10 @@ export default {
       confirmContinueCreate: "Tetap Buat",
       voidConfirm: "Konfirmasi Pembatalan",
       uploadExpansionLld: "Unggah LLD Target",
+      prepareExpansionLld: "Siapkan LLD Target",
+      reprepareExpansionLld: "Siapkan Ulang",
+      downloadExpansionDraft: "Unduh Draf",
+      useExpansionLld: "Gunakan LLD Target Ini",
     },
     dialogs: {
       createTitle: "Buat Perintah Kerja",
@@ -634,6 +638,20 @@ export default {
       batchAssignTitle: "Tugaskan Ulang Massal",
       batchPriorityTitle: "Ubah Prioritas Massal",
       batchResultTitle: "Hasil Operasi Massal",
+    },
+    expansionDialog: {
+      title: "Siapkan LLD Target",
+      bodyHint:
+        "Draf diekspor dari LLD saat ini. Pertahankan sel yang ada, tambahkan sel ekspansi, lalu unggah LLD target lengkap.",
+      empty:
+        "Unduh draf dan unggah LLD target lengkap. Pratinjau perbedaan akan muncul di sini.",
+      newCells: "{count} target sel/perangkat baru",
+      steps: {
+        download: "Unduh Draf",
+        upload: "Unggah LLD Lengkap",
+        preview: "Pratinjau Perbedaan",
+        use: "Gunakan LLD Target",
+      },
     },
     batch: {
       selectedCount: "{count} perintah kerja dipilih",
@@ -652,11 +670,17 @@ export default {
         "Dihasilkan dari slot perencanaan situs (sector_id + band). Mendukung pilihan ganda.",
       replacementTargetOption: "Sektor {sectorId} / Band {band}",
       expansionLld: "LLD Target",
+      expansionLldReady: "Siap",
+      expansionLldPending: "Belum Siap",
+      expansionLldNotPrepared: "LLD target belum disiapkan",
       expansionLldHint:
-        "Untuk pratinjau ekspansi situs terpasang. Sistem hanya mengambil slot baru dan menggabungkan perencanaan setelah perintah kerja selesai.",
+        "Unduh LLD saat ini sebagai draf, tambahkan sel baru, lalu unggah LLD target lengkap.",
+      cellExpansionTemplateHint:
+        "Ekspansi sel memakai ulang templat instalasi situs baru. Sistem terlebih dahulu memakai templat dari perintah kerja instalasi valid terbaru di situs ini dan hanya membuat item pemeriksaan untuk sel/perangkat baru.",
       expansionPreviewTitle:
-        "Pratinjau lolos: saat ini {current} sektor, target {target} sektor, {slots} slot baru",
-      expansionSlotLabel: "Sektor {sectorId} / Band {band}",
+        "Pratinjau lolos: saat ini {currentSectors} sektor / {currentCells} sel → target {targetSectors} sektor / {targetCells} sel, {newCells} target sel/perangkat baru",
+      expansionCellLabel:
+        "Sektor {physicalSector} / LCID {localCellId} / Band {band}",
       priority: "Prioritas",
       dueDate: "Batas Waktu",
       description: "Deskripsi",
@@ -668,6 +692,7 @@ export default {
         selectAssignee: "Pilih petugas",
         enterTitle: "Masukkan judul",
         template: "Rekomendasi otomatis (opsional)",
+        openingTemplateRequired: "Pilih templat instalasi situs baru (wajib)",
         replacementTargets: "Pilih slot penggantian (bisa lebih dari satu)",
         selectPriority: "Pilih prioritas",
         description: "Deskripsi perintah kerja opsional",
@@ -706,7 +731,7 @@ export default {
     types: {
       opening_inspection: "Instalasi Situs Baru",
       equipment_replacement: "Penggantian Peralatan",
-      sector_expansion: "Ekspansi Sektor",
+      cell_expansion: "Ekspansi Sel",
       maintenance: "Inspeksi Pemeliharaan",
       power_issue: "Masalah Daya",
       transmission_issue: "Masalah Transmisi",
@@ -783,6 +808,8 @@ export default {
       selectSite: "Silakan pilih situs",
       selectType: "Silakan pilih jenis",
       selectAssignee: "Silakan pilih petugas",
+      selectOpeningTemplate:
+        "Perintah kerja ekspansi sel wajib memilih templat instalasi situs baru",
       enterTitle: "Silakan masukkan judul",
       selectNewStatus: "Silakan pilih status baru",
       selectAssigneeForBatch: "Silakan pilih petugas",
@@ -817,9 +844,11 @@ export default {
       replacementTargetRequired:
         "Perintah kerja penggantian peralatan harus memilih slot penggantian",
       expansionTargetRequired:
-        "Perintah kerja ekspansi sektor harus mengunggah LLD target terlebih dahulu",
+        "Perintah kerja ekspansi sel harus mengunggah LLD target terlebih dahulu",
       expansionPreviewSuccess: "Pratinjau LLD target lolos",
       expansionPreviewFailed: "Pratinjau LLD target gagal",
+      expansionDraftDownloaded: "Draf LLD target telah diunduh",
+      expansionDraftDownloadFailed: "Gagal mengunduh draf",
       createSuccess: "Berhasil dibuat",
       createFailed: "Gagal membuat",
       updateSuccess: "Berhasil diperbarui",
@@ -881,10 +910,10 @@ export default {
       photo: "Foto",
       noSubmittedContent:
         "Item pemeriksaan ini belum memiliki konten yang dikirim",
-      sectorExpansionInfo: "Info Ekspansi Sektor",
-      expansionSector: "Sektor Ekspansi",
+      cellExpansionInfo: "Info Ekspansi Sel",
+      expansionSector: "Sektor / Sel",
       targetPlanningVersion: "Versi Perencanaan Target",
-      newSlots: "Slot Baru",
+      newSlots: "Sel/Perangkat Baru",
     },
     filters: {
       reviewList: {

@@ -31,7 +31,7 @@ from app.services.omc_state import (
   summarize_site_omc_state,
 )
 from app.models.equipment_binding_history import BindingActionEnum, EquipmentBindingHistory
-from app.services.sector_expansion import (
+from app.services.cell_expansion import (
   create_planning_version_from_expansion,
   get_expansion_target_slots_from_work_order,
   serialize_slot,
@@ -419,11 +419,11 @@ def _commit_expansion_planning_if_needed(
 
   target_cells = extra.get("expansion_target_cells") or []
   if not target_cells:
-    raise ValueError("扇区扩容工单缺少 expansion_target_cells，无法合并规划")
+    raise ValueError("小区扩容工单缺少 expansion_target_cells，无法合并规划")
 
   site = db.query(Site).filter(Site.id == wo.site_id).first()
   if not site:
-    raise ValueError("扇区扩容工单站点不存在，无法合并规划")
+    raise ValueError("小区扩容工单站点不存在，无法合并规划")
 
   actor_id = operator_id or wo.reviewer_id or wo.assigned_by or 1
   planning = create_planning_version_from_expansion(
@@ -440,14 +440,14 @@ def _commit_expansion_planning_if_needed(
   return int(planning.id)
 
 
-def refresh_sector_expansion_work_order_omc_status(db: Session, client: OmcClient, wo: WorkOrder) -> Dict:
+def refresh_cell_expansion_work_order_omc_status(db: Session, client: OmcClient, wo: WorkOrder) -> Dict:
   """
-  针对“扇区扩容工单”：
-  - 只检查扩容目标新增设备位，不用当前规划的全部槽位做门禁
-  - 新增设备位全部曾经在线后推进到 ACTIVATED
-  - 新增设备位全部曾经激活后完成工单，并将目标 LLD 合并为当前规划
+  针对“小区扩容工单”：
+  - 只检查扩容目标新增小区/设备，不用当前规划的全部槽位做门禁
+  - 新增小区/设备全部曾经在线后推进到 ACTIVATED
+  - 新增小区/设备全部曾经激活后完成工单，并将目标 LLD 合并为当前规划
   """
-  if wo.type != WorkOrderTypeEnum.SECTOR_EXPANSION:
+  if wo.type != WorkOrderTypeEnum.CELL_EXPANSION:
     return {}
 
   binding_summary = _summarize_expansion_binding_slots(db, wo)
@@ -511,7 +511,7 @@ def refresh_sector_expansion_work_order_omc_status(db: Session, client: OmcClien
   rebuild_site_progress(
     db,
     wo.site_id,
-    reason="refresh_sector_expansion_work_order_omc_status",
+    reason="refresh_cell_expansion_work_order_omc_status",
   )
   return summary
 
@@ -574,8 +574,8 @@ def advance_opening_work_orders_by_ever(db: Session, site_id: int) -> Dict:
   return result
 
 
-def advance_sector_expansion_work_orders_by_ever(db: Session, site_id: int) -> Dict:
-  """根据聚合表的 ever 状态推进扇区扩容工单，并在激活完成后合并目标规划。"""
+def advance_cell_expansion_work_orders_by_ever(db: Session, site_id: int) -> Dict:
+  """根据聚合表的 ever 状态推进小区扩容工单，并在激活完成后合并目标规划。"""
   result = {
     "site_id": site_id,
     "work_orders": [],
@@ -583,7 +583,7 @@ def advance_sector_expansion_work_orders_by_ever(db: Session, site_id: int) -> D
 
   wos = db.query(WorkOrder).filter(
     WorkOrder.site_id == site_id,
-    WorkOrder.type == WorkOrderTypeEnum.SECTOR_EXPANSION,
+    WorkOrder.type == WorkOrderTypeEnum.CELL_EXPANSION,
     WorkOrder.status.in_([WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED]),
   ).all()
 
@@ -626,7 +626,7 @@ def advance_sector_expansion_work_orders_by_ever(db: Session, site_id: int) -> D
   rebuild_site_progress(
     db,
     site_id,
-    reason="advance_sector_expansion_work_orders_by_ever",
+    reason="advance_cell_expansion_work_orders_by_ever",
   )
   return result
 
@@ -696,7 +696,7 @@ def run_omc_check_for_work_order(work_order_id: str) -> None:
     if not wo or wo.type not in (
       WorkOrderTypeEnum.OPENING_INSPECTION,
       WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT,
-      WorkOrderTypeEnum.SECTOR_EXPANSION,
+      WorkOrderTypeEnum.CELL_EXPANSION,
     ):
       return
 
@@ -709,8 +709,8 @@ def run_omc_check_for_work_order(work_order_id: str) -> None:
       refresh_opening_work_order_omc_status(db, client, wo)
     elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
       refresh_replacement_work_order_omc_status(db, client, wo)
-    elif wo.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
-      refresh_sector_expansion_work_order_omc_status(db, client, wo)
+    elif wo.type == WorkOrderTypeEnum.CELL_EXPANSION:
+      refresh_cell_expansion_work_order_omc_status(db, client, wo)
     db.commit()
   except Exception as exc:  # pragma: no cover
     db.rollback()
@@ -738,7 +738,7 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
           .filter(
             WorkOrder.type.in_(
               [WorkOrderTypeEnum.OPENING_INSPECTION, WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT]
-              + [WorkOrderTypeEnum.SECTOR_EXPANSION]
+              + [WorkOrderTypeEnum.CELL_EXPANSION]
             ),
             WorkOrder.status.in_([WorkOrderStatusEnum.APPROVED, WorkOrderStatusEnum.ACTIVATED]),
           )
@@ -751,8 +751,8 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
               refresh_opening_work_order_omc_status(db, client, wo)
             elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
               refresh_replacement_work_order_omc_status(db, client, wo)
-            elif wo.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
-              refresh_sector_expansion_work_order_omc_status(db, client, wo)
+            elif wo.type == WorkOrderTypeEnum.CELL_EXPANSION:
+              refresh_cell_expansion_work_order_omc_status(db, client, wo)
           except Exception as exc:
             print(f"[OMC] 定时检查工单 {wo.id} 失败: {exc}")
 

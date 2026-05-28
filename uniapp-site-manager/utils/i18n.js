@@ -199,7 +199,7 @@ const messages = {
       types: {
         opening_inspection: '新站安装',
         equipment_replacement: '设备更换',
-        sector_expansion: '扇区扩容',
+        cell_expansion: '小区扩容',
         maintenance: '维护',
         power_issue: '电源问题',
         transmission_issue: '传输问题',
@@ -1708,7 +1708,7 @@ const messages = {
       types: {
         opening_inspection: 'New Site Installation',
         equipment_replacement: 'Equipment Replacement',
-        sector_expansion: 'Sector Expansion',
+        cell_expansion: 'Cell Expansion',
         maintenance: 'Maintenance',
         power_issue: 'Power Issue',
         transmission_issue: 'Transmission Issue',
@@ -3246,7 +3246,7 @@ const messages = {
       types: {
         opening_inspection: 'Instalasi Situs Baru',
         equipment_replacement: 'Penggantian Perangkat',
-        sector_expansion: 'Ekspansi Sektor',
+        cell_expansion: 'Ekspansi Sel',
         maintenance: 'Pemeliharaan',
         power_issue: 'Masalah Daya',
         transmission_issue: 'Masalah Transmisi',

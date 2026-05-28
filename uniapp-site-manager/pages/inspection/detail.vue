@@ -1173,7 +1173,7 @@
 				const status = response.data.status
 				let progressPercentage = 0
 				
-				const isOmcGated = ['opening_inspection', 'equipment_replacement', 'sector_expansion'].includes(String(response.data.type || ''))
+				const isOmcGated = ['opening_inspection', 'equipment_replacement', 'cell_expansion'].includes(String(response.data.type || ''))
 				
 				switch (status) {
 					case 'PENDING':

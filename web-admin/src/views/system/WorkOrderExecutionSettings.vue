@@ -423,7 +423,7 @@ const WORK_ORDER_TYPE_VALUES = [
   'site_survey',
   'opening_inspection',
   'equipment_replacement',
-  'sector_expansion',
+  'cell_expansion',
   'ssv',
   'maintenance',
   'power_issue',

@@ -154,7 +154,7 @@ export const WorkOrderType = {
   SSV: 'ssv',
   MAINTENANCE: 'maintenance',
   EQUIPMENT_REPLACEMENT: 'equipment_replacement',
-  SECTOR_EXPANSION: 'sector_expansion',
+  CELL_EXPANSION: 'cell_expansion',
   POWER_ISSUE: 'power_issue',
   TRANSMISSION_ISSUE: 'transmission_issue',
   GPS_ISSUE: 'gps_issue',

@@ -4448,17 +4448,17 @@ async def bind_equipment_to_sector(
         detail="当前未启用 Web 端设备绑定",
     )
 
-    # 识别工单类型（设备更换/扇区扩容工单允许“直接换绑”）
+    # 识别工单类型（设备更换/小区扩容工单允许“直接换绑”）
     wo: Optional[WorkOrder] = work_order
     is_replacement_wo = False
-    is_sector_expansion_wo = False
+    is_cell_expansion_wo = False
     if getattr(inspection, "work_order_id", None):
         wo = db.query(WorkOrder).filter(WorkOrder.id == inspection.work_order_id).first()
         if wo and wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
             is_replacement_wo = True
-        if wo and wo.type == WorkOrderTypeEnum.SECTOR_EXPANSION:
-            is_sector_expansion_wo = True
-    can_direct_rebind_slot = is_replacement_wo or is_sector_expansion_wo
+        if wo and wo.type == WorkOrderTypeEnum.CELL_EXPANSION:
+            is_cell_expansion_wo = True
+    can_direct_rebind_slot = is_replacement_wo or is_cell_expansion_wo
     
     # 验证设备状态（仅在绑定操作时验证）
     equipment_instance = None

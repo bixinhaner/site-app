@@ -26,7 +26,7 @@ from app.models.planning import (
     SitePlanningCell,
 )
 from app.services.authz_service import user_has_any_role_or_permission
-from app.services.sector_expansion import validate_expansion_target_cells
+from app.services.cell_expansion import validate_expansion_target_cells
 from app.services.site_progress_service import rebuild_site_progress
 from app.utils.planning_schema import LLD_CELL_EXTRA_FIELD_CANDIDATES
 from app.utils.timezone import to_utc_iso
@@ -2789,18 +2789,19 @@ def _dump_import_issue(issue: ImportIssue) -> Dict[str, Any]:
     return issue.dict()
 
 
+@router.post("/{site_id}/planning/cell-expansion-preview")
 @router.post("/{site_id}/planning/expansion-preview")
-async def preview_sector_expansion_planning(
+async def preview_cell_expansion_planning(
     site_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    扇区扩容目标 LLD 预览：只校验差异，不写入当前规划。
+    小区扩容目标 LLD 预览：只校验差异，不写入当前规划。
 
     这个接口用于已安装/已开通站点。目标 LLD 必须保留现有 Cell 的关键字段，
-    并至少新增 1 个设备位；真正合并规划会在扩容工单完成后执行。
+    并至少新增 1 个小区；真正合并规划会在扩容工单完成后执行。
     """
     _ensure_planning_editor(current_user)
 
@@ -3982,19 +3983,8 @@ async def export_lld_planning(
     )
 
 
-@router.get("/planning/lld-cells/export")
-async def export_lld_cells(
-    status: Optional[str] = Query(None, description="站点状态"),
-    band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
-    start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
-    end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
-    site_keyword: Optional[str] = Query(None, description="站点编码或站点名称关键字"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def _build_lld_cells_export_response(rows, filename: str = "site_planning_lld_export.xlsx"):
     from fastapi.responses import StreamingResponse
-
-    _ensure_planning_editor(current_user)
 
     template_path = _get_lld_template_path()
     if not template_path.exists():
@@ -4012,15 +4002,6 @@ async def export_lld_cells(
         raise HTTPException(status_code=500, detail="LLD 模板缺少 4G/5G Sheet")
     ws_4g = wb["4G"]
     ws_5g = wb["5G"]
-
-    band_list = _parse_band_list(band)
-    query = _build_lld_cells_query(db, status, band_list, start_time, end_time, site_keyword)
-    # 导出用于回导：过滤掉无法作为有效 key 的行
-    query = query.filter(SitePlanningCell.local_cell_id.isnot(None))
-    query = query.filter(SitePlanningCell.band_code.isnot(None))
-    query = query.filter(SitePlanningCell.band_code != "")
-
-    rows = query.order_by(SitePlanning.updated_at.desc(), SitePlanningCell.id.desc()).all()
 
     for cell, _planning, site in rows:
         rat = (cell.rat or "").strip().upper()
@@ -4041,9 +4022,60 @@ async def export_lld_cells(
     wb.save(output)
     output.seek(0)
 
-    headers = {"Content-Disposition": "attachment; filename=site_planning_lld_export.xlsx"}
+    headers = {"Content-Disposition": f"attachment; filename={filename}"}
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers=headers,
     )
+
+
+@router.get("/{site_id}/planning/lld-cells/export")
+async def export_site_lld_cells(
+    site_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_planning_editor(current_user)
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    query = _build_lld_cells_query(db, None, [], None, None, None)
+    query = query.filter(Site.id == site_id)
+    query = query.filter(SitePlanningCell.local_cell_id.isnot(None))
+    query = query.filter(SitePlanningCell.band_code.isnot(None))
+    query = query.filter(SitePlanningCell.band_code != "")
+    rows = query.order_by(SitePlanningCell.rat.asc(), SitePlanningCell.band_code.asc(), SitePlanningCell.local_cell_id.asc()).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="站点没有可导出的当前 LLD 小区明细")
+
+    safe_site_code = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_"
+        for ch in (site.site_code or str(site.id))
+    )
+    return _build_lld_cells_export_response(rows, filename=f"{safe_site_code}_target_lld_draft.xlsx")
+
+
+@router.get("/planning/lld-cells/export")
+async def export_lld_cells(
+    status: Optional[str] = Query(None, description="站点状态"),
+    band: Optional[str] = Query(None, description="Band 过滤，多个用逗号分隔"),
+    start_time: Optional[datetime] = Query(None, description="规划更新时间起"),
+    end_time: Optional[datetime] = Query(None, description="规划更新时间止"),
+    site_keyword: Optional[str] = Query(None, description="站点编码或站点名称关键字"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_planning_editor(current_user)
+
+    band_list = _parse_band_list(band)
+    query = _build_lld_cells_query(db, status, band_list, start_time, end_time, site_keyword)
+    # 导出用于回导：过滤掉无法作为有效 key 的行
+    query = query.filter(SitePlanningCell.local_cell_id.isnot(None))
+    query = query.filter(SitePlanningCell.band_code.isnot(None))
+    query = query.filter(SitePlanningCell.band_code != "")
+    rows = query.order_by(SitePlanning.updated_at.desc(), SitePlanningCell.id.desc()).all()
+
+    return _build_lld_cells_export_response(rows)

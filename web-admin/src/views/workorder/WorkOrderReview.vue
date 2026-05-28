@@ -92,7 +92,7 @@
               <el-space wrap>
                 <el-tag
                   v-for="t in replacementTargets"
-                  :key="`${t.sector_id}__${t.band}`"
+                  :key="`${t.sector_id}__${t.band}__${t.rat || ''}`"
                   size="small"
                 >
                   S{{ t.sector_id }}/{{ t.band }}
@@ -185,22 +185,19 @@
           </div>
         </el-card>
 
-        <!-- 扇区扩容工单信息 -->
+        <!-- 小区扩容工单信息 -->
         <el-card
-          v-if="order.type === 'sector_expansion'"
+          v-if="order.type === 'cell_expansion'"
           style="margin-bottom: 16px"
         >
           <template #header>
             <div class="card-header">
-              <span>{{ t("workOrderReview.labels.sectorExpansionInfo") }}</span>
+              <span>{{ t("workOrderReview.labels.cellExpansionInfo") }}</span>
             </div>
           </template>
           <el-descriptions :column="2" border size="small">
             <el-descriptions-item :label="t('workOrderReview.labels.expansionSector')">
-              <span>
-                {{ expansionSummary.current_sector_count ?? "-" }} →
-                {{ expansionSummary.target_sector_count ?? "-" }}
-              </span>
+              <span>{{ expansionSectorCellSummary }}</span>
             </el-descriptions-item>
             <el-descriptions-item :label="t('workOrderReview.labels.targetPlanningVersion')">
               <span>{{ expansionSummary.current_planning_version || "-" }}</span>
@@ -214,7 +211,7 @@
                   type="success"
                   effect="plain"
                 >
-                  S{{ t.sector_id }}/{{ t.band }}
+                  {{ expansionTargetLabel(t) }}
                 </el-tag>
                 <span v-if="!expansionTargets.length" class="muted">-</span>
               </el-space>
@@ -222,12 +219,12 @@
           </el-descriptions>
         </el-card>
 
-        <!-- 开站/设备更换/扇区扩容工单：设备在线/激活状态 -->
+        <!-- 开站/设备更换/小区扩容工单：设备在线/激活状态 -->
         <el-card
           v-if="
             order.type === 'opening_inspection' ||
             order.type === 'equipment_replacement' ||
-            order.type === 'sector_expansion'
+            order.type === 'cell_expansion'
           "
           class="mb16"
           v-loading="deviceStatusLoading"
@@ -237,7 +234,7 @@
               <span>{{
                 order.type === "opening_inspection"
                   ? "开站设备在线 / 激活状态"
-                  : order.type === "sector_expansion"
+                  : order.type === "cell_expansion"
                     ? "扩容设备在线 / 激活状态"
                     : "换机设备在线 / 激活状态"
               }}</span>
@@ -2522,6 +2519,21 @@ const expansionSummary = computed(() => {
   return summary && typeof summary === "object" ? summary : {};
 });
 
+const expansionSectorCellSummary = computed(() => {
+  const summary = expansionSummary.value || {};
+  const currentSectors = summary.current_physical_sector_count ?? summary.current_sector_count ?? "-";
+  const targetSectors = summary.target_physical_sector_count ?? summary.target_sector_count ?? "-";
+  const currentCells = summary.current_cell_count ?? "-";
+  const targetCells = summary.target_cell_count ?? "-";
+  return `${currentSectors} / ${currentCells} → ${targetSectors} / ${targetCells}`;
+});
+
+const expansionTargetLabel = (target) => t("workOrderList.form.expansionCellLabel", {
+  physicalSector: target?.physical_sector_id || target?.sector_id || "-",
+  localCellId: target?.local_cell_id || target?.sector_id || "-",
+  band: target?.band || target?.band_code || "-",
+});
+
 const replacementReturnCandidates = computed(() => {
   const sns = [];
   for (const row of replacementHistory.value || []) {
@@ -2967,7 +2979,7 @@ const VOIDABLE_STATUSES = [
 const types = [
   { label: "新站点设备安装", value: "opening_inspection" },
   { label: "设备更换", value: "equipment_replacement" },
-  { label: "扇区扩容", value: "sector_expansion" },
+  { label: "小区扩容", value: "cell_expansion" },
   { label: "维护检查", value: "maintenance" },
   { label: "断电问题", value: "power_issue" },
   { label: "传输问题", value: "transmission_issue" },
@@ -5144,7 +5156,7 @@ const formatFileSize = (size) => {
 };
 
 const statusText = (status, type) => {
-  if (["opening_inspection", "equipment_replacement", "sector_expansion"].includes(type)) {
+  if (["opening_inspection", "equipment_replacement", "cell_expansion"].includes(type)) {
     if (status === "APPROVED") return "待上线 (80%)";
     if (status === "ACTIVATED") return "已上线待激活 (90%)";
     if (status === "COMPLETED") return "已激活 (100%)";
@@ -5250,10 +5262,10 @@ const loadDeviceStatus = async (refresh = false) => {
     );
     return;
   }
-  // 仅开站/设备更换/扇区扩容工单需要设备状态
+  // 仅开站/设备更换/小区扩容工单需要设备状态
   if (
     !order.value ||
-    !["opening_inspection", "equipment_replacement", "sector_expansion"].includes(order.value.type)
+    !["opening_inspection", "equipment_replacement", "cell_expansion"].includes(order.value.type)
   ) {
     devices.value = [];
     deviceStatusCheckedAt.value = null;
@@ -5267,12 +5279,12 @@ const loadDeviceStatus = async (refresh = false) => {
       {
         params: {
           refresh: refresh ? 1 : 0,
-          include_expected_slots: order.value.type === "sector_expansion" ? 0 : 1,
+          include_expected_slots: order.value.type === "cell_expansion" ? 0 : 1,
         },
       },
     );
     const list = Array.isArray(res.devices) ? res.devices : [];
-    if (order.value.type === "sector_expansion") {
+    if (order.value.type === "cell_expansion") {
       const targetKeys = new Set(
         expansionTargets.value.map((t) => `${String(t.sector_id || "").trim()}__${String(t.band || "").trim()}`),
       );

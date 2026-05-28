@@ -238,10 +238,24 @@
       <el-form-item :label="t('workOrderList.form.title')" prop="title">
         <el-input v-model="createForm.title" :placeholder="t('workOrderList.form.placeholders.enterTitle')" />
       </el-form-item>
-      <el-form-item :label="t('workOrderList.form.inspectionTemplate')">
-        <el-select v-model="createForm.template_id" clearable filterable :placeholder="t('workOrderList.form.placeholders.template')" style="width: 100%" @visible-change="v => v && loadTemplates()">
+      <el-form-item
+        :label="t('workOrderList.form.inspectionTemplate')"
+        prop="template_id"
+        :required="isTemplateRequiredForCreate"
+      >
+        <el-select
+          v-model="createForm.template_id"
+          clearable
+          filterable
+          :placeholder="templatePlaceholder"
+          style="width: 100%"
+          @visible-change="v => v && loadTemplates()"
+        >
           <el-option v-for="tpl in templateOptions" :key="tpl.id" :label="tpl.template_name" :value="tpl.id" />
         </el-select>
+        <div v-if="createForm.type === 'cell_expansion'" class="form-hint">
+          {{ t('workOrderList.form.cellExpansionTemplateHint') }}
+        </div>
       </el-form-item>
       <el-form-item v-if="createForm.type === 'equipment_replacement'" :label="t('workOrderList.form.replacementTargets')" prop="replacement_targets">
         <el-select
@@ -259,41 +273,32 @@
         </el-select>
         <div class="form-hint">{{ t('workOrderList.form.replacementTargetHint') }}</div>
       </el-form-item>
-      <el-form-item v-if="createForm.type === 'sector_expansion'" :label="t('workOrderList.form.expansionLld')" prop="expansion_target_cells">
-        <div class="expansion-upload-row">
-          <el-upload
-            :auto-upload="false"
-            :show-file-list="false"
-            accept=".xlsx,.xls"
-            :on-change="handleExpansionFileChange"
-          >
-            <el-button :loading="expansionPreviewLoading">
-              <el-icon><Upload /></el-icon>
-              {{ t('workOrderList.actions.uploadExpansionLld') }}
-            </el-button>
-          </el-upload>
-          <span v-if="expansionFileName" class="expansion-file-name">{{ expansionFileName }}</span>
+      <el-form-item v-if="createForm.type === 'cell_expansion'" :label="t('workOrderList.form.expansionLld')" prop="expansion_target_cells">
+        <div class="expansion-lld-card">
+          <div class="expansion-lld-main">
+            <el-tag :type="expansionPreview ? 'success' : 'info'" effect="plain">
+              {{ expansionPreview ? t('workOrderList.form.expansionLldReady') : t('workOrderList.form.expansionLldPending') }}
+            </el-tag>
+            <div>
+              <div class="expansion-lld-title">
+                {{ expansionPreview ? expansionFileName : t('workOrderList.form.expansionLldNotPrepared') }}
+              </div>
+              <div class="form-hint">{{ expansionPreview ? expansionCommittedSummaryTitle : t('workOrderList.form.expansionLldHint') }}</div>
+            </div>
+          </div>
+          <el-button type="primary" plain @click="openExpansionDialog">
+            {{ expansionPreview ? t('workOrderList.actions.reprepareExpansionLld') : t('workOrderList.actions.prepareExpansionLld') }}
+          </el-button>
         </div>
-        <div class="form-hint">{{ t('workOrderList.form.expansionLldHint') }}</div>
         <div v-if="expansionPreview" class="expansion-preview">
-          <el-alert
-            type="success"
-            :closable="false"
-            show-icon
-            :title="t('workOrderList.form.expansionPreviewTitle', {
-              current: expansionPreview.current_sector_count,
-              target: expansionPreview.target_sector_count,
-              slots: expansionPreview.new_slots?.length || 0,
-            })"
-          />
-          <div class="expansion-slot-list">
+          <div class="expansion-cell-list">
             <el-tag
-              v-for="slot in expansionPreview.new_slots || []"
-              :key="`${slot.sector_id}_${slot.band}`"
+              v-for="cell in getExpansionPreviewCells(expansionPreview)"
+              :key="`${cell.sector_id || cell.local_cell_id}_${cell.band}_${cell.rat || ''}`"
               type="success"
               effect="plain"
             >
-              {{ t('workOrderList.form.expansionSlotLabel', { sectorId: slot.sector_id, band: slot.band }) }}
+              {{ expansionCellLabel(cell) }}
             </el-tag>
           </div>
         </div>
@@ -313,6 +318,78 @@
     <template #footer>
       <el-button @click="createVisible=false">{{ t('common.cancel') }}</el-button>
       <el-button type="primary" :loading="creating" @click="submitCreate">{{ t('workOrderList.actions.create') }}</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog
+    v-model="expansionDialogVisible"
+    :title="t('workOrderList.expansionDialog.title')"
+    width="760px"
+    class="expansion-dialog"
+    destroy-on-close
+  >
+    <div class="expansion-dialog-body">
+      <el-steps :active="expansionDialogStep" finish-status="success" simple>
+        <el-step :title="t('workOrderList.expansionDialog.steps.download')" />
+        <el-step :title="t('workOrderList.expansionDialog.steps.upload')" />
+        <el-step :title="t('workOrderList.expansionDialog.steps.preview')" />
+        <el-step :title="t('workOrderList.expansionDialog.steps.use')" />
+      </el-steps>
+
+      <div class="expansion-dialog-panel">
+        <div class="expansion-dialog-actions">
+          <el-button :loading="expansionDraftDownloading" @click="downloadExpansionDraft">
+            <el-icon><Download /></el-icon>
+            {{ t('workOrderList.actions.downloadExpansionDraft') }}
+          </el-button>
+          <el-upload
+            :auto-upload="false"
+            :show-file-list="false"
+            accept=".xlsx,.xls"
+            :on-change="handleExpansionDialogFileChange"
+          >
+            <el-button type="primary" plain :loading="expansionPreviewLoading">
+              <el-icon><Upload /></el-icon>
+              {{ t('workOrderList.actions.uploadExpansionLld') }}
+            </el-button>
+          </el-upload>
+        </div>
+        <div class="form-hint">{{ t('workOrderList.expansionDialog.bodyHint') }}</div>
+      </div>
+
+      <div v-if="expansionDraftPreview" class="expansion-dialog-preview">
+        <el-alert
+          type="success"
+          :closable="false"
+          show-icon
+          :title="expansionDraftSummaryTitle"
+        />
+        <div class="expansion-preview-meta">
+          <span>{{ expansionDraftFileName }}</span>
+          <span>{{ t('workOrderList.expansionDialog.newCells', { count: getExpansionPreviewCells(expansionDraftPreview).length }) }}</span>
+        </div>
+        <div class="expansion-cell-list">
+          <el-tag
+            v-for="cell in getExpansionPreviewCells(expansionDraftPreview)"
+            :key="`${cell.sector_id || cell.local_cell_id}_${cell.band}_${cell.rat || ''}`"
+            type="success"
+            effect="plain"
+          >
+            {{ expansionCellLabel(cell) }}
+          </el-tag>
+        </div>
+      </div>
+      <el-empty
+        v-else
+        class="expansion-dialog-empty"
+        :description="t('workOrderList.expansionDialog.empty')"
+      />
+    </div>
+    <template #footer>
+      <el-button @click="expansionDialogVisible = false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :disabled="!expansionDraftPreview" @click="useExpansionDraft">
+        {{ t('workOrderList.actions.useExpansionLld') }}
+      </el-button>
     </template>
   </el-dialog>
 
@@ -561,7 +638,7 @@ const normalizeStatusList = (list) => {
   }
   return out
 }
-const createTypeValues = ['site_survey', 'opening_inspection', 'equipment_replacement', 'sector_expansion', 'ssv']
+const createTypeValues = ['site_survey', 'opening_inspection', 'equipment_replacement', 'cell_expansion', 'ssv']
 const sortFieldOptions = computed(() => [
   { label: t('workOrderList.sort.fields.createdAt'), value: 'created_at' },
   { label: t('workOrderList.sort.fields.updatedAt'), value: 'updated_at' },
@@ -644,6 +721,10 @@ const lastReplacementTargetsSiteId = ref(null)
 const expansionPreview = ref(null)
 const expansionFileName = ref('')
 const expansionPreviewLoading = ref(false)
+const expansionDialogVisible = ref(false)
+const expansionDraftPreview = ref(null)
+const expansionDraftFileName = ref('')
+const expansionDraftDownloading = ref(false)
 
 // 重复安装工单对话框
 const dupVisible = ref(false)
@@ -675,7 +756,7 @@ const validateReplacementTargets = (rule, value, callback) => {
 }
 
 const validateExpansionTargetCells = (rule, value, callback) => {
-  if (createForm.value.type !== 'sector_expansion') {
+  if (createForm.value.type !== 'cell_expansion') {
     callback()
     return
   }
@@ -686,11 +767,37 @@ const validateExpansionTargetCells = (rule, value, callback) => {
   callback(new Error(t('workOrderList.validation.uploadExpansionLld')))
 }
 
+const isTemplateRequiredForCreate = computed(() => createForm.value.type === 'cell_expansion')
+
+const templatePlaceholder = computed(() => (
+  createForm.value.type === 'cell_expansion'
+    ? t('workOrderList.form.placeholders.openingTemplateRequired')
+    : t('workOrderList.form.placeholders.template')
+))
+
+const getTemplateTaskTypeForCreate = (type) => {
+  const value = String(type || '').trim()
+  return value === 'cell_expansion' ? 'opening_inspection' : value
+}
+
+const validateTemplateId = (rule, value, callback) => {
+  if (!isTemplateRequiredForCreate.value) {
+    callback()
+    return
+  }
+  if (value) {
+    callback()
+    return
+  }
+  callback(new Error(t('workOrderList.validation.selectOpeningTemplate')))
+}
+
 const rules = computed(() => ({
   site_id: [{ required: true, message: t('workOrderList.validation.selectSite'), trigger: 'change' }],
   type: [{ required: true, message: t('workOrderList.validation.selectType'), trigger: 'change' }],
   assigned_to: [{ required: true, message: t('workOrderList.validation.selectAssignee'), trigger: 'change' }],
   title: [{ required: true, message: t('workOrderList.validation.enterTitle'), trigger: 'blur' }],
+  template_id: [{ validator: validateTemplateId, trigger: 'change' }],
   replacement_targets: [{ validator: validateReplacementTargets, trigger: 'change' }],
   expansion_target_cells: [{ validator: validateExpansionTargetCells, trigger: 'change' }],
 }))
@@ -980,12 +1087,46 @@ const loadUsers = async () => {
 const loadTemplates = async () => {
   if (!createForm.value.type) return
   try {
-    const params = { task_type: createForm.value.type, limit: 100 }
+    const params = { task_type: getTemplateTaskTypeForCreate(createForm.value.type), limit: 100 }
     const list = await request.get('/api/inspections/templates', { params })
     templateOptions.value = Array.isArray(list) ? list : []
   } catch (e) {
     // ignore (权限不足等)
   }
+}
+
+const applyTemplateOptionIfMissing = (templateId, templateName) => {
+  const id = String(templateId || '').trim()
+  if (!id) return
+  const exists = templateOptions.value.some(t => t.id === id)
+  if (!exists) {
+    templateOptions.value.push({
+      id,
+      template_name: templateName || id,
+    })
+  }
+}
+
+const applyHistoricalOpeningTemplate = async () => {
+  if (createForm.value.type !== 'cell_expansion' || !createForm.value.site_id) {
+    return false
+  }
+
+  try {
+    const res = await request.get('/api/inspections/templates/preferred-opening', {
+      params: { site_id: createForm.value.site_id },
+    })
+    if (res?.success && res?.template_id) {
+      createForm.value.template_id = res.template_id
+      applyTemplateOptionIfMissing(res.template_id, res.template_name)
+      formRef.value?.validateField?.('template_id')
+      return true
+    }
+  } catch (e) {
+    // 历史模板只是默认值优化，失败时继续走模板绑定推荐。
+  }
+
+  return false
 }
 
 const _parseReplacementTargetKey = (key) => {
@@ -1001,9 +1142,21 @@ const _parseReplacementTargetKey = (key) => {
 const resetExpansionPreview = () => {
   expansionPreview.value = null
   expansionFileName.value = ''
+  expansionDraftPreview.value = null
+  expansionDraftFileName.value = ''
   if (createForm.value) {
     createForm.value.expansion_target_cells = []
   }
+}
+
+const openExpansionDialog = () => {
+  if (!createForm.value.site_id) {
+    ElMessage.warning(t('workOrderList.validation.selectSite'))
+    return
+  }
+  expansionDraftPreview.value = expansionPreview.value
+  expansionDraftFileName.value = expansionFileName.value
+  expansionDialogVisible.value = true
 }
 
 const _extractExpansionPreviewError = (detail) => {
@@ -1020,7 +1173,7 @@ const _extractExpansionPreviewError = (detail) => {
   return t('workOrderList.messages.expansionPreviewFailed')
 }
 
-const handleExpansionFileChange = async (uploadFile) => {
+const handleExpansionDialogFileChange = async (uploadFile) => {
   const siteId = createForm.value.site_id
   const file = uploadFile?.raw
   if (!siteId) {
@@ -1031,19 +1184,54 @@ const handleExpansionFileChange = async (uploadFile) => {
 
   expansionPreviewLoading.value = true
   try {
-    const preview = await sitePlanningApi.previewSectorExpansion(siteId, file)
-    expansionPreview.value = preview
-    expansionFileName.value = file.name || uploadFile.name || ''
-    createForm.value.expansion_target_cells = Array.isArray(preview?.target_cells) ? preview.target_cells : []
+    const preview = await sitePlanningApi.previewCellExpansion(siteId, file)
+    expansionDraftPreview.value = preview
+    expansionDraftFileName.value = file.name || uploadFile.name || ''
     ElMessage.success(t('workOrderList.messages.expansionPreviewSuccess'))
-    formRef.value?.validateField?.('expansion_target_cells')
   } catch (e) {
     console.error(e)
-    resetExpansionPreview()
+    expansionDraftPreview.value = null
+    expansionDraftFileName.value = ''
     ElMessage.error(_extractExpansionPreviewError(e?.response?.data?.detail))
   } finally {
     expansionPreviewLoading.value = false
   }
+}
+
+const downloadExpansionDraft = async () => {
+  const siteId = createForm.value.site_id
+  if (!siteId) {
+    ElMessage.warning(t('workOrderList.validation.selectSite'))
+    return
+  }
+  if (expansionDraftDownloading.value) return
+
+  try {
+    expansionDraftDownloading.value = true
+    const response = await sitePlanningApi.exportSiteLldCells(siteId)
+    const filename = parseFilenameFromDisposition(response?.headers?.['content-disposition']) ||
+      `target_lld_draft_${siteId}_${formatExportDate()}.xlsx`
+    downloadBlob(response?.data, filename)
+    ElMessage.success(t('workOrderList.messages.expansionDraftDownloaded'))
+  } catch (e) {
+    console.error(e)
+    const detail = await extractErrorDetail(e)
+    ElMessage.error(detail || t('workOrderList.messages.expansionDraftDownloadFailed'))
+  } finally {
+    expansionDraftDownloading.value = false
+  }
+}
+
+const useExpansionDraft = () => {
+  if (!expansionDraftPreview.value || !Array.isArray(expansionDraftPreview.value.target_cells)) {
+    ElMessage.error(t('workOrderList.messages.expansionTargetRequired'))
+    return
+  }
+  expansionPreview.value = expansionDraftPreview.value
+  expansionFileName.value = expansionDraftFileName.value
+  createForm.value.expansion_target_cells = expansionDraftPreview.value.target_cells
+  formRef.value?.validateField?.('expansion_target_cells')
+  expansionDialogVisible.value = false
 }
 
 const loadReplacementTargets = async () => {
@@ -1092,7 +1280,7 @@ const loadReplacementTargets = async () => {
 }
 
 const onTypeOrSiteChange = async () => {
-  if (createForm.value.type !== 'sector_expansion') {
+  if (createForm.value.type !== 'cell_expansion') {
     resetExpansionPreview()
   }
   if (!createForm.value.site_id) {
@@ -1114,16 +1302,18 @@ const onTypeOrSiteChange = async () => {
     lastReplacementTargetsSiteId.value = null
   }
 
+  const appliedHistoricalTemplate = await applyHistoricalOpeningTemplate()
+  if (appliedHistoricalTemplate) return
+
   try {
-    const body = { site_id: createForm.value.site_id, task_type: createForm.value.type }
+    const body = {
+      site_id: createForm.value.site_id,
+      task_type: getTemplateTaskTypeForCreate(createForm.value.type),
+    }
     const res = await request.post('/api/inspections/templates/resolve', body)
     if (res?.success && res?.result?.template_id) {
       createForm.value.template_id = res.result.template_id
-      // ensure recommended template appears in options for visible label
-      const exists = templateOptions.value.some(t => t.id === res.result.template_id)
-      if (!exists) {
-        templateOptions.value.push({ id: res.result.template_id, template_name: res.result.template_name })
-      }
+      applyTemplateOptionIfMissing(res.result.template_id, res.result.template_name)
     }
   } catch (e) {
     // ignore
@@ -1156,7 +1346,7 @@ const submitCreate = () => {
       } else {
         delete payload.replacement_targets
       }
-      if (payload.type === 'sector_expansion') {
+      if (payload.type === 'cell_expansion') {
         if (!expansionPreview.value || !Array.isArray(expansionPreview.value.target_cells)) {
           ElMessage.error(t('workOrderList.messages.expansionTargetRequired'))
           creating.value = false
@@ -1169,11 +1359,17 @@ const submitCreate = () => {
           current_planning_version: expansionPreview.value.current_planning_version,
           current_sector_count: expansionPreview.value.current_sector_count,
           target_sector_count: expansionPreview.value.target_sector_count,
+          current_physical_sector_count: expansionPreview.value.current_physical_sector_count,
+          target_physical_sector_count: expansionPreview.value.target_physical_sector_count,
+          current_cell_count: expansionPreview.value.current_cell_count,
           target_cell_count: expansionPreview.value.target_cell_count,
+          new_cell_count: expansionPreview.value.new_cell_count,
+          new_device_count: expansionPreview.value.new_device_count,
           bands: expansionPreview.value.bands || [],
           current_slots: expansionPreview.value.current_slots || [],
           target_slots: expansionPreview.value.target_slots || [],
           new_slots: expansionPreview.value.new_slots || [],
+          new_cells: expansionPreview.value.new_cells || [],
         }
       } else {
         delete payload.expansion_targets
@@ -1437,7 +1633,7 @@ const buildWorkOrderProgress = (row) => {
 }
 
 const progressStageKeys = (type) => (
-  ['opening_inspection', 'equipment_replacement', 'sector_expansion'].includes(type)
+  ['opening_inspection', 'equipment_replacement', 'cell_expansion'].includes(type)
     ? OPENING_PROGRESS_STAGE_KEYS
     : DEFAULT_PROGRESS_STAGE_KEYS
 )
@@ -1461,7 +1657,7 @@ const progressDotTooltip = (row, dot) => {
 }
 
 const statusText = (status, type) => {
-  if (['opening_inspection', 'equipment_replacement', 'sector_expansion'].includes(type)) {
+  if (['opening_inspection', 'equipment_replacement', 'cell_expansion'].includes(type)) {
     if (status === 'APPROVED') return t('workOrderList.statusOverrides.APPROVED')
     if (status === 'ACTIVATED') return t('workOrderList.statusOverrides.ACTIVATED')
     if (status === 'COMPLETED') return t('workOrderList.statusOverrides.COMPLETED')
@@ -1489,6 +1685,34 @@ const replacementTargetLabel = (opt) => t('workOrderList.form.replacementTargetO
   sectorId: opt?.sectorId ?? '-',
   band: opt?.band ?? '-',
 })
+
+const getExpansionPreviewCells = (preview) => {
+  if (Array.isArray(preview?.new_cells) && preview.new_cells.length) return preview.new_cells
+  if (Array.isArray(preview?.expansion_targets) && preview.expansion_targets.length) return preview.expansion_targets
+  return Array.isArray(preview?.new_slots) ? preview.new_slots : []
+}
+
+const expansionCellLabel = (cell) => t('workOrderList.form.expansionCellLabel', {
+  physicalSector: cell?.physical_sector_id || cell?.physicalSectorId || cell?.sector_id || '-',
+  localCellId: cell?.local_cell_id || cell?.localCellId || cell?.sector_id || '-',
+  band: cell?.band || cell?.band_code || '-',
+})
+
+const buildExpansionSummaryTitle = (preview) => {
+  if (!preview) return ''
+  return t('workOrderList.form.expansionPreviewTitle', {
+    currentSectors: preview.current_physical_sector_count ?? preview.current_sector_count ?? '-',
+    currentCells: preview.current_cell_count ?? '-',
+    targetSectors: preview.target_physical_sector_count ?? preview.target_sector_count ?? '-',
+    targetCells: preview.target_cell_count ?? '-',
+    newCells: preview.new_cell_count ?? getExpansionPreviewCells(preview).length,
+    newDevices: preview.new_device_count ?? getExpansionPreviewCells(preview).length,
+  })
+}
+
+const expansionCommittedSummaryTitle = computed(() => buildExpansionSummaryTitle(expansionPreview.value))
+const expansionDraftSummaryTitle = computed(() => buildExpansionSummaryTitle(expansionDraftPreview.value))
+const expansionDialogStep = computed(() => (expansionDraftPreview.value ? 3 : 0))
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : '-')
 
 const formatExportDate = () => {
@@ -2048,17 +2272,30 @@ onBeforeUnmount(() => {
   color: #909399;
 }
 
-.expansion-upload-row {
+.expansion-lld-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.expansion-lld-main {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 32px;
+  min-width: 0;
 }
 
-.expansion-file-name {
-  min-width: 0;
-  color: #606266;
+.expansion-lld-title {
+  max-width: 420px;
+  color: #303133;
   font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2068,10 +2305,59 @@ onBeforeUnmount(() => {
   margin-top: 10px;
 }
 
-.expansion-slot-list {
+.expansion-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.expansion-dialog-panel {
+  padding: 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #f7f8fa;
+}
+
+.expansion-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.expansion-dialog-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.expansion-preview-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #606266;
+  font-size: 12px;
+}
+
+.expansion-dialog-empty {
+  padding: 18px 0 8px;
+}
+
+.expansion-cell-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .expansion-lld-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .expansion-lld-title {
+    max-width: 100%;
+  }
 }
 </style>

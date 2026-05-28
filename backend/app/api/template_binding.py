@@ -9,14 +9,15 @@ from sqlalchemy import func, and_, or_, desc
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
+import json
 
 from app.core.database import get_db
 from app.models.user import User
 from app.models.site import Site
 from app.models.inspection import (
-    InspectionTemplate, TemplateBinding, SiteInspection
+    InspectionTemplate, TemplateBinding, SiteInspection, TaskTypeEnum
 )
-from app.models.work_order import WorkOrder, WorkOrderStatusEnum
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.models.user_log import UserLog
 from app.schemas.template_binding import (
     TemplateBindingCreate, TemplateBindingUpdate, TemplateBindingResponse,
@@ -38,6 +39,19 @@ from app.services.inspection_template_sync import (
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
+
+
+def _extract_template_id_from_extra_data(extra_data: Any) -> Optional[str]:
+    if not extra_data:
+        return None
+    try:
+        payload = json.loads(extra_data) if isinstance(extra_data, str) else extra_data
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("template_id")
+    return str(value).strip() if value else None
 
 
 def _ensure_template_read_access(current_user: User) -> None:
@@ -86,6 +100,23 @@ async def get_templates(
     # 关键字搜索
     if q:
         query = query.filter(InspectionTemplate.template_name.contains(q))
+
+    if task_type:
+        try:
+            task_type_enum = TaskTypeEnum(task_type)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"不支持的任务类型：{task_type}",
+            )
+
+        query = query.join(TemplateBinding).filter(
+            TemplateBinding.active == True,
+            or_(
+                TemplateBinding.task_type == task_type_enum,
+                TemplateBinding.task_type.is_(None),
+            ),
+        ).distinct()
     
 
     # 按更新时间排序
@@ -181,6 +212,87 @@ async def create_template(
         work_orders_count=0,
         active_work_orders_count=0,
     )
+
+
+@router.get("/templates/preferred-opening", response_model=dict)
+async def get_preferred_opening_template(
+    site_id: int = Query(..., description="站点ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取站点最近一次有效开站工单实际使用过的检查模板。"""
+    _ensure_template_read_access(current_user)
+
+    valid_statuses = [
+        WorkOrderStatusEnum.PENDING,
+        WorkOrderStatusEnum.ACTIVE,
+        WorkOrderStatusEnum.SUBMITTED,
+        WorkOrderStatusEnum.UNDER_REVIEW,
+        WorkOrderStatusEnum.APPROVED,
+        WorkOrderStatusEnum.ACTIVATED,
+        WorkOrderStatusEnum.COMPLETED,
+    ]
+
+    work_orders = (
+        db.query(WorkOrder)
+        .filter(
+            WorkOrder.site_id == site_id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status.in_(valid_statuses),
+        )
+        .order_by(
+            desc(WorkOrder.completed_at),
+            desc(WorkOrder.reviewed_at),
+            desc(WorkOrder.submitted_at),
+            desc(WorkOrder.accepted_at),
+            desc(WorkOrder.assigned_at),
+            desc(WorkOrder.updated_at),
+        )
+        .limit(20)
+        .all()
+    )
+
+    for wo in work_orders:
+        template_id = _extract_template_id_from_extra_data(wo.extra_data)
+        if not template_id:
+            inspection = (
+                db.query(SiteInspection)
+                .filter(
+                    or_(
+                        SiteInspection.work_order_id == wo.id,
+                        SiteInspection.id == wo.inspection_id,
+                    )
+                )
+                .order_by(desc(SiteInspection.updated_at))
+                .first()
+            )
+            template_id = inspection.template_id if inspection else None
+
+        if not template_id:
+            continue
+
+        template = (
+            db.query(InspectionTemplate)
+            .filter(InspectionTemplate.id == template_id)
+            .first()
+        )
+        if not template:
+            continue
+
+        return {
+            "success": True,
+            "source": "opening_work_order_history",
+            "template_id": template.id,
+            "template_name": template.template_name,
+            "source_work_order_id": wo.id,
+            "source_work_order_status": wo.status.value if hasattr(wo.status, "value") else str(wo.status),
+        }
+
+    return {
+        "success": False,
+        "source": "opening_work_order_history",
+        "message": "未找到该站点历史开站工单使用过的有效模板",
+    }
 
 
 @router.get("/templates/{template_id}", response_model=InspectionTemplateResponse)

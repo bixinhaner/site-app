@@ -27,7 +27,7 @@ class WorkOrderTypeEnum(str, Enum):
     OPENING_INSPECTION = "opening_inspection"
     MAINTENANCE = "maintenance"
     EQUIPMENT_REPLACEMENT = "equipment_replacement"
-    SECTOR_EXPANSION = "sector_expansion"
+    CELL_EXPANSION = "cell_expansion"
     POWER_ISSUE = "power_issue"
     TRANSMISSION_ISSUE = "transmission_issue"
     GPS_ISSUE = "gps_issue"
@@ -61,7 +61,7 @@ class WorkOrderCreate(BaseModel):
     template_id: Optional[str] = None
     # 设备更换工单：必须选择要更换的设备位（支持多选）
     replacement_targets: Optional[List[WorkOrderReplacementTarget]] = None
-    # 扇区扩容工单：由目标 LLD dry-run 生成，后端会再次校验
+    # 小区扩容工单：由目标 LLD dry-run 生成，后端会再次校验
     expansion_targets: Optional[List[WorkOrderReplacementTarget]] = None
     expansion_target_cells: Optional[List[Dict[str, Any]]] = None
     expansion_summary: Optional[Dict[str, Any]] = None
