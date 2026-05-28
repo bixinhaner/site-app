@@ -878,6 +878,10 @@ export default {
       unit: "Unit",
       photo: "Photos",
       noSubmittedContent: "This check item has no submitted content yet",
+      sectorExpansionInfo: "Sector Expansion Info",
+      expansionSector: "Expansion Sectors",
+      targetPlanningVersion: "Target Planning Version",
+      newSlots: "New Slots",
     },
     filters: {
       reviewList: {

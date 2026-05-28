@@ -881,6 +881,10 @@ export default {
       photo: "Foto",
       noSubmittedContent:
         "Item pemeriksaan ini belum memiliki konten yang dikirim",
+      sectorExpansionInfo: "Info Ekspansi Sektor",
+      expansionSector: "Sektor Ekspansi",
+      targetPlanningVersion: "Versi Perencanaan Target",
+      newSlots: "Slot Baru",
     },
     filters: {
       reviewList: {

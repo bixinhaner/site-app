@@ -576,6 +576,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 
@@ -598,6 +599,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const { t } = useI18n()
 
 const pageLoading = ref(false)
 const pageError = ref('')
@@ -791,18 +793,24 @@ const statusText = (status) => ({
   VOIDED: '已作废',
 }[status] || status)
 
-const typeText = (type) => ({
-  site_survey: '站点勘查',
-  opening_inspection: '新站安装',
-  equipment_replacement: '设备更换',
-  sector_expansion: '扇区扩容',
-  ssv: 'SSV 验收',
-  maintenance: '维护检查',
-  power_issue: '断电问题',
-  transmission_issue: '传输问题',
-  gps_issue: 'GPS问题',
-  signal_issue: '信号问题',
-}[type] || type)
+const typeText = (type) => {
+  const value = String(type || '').trim()
+  const key = `workOrderList.types.${value}`
+  const label = t(key)
+  if (label && label !== key) return label
+  return ({
+    site_survey: '站点勘查',
+    opening_inspection: '新站安装',
+    equipment_replacement: '设备更换',
+    sector_expansion: '扇区扩容',
+    ssv: 'SSV 验收',
+    maintenance: '维护检查',
+    power_issue: '断电问题',
+    transmission_issue: '传输问题',
+    gps_issue: 'GPS问题',
+    signal_issue: '信号问题',
+  }[value] || value || type)
+}
 
 const requiredTypeText = (type) => ({
   photo: '仅照片',

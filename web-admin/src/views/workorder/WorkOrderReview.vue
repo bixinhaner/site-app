@@ -192,20 +192,20 @@
         >
           <template #header>
             <div class="card-header">
-              <span>扇区扩容信息</span>
+              <span>{{ t("workOrderReview.labels.sectorExpansionInfo") }}</span>
             </div>
           </template>
           <el-descriptions :column="2" border size="small">
-            <el-descriptions-item label="扩容扇区">
+            <el-descriptions-item :label="t('workOrderReview.labels.expansionSector')">
               <span>
                 {{ expansionSummary.current_sector_count ?? "-" }} →
                 {{ expansionSummary.target_sector_count ?? "-" }}
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="目标规划版本">
+            <el-descriptions-item :label="t('workOrderReview.labels.targetPlanningVersion')">
               <span>{{ expansionSummary.current_planning_version || "-" }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="新增设备位" :span="2">
+            <el-descriptions-item :label="t('workOrderReview.labels.newSlots')" :span="2">
               <el-space wrap>
                 <el-tag
                   v-for="t in expansionTargets"
@@ -5151,7 +5151,13 @@ const statusText = (status, type) => {
   }
   return statuses.find((s) => s.value === status)?.label || status;
 };
-const typeText = (v) => types.find((t) => t.value === v)?.label || v;
+const typeText = (v) => {
+  const value = String(v || "").trim();
+  const key = `workOrderList.types.${value}`;
+  const label = t(key);
+  if (label && label !== key) return label;
+  return types.find((t) => t.value === value)?.label || value;
+};
 const priorityText = (v) =>
   ({ low: "低", normal: "普通", high: "高", urgent: "紧急" })[v] || v;
 const formatDateTime = (val) => (val ? new Date(val).toLocaleString() : "-");

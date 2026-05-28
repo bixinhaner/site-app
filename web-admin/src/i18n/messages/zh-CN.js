@@ -832,6 +832,10 @@ export default {
       unit: "单位",
       photo: "照片",
       noSubmittedContent: "该检查项暂无提交内容",
+      sectorExpansionInfo: "扇区扩容信息",
+      expansionSector: "扩容扇区",
+      targetPlanningVersion: "目标规划版本",
+      newSlots: "新增设备位",
     },
     filters: {
       reviewList: {

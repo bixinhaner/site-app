@@ -252,6 +252,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { userAPI } from '@/api/user'
 import { authzApi } from '@/api/authz'
@@ -267,6 +268,7 @@ const props = defineProps({
 
 // Emits
 const emit = defineEmits(['success', 'cancel'])
+const { t } = useI18n()
 
 // 用户状态管理
 const userStore = useUserStore()
@@ -450,6 +452,9 @@ const normalizeReasonList = (value) => {
 }
 
 const getWorkOrderTypeLabel = (value) => {
+  const key = `workOrderList.types.${value}`
+  const label = t(key)
+  if (label && label !== key) return label
   const typeMap = {
     site_survey: '站点勘查',
     opening_inspection: '新站安装',

@@ -2037,6 +2037,7 @@ const legacyIdMap = {
   扇区数: "Jumlah sektor",
   "扇区数: {{ summary.sector_count }}":
     "Jumlah sektor: {{ ringkasan.sector_count }}",
+  扇区扩容: "Ekspansi Sektor",
   扇区信息: "informasi sektor",
   上传被系统阻断: "Unggahan diblokir oleh sistem",
   上传附件: "Unggah lampiran",

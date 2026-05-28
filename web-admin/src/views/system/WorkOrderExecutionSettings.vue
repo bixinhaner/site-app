@@ -373,6 +373,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Document, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
@@ -381,6 +382,7 @@ import { userAPI } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
+const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const userSelectLoading = ref(false)
@@ -417,17 +419,17 @@ const roleRows = [
   { key: 'warehouse_manager', label: '仓库管理员' },
 ]
 
-const workOrderTypeOptions = [
-  { value: 'site_survey', label: '站点勘查' },
-  { value: 'opening_inspection', label: '新站安装' },
-  { value: 'equipment_replacement', label: '设备更换' },
-  { value: 'sector_expansion', label: '扇区扩容' },
-  { value: 'ssv', label: 'SSV 验收' },
-  { value: 'maintenance', label: '维护检查' },
-  { value: 'power_issue', label: '断电问题' },
-  { value: 'transmission_issue', label: '传输问题' },
-  { value: 'gps_issue', label: 'GPS问题' },
-  { value: 'signal_issue', label: '信号问题' },
+const WORK_ORDER_TYPE_VALUES = [
+  'site_survey',
+  'opening_inspection',
+  'equipment_replacement',
+  'sector_expansion',
+  'ssv',
+  'maintenance',
+  'power_issue',
+  'transmission_issue',
+  'gps_issue',
+  'signal_issue',
 ]
 
 const createBoolRule = (defaultValue) => ({
@@ -450,11 +452,11 @@ const createDefaultForm = () => ({
   // 兼容字段：保存时按三档策略自动派生。
   allow_local_upload_without_geo: createBoolRule(false),
   visible_work_order_types: {
-    default: workOrderTypeOptions.map(item => item.value),
+    default: [...WORK_ORDER_TYPE_VALUES],
     per_role: {},
   },
   editable_work_order_types: {
-    default: workOrderTypeOptions.map(item => item.value),
+    default: [...WORK_ORDER_TYPE_VALUES],
     per_role: {},
   },
   user_overrides: [],
@@ -490,7 +492,17 @@ const defaultBoolKeys = [
 
 const overridableBoolKeys = defaultBoolKeys.filter(key => key !== 'enabled')
 
-const getTypeLabel = (value) => workOrderTypeOptions.find(item => item.value === value)?.label || value
+const getTypeLabel = (value) => {
+  const type = String(value || '').trim()
+  const key = `workOrderList.types.${type}`
+  const label = t(key)
+  return label && label !== key ? label : type
+}
+
+const workOrderTypeOptions = computed(() => WORK_ORDER_TYPE_VALUES.map(value => ({
+  value,
+  label: getTypeLabel(value),
+})))
 
 const buildTypeOptions = (types = []) => normalizeTypeList(types).map(type => ({
   value: type,

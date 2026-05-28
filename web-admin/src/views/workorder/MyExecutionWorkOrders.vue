@@ -164,6 +164,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { ArrowRight, Refresh, Search } from '@element-plus/icons-vue'
 
@@ -172,6 +173,7 @@ import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const userStore = useUserStore()
+const { t } = useI18n()
 
 const GROUPS = [
   { key: 'pending', label: '待接受', statuses: ['PENDING'], tagType: 'warning' },
@@ -257,7 +259,7 @@ const editableTypes = computed(() => {
 
 const allowedTypeOptions = computed(() => visibleTypes.value.map((type) => ({
   value: type,
-  label: TYPE_LABEL_MAP[type] || type,
+  label: typeText(type),
 })))
 
 const activeGroupMeta = computed(() => GROUPS.find(group => group.key === activeGroup.value) || GROUPS[0])
@@ -310,6 +312,9 @@ const formatDateTime = (value) => {
 
 const typeText = (type) => {
   const normalized = normalizeWorkOrderType(type)
+  const key = `workOrderList.types.${normalized}`
+  const label = t(key)
+  if (label && label !== key) return label
   return TYPE_LABEL_MAP[normalized] || normalized || type
 }
 
