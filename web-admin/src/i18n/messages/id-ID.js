@@ -686,13 +686,15 @@ export default {
       description: "Deskripsi",
       loading: "Memuat...",
       loadFailed: "Gagal memuat",
+      noTemplates: "Tidak ada templat inspeksi yang tersedia",
+      templateLoadFailed: "Gagal memuat templat inspeksi",
       placeholders: {
         siteSearch: "Masukkan nama atau kode situs untuk mencari",
         selectType: "Pilih jenis",
         selectAssignee: "Pilih petugas",
         enterTitle: "Masukkan judul",
-        template: "Rekomendasi otomatis (opsional)",
-        openingTemplateRequired: "Pilih templat instalasi situs baru (wajib)",
+        template: "Pilih templat inspeksi",
+        openingTemplateRequired: "Pilih templat inspeksi",
         replacementTargets: "Pilih slot penggantian (bisa lebih dari satu)",
         selectPriority: "Pilih prioritas",
         description: "Deskripsi perintah kerja opsional",
@@ -825,6 +827,7 @@ export default {
       selectSite: "Silakan pilih situs",
       selectType: "Silakan pilih jenis",
       selectAssignee: "Silakan pilih petugas",
+      selectTemplate: "Silakan pilih templat inspeksi",
       selectOpeningTemplate:
         "Perintah kerja ekspansi sel wajib memilih templat instalasi situs baru",
       cellExpansionSiteRequired:
@@ -870,6 +873,9 @@ export default {
       expansionDraftDownloadFailed: "Gagal mengunduh draf",
       cellExpansionSiteNotAllowed:
         "Status situs saat ini {status}, sehingga ekspansi sel tidak dapat dibuat. Untuk situs yang belum terpasang, gunakan perintah kerja instalasi situs baru atau kelola LLD target langsung.",
+      templateLoadFailed: "Gagal memuat templat inspeksi: {message}",
+      templateLoadFailedFallback:
+        "Muat ulang halaman dan coba lagi, atau minta administrator memeriksa izin templat.",
       createSuccess: "Berhasil dibuat",
       createFailed: "Gagal membuat",
       updateSuccess: "Berhasil diperbarui",

@@ -682,13 +682,15 @@ export default {
       description: "Description",
       loading: "Loading...",
       loadFailed: "Load failed",
+      noTemplates: "No inspection templates available",
+      templateLoadFailed: "Failed to load inspection templates",
       placeholders: {
         siteSearch: "Search by site name or code",
         selectType: "Select type",
         selectAssignee: "Select assignee",
         enterTitle: "Enter title",
-        template: "Auto recommended (optional)",
-        openingTemplateRequired: "Select new-site installation template (required)",
+        template: "Select an inspection template",
+        openingTemplateRequired: "Select an inspection template",
         replacementTargets: "Select replacement slots (multiple)",
         selectPriority: "Select priority",
         description: "Optional work order description",
@@ -821,6 +823,7 @@ export default {
       selectSite: "Please select a site",
       selectType: "Please select a type",
       selectAssignee: "Please select an assignee",
+      selectTemplate: "Please select an inspection template",
       selectOpeningTemplate:
         "Cell expansion work orders must select a new-site installation template",
       cellExpansionSiteRequired:
@@ -866,6 +869,9 @@ export default {
       expansionDraftDownloadFailed: "Failed to download the draft",
       cellExpansionSiteNotAllowed:
         "The current site status is {status}, so cell expansion cannot be created. For uninstalled sites, use a new-site installation work order or maintain the target LLD directly.",
+      templateLoadFailed: "Failed to load inspection templates: {message}",
+      templateLoadFailedFallback:
+        "Refresh the page and try again, or ask an administrator to check template permissions.",
       createSuccess: "Created successfully",
       createFailed: "Create failed",
       updateSuccess: "Updated successfully",

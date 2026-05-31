@@ -1526,6 +1526,12 @@ async def create_work_order(
     if not site:
         raise HTTPException(status_code=404, detail="站点不存在")
 
+    if not data.template_id:
+        raise HTTPException(status_code=400, detail="创建工单必须选择检查模板")
+    template_exists = db.query(InspectionTemplate.id).filter(InspectionTemplate.id == data.template_id).first()
+    if not template_exists:
+        raise HTTPException(status_code=400, detail="检查模板不存在或已删除")
+
     normalized_replacement_targets = None
     normalized_expansion: Optional[Dict[str, Any]] = None
 
@@ -1591,8 +1597,6 @@ async def create_work_order(
 
     # 小区扩容工单创建规则校验：用目标 LLD 计算新增小区/设备，但不提前写入当前规划
     if data.type == WorkOrderTypeEnum.CELL_EXPANSION:
-        if not data.template_id:
-            raise HTTPException(status_code=400, detail="小区扩容工单必须选择检查模板")
         raw_target_cells = getattr(data, "expansion_target_cells", None) or []
         if not raw_target_cells:
             raise HTTPException(status_code=400, detail="小区扩容工单必须先上传目标 LLD 并完成预览")

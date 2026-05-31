@@ -101,27 +101,8 @@ async def get_templates(
     if q:
         query = query.filter(InspectionTemplate.template_name.contains(q))
 
-    if task_type:
-        try:
-            task_type_enum = TaskTypeEnum(task_type)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"不支持的任务类型：{task_type}",
-            )
-
-        scoped_query = query.join(TemplateBinding).filter(
-            TemplateBinding.active == True,
-            or_(
-                TemplateBinding.task_type == task_type_enum,
-                TemplateBinding.task_type.is_(None),
-            ),
-        ).distinct()
-
-        # 生产库可能已有检查模板，但还没有补齐模板绑定记录。
-        # 下拉列表不能因此变空：有绑定时按绑定筛选；无绑定时回退展示可用模板。
-        if scoped_query.count() > 0:
-            query = scoped_query
+    # 生产创建工单流程当前不使用模板绑定筛选。
+    # 即使旧前端仍传 task_type，也返回全部可用模板，避免未配置绑定或类型枚举不覆盖时下拉为空。
     
 
     # 按更新时间排序

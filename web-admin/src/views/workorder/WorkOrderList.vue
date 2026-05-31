@@ -253,7 +253,9 @@
           v-model="createForm.template_id"
           clearable
           filterable
+          :loading="templateOptionsLoading"
           :placeholder="templatePlaceholder"
+          :no-data-text="templateNoDataText"
           style="width: 100%"
           @visible-change="v => v && loadTemplates()"
         >
@@ -725,6 +727,8 @@ const siteSearchTotal = ref(0)
 const selectedSiteOption = ref(null)
 const userOptions = ref([])
 const templateOptions = ref([])
+const templateOptionsLoading = ref(false)
+const templateLoadFailed = ref(false)
 const formRef = ref()
 
 const isCellExpansionCreate = computed(() => createForm.value.type === 'cell_expansion')
@@ -782,12 +786,14 @@ const validateExpansionTargetCells = (rule, value, callback) => {
   callback(new Error(t('workOrderList.validation.uploadExpansionLld')))
 }
 
-const isTemplateRequiredForCreate = computed(() => createForm.value.type === 'cell_expansion')
+const isTemplateRequiredForCreate = computed(() => true)
 
-const templatePlaceholder = computed(() => (
-  isCellExpansionCreate.value
-    ? t('workOrderList.form.placeholders.openingTemplateRequired')
-    : t('workOrderList.form.placeholders.template')
+const templatePlaceholder = computed(() => t('workOrderList.form.placeholders.template'))
+
+const templateNoDataText = computed(() => (
+  templateLoadFailed.value
+    ? t('workOrderList.form.templateLoadFailed')
+    : t('workOrderList.form.noTemplates')
 ))
 
 const siteSearchPlaceholder = computed(() => (
@@ -795,11 +801,6 @@ const siteSearchPlaceholder = computed(() => (
     ? t('workOrderList.siteSearch.cellExpansionInputHint')
     : t('workOrderList.form.placeholders.siteSearch')
 ))
-
-const getTemplateTaskTypeForCreate = (type) => {
-  const value = String(type || '').trim()
-  return value === 'cell_expansion' ? 'opening_inspection' : value
-}
 
 const getSelectedCreateSite = () => {
   const selectedId = createForm.value.site_id
@@ -832,15 +833,11 @@ const isSiteOptionDisabledForCreate = (site) => (
 )
 
 const validateTemplateId = (rule, value, callback) => {
-  if (!isTemplateRequiredForCreate.value) {
-    callback()
-    return
-  }
   if (value) {
     callback()
     return
   }
-  callback(new Error(t('workOrderList.validation.selectOpeningTemplate')))
+  callback(new Error(t('workOrderList.validation.selectTemplate')))
 }
 
 const validateCreateSiteId = (rule, value, callback) => {
@@ -955,10 +952,12 @@ const openCreate = () => {
   }
   resetSiteSearchState()
   templateOptions.value = []
+  templateLoadFailed.value = false
   replacementTargetOptions.value = []
   lastReplacementTargetsSiteId.value = null
   resetExpansionPreview()
   createVisible.value = true
+  loadTemplates()
 }
 
 const _firstQueryValue = (v) => (Array.isArray(v) ? v[0] : v)
@@ -1187,13 +1186,21 @@ const loadUsers = async () => {
 }
 
 const loadTemplates = async () => {
-  if (!createForm.value.type) return
+  if (templateOptionsLoading.value) return
+  templateOptionsLoading.value = true
+  templateLoadFailed.value = false
   try {
-    const params = { task_type: getTemplateTaskTypeForCreate(createForm.value.type), limit: 100 }
+    const params = { limit: 100 }
     const list = await request.get('/api/inspections/templates', { params })
     templateOptions.value = Array.isArray(list) ? list : []
   } catch (e) {
-    // ignore (权限不足等)
+    templateOptions.value = []
+    templateLoadFailed.value = true
+    const detail = e?.response?.data?.detail
+    const message = (typeof detail === 'string' && detail) || detail?.message || e?.message || t('workOrderList.messages.templateLoadFailedFallback')
+    ElMessage.error(t('workOrderList.messages.templateLoadFailed', { message }))
+  } finally {
+    templateOptionsLoading.value = false
   }
 }
 
@@ -1409,20 +1416,6 @@ const onTypeOrSiteChange = async () => {
 
   const appliedHistoricalTemplate = await applyHistoricalOpeningTemplate()
   if (appliedHistoricalTemplate) return
-
-  try {
-    const body = {
-      site_id: createForm.value.site_id,
-      task_type: getTemplateTaskTypeForCreate(createForm.value.type),
-    }
-    const res = await request.post('/api/inspections/templates/resolve', body)
-    if (res?.success && res?.result?.template_id) {
-      createForm.value.template_id = res.result.template_id
-      applyTemplateOptionIfMissing(res.result.template_id, res.result.template_name)
-    }
-  } catch (e) {
-    // ignore
-  }
 }
 
 const submitCreate = () => {
