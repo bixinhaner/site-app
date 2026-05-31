@@ -69,6 +69,12 @@ from sqlalchemy.exc import SQLAlchemyError
 router = APIRouter()
 
 
+def _parse_csv_query_values(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return [item.strip() for item in str(value).split(",") if item and item.strip()]
+
+
 def _ensure_site_manage_access(current_user: User) -> None:
     if not user_has_any_role_or_permission(
         current_user,
@@ -372,6 +378,7 @@ async def get_sites(
 async def search_sites(
     keyword: Optional[str] = Query(None, description="搜索站点名称/编码/城市"),
     status: Optional[str] = Query(None),
+    status_in: Optional[str] = Query(None, description="逗号分隔的站点状态列表"),
     site_type: Optional[str] = Query(None),
     assigned_to: Optional[int] = Query(None),
     sort_by: Optional[str] = Query(None, description="排序字段: site_code|site_name|city|status|created_at|updated_at"),
@@ -397,8 +404,9 @@ async def search_sites(
         )
 
     # 过滤条件
-    if status:
-        query = query.filter(Site.status == status)
+    status_values = [status] if status else _parse_csv_query_values(status_in)
+    if status_values:
+        query = query.filter(Site.status.in_(status_values))
     if site_type:
         query = query.filter(Site.site_type == site_type)
     if assigned_to and _can_view_all_sites(current_user):

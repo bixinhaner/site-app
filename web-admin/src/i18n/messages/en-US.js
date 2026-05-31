@@ -724,6 +724,17 @@ export default {
       ACTIVATED: "Online, Pending Activation",
       COMPLETED: "Activated",
     },
+    siteStatuses: {
+      survey_pending: "Survey Pending",
+      planning: "Planning",
+      construction: "Construction",
+      pending_online: "Ready for Online",
+      online_pending_activation: "Online, Pending Activation",
+      operational: "Operational",
+      maintenance: "Maintenance",
+      decommissioned: "Decommissioned",
+      cancelled: "Cancelled",
+    },
     types: {
       opening_inspection: "New Site Installation",
       equipment_replacement: "Equipment Replacement",
@@ -785,6 +796,11 @@ export default {
       loading: "Searching sites...",
       noMatch: "No matching sites found",
       inputHint: "Search by site name or code",
+      cellExpansionInputHint: "Search installed sites by name or code",
+      cellExpansionNoMatch:
+        "No installed site is available for cell expansion",
+      cellExpansionScopeHint:
+        "Cell expansion only supports sites that are ready for online, online pending activation, operational, or under maintenance.",
       loadingHint: "Searching sites, please wait.",
       noKeywordResults:
         'No sites matched "{keyword}". Try site name, code, or a shorter keyword.',
@@ -807,6 +823,8 @@ export default {
       selectAssignee: "Please select an assignee",
       selectOpeningTemplate:
         "Cell expansion work orders must select a new-site installation template",
+      cellExpansionSiteRequired:
+        "Cell expansion can only select installed or online sites",
       enterTitle: "Please enter a title",
       selectNewStatus: "Please select a new status",
       selectAssigneeForBatch: "Please select an assignee",
@@ -846,6 +864,8 @@ export default {
       expansionPreviewFailed: "Target LLD preview failed",
       expansionDraftDownloaded: "Target LLD draft downloaded",
       expansionDraftDownloadFailed: "Failed to download the draft",
+      cellExpansionSiteNotAllowed:
+        "The current site status is {status}, so cell expansion cannot be created. For uninstalled sites, use a new-site installation work order or maintain the target LLD directly.",
       createSuccess: "Created successfully",
       createFailed: "Create failed",
       updateSuccess: "Updated successfully",

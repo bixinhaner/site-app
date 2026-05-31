@@ -728,6 +728,17 @@ export default {
       ACTIVATED: "Sudah Online, Menunggu Aktivasi",
       COMPLETED: "Sudah Diaktifkan",
     },
+    siteStatuses: {
+      survey_pending: "Menunggu Survei",
+      planning: "Perencanaan",
+      construction: "Konstruksi",
+      pending_online: "Siap Online",
+      online_pending_activation: "Online, Menunggu Aktivasi",
+      operational: "Operasional",
+      maintenance: "Pemeliharaan",
+      decommissioned: "Dinonaktifkan",
+      cancelled: "Dibatalkan",
+    },
     types: {
       opening_inspection: "Instalasi Situs Baru",
       equipment_replacement: "Penggantian Peralatan",
@@ -789,6 +800,12 @@ export default {
       loading: "Sedang mencari situs...",
       noMatch: "Tidak ada situs yang cocok",
       inputHint: "Masukkan nama atau kode situs untuk mencari",
+      cellExpansionInputHint:
+        "Cari situs yang sudah terpasang berdasarkan nama atau kode",
+      cellExpansionNoMatch:
+        "Tidak ada situs terpasang yang bisa dibuatkan ekspansi sel",
+      cellExpansionScopeHint:
+        "Ekspansi sel hanya mendukung situs siap online, online menunggu aktivasi, operasional, atau pemeliharaan.",
       loadingHint: "Sedang mencari situs, harap tunggu.",
       noKeywordResults:
         'Tidak ada situs yang cocok dengan "{keyword}". Coba nama situs, kode, atau kata kunci yang lebih pendek.',
@@ -810,6 +827,8 @@ export default {
       selectAssignee: "Silakan pilih petugas",
       selectOpeningTemplate:
         "Perintah kerja ekspansi sel wajib memilih templat instalasi situs baru",
+      cellExpansionSiteRequired:
+        "Ekspansi sel hanya dapat memilih situs yang sudah terpasang atau online",
       enterTitle: "Silakan masukkan judul",
       selectNewStatus: "Silakan pilih status baru",
       selectAssigneeForBatch: "Silakan pilih petugas",
@@ -849,6 +868,8 @@ export default {
       expansionPreviewFailed: "Pratinjau LLD target gagal",
       expansionDraftDownloaded: "Draf LLD target telah diunduh",
       expansionDraftDownloadFailed: "Gagal mengunduh draf",
+      cellExpansionSiteNotAllowed:
+        "Status situs saat ini {status}, sehingga ekspansi sel tidak dapat dibuat. Untuk situs yang belum terpasang, gunakan perintah kerja instalasi situs baru atau kelola LLD target langsung.",
       createSuccess: "Berhasil dibuat",
       createFailed: "Gagal membuat",
       updateSuccess: "Berhasil diperbarui",

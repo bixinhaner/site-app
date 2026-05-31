@@ -110,13 +110,18 @@ async def get_templates(
                 detail=f"不支持的任务类型：{task_type}",
             )
 
-        query = query.join(TemplateBinding).filter(
+        scoped_query = query.join(TemplateBinding).filter(
             TemplateBinding.active == True,
             or_(
                 TemplateBinding.task_type == task_type_enum,
                 TemplateBinding.task_type.is_(None),
             ),
         ).distinct()
+
+        # 生产库可能已有检查模板，但还没有补齐模板绑定记录。
+        # 下拉列表不能因此变空：有绑定时按绑定筛选；无绑定时回退展示可用模板。
+        if scoped_query.count() > 0:
+            query = scoped_query
     
 
     # 按更新时间排序

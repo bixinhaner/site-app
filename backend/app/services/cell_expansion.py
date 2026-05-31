@@ -17,7 +17,6 @@ from app.services.site_progress_service import rebuild_site_progress
 
 
 EXPANSION_ALLOWED_SITE_STATUSES = {
-    "construction",
     "pending_online",
     "online_pending_activation",
     "operational",

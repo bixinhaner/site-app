@@ -216,17 +216,23 @@
           :remote-method="handleSiteRemoteSearch"
           :no-data-text="siteSelectNoDataText"
           :loading-text="t('workOrderList.siteSearch.loading')"
-          :placeholder="t('workOrderList.form.placeholders.siteSearch')"
+          :placeholder="siteSearchPlaceholder"
           style="width: 100%"
           @visible-change="handleSiteDropdownVisible"
           @change="handleSiteChange"
         >
-          <el-option v-for="s in siteOptions" :key="s.id" :label="s.site_name + ' ('+ s.site_code +')'" :value="s.id" />
+          <el-option
+            v-for="s in siteOptions"
+            :key="s.id"
+            :label="siteOptionLabel(s)"
+            :value="s.id"
+            :disabled="isSiteOptionDisabledForCreate(s)"
+          />
         </el-select>
         <div class="form-hint">{{ siteSelectHint }}</div>
       </el-form-item>
       <el-form-item :label="t('workOrderList.form.type')" prop="type">
-        <el-select v-model="createForm.type" :placeholder="t('workOrderList.form.placeholders.selectType')" style="width: 100%" @change="onTypeOrSiteChange">
+        <el-select v-model="createForm.type" :placeholder="t('workOrderList.form.placeholders.selectType')" style="width: 100%" @change="handleTypeChange">
           <el-option v-for="option in createTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
       </el-form-item>
@@ -705,6 +711,13 @@ const createForm = ref({
 const SITE_SUGGEST_LIMIT = 20
 const SITE_SEARCH_LIMIT = 50
 const SITE_SEARCH_DEBOUNCE_MS = 300
+const CELL_EXPANSION_ALLOWED_SITE_STATUSES = [
+  'pending_online',
+  'online_pending_activation',
+  'operational',
+  'maintenance',
+]
+const CELL_EXPANSION_ALLOWED_SITE_STATUS_SET = new Set(CELL_EXPANSION_ALLOWED_SITE_STATUSES)
 const siteOptions = ref([])
 const siteOptionsLoading = ref(false)
 const siteSearchKeyword = ref('')
@@ -713,6 +726,8 @@ const selectedSiteOption = ref(null)
 const userOptions = ref([])
 const templateOptions = ref([])
 const formRef = ref()
+
+const isCellExpansionCreate = computed(() => createForm.value.type === 'cell_expansion')
 
 // 设备更换：设备位候选项（来自站点规划）
 const replacementTargetOptions = ref([])
@@ -770,15 +785,51 @@ const validateExpansionTargetCells = (rule, value, callback) => {
 const isTemplateRequiredForCreate = computed(() => createForm.value.type === 'cell_expansion')
 
 const templatePlaceholder = computed(() => (
-  createForm.value.type === 'cell_expansion'
+  isCellExpansionCreate.value
     ? t('workOrderList.form.placeholders.openingTemplateRequired')
     : t('workOrderList.form.placeholders.template')
+))
+
+const siteSearchPlaceholder = computed(() => (
+  isCellExpansionCreate.value
+    ? t('workOrderList.siteSearch.cellExpansionInputHint')
+    : t('workOrderList.form.placeholders.siteSearch')
 ))
 
 const getTemplateTaskTypeForCreate = (type) => {
   const value = String(type || '').trim()
   return value === 'cell_expansion' ? 'opening_inspection' : value
 }
+
+const getSelectedCreateSite = () => {
+  const selectedId = createForm.value.site_id
+  if (!selectedId) return null
+  if (selectedSiteOption.value?.id === selectedId) return selectedSiteOption.value
+  return siteOptions.value.find(s => s.id === selectedId) || null
+}
+
+const siteStatusText = (status) => {
+  const value = String(status || '').trim()
+  if (!value) return '-'
+  const translated = t(`workOrderList.siteStatuses.${value}`)
+  return translated === `workOrderList.siteStatuses.${value}` ? value : translated
+}
+
+const siteOptionLabel = (site) => {
+  if (!site) return '-'
+  const name = site.site_name || site.site_code || site.id || '-'
+  const code = site.site_code || site.id || '-'
+  return `${name} (${code})`
+}
+
+const isCellExpansionAllowedSite = (site) => {
+  const status = String(site?.status || '').trim()
+  return CELL_EXPANSION_ALLOWED_SITE_STATUS_SET.has(status)
+}
+
+const isSiteOptionDisabledForCreate = (site) => (
+  isCellExpansionCreate.value && !isCellExpansionAllowedSite(site)
+)
 
 const validateTemplateId = (rule, value, callback) => {
   if (!isTemplateRequiredForCreate.value) {
@@ -792,8 +843,23 @@ const validateTemplateId = (rule, value, callback) => {
   callback(new Error(t('workOrderList.validation.selectOpeningTemplate')))
 }
 
+const validateCreateSiteId = (rule, value, callback) => {
+  if (!value) {
+    callback(new Error(t('workOrderList.validation.selectSite')))
+    return
+  }
+  if (isCellExpansionCreate.value) {
+    const site = getSelectedCreateSite()
+    if (site && !isCellExpansionAllowedSite(site)) {
+      callback(new Error(t('workOrderList.validation.cellExpansionSiteRequired')))
+      return
+    }
+  }
+  callback()
+}
+
 const rules = computed(() => ({
-  site_id: [{ required: true, message: t('workOrderList.validation.selectSite'), trigger: 'change' }],
+  site_id: [{ validator: validateCreateSiteId, trigger: 'change' }],
   type: [{ required: true, message: t('workOrderList.validation.selectType'), trigger: 'change' }],
   assigned_to: [{ required: true, message: t('workOrderList.validation.selectAssignee'), trigger: 'change' }],
   title: [{ required: true, message: t('workOrderList.validation.enterTitle'), trigger: 'blur' }],
@@ -804,6 +870,7 @@ const rules = computed(() => ({
 
 const siteSelectNoDataText = computed(() => {
   if (siteOptionsLoading.value) return t('workOrderList.siteSearch.loading')
+  if (isCellExpansionCreate.value) return t('workOrderList.siteSearch.cellExpansionNoMatch')
   return siteSearchKeyword.value.trim() ? t('workOrderList.siteSearch.noMatch') : t('workOrderList.siteSearch.inputHint')
 })
 
@@ -812,20 +879,21 @@ const siteSelectHint = computed(() => {
 
   const keyword = siteSearchKeyword.value.trim()
   const visibleCount = siteOptions.value.length
+  const prefix = isCellExpansionCreate.value ? `${t('workOrderList.siteSearch.cellExpansionScopeHint')} ` : ''
 
   if (keyword) {
-    if (!visibleCount) return t('workOrderList.siteSearch.noKeywordResults', { keyword })
+    if (!visibleCount) return prefix + t('workOrderList.siteSearch.noKeywordResults', { keyword })
     if (siteSearchTotal.value > SITE_SEARCH_LIMIT) {
-      return t('workOrderList.siteSearch.totalTruncated', { total: siteSearchTotal.value, visible: visibleCount })
+      return prefix + t('workOrderList.siteSearch.totalTruncated', { total: siteSearchTotal.value, visible: visibleCount })
     }
-    return t('workOrderList.siteSearch.foundCount', { count: siteSearchTotal.value || visibleCount })
+    return prefix + t('workOrderList.siteSearch.foundCount', { count: siteSearchTotal.value || visibleCount })
   }
 
-  if (!visibleCount) return t('workOrderList.siteSearch.defaultHint')
+  if (!visibleCount) return prefix + t('workOrderList.siteSearch.defaultHint')
   if (siteSearchTotal.value > SITE_SUGGEST_LIMIT) {
-    return t('workOrderList.siteSearch.suggestTruncated', { visible: visibleCount })
+    return prefix + t('workOrderList.siteSearch.suggestTruncated', { visible: visibleCount })
   }
-  return t('workOrderList.siteSearch.visibleCount', { visible: visibleCount })
+  return prefix + t('workOrderList.siteSearch.visibleCount', { visible: visibleCount })
 })
 
 const dedupeSites = (sites = []) => {
@@ -840,10 +908,16 @@ const dedupeSites = (sites = []) => {
 }
 
 const applySiteOptions = (sites = []) => {
-  const selected = selectedSiteOption.value && selectedSiteOption.value.id === createForm.value.site_id
+  const visibleSites = isCellExpansionCreate.value
+    ? sites.filter(isCellExpansionAllowedSite)
+    : sites
+  const selectedCandidate = selectedSiteOption.value && selectedSiteOption.value.id === createForm.value.site_id
     ? selectedSiteOption.value
     : null
-  siteOptions.value = dedupeSites(selected ? [selected, ...sites] : sites)
+  const selected = selectedCandidate && (!isCellExpansionCreate.value || isCellExpansionAllowedSite(selectedCandidate))
+    ? selectedCandidate
+    : null
+  siteOptions.value = dedupeSites(selected ? [selected, ...visibleSites] : visibleSites)
 }
 
 let siteSearchTimer = null
@@ -1023,6 +1097,9 @@ const fetchSiteOptions = async ({ keyword = '' } = {}) => {
       sort_order: normalizedKeyword ? 'asc' : 'desc',
     }
     if (normalizedKeyword) params.keyword = normalizedKeyword
+    if (isCellExpansionCreate.value) {
+      params.status_in = CELL_EXPANSION_ALLOWED_SITE_STATUSES.join(',')
+    }
 
     const res = await request.get('/api/sites/search', { params })
     if (requestId !== siteSearchRequestId) return
@@ -1062,6 +1139,31 @@ const handleSiteDropdownVisible = async (visible) => {
     await ensureSiteOption(createForm.value.site_id)
   }
   await loadSites()
+}
+
+const ensureSelectedSiteAllowedForCellExpansion = async () => {
+  if (!isCellExpansionCreate.value || !createForm.value.site_id) return true
+  const site = await ensureSiteOption(createForm.value.site_id)
+  if (!site || isCellExpansionAllowedSite(site)) return true
+
+  createForm.value.site_id = null
+  selectedSiteOption.value = null
+  resetExpansionPreview()
+  applySiteOptions(siteOptions.value)
+  ElMessage.warning(t('workOrderList.messages.cellExpansionSiteNotAllowed', {
+    status: siteStatusText(site.status),
+  }))
+  formRef.value?.validateField?.('site_id')
+  return false
+}
+
+const handleTypeChange = async () => {
+  resetExpansionPreview()
+  await ensureSelectedSiteAllowedForCellExpansion()
+  siteSearchTotal.value = 0
+  applySiteOptions([])
+  await loadSites(siteSearchKeyword.value)
+  await onTypeOrSiteChange()
 }
 
 const handleSiteChange = async (siteId) => {
@@ -1282,6 +1384,9 @@ const loadReplacementTargets = async () => {
 const onTypeOrSiteChange = async () => {
   if (createForm.value.type !== 'cell_expansion') {
     resetExpansionPreview()
+  }
+  if (isCellExpansionCreate.value && !(await ensureSelectedSiteAllowedForCellExpansion())) {
+    return
   }
   if (!createForm.value.site_id) {
     replacementTargetOptions.value = []

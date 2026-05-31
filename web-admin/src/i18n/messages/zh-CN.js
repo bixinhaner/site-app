@@ -685,6 +685,17 @@ export default {
       ACTIVATED: "已上线待激活",
       COMPLETED: "已激活",
     },
+    siteStatuses: {
+      survey_pending: "待勘察",
+      planning: "规划中",
+      construction: "施工中",
+      pending_online: "待上线",
+      online_pending_activation: "已上线待激活",
+      operational: "运营中",
+      maintenance: "维护中",
+      decommissioned: "已退网",
+      cancelled: "已取消",
+    },
     types: {
       opening_inspection: "新站安装",
       equipment_replacement: "设备更换",
@@ -746,6 +757,10 @@ export default {
       loading: "正在搜索站点...",
       noMatch: "未找到匹配站点",
       inputHint: "输入站点名称或编码搜索",
+      cellExpansionInputHint: "输入已安装站点名称或编码搜索",
+      cellExpansionNoMatch: "未找到可创建小区扩容的已安装站点",
+      cellExpansionScopeHint:
+        "小区扩容仅支持待上线、已上线待激活、运营中或维护中的站点。",
       loadingHint: "正在搜索站点，请稍候。",
       noKeywordResults:
         "未找到与“{keyword}”匹配的站点，请尝试站点名称、编码或更短关键词。",
@@ -765,6 +780,7 @@ export default {
       selectType: "请选择类型",
       selectAssignee: "请选择分配对象",
       selectOpeningTemplate: "小区扩容工单必须选择开站检查模板",
+      cellExpansionSiteRequired: "小区扩容只能选择已安装或已开通的站点",
       enterTitle: "请输入标题",
       selectNewStatus: "请选择新状态",
       selectAssigneeForBatch: "请选择分配人员",
@@ -798,6 +814,8 @@ export default {
       expansionPreviewFailed: "目标 LLD 预览失败",
       expansionDraftDownloaded: "目标 LLD 底稿已下载",
       expansionDraftDownloadFailed: "底稿下载失败",
+      cellExpansionSiteNotAllowed:
+        "该站点当前状态为 {status}，不能创建小区扩容；未安装站点请走开站工单或直接维护目标 LLD。",
       createSuccess: "创建成功",
       createFailed: "创建失败",
       updateSuccess: "更新成功",
