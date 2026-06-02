@@ -13,6 +13,10 @@ export async function fetchSiteProgressTrend(params = {}) {
   return request.get('/api/dashboard/site-progress-trend', { params })
 }
 
+export async function fetchInstallProgressBreakdown(params = {}) {
+  return request.get('/api/dashboard/install-progress-breakdown', { params })
+}
+
 // 我的待办（工单、检查）
 export async function fetchTodos() {
   const userStore = useUserStore()

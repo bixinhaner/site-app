@@ -15,6 +15,7 @@ from .ssv_archive import SiteSSVArchive, SiteSSVArchiveVersion, SiteSSVArchiveKV
 from .omc_cellname_sync import OmcCellNameSync
 from .app_version import AppVersion, AppVersionDownloadLog, AppVersionReleaseNote, AppVersionReleaseNoteItem, AppVersionUsageLog
 from .site_progress import SiteProgressSnapshot, SiteProgressEvent
+from .site_group import SiteGroupAssignment, SiteGroupCategory, SiteGroupOption
 
 __all__ = [
     "User",
@@ -65,4 +66,7 @@ __all__ = [
     "AppVersionUsageLog",
     "SiteProgressSnapshot",
     "SiteProgressEvent",
+    "SiteGroupAssignment",
+    "SiteGroupCategory",
+    "SiteGroupOption",
 ]

@@ -45,3 +45,8 @@ class Site(Base):
     # 关系
     assigned_user = relationship("User", foreign_keys=[assigned_to])
     creator = relationship("User", foreign_keys=[created_by])
+    group_assignments = relationship(
+        "SiteGroupAssignment",
+        back_populates="site",
+        cascade="all, delete-orphan",
+    )

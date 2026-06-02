@@ -105,6 +105,22 @@
             </div>
           </div>
 
+          <div class="summary-card">
+            <div class="summary-label">站点分组</div>
+            <div class="summary-primary group-tags">
+              <el-tag
+                v-for="assignment in site.group_assignments || []"
+                :key="assignment.category_id"
+                effect="plain"
+                :style="{ borderColor: assignment.option_color || undefined }"
+              >
+                {{ assignment.category_name }}：{{ assignment.option_name }}
+              </el-tag>
+              <span v-if="!(site.group_assignments || []).length">{{ placeholderText }}</span>
+            </div>
+            <div class="summary-secondary">用于仪表盘分组统计</div>
+          </div>
+
           <div class="summary-card summary-card-wide">
             <div class="summary-label">{{ t('siteDetail.basic.address') }}</div>
             <div class="summary-primary">{{ site.address || placeholderText }}</div>
@@ -306,6 +322,26 @@
             :controls="false"
             style="width: 100%"
           />
+        </el-form-item>
+        <el-form-item
+          v-for="category in groupCategories"
+          :key="category.id"
+          :label="category.name"
+        >
+          <el-select
+            v-model="editForm.group_assignments[category.id]"
+            clearable
+            :value-on-clear="null"
+            placeholder="未分组"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="option in category.options || []"
+              :key="option.id"
+              :label="option.name"
+              :value="option.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item :label="t('siteDetail.editDialog.remark')">
           <el-input v-model="editForm.description" type="textarea" :rows="3" />
@@ -568,6 +604,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../../stores/user'
 import { surveyArchivesApi } from '@/api/surveyArchives'
 import { openingArchivesApi } from '@/api/openingArchives'
+import siteGroupsApi from '@/api/siteGroups'
 
 const route = useRoute()
 const router = useRouter()
@@ -576,6 +613,7 @@ const loading = ref(false)
 const site = ref(null)
 const userStore = useUserStore()
 const userOptions = ref([])
+const groupCategories = ref([])
 const dateLocale = computed(() => (locale.value === 'zh-CN' ? 'zh-CN' : locale.value))
 const placeholderText = computed(() => t('siteDetail.basic.placeholder'))
 const canManageSite = computed(() => userStore.hasPermission('sites:update:write'))
@@ -628,6 +666,7 @@ const editForm = ref({
   contact_phone: '',
   description: '',
   contract_amount: null,
+  group_assignments: {},
 })
 
 const deleteVisible = ref(false)
@@ -684,6 +723,39 @@ const formatRegion = (record) => {
     .map((item) => String(item || '').trim())
     .filter(Boolean)
   return segments.length ? segments.join('/') : placeholderText.value
+}
+
+const loadGroupCategories = async () => {
+  try {
+    const res = await siteGroupsApi.listCategories()
+    groupCategories.value = Array.isArray(res) ? res : []
+  } catch (e) {
+    groupCategories.value = []
+  }
+}
+
+const getSiteGroupAssignment = (record, categoryId) => {
+  const rows = Array.isArray(record?.group_assignments) ? record.group_assignments : []
+  return rows.find(item => item.category_id === categoryId) || null
+}
+
+const buildGroupAssignmentMap = (record) => {
+  const result = {}
+  groupCategories.value.forEach((category) => {
+    const assignment = getSiteGroupAssignment(record, category.id)
+    result[category.id] = assignment?.option_id || null
+  })
+  return result
+}
+
+const saveGroupAssignments = async () => {
+  const updates = Object.entries(editForm.value.group_assignments || {})
+  for (const [categoryId, optionId] of updates) {
+    await siteGroupsApi.updateSiteAssignment(route.params.id, {
+      category_id: Number(categoryId),
+      option_id: optionId || null,
+    })
+  }
 }
 
 const milestoneItems = computed(() => [
@@ -909,8 +981,11 @@ const deleteDisableTip = computed(() => {
   return `${t('siteDetail.deleteCheck.blockedPrefix')}（${pairs.join('，')}）`
 })
 
-const openEdit = () => {
+const openEdit = async () => {
   if (!site.value) return
+  if (!groupCategories.value.length) {
+    await loadGroupCategories()
+  }
   editForm.value = {
     site_code: site.value.site_code || '',
     site_name: site.value.site_name || '',
@@ -926,6 +1001,7 @@ const openEdit = () => {
     contact_phone: site.value.contact_phone || '',
     description: site.value.description || '',
     contract_amount: site.value.contract_amount ?? null,
+    group_assignments: buildGroupAssignmentMap(site.value),
   }
   editVisible.value = true
 }
@@ -954,6 +1030,7 @@ const submitEdit = async () => {
       contract_amount: editForm.value.contract_amount === null || editForm.value.contract_amount === '' ? null : editForm.value.contract_amount,
     }
     await request.put(`/api/sites/${route.params.id}`, payload)
+    await saveGroupAssignments()
     ElMessage.success(t('siteDetail.messages.saveSuccess'))
     editVisible.value = false
     await load()
@@ -1313,6 +1390,7 @@ const viewWorkOrder = (workOrder) => {
 }
 
 onMounted(() => {
+  loadGroupCategories()
   load()
   loadUsers()
   loadDeviceStatus(false)
@@ -1434,6 +1512,11 @@ const createResurvey = async () => {
   font-weight: 700;
   color: #0f172a;
   word-break: break-word;
+}
+.group-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .summary-secondary {
   margin-top: 8px;

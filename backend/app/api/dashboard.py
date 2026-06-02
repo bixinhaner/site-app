@@ -3,7 +3,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import and_, case, func, desc
 
 from app.core.database import get_db
 from app.api.auth import get_current_user
@@ -12,14 +12,23 @@ from app.models.user import User as UserModel
 from app.models.work_order import WorkOrder
 from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
+from app.models.site_group import SiteGroupAssignment, SiteGroupCategory, SiteGroupOption
+from app.models.site_progress import SiteProgressSnapshot
 from app.models.survey_archive import SiteSurveyArchive
 from app.models.equipment import Inventory, Equipment, StockTransaction
 from app.services.site_progress_service import (
     ensure_site_progress_snapshots,
     get_site_progress_rows,
+    resolve_site_progress_field_name,
 )
 from app.services.authz_service import user_has_any_role_or_permission
 from app.services.site_progress_metric_service import get_site_progress_metric_mode
+from app.services.site_group_service import (
+    get_active_group_categories,
+    get_default_group_category,
+    serialize_categories,
+    serialize_category,
+)
 from app.utils.timezone import to_utc_iso
 
 router = APIRouter()
@@ -275,6 +284,140 @@ async def get_dashboard_summary(
         "inspections": {"pending_review_count": int(pending_review_count)},
         "surveys": {"last7d_new": int(surveys_last7d)},
         "time_range": {"from": to_utc_iso(start), "to": to_utc_iso(end)},
+    }
+
+
+@router.get("/install-progress-breakdown")
+async def get_install_progress_breakdown(
+    category_id: Optional[int] = Query(None, description="站点分组维度 ID；为空时使用默认维度"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按站点分组维度查看安装进度。
+
+    这是通用分组统计：TDD/FDD 只是某个项目在“交付范围”维度下的选项。
+    """
+    _ = current_user
+    categories = get_active_group_categories(db)
+    if not categories:
+        return {
+            "categories": [],
+            "category": None,
+            "metric_mode": get_site_progress_metric_mode(db),
+            "rows": [],
+            "totals": {
+                "total": 0,
+                "install_started": 0,
+                "installed": 0,
+                "not_installed": 0,
+                "online": 0,
+                "activated": 0,
+            },
+        }
+
+    selected_category: Optional[SiteGroupCategory] = None
+    if category_id:
+        selected_category = (
+            db.query(SiteGroupCategory)
+            .filter(
+                SiteGroupCategory.id == category_id,
+                SiteGroupCategory.is_active == True,
+            )
+            .first()
+        )
+        if selected_category is None:
+            raise HTTPException(status_code=404, detail="分组维度不存在")
+    else:
+        selected_category = get_default_group_category(db)
+
+    if selected_category is None:
+        raise HTTPException(status_code=404, detail="分组维度不存在")
+
+    ensure_result = ensure_site_progress_snapshots(db, reason="dashboard_install_progress_breakdown_read")
+    if ensure_result["rebuilt_site_ids"]:
+        db.commit()
+
+    metric_mode = get_site_progress_metric_mode(db)
+    online_field = resolve_site_progress_field_name("online", metric_mode=metric_mode)
+    activated_field = resolve_site_progress_field_name("activated", metric_mode=metric_mode)
+    online_col = getattr(SiteProgressSnapshot, online_field)
+    activated_col = getattr(SiteProgressSnapshot, activated_field)
+
+    grouped_rows = (
+        db.query(
+            SiteGroupOption.id.label("option_id"),
+            SiteGroupOption.code.label("option_code"),
+            SiteGroupOption.name.label("option_name"),
+            SiteGroupOption.color.label("option_color"),
+            SiteGroupOption.sort_order.label("sort_order"),
+            func.count(Site.id).label("total"),
+            func.sum(case((SiteProgressSnapshot.install_started_at.isnot(None), 1), else_=0)).label("install_started"),
+            func.sum(case((SiteProgressSnapshot.install_completed_at.isnot(None), 1), else_=0)).label("installed"),
+            func.sum(case((online_col.isnot(None), 1), else_=0)).label("online"),
+            func.sum(case((activated_col.isnot(None), 1), else_=0)).label("activated"),
+        )
+        .outerjoin(
+            SiteGroupAssignment,
+            and_(
+                SiteGroupAssignment.site_id == Site.id,
+                SiteGroupAssignment.category_id == selected_category.id,
+            ),
+        )
+        .outerjoin(SiteGroupOption, SiteGroupOption.id == SiteGroupAssignment.option_id)
+        .outerjoin(SiteProgressSnapshot, SiteProgressSnapshot.site_id == Site.id)
+        .group_by(
+            SiteGroupOption.id,
+            SiteGroupOption.code,
+            SiteGroupOption.name,
+            SiteGroupOption.color,
+            SiteGroupOption.sort_order,
+        )
+        .all()
+    )
+
+    rows = []
+    for row in grouped_rows:
+        total = int(row.total or 0)
+        installed = int(row.installed or 0)
+        option_id = row.option_id
+        rows.append(
+            {
+                "option_id": option_id,
+                "option_code": row.option_code or "unassigned",
+                "option_name": row.option_name or "未分组",
+                "option_color": row.option_color,
+                "sort_order": int(row.sort_order or 999999),
+                "total": total,
+                "install_started": int(row.install_started or 0),
+                "installed": installed,
+                "not_installed": max(total - installed, 0),
+                "online": int(row.online or 0),
+                "activated": int(row.activated or 0),
+                "completion_rate": round((installed / total) * 100, 2) if total else 0,
+                "filter": {
+                    "group_category_id": selected_category.id,
+                    "group_option_id": option_id,
+                    "group_unassigned": option_id is None,
+                },
+            }
+        )
+
+    rows.sort(key=lambda item: (item["option_id"] is None, item["sort_order"], item["option_name"]))
+    totals = {
+        "total": sum(item["total"] for item in rows),
+        "install_started": sum(item["install_started"] for item in rows),
+        "installed": sum(item["installed"] for item in rows),
+        "not_installed": sum(item["not_installed"] for item in rows),
+        "online": sum(item["online"] for item in rows),
+        "activated": sum(item["activated"] for item in rows),
+    }
+
+    return {
+        "categories": serialize_categories(categories),
+        "category": serialize_category(selected_category),
+        "metric_mode": metric_mode,
+        "rows": rows,
+        "totals": totals,
     }
 
 

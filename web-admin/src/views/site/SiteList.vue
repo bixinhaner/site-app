@@ -11,6 +11,37 @@
           <el-option label="已开通" value="operational" />
           <el-option label="维护中" value="maintenance" />
         </el-select>
+        <el-select
+          v-if="groupCategories.length"
+          v-model="groupCategoryFilter"
+          placeholder="分组维度"
+          clearable
+          style="width: 150px"
+          @change="onGroupCategoryChange"
+        >
+          <el-option
+            v-for="category in groupCategories"
+            :key="category.id"
+            :label="category.name"
+            :value="category.id"
+          />
+        </el-select>
+        <el-select
+          v-if="selectedGroupCategory"
+          v-model="groupOptionFilter"
+          placeholder="分组选项"
+          clearable
+          style="width: 150px"
+          @change="onGroupOptionChange"
+        >
+          <el-option
+            v-for="option in selectedGroupCategory.options || []"
+            :key="option.id"
+            :label="option.name"
+            :value="option.id"
+          />
+          <el-option label="未分组" value="__unassigned" />
+        </el-select>
         <el-button v-if="canManageSurveyStage" @click="openSurveyStageBatch">
           <el-icon><Operation /></el-icon>
           勘察批量
@@ -100,6 +131,23 @@
         <el-table-column prop="site_code" label="站点编码" width="140" />
         <el-table-column prop="site_name" label="站点名称" min-width="180" />
         <el-table-column prop="site_type" label="类型" width="120" />
+        <el-table-column
+          v-for="category in groupCategories"
+          :key="category.id"
+          :label="category.name"
+          width="130"
+        >
+          <template #default="{ row }">
+            <el-tag
+              v-if="getSiteGroupAssignment(row, category.id)"
+              :style="{ borderColor: getSiteGroupAssignment(row, category.id)?.option_color || undefined }"
+              effect="plain"
+            >
+              {{ getSiteGroupAssignment(row, category.id)?.option_name }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="city" label="城市" width="120" />
         <el-table-column prop="status" label="状态" width="140">
           <template #default="{ row }">
@@ -182,6 +230,29 @@
         <el-table-column label="类型" width="140">
           <template #default="{ row }">
             <el-input v-model="row.site_type" />
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-for="category in groupCategories"
+          :key="`batch_${category.id}`"
+          :label="category.name"
+          width="160"
+        >
+          <template #default="{ row }">
+            <el-select
+              v-model="row.group_assignments[category.id]"
+              clearable
+              :value-on-clear="null"
+              placeholder="未分组"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="option in category.options || []"
+                :key="option.id"
+                :label="option.name"
+                :value="option.id"
+              />
+            </el-select>
           </template>
         </el-table-column>
         <el-table-column label="省份" width="140">
@@ -297,12 +368,14 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '../../stores/user'
 import { createDebouncedTracker } from '@/utils/operationTrack'
+import siteGroupsApi from '@/api/siteGroups'
 
 const router = useRouter()
+const route = useRoute()
 const { t } = useI18n()
 const userStore = useUserStore()
 const canManagePlanning = computed(() => userStore.hasPermission('sites:lld:write'))
@@ -328,6 +401,9 @@ const assigneeFilter = ref(null)
 const exporting = ref(false)
 const sortBy = ref('created_at')
 const sortOrder = ref('desc')
+const groupCategories = ref([])
+const groupCategoryFilter = ref(null)
+const groupOptionFilter = ref(null)
 
 const userOptions = ref([])
 const usersLoaded = ref(false)
@@ -354,6 +430,8 @@ const trackSearch = () => {
       status: statusFilter.value || undefined,
       sort_by: sortBy.value || undefined,
       sort_order: sortOrder.value || undefined,
+      group_category_id: groupCategoryFilter.value || undefined,
+      group_option_id: groupOptionFilter.value || undefined,
     },
   })
 }
@@ -361,6 +439,55 @@ const trackSearch = () => {
 const onStatusFilterChange = () => {
   trackSearch()
   reload()
+}
+
+const selectedGroupCategory = computed(() => (
+  groupCategories.value.find(category => category.id === groupCategoryFilter.value) || null
+))
+
+const onGroupCategoryChange = () => {
+  groupOptionFilter.value = null
+  currentPage.value = 1
+  trackSearch()
+  reload()
+}
+
+const onGroupOptionChange = () => {
+  currentPage.value = 1
+  trackSearch()
+  reload()
+}
+
+const loadGroupCategories = async () => {
+  try {
+    const res = await siteGroupsApi.listCategories()
+    groupCategories.value = Array.isArray(res) ? res : []
+  } catch (e) {
+    groupCategories.value = []
+  }
+}
+
+const applyGroupFiltersFromRoute = () => {
+  const categoryId = Number(route.query.group_category_id || 0)
+  if (!categoryId) return
+  groupCategoryFilter.value = categoryId
+  if (route.query.group_unassigned) {
+    groupOptionFilter.value = '__unassigned'
+    return
+  }
+  const optionId = Number(route.query.group_option_id || 0)
+  groupOptionFilter.value = optionId || null
+}
+
+const applyGroupParams = (params) => {
+  if (!groupCategoryFilter.value) return params
+  params.group_category_id = groupCategoryFilter.value
+  if (groupOptionFilter.value === '__unassigned') {
+    params.group_unassigned = true
+  } else if (groupOptionFilter.value) {
+    params.group_option_id = groupOptionFilter.value
+  }
+  return params
 }
 
 const reload = async () => {
@@ -375,6 +502,7 @@ const reload = async () => {
     if (assigneeFilter.value) params.assigned_to = assigneeFilter.value
     if (sortBy.value) params.sort_by = sortBy.value
     if (sortOrder.value) params.sort_order = sortOrder.value
+    applyGroupParams(params)
     const res = await request.get('/api/sites/search', { params })
     const list = Array.isArray(res?.sites) ? res.sites : []
     sites.value = list
@@ -425,6 +553,20 @@ const handleSelectionChange = (rows) => {
   selectedSites.value = Array.isArray(rows) ? rows : []
 }
 
+const getSiteGroupAssignment = (site, categoryId) => {
+  const rows = Array.isArray(site?.group_assignments) ? site.group_assignments : []
+  return rows.find(item => item.category_id === categoryId) || null
+}
+
+const buildGroupAssignmentMap = (site) => {
+  const result = {}
+  groupCategories.value.forEach((category) => {
+    const assignment = getSiteGroupAssignment(site, category.id)
+    result[category.id] = assignment?.option_id || null
+  })
+  return result
+}
+
 const openBatchEdit = () => {
   if (!selectedSites.value.length) {
     ElMessage.warning('请先选择要编辑的站点')
@@ -446,6 +588,7 @@ const openBatchEdit = () => {
     contact_person: site.contact_person || '',
     contact_phone: site.contact_phone || '',
     contract_amount: site.contract_amount ?? null,
+    group_assignments: buildGroupAssignmentMap(site),
   }))
   batchResult.value = null
   batchEditVisible.value = true
@@ -490,6 +633,7 @@ const buildBatchPayload = () => ({
     contact_person: row.contact_person || null,
     contact_phone: row.contact_phone || null,
     contract_amount: row.contract_amount ?? null,
+    group_assignments: row.group_assignments || {},
   })),
 })
 
@@ -564,6 +708,7 @@ const exportSites = async () => {
     if (keyword.value) params.keyword = keyword.value
     if (statusFilter.value) params.status = statusFilter.value
     if (assigneeFilter.value) params.assigned_to = assigneeFilter.value
+    applyGroupParams(params)
 
     const blob = await request.get('/api/sites/export', { params, responseType: 'blob' })
     const fileName = `站点列表_${formatExportDate()}.xlsx`
@@ -687,7 +832,9 @@ const userName = (id) => {
   return u ? (u.full_name || u.username) : (id || '-')
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadGroupCategories()
+  applyGroupFiltersFromRoute()
   reload()
   // 预热用户列表（仅管理员有效）
   loadUsers()

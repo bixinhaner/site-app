@@ -1,8 +1,9 @@
 from pydantic import BaseModel, field_serializer
-from typing import Optional, List
+from typing import Dict, Optional, List
 from datetime import datetime
 
 from app.utils.timezone import to_utc_iso
+from app.schemas.site_group import SiteGroupAssignmentResponse
 
 class SiteBase(BaseModel):
     site_code: str
@@ -56,6 +57,7 @@ class SiteBatchUpdateItem(BaseModel):
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
     contract_amount: Optional[float] = None
+    group_assignments: Optional[Dict[int, Optional[int]]] = None
 
     class Config:
         extra = "forbid"
@@ -96,6 +98,7 @@ class SiteResponse(SiteBase):
     created_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    group_assignments: List[SiteGroupAssignmentResponse] = []
 
     @field_serializer('survey_skipped_at', 'created_at', 'updated_at')
     def _serialize_dt(self, dt: Optional[datetime]) -> Optional[str]:

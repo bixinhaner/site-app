@@ -13,6 +13,7 @@ import math
 from app.core.database import get_db
 from app.models.user import User
 from app.models.site import Site
+from app.models.site_group import SiteGroupAssignment, SiteGroupCategory
 from app.models.site_business import SiteMilestoneRecord
 from app.schemas.site import (
     SiteCreate,
@@ -56,6 +57,14 @@ from app.services.site_progress_service import (
 )
 from app.services.site_payment_service import build_site_payment_records
 from app.services.site_progress_metric_service import get_site_progress_metric_mode
+from app.services.site_group_service import (
+    find_group_column_categories,
+    find_option_by_name,
+    get_active_group_categories,
+    group_column_name,
+    serialize_site_assignments,
+    upsert_site_group_assignment,
+)
 from app.services.photo_location_compare_service import refresh_site_photo_location_compare_for_site
 from app.utils.timezone import to_utc_iso
 from app.utils.file_handler import save_uploaded_file
@@ -341,7 +350,7 @@ async def create_site(
     db.commit()
     db.refresh(db_site)
     
-    return SiteResponse.from_orm(db_site)
+    return _serialize_site_response(db_site)
 
 @router.get("/", response_model=List[SiteResponse])
 async def get_sites(
@@ -350,10 +359,13 @@ async def get_sites(
     status: Optional[str] = Query(None),
     site_type: Optional[str] = Query(None),
     assigned_to: Optional[int] = Query(None),
+    group_category_id: Optional[int] = Query(None),
+    group_option_id: Optional[int] = Query(None),
+    group_unassigned: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = db.query(Site)
+    query = _site_with_groups_query(db)
 
     # 权限控制：
     # - admin/manager/planner：可查看全部站点
@@ -368,10 +380,16 @@ async def get_sites(
     # assigned_to 仍表示 Site.assigned_to，仅允许管理员/规划角色使用该筛选，避免限制角色误过滤
     if assigned_to and _can_view_all_sites(current_user):
         query = query.filter(Site.assigned_to == assigned_to)
+    query = _apply_group_filter(
+        query,
+        group_category_id=group_category_id,
+        group_option_id=group_option_id,
+        group_unassigned=group_unassigned,
+    )
 
     # 固定排序后再分页，避免跨页重复/漏项
     sites = query.order_by(Site.id.asc()).offset(skip).limit(limit).all()
-    return [SiteResponse.from_orm(site) for site in sites]
+    return [_serialize_site_response(site) for site in sites]
 
 
 @router.get("/search", response_model=SiteListResponse)
@@ -381,6 +399,9 @@ async def search_sites(
     status_in: Optional[str] = Query(None, description="逗号分隔的站点状态列表"),
     site_type: Optional[str] = Query(None),
     assigned_to: Optional[int] = Query(None),
+    group_category_id: Optional[int] = Query(None),
+    group_option_id: Optional[int] = Query(None),
+    group_unassigned: Optional[bool] = Query(None),
     sort_by: Optional[str] = Query(None, description="排序字段: site_code|site_name|city|status|created_at|updated_at"),
     sort_order: str = Query("desc", description="排序方向: asc|desc"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
@@ -389,7 +410,7 @@ async def search_sites(
     current_user: User = Depends(get_current_user),
 ):
     """站点搜索与分页列表（返回总数）"""
-    query = db.query(Site)
+    query = _site_with_groups_query(db)
 
     query = _apply_site_visibility_filter(query, db, current_user)
 
@@ -411,6 +432,12 @@ async def search_sites(
         query = query.filter(Site.site_type == site_type)
     if assigned_to and _can_view_all_sites(current_user):
         query = query.filter(Site.assigned_to == assigned_to)
+    query = _apply_group_filter(
+        query,
+        group_category_id=group_category_id,
+        group_option_id=group_option_id,
+        group_unassigned=group_unassigned,
+    )
 
     total = query.count()
 
@@ -440,7 +467,7 @@ async def search_sites(
     pages = math.ceil(total / limit) if limit else 1
 
     return SiteListResponse(
-        sites=[SiteResponse.from_orm(site) for site in sites],
+        sites=[_serialize_site_response(site) for site in sites],
         total=total,
         page=page,
         size=limit,
@@ -481,6 +508,9 @@ async def export_sites(
     status: Optional[str] = Query(None),
     site_type: Optional[str] = Query(None),
     assigned_to: Optional[int] = Query(None),
+    group_category_id: Optional[int] = Query(None),
+    group_option_id: Optional[int] = Query(None),
+    group_unassigned: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -513,8 +543,29 @@ async def export_sites(
         query = query.filter(Site.site_type == site_type)
     if assigned_to and _can_view_all_sites(current_user):
         query = query.filter(Site.assigned_to == assigned_to)
+    query = _apply_group_filter(
+        query,
+        group_category_id=group_category_id,
+        group_option_id=group_option_id,
+        group_unassigned=group_unassigned,
+    )
 
     records = query.order_by(Site.id.asc()).all()
+    group_categories = get_active_group_categories(db)
+    group_assignments = {}
+    if group_categories:
+        site_ids = [site.id for site, _, _ in records]
+        if site_ids:
+            assignment_rows = (
+                db.query(SiteGroupAssignment)
+                .options(joinedload(SiteGroupAssignment.option))
+                .filter(SiteGroupAssignment.site_id.in_(site_ids))
+                .all()
+            )
+            group_assignments = {
+                (row.site_id, row.category_id): row.option.name if row.option else None
+                for row in assignment_rows
+            }
 
     def _display_name(user: Optional[User]) -> Optional[str]:
         if not user:
@@ -523,33 +574,34 @@ async def export_sites(
 
     rows = []
     for site, assigned, creator in records:
-        rows.append(
-            {
-                "site_id": site.id,
-                "site_code": site.site_code,
-                "site_name": site.site_name,
-                "site_type": site.site_type,
-                "province": site.province,
-                "city": site.city,
-                "district": site.district,
-                "address": site.address,
-                "latitude": site.latitude,
-                "longitude": site.longitude,
-                "status": site.status,
-                "ssv_passed": bool(site.ssv_passed) if site.ssv_passed is not None else False,
-                "priority": site.priority,
-                "contact_person": site.contact_person,
-                "contact_phone": site.contact_phone,
-                "contract_amount": site.contract_amount,
-                "description": site.description,
-                "assigned_to": site.assigned_to,
-                "assigned_to_name": _display_name(assigned),
-                "created_by": site.created_by,
-                "created_by_name": _display_name(creator),
-                "created_at": to_utc_iso(site.created_at) if site.created_at else None,
-                "updated_at": to_utc_iso(site.updated_at) if site.updated_at else None,
-            }
-        )
+        row_data = {
+            "site_id": site.id,
+            "site_code": site.site_code,
+            "site_name": site.site_name,
+            "site_type": site.site_type,
+            "province": site.province,
+            "city": site.city,
+            "district": site.district,
+            "address": site.address,
+            "latitude": site.latitude,
+            "longitude": site.longitude,
+            "status": site.status,
+            "ssv_passed": bool(site.ssv_passed) if site.ssv_passed is not None else False,
+            "priority": site.priority,
+            "contact_person": site.contact_person,
+            "contact_phone": site.contact_phone,
+            "contract_amount": site.contract_amount,
+            "description": site.description,
+            "assigned_to": site.assigned_to,
+            "assigned_to_name": _display_name(assigned),
+            "created_by": site.created_by,
+            "created_by_name": _display_name(creator),
+            "created_at": to_utc_iso(site.created_at) if site.created_at else None,
+            "updated_at": to_utc_iso(site.updated_at) if site.updated_at else None,
+        }
+        for category in group_categories:
+            row_data[group_column_name(category)] = group_assignments.get((site.id, category.id))
+        rows.append(row_data)
 
     columns = [
         "site_id",
@@ -576,6 +628,7 @@ async def export_sites(
         "created_at",
         "updated_at",
     ]
+    columns.extend(group_column_name(category) for category in group_categories)
 
     df = pd.DataFrame(rows, columns=columns)
 
@@ -960,25 +1013,26 @@ async def upload_survey_stage_batch(
 
 # ===== 基础信息批量导入（模板/上传/历史） =====
 @router.get("/basic/batch-template")
-async def download_basic_template():
+async def download_basic_template(db: Session = Depends(get_db)):
     """下载基础信息批量导入模板（仅 Sites 表）。"""
-    sites_df = pd.DataFrame([
-        {
-            "site_code": "SITE001",
-            "site_name": "样例站点A",
-            "site_type": "macro",
-            "province": "北京",
-            "city": "北京",
-            "district": "朝阳区",
-            "address": "某路1号",
-            "latitude": 39.9,
-            "longitude": 116.3,
-            "priority": "normal",
-            "contact_person": "张三",
-            "contact_phone": "13800000000",
-            "description": "示例备注",
-        }
-    ])
+    sample = {
+        "site_code": "SITE001",
+        "site_name": "样例站点A",
+        "site_type": "macro",
+        "province": "北京",
+        "city": "北京",
+        "district": "朝阳区",
+        "address": "某路1号",
+        "latitude": 39.9,
+        "longitude": 116.3,
+        "priority": "normal",
+        "contact_person": "张三",
+        "contact_phone": "13800000000",
+        "description": "示例备注",
+    }
+    for category in get_active_group_categories(db):
+        sample[group_column_name(category)] = "TDD" if category.name == "交付范围" else ""
+    sites_df = pd.DataFrame([sample])
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -989,27 +1043,28 @@ async def download_basic_template():
 
 
 @router.get("/basic/batch-update-template")
-async def download_basic_update_template():
+async def download_basic_update_template(db: Session = Depends(get_db)):
     """下载基础信息批量更新模板（支持从站点导出表回写）。"""
-    sites_df = pd.DataFrame([
-        {
-            "site_id": 1,
-            "site_code": "SITE001",
-            "site_name": "样例站点A-更新",
-            "site_type": "macro",
-            "province": "北京",
-            "city": "北京",
-            "district": "朝阳区",
-            "address": "某路100号",
-            "latitude": 39.901,
-            "longitude": 116.301,
-            "priority": "normal",
-            "contact_person": "李四",
-            "contact_phone": "13811112222",
-            "contract_amount": 12500,
-            "description": "更新备注示例",
-        }
-    ])
+    sample = {
+        "site_id": 1,
+        "site_code": "SITE001",
+        "site_name": "样例站点A-更新",
+        "site_type": "macro",
+        "province": "北京",
+        "city": "北京",
+        "district": "朝阳区",
+        "address": "某路100号",
+        "latitude": 39.901,
+        "longitude": 116.301,
+        "priority": "normal",
+        "contact_person": "李四",
+        "contact_phone": "13811112222",
+        "contract_amount": 12500,
+        "description": "更新备注示例",
+    }
+    for category in get_active_group_categories(db):
+        sample[group_column_name(category)] = "TDD" if category.name == "交付范围" else ""
+    sites_df = pd.DataFrame([sample])
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -1066,6 +1121,95 @@ def _refresh_photo_location_compare_after_coordinate_change(
     return refresh_site_photo_location_compare_for_site(db, site, reason=reason)
 
 
+def _site_with_groups_query(db: Session):
+    return db.query(Site).options(
+        joinedload(Site.group_assignments).joinedload(SiteGroupAssignment.category),
+        joinedload(Site.group_assignments).joinedload(SiteGroupAssignment.option),
+    )
+
+
+def _serialize_site_response(site: Site) -> SiteResponse:
+    response = SiteResponse.from_orm(site)
+    response.group_assignments = serialize_site_assignments(site)
+    return response
+
+
+def _apply_group_filter(
+    query,
+    *,
+    group_category_id: Optional[int],
+    group_option_id: Optional[int],
+    group_unassigned: Optional[bool],
+):
+    if not group_category_id:
+        return query
+
+    if group_unassigned:
+        assigned_site_ids = (
+            query.session.query(SiteGroupAssignment.site_id)
+            .filter(SiteGroupAssignment.category_id == group_category_id)
+        )
+        return query.filter(~Site.id.in_(assigned_site_ids))
+
+    if group_option_id:
+        return query.join(
+            SiteGroupAssignment,
+            and_(
+                SiteGroupAssignment.site_id == Site.id,
+                SiteGroupAssignment.category_id == group_category_id,
+                SiteGroupAssignment.option_id == group_option_id,
+            ),
+        )
+
+    return query
+
+
+def _resolve_group_updates_from_row(
+    row_dict: Dict[str, object],
+    group_columns: Dict[str, SiteGroupCategory],
+    *,
+    allow_clear: bool,
+) -> tuple[Dict[int, Optional[int]], List[str]]:
+    updates: Dict[int, Optional[int]] = {}
+    errors: List[str] = []
+    for col_name, category in group_columns.items():
+        raw_value = row_dict.get(col_name)
+        if _is_excel_blank(raw_value):
+            if allow_clear:
+                updates[category.id] = None
+            continue
+        option = find_option_by_name(category, str(raw_value))
+        if option is None:
+            allowed = "、".join(option.name for option in list(category.options or []) if option.is_active)
+            errors.append(f"{col_name} 不支持该值: {raw_value}（可选：{allowed or '无'}）")
+            continue
+        updates[category.id] = option.id
+    return updates, errors
+
+
+def _apply_group_assignment_updates(
+    db: Session,
+    *,
+    site_id: int,
+    group_updates: Dict[int, Optional[int]],
+    operator_id: Optional[int],
+    source: str,
+) -> List[str]:
+    actions: List[str] = []
+    for category_id, option_id in group_updates.items():
+        action, _ = upsert_site_group_assignment(
+            db,
+            site_id=site_id,
+            category_id=int(category_id),
+            option_id=option_id,
+            operator_id=operator_id,
+            source=source,
+        )
+        if action != "noop":
+            actions.append(action)
+    return actions
+
+
 @router.post("/basic/batch-update-upload", response_model=BasicBatchImportReport)
 async def basic_batch_update_upload(
     file: UploadFile = File(...),
@@ -1086,6 +1230,7 @@ async def basic_batch_update_upload(
 
     df = excel.parse("Sites")
     df.columns = [str(col).strip() for col in df.columns]
+    group_columns = find_group_column_categories(db, df.columns)
 
     has_site_id_col = "site_id" in df.columns
     has_site_code_col = "site_code" in df.columns
@@ -1108,7 +1253,7 @@ async def basic_batch_update_upload(
         "contract_amount",
     ]
     effective_editable_columns = [c for c in editable_columns if c in df.columns]
-    if not effective_editable_columns:
+    if not effective_editable_columns and not group_columns:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未找到可更新字段列")
 
     results: List[BasicImportRowResult] = []
@@ -1229,6 +1374,13 @@ async def basic_batch_update_upload(
                 except Exception:
                     errors.append("经度格式错误")
 
+        group_updates, group_errors = _resolve_group_updates_from_row(
+            row_dict,
+            group_columns,
+            allow_clear=True,
+        )
+        errors.extend(group_errors)
+
         if errors:
             results.append(
                 BasicImportRowResult(
@@ -1250,7 +1402,7 @@ async def basic_batch_update_upload(
             if not _same_site_field_value(old_value, new_value):
                 update_data[field] = new_value
 
-        if not update_data:
+        if not update_data and not group_updates:
             success_count += 1
             results.append(
                 BasicImportRowResult(
@@ -1284,6 +1436,15 @@ async def basic_batch_update_upload(
             coordinates_changed = _site_coordinates_changed(site, update_data)
             for field, value in update_data.items():
                 setattr(site, field, value)
+            group_actions = _apply_group_assignment_updates(
+                db,
+                site_id=site.id,
+                group_updates=group_updates,
+                operator_id=current_user.id,
+                source="site_basic_batch_update",
+            )
+            if group_actions:
+                warnings.append("已更新站点分组")
             refresh_result = _refresh_photo_location_compare_after_coordinate_change(
                 db,
                 site,
@@ -1369,6 +1530,8 @@ async def basic_batch_upload(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少工作表: Sites")
 
     df = excel.parse("Sites")
+    df.columns = [str(col).strip() for col in df.columns]
+    group_columns = find_group_column_categories(db, df.columns)
     results: List[BasicImportRowResult] = []
     success_count = 0
     failed_count = 0
@@ -1419,6 +1582,13 @@ async def basic_batch_upload(
         except Exception:
             errors.append("经度格式错误")
 
+        group_updates, group_errors = _resolve_group_updates_from_row(
+            row_dict,
+            group_columns,
+            allow_clear=False,
+        )
+        errors.extend(group_errors)
+
         if errors:
             results.append(BasicImportRowResult(row_index=i, site_code=site_code or None, success=False, action=None, warnings=warnings, errors=errors))
             failed_count += 1
@@ -1451,6 +1621,14 @@ async def basic_batch_upload(
             db.add(site)
             db.flush()  # 获取自增ID
             site_id = site.id
+            if group_updates:
+                _apply_group_assignment_updates(
+                    db,
+                    site_id=site.id,
+                    group_updates=group_updates,
+                    operator_id=current_user.id,
+                    source="site_basic_import",
+                )
         results.append(BasicImportRowResult(row_index=i, site_code=site_code, success=True, action="created", site_id=site_id, warnings=warnings, errors=[]))
         success_count += 1
 
@@ -1552,7 +1730,7 @@ async def get_site(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    site = db.query(Site).filter(Site.id == site_id).first()
+    site = _site_with_groups_query(db).filter(Site.id == site_id).first()
     if site is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1561,7 +1739,7 @@ async def get_site(
 
     _ensure_site_visible(site_id, db, current_user)
 
-    return SiteResponse.from_orm(site)
+    return _serialize_site_response(site)
 
 
 @router.get("/{site_id}/milestones", response_model=SiteMilestonesResponse)
@@ -1822,7 +2000,7 @@ async def skip_site_survey(
 
     db.commit()
     db.refresh(site)
-    return SiteResponse.from_orm(site)
+    return _serialize_site_response(site)
 
 
 @router.post("/{site_id}/survey/require", response_model=SiteResponse)
@@ -1878,7 +2056,7 @@ async def require_site_survey(
 
     db.commit()
     db.refresh(site)
-    return SiteResponse.from_orm(site)
+    return _serialize_site_response(site)
 
 
 @router.get("/{site_id}/delete-check", response_model=SiteDeleteCheckResponse)
@@ -1923,7 +2101,9 @@ async def batch_update_sites(
     for idx, row in enumerate(updates, start=1):
         row_errors: List[str] = []
         site_id = int(row.site_id)
-        update_data = row.dict(exclude_unset=True, exclude={"site_id"})
+        row_payload = row.dict(exclude_unset=True, exclude={"site_id"})
+        group_updates = row_payload.pop("group_assignments", None) or {}
+        update_data = row_payload
         site = None
 
         if site_id in seen_site_ids:
@@ -1931,7 +2111,7 @@ async def batch_update_sites(
         else:
             seen_site_ids.add(site_id)
 
-        if not update_data:
+        if not update_data and not group_updates:
             row_errors.append("未提供可更新字段")
 
         if "site_name" in update_data:
@@ -1979,6 +2159,13 @@ async def batch_update_sites(
             coordinates_changed = _site_coordinates_changed(site, update_data)
             for field, value in update_data.items():
                 setattr(site, field, value)
+            group_actions = _apply_group_assignment_updates(
+                db,
+                site_id=site.id,
+                group_updates=group_updates,
+                operator_id=current_user.id,
+                source="site_batch_update",
+            )
             refresh_result = _refresh_photo_location_compare_after_coordinate_change(
                 db,
                 site,
@@ -1996,6 +2183,19 @@ async def batch_update_sites(
                     site_name=site.site_name,
                     success=True,
                     errors=[],
+                )
+            )
+        except ValueError as exc:
+            db.rollback()
+            failed_count += 1
+            results.append(
+                SiteBatchUpdateRowResult(
+                    row_index=idx,
+                    site_id=site_id,
+                    site_code=getattr(site, "site_code", None),
+                    site_name=getattr(site, "site_name", None),
+                    success=False,
+                    errors=[str(exc)],
                 )
             )
         except SQLAlchemyError:
@@ -2071,7 +2271,7 @@ async def update_site(
     db.commit()
     db.refresh(site)
     
-    return SiteResponse.from_orm(site)
+    return _serialize_site_response(site)
 
 @router.delete("/{site_id}")
 async def delete_site(

@@ -13,6 +13,8 @@
     <!-- 站点概况（新卡组，置顶） -->
     <SiteProgressOverview :progress="topStats?.site_progress" @goto="handleGoto" />
 
+    <InstallProgressBreakdown ref="installProgressBreakdownRef" @goto="handleGoto" />
+
     <!-- 站点事件趋势（按日/周/月 + 新增/累计） -->
     <SiteProgressTrend ref="siteProgressTrendRef" class="mt-24 mb-24" />
 
@@ -74,6 +76,7 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import StatsOverview from '@/components/dashboard/StatsOverview.vue'
 import SiteProgressOverview from '@/components/dashboard/SiteProgressOverview.vue'
+import InstallProgressBreakdown from '@/components/dashboard/InstallProgressBreakdown.vue'
 import SiteProgressTrend from '@/components/dashboard/SiteProgressTrend.vue'
 import MyTodos from '@/components/dashboard/MyTodos.vue'
 import RisksPanel from '@/components/dashboard/RisksPanel.vue'
@@ -87,6 +90,7 @@ const todos = ref(null)
 const risks = ref(null)
 const activity = ref(null)
 const siteProgressTrendRef = ref(null)
+const installProgressBreakdownRef = ref(null)
 
 const loadAll = async () => {
   try {
@@ -112,6 +116,7 @@ const loadAll = async () => {
 const refresh = async () => {
   await Promise.all([
     loadAll(),
+    installProgressBreakdownRef.value?.refresh?.() || Promise.resolve(),
     siteProgressTrendRef.value?.refresh?.() || Promise.resolve(),
   ])
   ElMessage.success('数据已刷新')

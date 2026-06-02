@@ -218,6 +218,12 @@ const routes = [
             meta: { title: '站点付款规则', icon: 'Money', roles: ['admin'] }
           },
           {
+            path: 'site-groups',
+            name: 'SiteGroupSettings',
+            component: () => import('../views/system/SiteGroupSettings.vue'),
+            meta: { title: '站点分组设置', icon: 'CollectionTag', roles: ['admin', 'manager', 'planner'] }
+          },
+          {
             path: 'geocode-cache',
             name: 'GeocodeCache',
             component: () => import('../views/system/GeocodeCache.vue'),
@@ -345,6 +351,7 @@ const ROUTE_PERMISSION_MAP = {
   MobileLocationSettings: ['system:mobile-settings:read'],
   WorkOrderExecutionSettings: ['authz:manage:all'],
   SitePaymentSettings: ['authz:manage:all'],
+  SiteGroupSettings: ['sites:update:write'],
   GeocodeCache: ['system:geocode-cache:read'],
   OmcConfig: ['system:mobile-settings:write'],
   OmcDeviceStates: ['system:logs:read'],

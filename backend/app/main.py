@@ -18,6 +18,7 @@ from app.utils.app_version_schema import ensure_app_version_schema
 from app.utils.inspection_schema import ensure_inspection_schema
 from app.utils.work_order_schema import ensure_work_order_schema
 from app.utils.site_progress_schema import ensure_site_progress_schema
+from app.utils.site_group_schema import ensure_site_group_schema
 # Ensure new models are imported before creating tables
 from app.models import work_order as _work_order_models  # noqa: F401
 from app.models import user_log as _user_log_models  # noqa: F401
@@ -36,9 +37,11 @@ from app.models import app_version as _app_version_models  # noqa: F401
 from app.models import mobile_client_log as _mobile_client_log_models  # noqa: F401
 from app.models import site_progress as _site_progress_models  # noqa: F401
 from app.models import site_business as _site_business_models  # noqa: F401
+from app.models import site_group as _site_group_models  # noqa: F401
 from app.models.user import User
 from app.api import auth, authz, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai, ai_management
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
+from app.api import site_groups
 from app.api import operation_logs, app_version
 from app.api import mobile_client_logs
 from app.api import mock_omc_proxy
@@ -75,6 +78,8 @@ ensure_inspection_schema(engine)
 ensure_work_order_schema(engine)
 # 轻量迁移：为站点生命周期快照旧表补列（SQLite 友好）
 ensure_site_progress_schema(engine)
+# 轻量迁移：为站点分组表补齐索引（SQLite 友好）
+ensure_site_group_schema(engine)
 
 app = FastAPI(
     title="站点信息管理系统 API",
@@ -119,6 +124,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(authz.router, prefix="/api/authz", tags=["权限管理"])
 app.include_router(users.router, prefix="/api/users", tags=["用户管理"])
 app.include_router(sites.router, prefix="/api/sites", tags=["站点管理"])
+app.include_router(site_groups.router, prefix="/api/site-groups", tags=["站点分组"])
 app.include_router(inspections.router, prefix="/api/inspections", tags=["检查管理"])
 app.include_router(template_binding.router, prefix="/api/inspections", tags=["模板绑定"])
 app.include_router(equipment.router, prefix="/api/equipment", tags=["设备管理"])
