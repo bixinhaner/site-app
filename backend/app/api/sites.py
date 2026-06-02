@@ -1129,7 +1129,12 @@ def _site_with_groups_query(db: Session):
 
 
 def _serialize_site_response(site: Site) -> SiteResponse:
-    response = SiteResponse.from_orm(site)
+    response_data = {
+        field_name: getattr(site, field_name)
+        for field_name in SiteResponse.model_fields
+        if field_name != "group_assignments"
+    }
+    response = SiteResponse(**response_data)
     response.group_assignments = serialize_site_assignments(site)
     return response
 
