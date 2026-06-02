@@ -24,6 +24,14 @@ ASSIGNMENT_MODE_DERIVED = "derived"
 SOURCE_TYPE_SITE_FIELD = "site_field"
 SOURCE_TYPE_LLD_CELL_FIELD = "lld_cell_field"
 FIELD_DERIVED_SOURCE = "field_derived"
+GROUP_SYNC_SAMPLE_LIMIT = 500
+GROUP_SYNC_ACTION_PRIORITY = {
+    "overwrite": 0,
+    "conflict": 1,
+    "skipped": 2,
+    "assign": 3,
+    "unchanged": 4,
+}
 
 SITE_DERIVED_FIELDS = {
     "province": ("省份", "站点基础信息中的省份"),
@@ -387,6 +395,17 @@ def _active_option_maps(category: SiteGroupCategory) -> Tuple[Dict[int, SiteGrou
     return by_id, by_name_or_code
 
 
+def _prioritized_group_plan_samples(rows: Iterable[Dict[str, object]]) -> List[Dict[str, object]]:
+    return sorted(
+        list(rows),
+        key=lambda row: (
+            GROUP_SYNC_ACTION_PRIORITY.get(str(row.get("action") or ""), 99),
+            str(row.get("site_code") or ""),
+            int(row.get("site_id") or 0),
+        ),
+    )[:GROUP_SYNC_SAMPLE_LIMIT]
+
+
 def build_derived_group_sync_plan(
     db: Session,
     category: SiteGroupCategory,
@@ -576,7 +595,7 @@ def build_derived_group_sync_plan(
         "by_option": by_option,
         "warnings": warnings,
         "plan": plan_rows,
-        "samples": plan_rows[:20],
+        "samples": _prioritized_group_plan_samples(plan_rows),
         "create_missing_options": should_create_missing,
         "created_option_count": len(planned_create_option_names),
     }
@@ -815,7 +834,6 @@ def build_delivery_scope_seed_plan(
             .all()
         }
 
-    samples: List[Dict[str, object]] = []
     warnings: List[str] = []
     by_option = {"TDD": 0, "FDD": 0}
     suggested_count = 0
@@ -876,8 +894,6 @@ def build_delivery_scope_seed_plan(
             "reason": reason,
         }
         plan.append(row)
-        if len(samples) < 20:
-            samples.append(row)
 
     return {
         "category": category,
@@ -890,5 +906,5 @@ def build_delivery_scope_seed_plan(
         "skipped_count": skipped_count,
         "by_option": by_option,
         "warnings": warnings,
-        "samples": samples,
+        "samples": _prioritized_group_plan_samples(plan),
     }

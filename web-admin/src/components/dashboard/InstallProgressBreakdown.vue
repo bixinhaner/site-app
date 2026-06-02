@@ -31,11 +31,10 @@
           size="small"
           type="primary"
           plain
-          :loading="seedLoading"
-          @click="openSeedPreview"
+          @click="gotoGroupSettings"
         >
-          <el-icon><Operation /></el-icon>
-          生成交付范围
+          <el-icon><Setting /></el-icon>
+          分组设置
         </el-button>
       </div>
     </div>
@@ -85,71 +84,28 @@
       <el-button
         v-if="canManageGroups"
         type="primary"
-        :loading="seedLoading"
-        @click="openSeedPreview"
+        @click="gotoGroupSettings"
       >
-        从 LLD 生成交付范围
+        前往分组设置
       </el-button>
     </el-empty>
-
-    <el-dialog
-      v-model="seedDialogVisible"
-      title="生成交付范围"
-      width="720px"
-      :close-on-click-modal="false"
-    >
-      <div v-if="seedPlan" class="seed-summary">
-        <el-alert
-          type="info"
-          :closable="false"
-          title="系统会从当前 LLD 的 Duplex Mode 生成交付范围，TDD-only 归入 TDD，FDD-only 归入 FDD，同时包含 TDD/FDD 的站点保留人工确认。"
-        />
-        <div class="seed-metrics">
-          <div><span>总站点</span><strong>{{ seedPlan.requested_count }}</strong></div>
-          <div><span>可建议</span><strong>{{ seedPlan.suggested_count }}</strong></div>
-          <div><span>TDD</span><strong>{{ seedPlan.by_option?.TDD || 0 }}</strong></div>
-          <div><span>FDD</span><strong>{{ seedPlan.by_option?.FDD || 0 }}</strong></div>
-          <div><span>需人工确认</span><strong>{{ seedPlan.skipped_count + seedPlan.conflict_count }}</strong></div>
-        </div>
-        <el-table :data="seedPlan.samples || []" size="small" border max-height="260">
-          <el-table-column prop="site_code" label="站点编码" width="150" />
-          <el-table-column prop="site_name" label="站点名称" min-width="180" />
-          <el-table-column prop="target" label="建议分组" width="110">
-            <template #default="{ row }">{{ row.target || '-' }}</template>
-          </el-table-column>
-          <el-table-column prop="action" label="动作" width="110" />
-          <el-table-column prop="reason" label="说明" min-width="180" />
-        </el-table>
-        <div v-if="seedPlan.warnings?.length" class="warning-list">
-          <div v-for="item in seedPlan.warnings" :key="item">{{ item }}</div>
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="seedDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="seedLoading" @click="executeSeed">确认生成</el-button>
-      </template>
-    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Operation, Refresh } from '@element-plus/icons-vue'
+import { Refresh, Setting } from '@element-plus/icons-vue'
 import { fetchInstallProgressBreakdown } from '@/api/dashboard'
-import siteGroupsApi from '@/api/siteGroups'
 import { useUserStore } from '@/stores/user'
 
 const emit = defineEmits(['goto'])
 const userStore = useUserStore()
 
 const loading = ref(false)
-const seedLoading = ref(false)
-const seedDialogVisible = ref(false)
 const categories = ref([])
 const selectedCategoryId = ref(null)
 const rows = ref([])
-const seedPlan = ref(null)
 
 const canManageGroups = computed(() => (
   userStore.isAdmin
@@ -193,33 +149,8 @@ const gotoSites = (row) => {
   emit('goto', { name: 'SiteList', query })
 }
 
-const openSeedPreview = async () => {
-  try {
-    seedLoading.value = true
-    seedPlan.value = await siteGroupsApi.seedDeliveryScopeFromLld({ dry_run: true, overwrite: false })
-    seedDialogVisible.value = true
-  } catch (e) {
-    console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '生成预览失败')
-  } finally {
-    seedLoading.value = false
-  }
-}
-
-const executeSeed = async () => {
-  try {
-    seedLoading.value = true
-    const res = await siteGroupsApi.seedDeliveryScopeFromLld({ dry_run: false, overwrite: false })
-    ElMessage.success(`已生成交付范围，更新 ${res.assigned_count || 0} 个站点`)
-    seedDialogVisible.value = false
-    selectedCategoryId.value = res.category_id || selectedCategoryId.value
-    await load()
-  } catch (e) {
-    console.error(e)
-    ElMessage.error(e?.response?.data?.detail || '生成交付范围失败')
-  } finally {
-    seedLoading.value = false
-  }
+const gotoGroupSettings = () => {
+  emit('goto', { name: 'SiteGroupSettings' })
 }
 
 onMounted(load)
@@ -280,42 +211,6 @@ defineExpose({ refresh: load })
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
-.seed-summary {
-  display: grid;
-  gap: 12px;
-}
-.seed-metrics {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
-}
-.seed-metrics div {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px;
-  background: #fff;
-}
-.seed-metrics span {
-  display: block;
-  color: var(--text-light);
-  font-size: 12px;
-}
-.seed-metrics strong {
-  display: block;
-  margin-top: 4px;
-  color: var(--text-primary);
-  font-size: 20px;
-}
-.warning-list {
-  max-height: 120px;
-  overflow: auto;
-  color: #92400e;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 13px;
-}
 @media (max-width: 768px) {
   .section-head {
     align-items: stretch;
@@ -327,9 +222,6 @@ defineExpose({ refresh: load })
   .head-actions .el-select,
   .head-actions .el-button {
     width: 100%;
-  }
-  .seed-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

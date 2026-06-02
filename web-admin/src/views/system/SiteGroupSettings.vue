@@ -442,7 +442,27 @@
           :closable="false"
           :title="warning"
         />
-        <el-table :data="deriveDialog.result.samples || []" size="small" border max-height="420">
+        <div class="derive-result-toolbar">
+          <el-radio-group v-model="deriveActionFilter" size="small">
+            <el-radio-button
+              v-for="filter in deriveFilterOptions"
+              :key="filter.value"
+              :label="filter.value"
+            >
+              {{ filter.label }} {{ deriveFilterCount(filter) }}
+            </el-radio-button>
+          </el-radio-group>
+          <span class="derive-result-hint">
+            已按覆盖、冲突、跳过、写入优先展示；当前样例显示 {{ filteredDeriveSamples.length }}/{{ deriveSamples.length }} 条
+          </span>
+        </div>
+        <el-table
+          :data="filteredDeriveSamples"
+          size="small"
+          border
+          max-height="420"
+          empty-text="当前筛选无记录"
+        >
           <el-table-column prop="site_code" label="站点编码" width="150" />
           <el-table-column prop="site_name" label="站点名称" min-width="180" />
           <el-table-column label="来源值" min-width="180">
@@ -555,6 +575,17 @@ const deriveDialog = reactive({
   visible: false,
   result: null,
 })
+const deriveActionFilter = ref('priority')
+
+const deriveFilterOptions = [
+  { value: 'priority', label: '重点项', actions: ['overwrite', 'conflict', 'skipped', 'assign'] },
+  { value: 'overwrite', label: '覆盖', actions: ['overwrite'] },
+  { value: 'conflict', label: '冲突', actions: ['conflict'] },
+  { value: 'skipped', label: '跳过', actions: ['skipped'] },
+  { value: 'assign', label: '写入', actions: ['assign'] },
+  { value: 'unchanged', label: '不变', actions: ['unchanged'] },
+  { value: 'all', label: '全部', actions: null },
+]
 
 const sortedCategories = computed(() => {
   return [...categories.value].sort((a, b) => {
@@ -613,6 +644,21 @@ const activeOptionCount = computed(() => {
   }, 0)
 })
 const activeSelectedOptionCount = computed(() => selectedOptions.value.filter(option => option.is_active).length)
+const deriveSamples = computed(() => (
+  Array.isArray(deriveDialog.result?.samples) ? deriveDialog.result.samples : []
+))
+const deriveActionCounts = computed(() => {
+  return deriveSamples.value.reduce((counts, row) => {
+    const action = String(row?.action || '')
+    counts[action] = (counts[action] || 0) + 1
+    return counts
+  }, {})
+})
+const filteredDeriveSamples = computed(() => {
+  const selected = deriveFilterOptions.find(item => item.value === deriveActionFilter.value)
+  if (!selected || !Array.isArray(selected.actions)) return deriveSamples.value
+  return deriveSamples.value.filter(row => selected.actions.includes(row?.action))
+})
 
 const defaultSourceConfig = () => ({
   strategy: 'field_value',
@@ -1009,6 +1055,7 @@ const previewDerived = async () => {
     deriving.value = true
     const result = await siteGroupsApi.deriveCategory(category.id, derivePayload(true, payload))
     deriveDialog.result = result
+    deriveActionFilter.value = 'priority'
     deriveDialog.visible = true
   } catch (error) {
     console.error('预览派生失败:', error)
@@ -1041,6 +1088,7 @@ const syncDerived = async () => {
     await siteGroupsApi.updateCategory(category.id, payload)
     const result = await siteGroupsApi.deriveCategory(category.id, derivePayload(false))
     deriveDialog.result = result
+    deriveActionFilter.value = 'priority'
     deriveDialog.visible = true
     ElMessage.success(`已同步 ${result.assigned_count || 0} 个站点`)
     await loadCategories()
@@ -1066,10 +1114,16 @@ const deriveActionLabel = (action) => {
 }
 
 const deriveActionType = (action) => {
-  if (action === 'assign' || action === 'overwrite') return 'success'
+  if (action === 'overwrite') return 'warning'
+  if (action === 'assign') return 'success'
   if (action === 'unchanged') return 'info'
-  if (action === 'conflict') return 'warning'
+  if (action === 'conflict') return 'danger'
   return 'info'
+}
+
+const deriveFilterCount = (filter) => {
+  if (!Array.isArray(filter.actions)) return deriveSamples.value.length
+  return filter.actions.reduce((total, action) => total + (deriveActionCounts.value[action] || 0), 0)
 }
 
 onMounted(async () => {
@@ -1422,6 +1476,19 @@ onMounted(async () => {
   margin-bottom: 0;
 }
 
+.derive-result-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.derive-result-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 @media (max-width: 1080px) {
   .summary-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1460,6 +1527,11 @@ onMounted(async () => {
 
   .initial-option-row {
     align-items: stretch;
+  }
+
+  .derive-result-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 </style>
