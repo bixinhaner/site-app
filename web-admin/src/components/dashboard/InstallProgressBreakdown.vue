@@ -61,18 +61,7 @@
       <el-table-column prop="not_installed" label="未安装" width="90" align="right" />
       <el-table-column prop="online" label="上线" width="80" align="right" />
       <el-table-column prop="activated" label="激活" width="80" align="right" />
-      <el-table-column label="完成率" min-width="170">
-        <template #default="{ row }">
-          <div class="rate-cell">
-            <el-progress
-              :percentage="Number(row.completion_rate || 0)"
-              :stroke-width="8"
-              :show-text="false"
-            />
-            <span>{{ formatRate(row.completion_rate) }}</span>
-          </div>
-        </template>
-      </el-table-column>
+      <el-table-column prop="ssv" label="SSV完成" width="100" align="right" />
       <el-table-column label="操作" width="96" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="gotoSites(row)">查看站点</el-button>
@@ -135,8 +124,6 @@ const load = async () => {
   }
 }
 
-const formatRate = (value) => `${Number(value || 0).toFixed(1)}%`
-
 const gotoSites = (row) => {
   const query = {
     group_category_id: row.filter?.group_category_id,
@@ -189,8 +176,7 @@ defineExpose({ refresh: load })
 .breakdown-table {
   background: #fff;
 }
-.group-cell,
-.rate-cell {
+.group-cell {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -200,16 +186,6 @@ defineExpose({ refresh: load })
   height: 8px;
   border-radius: 50%;
   flex: 0 0 auto;
-}
-.rate-cell :deep(.el-progress) {
-  flex: 1;
-  min-width: 72px;
-}
-.rate-cell span {
-  width: 48px;
-  text-align: right;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
 }
 @media (max-width: 768px) {
   .section-head {

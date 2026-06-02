@@ -312,6 +312,7 @@ async def get_install_progress_breakdown(
                 "not_installed": 0,
                 "online": 0,
                 "activated": 0,
+                "ssv": 0,
             },
         }
 
@@ -355,6 +356,7 @@ async def get_install_progress_breakdown(
             func.sum(case((SiteProgressSnapshot.install_completed_at.isnot(None), 1), else_=0)).label("installed"),
             func.sum(case((online_col.isnot(None), 1), else_=0)).label("online"),
             func.sum(case((activated_col.isnot(None), 1), else_=0)).label("activated"),
+            func.sum(case((SiteProgressSnapshot.ssv_at.isnot(None), 1), else_=0)).label("ssv"),
         )
         .outerjoin(
             SiteGroupAssignment,
@@ -393,6 +395,7 @@ async def get_install_progress_breakdown(
                 "not_installed": max(total - installed, 0),
                 "online": int(row.online or 0),
                 "activated": int(row.activated or 0),
+                "ssv": int(row.ssv or 0),
                 "completion_rate": round((installed / total) * 100, 2) if total else 0,
                 "filter": {
                     "group_category_id": selected_category.id,
@@ -410,6 +413,7 @@ async def get_install_progress_breakdown(
         "not_installed": sum(item["not_installed"] for item in rows),
         "online": sum(item["online"] for item in rows),
         "activated": sum(item["activated"] for item in rows),
+        "ssv": sum(item["ssv"] for item in rows),
     }
 
     return {
