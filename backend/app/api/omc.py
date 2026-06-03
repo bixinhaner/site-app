@@ -22,6 +22,11 @@ from app.services.omc_client import (
   parse_activated_flag,
   is_success_status_payload,
 )
+from app.services.omc_runtime import (
+  configure_omc_runtime,
+  get_omc_runtime_stats,
+  normalize_omc_runtime_config,
+)
 from app.services.omc_state import upsert_omc_device_state
 from app.services.omc_monitor import (
   advance_opening_work_orders_by_ever,
@@ -47,6 +52,9 @@ class OmcConfigPayload(BaseModel):
   username: str
   password: Optional[str] = None
   timeout_seconds: Optional[int] = 10
+  rate_limit_per_minute: Optional[int] = 120
+  rate_limit_burst: Optional[int] = 10
+  token_ttl_seconds: Optional[int] = 600
   manual_confirm_enabled: Optional[bool] = False
   ssv_create_by_ever_activated_only: Optional[bool] = None
   site_progress_metric_mode: Optional[Literal["workflow", "device_fact"]] = None
@@ -56,6 +64,9 @@ class OmcConfigResponse(BaseModel):
   base_url: Optional[str] = None
   username: Optional[str] = None
   timeout_seconds: int = 10
+  rate_limit_per_minute: int = 120
+  rate_limit_burst: int = 10
+  token_ttl_seconds: int = 600
   manual_confirm_enabled: bool = False
   ssv_create_by_ever_activated_only: bool = False
   site_progress_metric_mode: str = SITE_PROGRESS_METRIC_MODE_WORKFLOW
@@ -116,10 +127,14 @@ def _load_omc_config(db: Session) -> OmcConfigResponse:
       site_progress_metric_mode=site_progress_metric_mode,
     )
   data = row.value or {}
+  runtime_config = normalize_omc_runtime_config(data)
   return OmcConfigResponse(
     base_url=data.get("base_url"),
     username=data.get("username"),
     timeout_seconds=int(data.get("timeout_seconds") or 10),
+    rate_limit_per_minute=runtime_config["rate_limit_per_minute"],
+    rate_limit_burst=runtime_config["rate_limit_burst"],
+    token_ttl_seconds=runtime_config["token_ttl_seconds"],
     manual_confirm_enabled=bool(data.get("manual_confirm_enabled") or False),
     ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
     site_progress_metric_mode=site_progress_metric_mode,
@@ -157,6 +172,13 @@ async def update_omc_config(
   username = payload.username.strip()
   new_password = (payload.password or "").strip()
   timeout = payload.timeout_seconds or 10
+  runtime_config = normalize_omc_runtime_config(
+    {
+      "rate_limit_per_minute": payload.rate_limit_per_minute,
+      "rate_limit_burst": payload.rate_limit_burst,
+      "token_ttl_seconds": payload.token_ttl_seconds,
+    }
+  )
   manual_confirm_enabled = bool(payload.manual_confirm_enabled or False)
   ssv_create_by_ever_activated_only = (
     get_ssv_create_by_ever_activated_only(db)
@@ -176,6 +198,7 @@ async def update_omc_config(
       "username": username,
       "password": new_password,
       "timeout_seconds": timeout,
+      **runtime_config,
       "manual_confirm_enabled": manual_confirm_enabled,
     }
     row = SystemConfig(key="omc_api", value=data)
@@ -185,6 +208,7 @@ async def update_omc_config(
     data["base_url"] = base_url
     data["username"] = username
     data["timeout_seconds"] = timeout
+    data.update(runtime_config)
     data["manual_confirm_enabled"] = manual_confirm_enabled
     # 只有在传入非空 password 时才更新存储的密码
     if new_password:
@@ -202,15 +226,32 @@ async def update_omc_config(
     {"metric_mode": site_progress_metric_mode},
   )
   db.commit()
+  configure_omc_runtime(runtime_config)
 
   return OmcConfigResponse(
     base_url=base_url,
     username=username,
     timeout_seconds=timeout,
+    rate_limit_per_minute=runtime_config["rate_limit_per_minute"],
+    rate_limit_burst=runtime_config["rate_limit_burst"],
+    token_ttl_seconds=runtime_config["token_ttl_seconds"],
     manual_confirm_enabled=manual_confirm_enabled,
     ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
     site_progress_metric_mode=site_progress_metric_mode,
   )
+
+
+@router.get("/runtime")
+async def get_omc_runtime(
+  db: Session = Depends(get_db),
+  current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+  """
+  获取 OMC 出口请求运行态统计（仅 admin 可见）。
+  """
+  _ensure_admin(current_user)
+  cfg = load_omc_config(db) or {}
+  return get_omc_runtime_stats(cfg)
 
 
 @router.get("/states", response_model=OmcDeviceStateListResponse)
@@ -343,6 +384,10 @@ async def test_omc_connection(
       username=cfg["username"],
       password=cfg["password"],
       timeout_seconds=cfg.get("timeout_seconds", 10),
+      rate_limit_per_minute=cfg.get("rate_limit_per_minute"),
+      rate_limit_burst=cfg.get("rate_limit_burst"),
+      token_ttl_seconds=cfg.get("token_ttl_seconds"),
+      source="test",
     )
     token = client._get_access_token()  # noqa: SLF001
     preview = token[:16] + "..." if token else ""
@@ -373,7 +418,7 @@ async def get_device_status_by_sn(
   # 仅要求登录即可；不做角色限制
   _ = current_user
 
-  client = get_omc_client(db)
+  client = get_omc_client(db, source="api_poll")
   if not client:
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1>OMC API 配置</h1>
       <div class="header-actions">
-        <el-button @click="loadConfig" :loading="loading">
+        <el-button @click="refreshPage" :loading="loading || runtimeLoading">
           <el-icon><Refresh /></el-icon>刷新
         </el-button>
         <el-button @click="testConnection" :loading="testing">
@@ -66,6 +66,126 @@
     </el-card>
 
     <el-card v-loading="loading" class="mt16">
+      <template #header>请求保护</template>
+      <el-form :model="form" label-width="180px" :disabled="!canManageOmc">
+        <el-form-item label="每分钟请求上限">
+          <el-input-number
+            v-model="form.rate_limit_per_minute"
+            :min="1"
+            :max="3000"
+            :step="10"
+          />
+          <div class="tip">
+            后台轮询、手动刷新、单 SN 查询和 cellName 同步都会共用这个出口额度。
+          </div>
+        </el-form-item>
+        <el-form-item label="短时突发上限">
+          <el-input-number
+            v-model="form.rate_limit_burst"
+            :min="1"
+            :max="500"
+            :step="1"
+          />
+          <div class="tip">
+            允许短时间内连续放行的请求数；建议明显小于每分钟上限。
+          </div>
+        </el-form-item>
+        <el-form-item label="Token缓存时间(秒)">
+          <el-input-number
+            v-model="form.token_ttl_seconds"
+            :min="60"
+            :max="86400"
+            :step="60"
+          />
+          <div class="tip">
+            缓存 OMC access token，避免每个 SN 查询都重复获取 token；遇到 401 会自动刷新一次。
+          </div>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card v-loading="runtimeLoading" class="mt16 runtime-card">
+      <template #header>
+        <div class="card-header">
+          <span>运行状态</span>
+          <el-button size="small" @click="loadRuntime" :loading="runtimeLoading">
+            <el-icon><Refresh /></el-icon>刷新状态
+          </el-button>
+        </div>
+      </template>
+      <div class="metric-grid">
+        <div class="metric-item">
+          <div class="metric-label">最近1分钟</div>
+          <div class="metric-value">{{ runtime?.stats?.requests_last_1m ?? 0 }}</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">最近5分钟</div>
+          <div class="metric-value">{{ runtime?.stats?.requests_last_5m ?? 0 }}</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">最近15分钟</div>
+          <div class="metric-value">{{ runtime?.stats?.requests_last_15m ?? 0 }}</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">15分钟失败</div>
+          <div class="metric-value danger">{{ runtime?.stats?.failed_last_15m ?? 0 }}</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">轮询队列</div>
+          <div class="metric-value">{{ runtime?.stats?.monitor_queue_depth ?? 0 }}</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">等待请求</div>
+          <div class="metric-value">{{ runtime?.limiter?.waiting_requests ?? 0 }}</div>
+        </div>
+      </div>
+
+      <el-descriptions :column="3" border class="runtime-details">
+        <el-descriptions-item label="当前上限">
+          {{ runtime?.config?.rate_limit_per_minute ?? form.rate_limit_per_minute }}/min
+        </el-descriptions-item>
+        <el-descriptions-item label="突发桶">
+          {{ runtime?.config?.rate_limit_burst ?? form.rate_limit_burst }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Token缓存">
+          {{ runtime?.config?.token_ttl_seconds ?? form.token_ttl_seconds }}s
+        </el-descriptions-item>
+        <el-descriptions-item label="Token命中">
+          {{ runtime?.token_cache?.hits ?? 0 }}
+        </el-descriptions-item>
+        <el-descriptions-item label="Token未命中">
+          {{ runtime?.token_cache?.misses ?? 0 }}
+        </el-descriptions-item>
+        <el-descriptions-item label="累计等待">
+          {{ runtime?.limiter?.total_wait_seconds ?? 0 }}s
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <el-table
+        :data="runtime?.stats?.recent_requests || []"
+        size="small"
+        class="recent-table"
+        empty-text="暂无 OMC 出口请求"
+      >
+        <el-table-column prop="time" label="时间" min-width="170">
+          <template #default="{ row }">{{ formatTime(row.time) }}</template>
+        </el-table-column>
+        <el-table-column prop="source" label="来源" width="110" />
+        <el-table-column prop="method" label="方法" width="80" />
+        <el-table-column prop="endpoint" label="接口" min-width="240" show-overflow-tooltip />
+        <el-table-column prop="status_code" label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.success ? 'success' : 'danger'" size="small">
+              {{ row.status_code || 'ERR' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="wait_seconds" label="等待(s)" width="90" />
+        <el-table-column prop="duration_seconds" label="耗时(s)" width="90" />
+      </el-table>
+    </el-card>
+
+    <el-card v-loading="loading" class="mt16">
       <template #header>SSV 创建规则</template>
       <el-form :model="form" label-width="180px" :disabled="!canManageOmc">
         <el-form-item label="站点设备激活即可创建SSV">
@@ -118,11 +238,16 @@ const userStore = useUserStore()
 const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
+const runtimeLoading = ref(false)
+const runtime = ref(null)
 const form = ref({
   base_url: '',
   username: '',
   password: '',
   timeout_seconds: 10,
+  rate_limit_per_minute: 120,
+  rate_limit_burst: 10,
+  token_ttl_seconds: 600,
   manual_confirm_enabled: false,
   ssv_create_by_ever_activated_only: false,
   site_progress_metric_mode: 'workflow',
@@ -138,6 +263,9 @@ const loadConfig = async () => {
     form.value.username = res.username || ''
     form.value.password = ''
     form.value.timeout_seconds = res.timeout_seconds || 10
+    form.value.rate_limit_per_minute = res.rate_limit_per_minute || 120
+    form.value.rate_limit_burst = res.rate_limit_burst || 10
+    form.value.token_ttl_seconds = res.token_ttl_seconds || 600
     form.value.manual_confirm_enabled = !!res.manual_confirm_enabled
     form.value.ssv_create_by_ever_activated_only = !!res.ssv_create_by_ever_activated_only
     form.value.site_progress_metric_mode = res.site_progress_metric_mode || 'workflow'
@@ -147,6 +275,24 @@ const loadConfig = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const loadRuntime = async () => {
+  if (!canManageOmc.value) return
+  try {
+    runtimeLoading.value = true
+    runtime.value = await request.get('/api/omc/runtime')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '加载 OMC 运行状态失败')
+  } finally {
+    runtimeLoading.value = false
+  }
+}
+
+const refreshPage = async () => {
+  await loadConfig()
+  await loadRuntime()
 }
 
 const save = async () => {
@@ -161,11 +307,15 @@ const save = async () => {
       username: form.value.username,
       password: form.value.password || undefined,
       timeout_seconds: form.value.timeout_seconds || 10,
+      rate_limit_per_minute: form.value.rate_limit_per_minute || 120,
+      rate_limit_burst: form.value.rate_limit_burst || 10,
+      token_ttl_seconds: form.value.token_ttl_seconds || 600,
       manual_confirm_enabled: !!form.value.manual_confirm_enabled,
       ssv_create_by_ever_activated_only: !!form.value.ssv_create_by_ever_activated_only,
       site_progress_metric_mode: form.value.site_progress_metric_mode || 'workflow',
     }
     await request.put('/api/omc/config', payload)
+    await refreshPage()
     ElMessage.success('保存成功')
   } catch (e) {
     console.error(e)
@@ -210,9 +360,16 @@ const testConnection = async () => {
   }
 }
 
+const formatTime = (value) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
+}
+
 onMounted(() => {
   if (canManageOmc.value) {
-    loadConfig()
+    refreshPage()
   }
 })
 </script>
@@ -229,11 +386,63 @@ onMounted(() => {
   display: flex;
   gap: 12px;
 }
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 .mb16 { margin-bottom: 16px; }
 .mt16 { margin-top: 16px; }
 .tip {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+.metric-item {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #fafafa;
+}
+.metric-label {
+  color: #606266;
+  font-size: 12px;
+}
+.metric-value {
+  margin-top: 6px;
+  color: #303133;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+.metric-value.danger {
+  color: #f56c6c;
+}
+.runtime-details {
+  margin-top: 16px;
+}
+.recent-table {
+  margin-top: 16px;
+}
+@media (max-width: 1200px) {
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

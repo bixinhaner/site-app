@@ -2507,7 +2507,7 @@ async def get_site_omc_devices(
 
     # 3. 如果需要刷新，直接调 OMC 获取“实时状态”
     if refresh:
-        client = get_omc_client(db)
+        client = get_omc_client(db, source="api_poll")
         if not client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

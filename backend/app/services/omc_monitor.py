@@ -23,6 +23,7 @@ from app.services.omc_client import (
   parse_activated_flag,
   is_success_status_payload,
 )
+from app.services.omc_runtime import runtime_stats
 from app.services.omc_state import (
   get_bound_slot_rows_for_site,
   get_device_state_by_sn,
@@ -700,7 +701,7 @@ def run_omc_check_for_work_order(work_order_id: str) -> None:
     ):
       return
 
-    client = get_omc_client(db)
+    client = get_omc_client(db, source="monitor")
     if not client:
       print("[OMC] 未配置 OMC API 信息，跳过检查")
       return
@@ -727,9 +728,10 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
     try:
       db = SessionLocal()
       try:
-        client = get_omc_client(db)
+        client = get_omc_client(db, source="monitor")
         if not client:
           # 未配置 OMC，则不做任何操作
+          runtime_stats.finish_monitor_cycle()
           time.sleep(interval_seconds)
           continue
 
@@ -745,7 +747,9 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
           .all()
         )
 
-        for wo in work_orders:
+        runtime_stats.set_monitor_queue(len(work_orders), total_work_orders=len(work_orders))
+
+        for index, wo in enumerate(work_orders):
           try:
             if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
               refresh_opening_work_order_omc_status(db, client, wo)
@@ -753,13 +757,18 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
               refresh_replacement_work_order_omc_status(db, client, wo)
             elif wo.type == WorkOrderTypeEnum.CELL_EXPANSION:
               refresh_cell_expansion_work_order_omc_status(db, client, wo)
+            db.commit()
           except Exception as exc:
+            db.rollback()
             print(f"[OMC] 定时检查工单 {wo.id} 失败: {exc}")
+          finally:
+            runtime_stats.set_monitor_queue(len(work_orders) - index - 1)
 
-        db.commit()
+        runtime_stats.finish_monitor_cycle()
       finally:
         db.close()
     except Exception as exc:  # pragma: no cover
+      runtime_stats.finish_monitor_cycle()
       print(f"[OMC] 定时检查循环异常: {exc}")
 
     time.sleep(interval_seconds)
