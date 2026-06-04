@@ -20,7 +20,7 @@ from app.utils.timezone import to_utc_iso
 
 DEFAULT_INVENTORY_SNAPSHOT_ENABLED = True
 DEFAULT_INVENTORY_SNAPSHOT_INTERVAL_SECONDS = 300
-DEFAULT_INVENTORY_DEVICE_GROUP_IDS = [30]
+DEFAULT_INVENTORY_DEVICE_GROUP_IDS: List[int] = []
 DEFAULT_INVENTORY_PAGE_SIZE = 1000
 DEFAULT_OFFLINE_DAYS_MARKS_EVER_ONLINE = True
 
@@ -28,7 +28,7 @@ MIN_INVENTORY_SNAPSHOT_INTERVAL_SECONDS = 60
 MAX_INVENTORY_SNAPSHOT_INTERVAL_SECONDS = 86400
 MIN_INVENTORY_PAGE_SIZE = 1
 MAX_INVENTORY_PAGE_SIZE = 5000
-MAX_INVENTORY_DEVICE_GROUPS = 50
+MAX_INVENTORY_DEVICE_GROUPS = 200
 
 
 def _parse_bool(value: Any, default: bool) -> bool:
@@ -54,7 +54,7 @@ def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
 
 def _parse_group_ids(value: Any) -> List[int]:
     if value is None or value == "":
-        return list(DEFAULT_INVENTORY_DEVICE_GROUP_IDS)
+        return []
 
     raw_items: List[Any]
     if isinstance(value, (list, tuple, set)):
@@ -76,7 +76,7 @@ def _parse_group_ids(value: Any) -> List[int]:
         if len(group_ids) >= MAX_INVENTORY_DEVICE_GROUPS:
             break
 
-    return group_ids or list(DEFAULT_INVENTORY_DEVICE_GROUP_IDS)
+    return group_ids
 
 
 def normalize_inventory_snapshot_config(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -304,6 +304,113 @@ def _extract_total(payload: Dict[str, Any]) -> Optional[int]:
     return None
 
 
+def _coerce_group_id(value: Any) -> Optional[int]:
+    try:
+        group_id = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return group_id if group_id > 0 else None
+
+
+def _extract_group_children(node: Dict[str, Any]) -> List[Dict[str, Any]]:
+    for key in ("children", "child", "childs", "groups", "list"):
+        children = node.get(key)
+        if isinstance(children, list):
+            return [child for child in children if isinstance(child, dict)]
+    return []
+
+
+def _extract_group_name(node: Dict[str, Any], group_id: int) -> str:
+    raw = (
+        node.get("group_name")
+        or node.get("groupName")
+        or node.get("name")
+        or node.get("label")
+        or node.get("text")
+    )
+    name = str(raw or "").strip()
+    return name or f"Group {group_id}"
+
+
+def flatten_device_groups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    将 /device/group 的树形或列表响应摊平成可查询的 group 列表。
+    """
+    if not is_success_status_payload(payload):
+        return []
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    roots: List[Dict[str, Any]]
+    if isinstance(data, list):
+        roots = [item for item in data if isinstance(item, dict)]
+    elif isinstance(data, dict):
+        roots = [data]
+    else:
+        return []
+
+    result: List[Dict[str, Any]] = []
+    seen: Set[int] = set()
+
+    def walk(node: Dict[str, Any], parent_id: Optional[int], parent_path: str) -> None:
+        group_id = _coerce_group_id(
+            node.get("id")
+            or node.get("group_id")
+            or node.get("groupId")
+            or node.get("value")
+        )
+        children = _extract_group_children(node)
+        if group_id is None:
+            for child in children:
+                walk(child, parent_id, parent_path)
+            return
+
+        name = _extract_group_name(node, group_id)
+        path = f"{parent_path}/{name}" if parent_path else name
+        if group_id not in seen:
+            result.append(
+                {
+                    "id": group_id,
+                    "name": name,
+                    "parent_id": parent_id,
+                    "path": path,
+                    "leaf": not children,
+                }
+            )
+            seen.add(group_id)
+
+        for child in children:
+            walk(child, group_id, path)
+
+    for root in roots:
+        walk(root, None, "")
+
+    return result[:MAX_INVENTORY_DEVICE_GROUPS]
+
+
+def fetch_device_groups(client: Any) -> Dict[str, Any]:
+    try:
+        payload = client.get_device_groups()
+    except Exception as exc:
+        return {
+            "groups": [],
+            "errors": [{"error": str(exc)}],
+            "payload": None,
+        }
+
+    if not is_success_status_payload(payload):
+        return {
+            "groups": [],
+            "errors": [{"payload": payload}],
+            "payload": payload,
+        }
+
+    return {
+        "groups": flatten_device_groups(payload),
+        "errors": [],
+        "payload": payload,
+    }
+
+
 def fetch_device_query_snapshot(
     client: Any,
     *,
@@ -314,8 +421,27 @@ def fetch_device_query_snapshot(
     errors: List[Dict[str, Any]] = []
     seen_sns: Set[str] = set()
     request_count = 0
+    selected_group_ids = list(group_ids or [])
+    auto_discovered = not bool(selected_group_ids)
+    auto_discovered_groups: List[Dict[str, Any]] = []
 
-    for group_id in group_ids:
+    if auto_discovered:
+        group_stats = fetch_device_groups(client)
+        errors.extend(group_stats.get("errors") or [])
+        auto_discovered_groups = list(group_stats.get("groups") or [])
+        selected_group_ids = [int(group["id"]) for group in auto_discovered_groups if group.get("id")]
+        if not selected_group_ids:
+            return {
+                "rows": rows,
+                "errors": errors or [{"error": "OMC 未返回可查询的设备分组"}],
+                "requests": request_count,
+                "covered_sns": seen_sns,
+                "group_ids": [],
+                "auto_discovered": auto_discovered,
+                "auto_discovered_groups": auto_discovered_groups,
+            }
+
+    for group_id in selected_group_ids:
         page_no = 0
         group_total: Optional[int] = None
         group_row_count = 0
@@ -372,6 +498,9 @@ def fetch_device_query_snapshot(
         "errors": errors,
         "requests": request_count,
         "covered_sns": seen_sns,
+        "group_ids": selected_group_ids,
+        "auto_discovered": auto_discovered,
+        "auto_discovered_groups": auto_discovered_groups,
     }
 
 
@@ -396,7 +525,9 @@ def sync_device_query_snapshot_from_omc(
     return {
         "enabled": bool(cfg["inventory_snapshot_enabled"]),
         "observed_at": to_utc_iso(observed_at),
-        "group_ids": list(cfg["inventory_device_group_ids"]),
+        "group_ids": list(fetch_stats.get("group_ids") or []),
+        "auto_discovered_groups": list(fetch_stats.get("auto_discovered_groups") or []),
+        "auto_discovered": bool(fetch_stats.get("auto_discovered")),
         "page_size": int(cfg["inventory_page_size"]),
         "requests": int(fetch_stats["requests"]),
         "errors": list(fetch_stats["errors"]),

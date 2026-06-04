@@ -27,7 +27,7 @@ from app.services.omc_runtime import (
   get_omc_runtime_stats,
   normalize_omc_runtime_config,
 )
-from app.services.omc_inventory import normalize_inventory_snapshot_config
+from app.services.omc_inventory import fetch_device_groups, normalize_inventory_snapshot_config
 from app.services.omc_state import upsert_omc_device_state
 from app.services.omc_monitor import (
   advance_opening_work_orders_by_ever,
@@ -75,7 +75,7 @@ class OmcConfigResponse(BaseModel):
   token_ttl_seconds: int = 600
   inventory_snapshot_enabled: bool = True
   inventory_snapshot_interval_seconds: int = 300
-  inventory_device_group_ids: List[int] = Field(default_factory=lambda: [30])
+  inventory_device_group_ids: List[int] = Field(default_factory=list)
   inventory_page_size: int = 1000
   offline_days_marks_ever_online: bool = True
   manual_confirm_enabled: bool = False
@@ -86,6 +86,20 @@ class OmcConfigResponse(BaseModel):
 class OmcTestResponse(BaseModel):
   success: bool
   message: str
+
+
+class OmcDeviceGroupItem(BaseModel):
+  id: int
+  name: str
+  parent_id: Optional[int] = None
+  path: str
+  leaf: bool = False
+
+
+class OmcDeviceGroupListResponse(BaseModel):
+  total: int
+  items: List[OmcDeviceGroupItem]
+  errors: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class OmcDeviceStatusBySnResponse(BaseModel):
@@ -271,6 +285,41 @@ async def update_omc_config(
     manual_confirm_enabled=manual_confirm_enabled,
     ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
     site_progress_metric_mode=site_progress_metric_mode,
+  )
+
+
+@router.get("/device-groups", response_model=OmcDeviceGroupListResponse)
+async def list_omc_device_groups(
+  db: Session = Depends(get_db),
+  current_user: User = Depends(get_current_user),
+):
+  """
+  从 OMC 实时读取当前账号可访问的设备分组，用于配置 device/query 快照范围。
+  """
+  _ensure_admin(current_user)
+  client = get_omc_client(db, source="api_poll")
+  if not client:
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="OMC 未配置，请先在后台配置 OMC API",
+    )
+
+  result = fetch_device_groups(client)
+  groups = [
+    OmcDeviceGroupItem(
+      id=int(group["id"]),
+      name=str(group.get("name") or f"Group {group['id']}"),
+      parent_id=group.get("parent_id"),
+      path=str(group.get("path") or group.get("name") or f"Group {group['id']}"),
+      leaf=bool(group.get("leaf")),
+    )
+    for group in result.get("groups") or []
+    if group.get("id")
+  ]
+  return OmcDeviceGroupListResponse(
+    total=len(groups),
+    items=groups,
+    errors=list(result.get("errors") or []),
   )
 
 

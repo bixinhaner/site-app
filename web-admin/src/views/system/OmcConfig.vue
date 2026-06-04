@@ -128,13 +128,39 @@
             默认 300 秒；周期未到时复用上一轮快照覆盖集合，不重复请求设备表。
           </div>
         </el-form-item>
-        <el-form-item label="设备分组ID">
-          <el-input
-            v-model="form.inventory_device_group_ids_text"
-            placeholder="例如：30，多个用逗号分隔"
-          />
+        <el-form-item label="同步范围">
+          <el-radio-group v-model="form.inventory_group_mode">
+            <el-radio-button label="auto">自动发现全部分组</el-radio-button>
+            <el-radio-button label="manual">手动选择分组</el-radio-button>
+          </el-radio-group>
           <div class="tip">
-            当前 Savanna 生产验证过的默认分组是 <code>30</code>（Default Device Group）。
+            自动模式会先读取 OMC 当前账号可访问的设备分组，再逐个调用 <code>/device/query</code> 并按 SN 去重。
+          </div>
+        </el-form-item>
+        <el-form-item v-if="form.inventory_group_mode === 'manual'" label="设备分组">
+          <div class="group-select-row">
+            <el-select
+              v-model="form.inventory_device_group_ids"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              placeholder="选择一个或多个 OMC 设备分组"
+              class="group-select"
+            >
+              <el-option
+                v-for="group in deviceGroupOptions"
+                :key="group.id"
+                :label="formatGroupLabel(group)"
+                :value="group.id"
+              />
+            </el-select>
+            <el-button @click="loadDeviceGroups" :loading="deviceGroupsLoading">
+              <el-icon><Refresh /></el-icon>读取分组
+            </el-button>
+          </div>
+          <div class="tip">
+            手动模式只同步所选分组；如果不确定范围，保持自动模式更通用。
           </div>
         </el-form-item>
         <el-form-item label="每页设备数">
@@ -211,7 +237,7 @@
           {{ form.inventory_snapshot_enabled ? `${form.inventory_snapshot_interval_seconds}s` : '关闭' }}
         </el-descriptions-item>
         <el-descriptions-item label="快照分组">
-          {{ form.inventory_device_group_ids_text || '30' }}
+          {{ snapshotGroupText }}
         </el-descriptions-item>
         <el-descriptions-item label="Token命中">
           {{ runtime?.token_cache?.hits ?? 0 }}
@@ -291,7 +317,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Document, Cpu } from '@element-plus/icons-vue'
 import request from '@/utils/request'
@@ -302,7 +328,9 @@ const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 const runtimeLoading = ref(false)
+const deviceGroupsLoading = ref(false)
 const runtime = ref(null)
+const deviceGroupOptions = ref([])
 const form = ref({
   base_url: '',
   username: '',
@@ -313,7 +341,8 @@ const form = ref({
   token_ttl_seconds: 600,
   inventory_snapshot_enabled: true,
   inventory_snapshot_interval_seconds: 300,
-  inventory_device_group_ids_text: '30',
+  inventory_group_mode: 'auto',
+  inventory_device_group_ids: [],
   inventory_page_size: 1000,
   offline_days_marks_ever_online: true,
   manual_confirm_enabled: false,
@@ -323,28 +352,61 @@ const form = ref({
 
 const canManageOmc = computed(() => userStore.hasPermission('system:mobile-settings:write'))
 
-const formatGroupIds = (value) => {
-  if (Array.isArray(value) && value.length) {
-    return value.join(',')
-  }
-  if (typeof value === 'string' && value.trim()) {
-    return value
-  }
-  return '30'
-}
+const snapshotGroupText = computed(() => {
+  if (form.value.inventory_group_mode === 'auto') return '自动发现全部分组'
+  return form.value.inventory_device_group_ids.length
+    ? form.value.inventory_device_group_ids.join(',')
+    : '未选择'
+})
 
-const parseGroupIds = (value) => {
-  const text = String(value || '').trim()
-  if (!text) return [30]
+const normalizeGroupIds = (value) => {
+  const raw = Array.isArray(value) ? value : []
   const seen = new Set()
-  return text
-    .split(/[,，]/)
-    .map(item => Number.parseInt(item.trim(), 10))
+  return raw
+    .map(item => Number.parseInt(item, 10))
     .filter((id) => {
       if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return false
       seen.add(id)
       return true
     })
+}
+
+const formatGroupLabel = (group) => {
+  const name = group?.path || group?.name || `Group ${group?.id}`
+  return `${name} (#${group.id})`
+}
+
+const ensureSelectedGroupOptions = (ids) => {
+  const existing = new Set(deviceGroupOptions.value.map(group => Number(group.id)))
+  ids.forEach((id) => {
+    if (!existing.has(id)) {
+      deviceGroupOptions.value.push({
+        id,
+        name: `Group ${id}`,
+        path: `Group ${id}`,
+        leaf: false,
+      })
+      existing.add(id)
+    }
+  })
+}
+
+const loadDeviceGroups = async () => {
+  if (!canManageOmc.value) return
+  try {
+    deviceGroupsLoading.value = true
+    const res = await request.get('/api/omc/device-groups')
+    deviceGroupOptions.value = Array.isArray(res?.items) ? res.items : []
+    ensureSelectedGroupOptions(form.value.inventory_device_group_ids)
+    if (Array.isArray(res?.errors) && res.errors.length) {
+      ElMessage.warning('OMC 分组读取完成，但部分分组返回异常')
+    }
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.detail || '读取 OMC 设备分组失败')
+  } finally {
+    deviceGroupsLoading.value = false
+  }
 }
 
 const loadConfig = async () => {
@@ -360,7 +422,10 @@ const loadConfig = async () => {
     form.value.token_ttl_seconds = res.token_ttl_seconds || 600
     form.value.inventory_snapshot_enabled = res.inventory_snapshot_enabled !== false
     form.value.inventory_snapshot_interval_seconds = res.inventory_snapshot_interval_seconds || 300
-    form.value.inventory_device_group_ids_text = formatGroupIds(res.inventory_device_group_ids)
+    const groupIds = normalizeGroupIds(res.inventory_device_group_ids)
+    form.value.inventory_device_group_ids = groupIds
+    form.value.inventory_group_mode = groupIds.length ? 'manual' : 'auto'
+    ensureSelectedGroupOptions(groupIds)
     form.value.inventory_page_size = res.inventory_page_size || 1000
     form.value.offline_days_marks_ever_online = res.offline_days_marks_ever_online !== false
     form.value.manual_confirm_enabled = !!res.manual_confirm_enabled
@@ -392,6 +457,15 @@ const refreshPage = async () => {
   await loadRuntime()
 }
 
+watch(
+  () => form.value.inventory_group_mode,
+  (mode) => {
+    if (mode === 'manual' && !deviceGroupOptions.value.length) {
+      loadDeviceGroups()
+    }
+  }
+)
+
 const save = async () => {
   if (!canManageOmc.value) {
     ElMessage.error('当前账号无权限保存配置')
@@ -399,9 +473,11 @@ const save = async () => {
   }
   try {
     saving.value = true
-    const inventoryGroupIds = parseGroupIds(form.value.inventory_device_group_ids_text)
-    if (!inventoryGroupIds.length) {
-      ElMessage.error('设备分组ID不能为空')
+    const inventoryGroupIds = form.value.inventory_group_mode === 'auto'
+      ? []
+      : normalizeGroupIds(form.value.inventory_device_group_ids)
+    if (form.value.inventory_group_mode === 'manual' && !inventoryGroupIds.length) {
+      ElMessage.error('请选择 OMC 设备分组，或切回自动发现全部分组')
       return
     }
     const payload = {
@@ -537,6 +613,15 @@ onMounted(() => {
 .recent-table {
   margin-top: 16px;
 }
+.group-select-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.group-select {
+  flex: 1;
+  min-width: 0;
+}
 @media (max-width: 1200px) {
   .metric-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -550,6 +635,9 @@ onMounted(() => {
   }
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .group-select-row {
+    flex-direction: column;
   }
 }
 </style>
