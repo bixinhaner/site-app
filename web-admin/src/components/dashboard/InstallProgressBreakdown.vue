@@ -2,9 +2,9 @@
   <section class="install-breakdown">
     <div class="section-head">
       <div>
-        <h2 class="section-title">安装进度分组</h2>
+        <h2 class="section-title">站点进度分组</h2>
         <p class="section-subtitle">
-          {{ categoryName ? `按「${categoryName}」查看站点安装状态` : '按业务分组查看站点安装状态' }}
+          {{ categoryName ? `按「${categoryName}」查看安装、上线和激活状态` : '按业务分组查看安装、上线和激活状态' }}
         </p>
       </div>
       <div class="head-actions">
@@ -59,8 +59,46 @@
       <el-table-column prop="install_started" label="已开始" width="90" align="right" />
       <el-table-column prop="installed" label="安装完成" width="100" align="right" />
       <el-table-column prop="not_installed" label="未安装" width="90" align="right" />
-      <el-table-column prop="online" label="上线" width="80" align="right" />
-      <el-table-column prop="activated" label="激活" width="80" align="right" />
+      <el-table-column label="部分上线" width="112" align="right">
+        <template #default="{ row }">
+          <div class="metric-cell">
+            <span class="metric-value">{{ row.partial_online || 0 }}</span>
+            <span v-if="deviceFraction(row, 'partial_online', 'online')" class="metric-fraction">
+              {{ deviceFraction(row, 'partial_online', 'online') }}
+            </span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="完全上线" width="112" align="right">
+        <template #default="{ row }">
+          <div class="metric-cell">
+            <span class="metric-value">{{ valueWithFallback(row, 'fully_online', 'online') }}</span>
+            <span v-if="deviceFraction(row, 'fully_online', 'online')" class="metric-fraction">
+              {{ deviceFraction(row, 'fully_online', 'online') }}
+            </span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="部分激活" width="112" align="right">
+        <template #default="{ row }">
+          <div class="metric-cell">
+            <span class="metric-value">{{ row.partial_activated || 0 }}</span>
+            <span v-if="deviceFraction(row, 'partial_activated', 'activated')" class="metric-fraction">
+              {{ deviceFraction(row, 'partial_activated', 'activated') }}
+            </span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="完全激活" width="112" align="right">
+        <template #default="{ row }">
+          <div class="metric-cell">
+            <span class="metric-value">{{ valueWithFallback(row, 'fully_activated', 'activated') }}</span>
+            <span v-if="deviceFraction(row, 'fully_activated', 'activated')" class="metric-fraction">
+              {{ deviceFraction(row, 'fully_activated', 'activated') }}
+            </span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="ssv" label="SSV完成" width="100" align="right" />
       <el-table-column label="操作" width="96" fixed="right">
         <template #default="{ row }">
@@ -105,6 +143,20 @@ const categoryName = computed(() => {
   const category = categories.value.find(item => item.id === selectedCategoryId.value)
   return category?.name || ''
 })
+const valueWithFallback = (row, key, fallbackKey) => {
+  if (row?.[key] === undefined || row?.[key] === null) {
+    return Number(row?.[fallbackKey] || 0)
+  }
+  return Number(row?.[key] || 0)
+}
+const deviceFraction = (row, key, type) => {
+  const bucket = row?.device_progress?.[key]
+  const denominator = Number(bucket?.denominator || 0)
+  if (!denominator) return ''
+  const numerator = Number(bucket?.numerator || 0)
+  const label = type === 'activated' ? '激活设备' : '上线设备'
+  return `${label} ${numerator}/${denominator}`
+}
 
 const load = async () => {
   try {
@@ -186,6 +238,25 @@ defineExpose({ refresh: load })
   height: 8px;
   border-radius: 50%;
   flex: 0 0 auto;
+}
+.metric-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  min-height: 34px;
+}
+.metric-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1;
+}
+.metric-fraction {
+  color: var(--text-light);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 @media (max-width: 768px) {
   .section-head {

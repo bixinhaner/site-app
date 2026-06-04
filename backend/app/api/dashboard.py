@@ -3,7 +3,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, case, func, desc
+from sqlalchemy import and_, func, desc
 
 from app.core.database import get_db
 from app.api.auth import get_current_user
@@ -167,26 +167,39 @@ def _empty_device_progress_bucket() -> Dict[str, int]:
     return {"sites": 0, "numerator": 0, "denominator": 0}
 
 
-def _build_site_device_progress(
+def _normalize_site_ids(site_ids: Optional[Iterable[int]]) -> Optional[set[int]]:
+    if site_ids is None:
+        return None
+    normalized: set[int] = set()
+    for raw_site_id in site_ids:
+        try:
+            normalized.add(int(raw_site_id))
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def _build_site_device_progress_metrics(
     db: Session,
     *,
-    fully_online_site_ids: Iterable[int],
-    fully_activated_site_ids: Iterable[int],
-) -> Dict[str, Dict[str, int]]:
+    site_ids: Optional[Iterable[int]] = None,
+) -> Dict[int, Dict[str, Any]]:
     """
-    汇总 dashboard 站点卡片下方的设备分数。
-
-    站点“完全上线/完全激活”继续沿用 site_progress_snapshots 的口径；
     设备分数按开站阶段有效设备位计算，规划有设备位时分母为规划位数量，
     避免缺槽位的站点因为已绑定设备全部在线而被看成完整。
     """
-    fully_online_ids = {int(site_id) for site_id in fully_online_site_ids}
-    fully_activated_ids = {int(site_id) for site_id in fully_activated_site_ids}
+    requested_site_ids = _normalize_site_ids(site_ids)
+    if requested_site_ids is not None and not requested_site_ids:
+        return {}
 
-    site_slot_rows: Dict[int, Dict[str, Any]] = {}
+    site_query = db.query(Site.id)
+    if requested_site_ids is not None:
+        site_query = site_query.filter(Site.id.in_(sorted(requested_site_ids)))
+
+    metrics: Dict[int, Dict[str, Any]] = {}
     all_sns: set[str] = set()
 
-    for site_id, in db.query(Site.id).all():
+    for site_id, in site_query.all():
         binding_summary = summarize_site_binding_slots(db, int(site_id), opening_only=True)
         slot_check_required = bool(binding_summary.get("slot_check_required"))
         expected_slot_count = int(binding_summary.get("expected_slot_count") or 0)
@@ -203,9 +216,11 @@ def _build_site_device_progress(
         if denominator <= 0:
             denominator = len(slot_sns)
 
-        site_slot_rows[int(site_id)] = {
+        metrics[int(site_id)] = {
             "denominator": denominator,
             "slot_sns": slot_sns,
+            "online_devices": 0,
+            "activated_devices": 0,
         }
         all_sns.update(slot_sns)
 
@@ -217,6 +232,33 @@ def _build_site_device_progress(
             .filter(OmcDeviceState.sn.in_(sorted(all_sns)))
             .all()
         }
+
+    for info in metrics.values():
+        slot_sns = list(info["slot_sns"] or [])
+        info["online_devices"] = sum(
+            1 for sn in slot_sns if bool(getattr(state_map.get(sn), "ever_online", False))
+        )
+        info["activated_devices"] = sum(
+            1 for sn in slot_sns if bool(getattr(state_map.get(sn), "ever_activated", False))
+        )
+
+    return metrics
+
+
+def _aggregate_site_device_progress(
+    metrics: Dict[int, Dict[str, Any]],
+    *,
+    fully_online_site_ids: Iterable[int],
+    fully_activated_site_ids: Iterable[int],
+    site_ids: Optional[Iterable[int]] = None,
+) -> Dict[str, Dict[str, int]]:
+    """按站点集合汇总部分/完全上线激活站点数与设备分数。"""
+    scope_ids = _normalize_site_ids(site_ids)
+    if scope_ids is None:
+        scope_ids = set(metrics.keys())
+
+    fully_online_ids = (_normalize_site_ids(fully_online_site_ids) or set()) & scope_ids
+    fully_activated_ids = (_normalize_site_ids(fully_activated_site_ids) or set()) & scope_ids
 
     result = {
         "partial_online": _empty_device_progress_bucket(),
@@ -235,18 +277,16 @@ def _build_site_device_progress(
         result[bucket]["sites"] += 1
         add_fraction(bucket, numerator, denominator)
 
-    for site_id, info in site_slot_rows.items():
+    for site_id in scope_ids:
+        info = metrics.get(site_id)
+        if not info:
+            continue
         denominator = int(info["denominator"] or 0)
         if denominator <= 0:
             continue
 
-        slot_sns = list(info["slot_sns"] or [])
-        online_devices = sum(
-            1 for sn in slot_sns if bool(getattr(state_map.get(sn), "ever_online", False))
-        )
-        activated_devices = sum(
-            1 for sn in slot_sns if bool(getattr(state_map.get(sn), "ever_activated", False))
-        )
+        online_devices = int(info["online_devices"] or 0)
+        activated_devices = int(info["activated_devices"] or 0)
 
         if site_id in fully_online_ids:
             add_fraction("fully_online", online_devices, denominator)
@@ -259,6 +299,26 @@ def _build_site_device_progress(
             add_partial("partial_activated", activated_devices, denominator)
 
     return result
+
+
+def _build_site_device_progress(
+    db: Session,
+    *,
+    fully_online_site_ids: Iterable[int],
+    fully_activated_site_ids: Iterable[int],
+) -> Dict[str, Dict[str, int]]:
+    """
+    汇总 dashboard 站点卡片下方的设备分数。
+
+    站点“完全上线/完全激活”继续沿用 site_progress_snapshots 的口径；
+    设备分数和“部分”统计按开站阶段有效设备位计算。
+    """
+    metrics = _build_site_device_progress_metrics(db)
+    return _aggregate_site_device_progress(
+        metrics,
+        fully_online_site_ids=fully_online_site_ids,
+        fully_activated_site_ids=fully_activated_site_ids,
+    )
 
 
 @router.get("/summary")
@@ -424,8 +484,18 @@ async def get_install_progress_breakdown(
                 "install_started": 0,
                 "installed": 0,
                 "not_installed": 0,
+                "partial_online": 0,
+                "fully_online": 0,
                 "online": 0,
+                "partial_activated": 0,
+                "fully_activated": 0,
                 "activated": 0,
+                "device_progress": {
+                    "partial_online": _empty_device_progress_bucket(),
+                    "fully_online": _empty_device_progress_bucket(),
+                    "partial_activated": _empty_device_progress_bucket(),
+                    "fully_activated": _empty_device_progress_bucket(),
+                },
                 "ssv": 0,
             },
         }
@@ -458,19 +528,19 @@ async def get_install_progress_breakdown(
     online_col = getattr(SiteProgressSnapshot, online_field)
     activated_col = getattr(SiteProgressSnapshot, activated_field)
 
-    grouped_rows = (
+    site_rows = (
         db.query(
+            Site.id.label("site_id"),
             SiteGroupOption.id.label("option_id"),
             SiteGroupOption.code.label("option_code"),
             SiteGroupOption.name.label("option_name"),
             SiteGroupOption.color.label("option_color"),
             SiteGroupOption.sort_order.label("sort_order"),
-            func.count(Site.id).label("total"),
-            func.sum(case((SiteProgressSnapshot.install_started_at.isnot(None), 1), else_=0)).label("install_started"),
-            func.sum(case((SiteProgressSnapshot.install_completed_at.isnot(None), 1), else_=0)).label("installed"),
-            func.sum(case((online_col.isnot(None), 1), else_=0)).label("online"),
-            func.sum(case((activated_col.isnot(None), 1), else_=0)).label("activated"),
-            func.sum(case((SiteProgressSnapshot.ssv_at.isnot(None), 1), else_=0)).label("ssv"),
+            SiteProgressSnapshot.install_started_at.label("install_started_at"),
+            SiteProgressSnapshot.install_completed_at.label("install_completed_at"),
+            online_col.label("online_at"),
+            activated_col.label("activated_at"),
+            SiteProgressSnapshot.ssv_at.label("ssv_at"),
         )
         .outerjoin(
             SiteGroupAssignment,
@@ -481,52 +551,100 @@ async def get_install_progress_breakdown(
         )
         .outerjoin(SiteGroupOption, SiteGroupOption.id == SiteGroupAssignment.option_id)
         .outerjoin(SiteProgressSnapshot, SiteProgressSnapshot.site_id == Site.id)
-        .group_by(
-            SiteGroupOption.id,
-            SiteGroupOption.code,
-            SiteGroupOption.name,
-            SiteGroupOption.color,
-            SiteGroupOption.sort_order,
-        )
         .all()
     )
 
-    rows = []
-    for row in grouped_rows:
-        total = int(row.total or 0)
-        installed = int(row.installed or 0)
+    groups: Dict[Optional[int], Dict[str, Any]] = {}
+    fully_online_site_ids: set[int] = set()
+    fully_activated_site_ids: set[int] = set()
+
+    for row in site_rows:
+        site_id = int(row.site_id)
         option_id = row.option_id
-        rows.append(
-            {
+        group = groups.get(option_id)
+        if group is None:
+            group = {
                 "option_id": option_id,
                 "option_code": row.option_code or "unassigned",
                 "option_name": row.option_name or "未分组",
                 "option_color": row.option_color,
                 "sort_order": int(row.sort_order or 999999),
-                "total": total,
-                "install_started": int(row.install_started or 0),
-                "installed": installed,
-                "not_installed": max(total - installed, 0),
-                "online": int(row.online or 0),
-                "activated": int(row.activated or 0),
-                "ssv": int(row.ssv or 0),
-                "completion_rate": round((installed / total) * 100, 2) if total else 0,
+                "site_ids": [],
+                "total": 0,
+                "install_started": 0,
+                "installed": 0,
+                "online": 0,
+                "activated": 0,
+                "ssv": 0,
                 "filter": {
                     "group_category_id": selected_category.id,
                     "group_option_id": option_id,
                     "group_unassigned": option_id is None,
                 },
             }
+            groups[option_id] = group
+
+        group["site_ids"].append(site_id)
+        group["total"] += 1
+        if row.install_started_at is not None:
+            group["install_started"] += 1
+        if row.install_completed_at is not None:
+            group["installed"] += 1
+        if row.online_at is not None:
+            group["online"] += 1
+            fully_online_site_ids.add(site_id)
+        if row.activated_at is not None:
+            group["activated"] += 1
+            fully_activated_site_ids.add(site_id)
+        if row.ssv_at is not None:
+            group["ssv"] += 1
+
+    device_metrics = _build_site_device_progress_metrics(
+        db,
+        site_ids=[int(row.site_id) for row in site_rows],
+    )
+
+    rows = []
+    for group in groups.values():
+        total = int(group["total"] or 0)
+        installed = int(group["installed"] or 0)
+        site_ids = list(group.pop("site_ids", []))
+        device_progress = _aggregate_site_device_progress(
+            device_metrics,
+            fully_online_site_ids=fully_online_site_ids,
+            fully_activated_site_ids=fully_activated_site_ids,
+            site_ids=site_ids,
         )
+        group["not_installed"] = max(total - installed, 0)
+        group["partial_online"] = device_progress["partial_online"]["sites"]
+        group["fully_online"] = int(group["online"] or 0)
+        group["partial_activated"] = device_progress["partial_activated"]["sites"]
+        group["fully_activated"] = int(group["activated"] or 0)
+        group["device_progress"] = device_progress
+        group["completion_rate"] = round((installed / total) * 100, 2) if total else 0
+        rows.append(group)
 
     rows.sort(key=lambda item: (item["option_id"] is None, item["sort_order"], item["option_name"]))
+    totals_device_progress = {
+        key: {
+            "sites": sum(item["device_progress"][key]["sites"] for item in rows),
+            "numerator": sum(item["device_progress"][key]["numerator"] for item in rows),
+            "denominator": sum(item["device_progress"][key]["denominator"] for item in rows),
+        }
+        for key in ["partial_online", "fully_online", "partial_activated", "fully_activated"]
+    }
     totals = {
         "total": sum(item["total"] for item in rows),
         "install_started": sum(item["install_started"] for item in rows),
         "installed": sum(item["installed"] for item in rows),
         "not_installed": sum(item["not_installed"] for item in rows),
+        "partial_online": sum(item["partial_online"] for item in rows),
+        "fully_online": sum(item["fully_online"] for item in rows),
         "online": sum(item["online"] for item in rows),
+        "partial_activated": sum(item["partial_activated"] for item in rows),
+        "fully_activated": sum(item["fully_activated"] for item in rows),
         "activated": sum(item["activated"] for item in rows),
+        "device_progress": totals_device_progress,
         "ssv": sum(item["ssv"] for item in rows),
     }
 
