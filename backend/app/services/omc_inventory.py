@@ -344,7 +344,11 @@ def flatten_device_groups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if isinstance(data, list):
         roots = [item for item in data if isinstance(item, dict)]
     elif isinstance(data, dict):
-        roots = [data]
+        rows = data.get("rows")
+        if isinstance(rows, list):
+            roots = [item for item in rows if isinstance(item, dict)]
+        else:
+            roots = [data]
     else:
         return []
 
