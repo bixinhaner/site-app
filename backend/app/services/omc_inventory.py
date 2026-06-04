@@ -332,6 +332,21 @@ def _extract_group_name(node: Dict[str, Any], group_id: int) -> str:
     return name or f"Group {group_id}"
 
 
+def _extract_group_leaf(node: Dict[str, Any], children: List[Dict[str, Any]]) -> bool:
+    for key in ("leaf", "is_leaf", "isLeaf"):
+        if key not in node:
+            continue
+        value = node.get(key)
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in {"1", "true", "yes", "y"}:
+            return True
+        if text in {"0", "false", "no", "n"}:
+            return False
+    return not children
+
+
 def flatten_device_groups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     将 /device/group 的树形或列表响应摊平成可查询的 group 列表。
@@ -370,6 +385,7 @@ def flatten_device_groups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         name = _extract_group_name(node, group_id)
         path = f"{parent_path}/{name}" if parent_path else name
+        leaf = _extract_group_leaf(node, children)
         if group_id not in seen:
             result.append(
                 {
@@ -377,7 +393,7 @@ def flatten_device_groups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "name": name,
                     "parent_id": parent_id,
                     "path": path,
-                    "leaf": not children,
+                    "leaf": leaf,
                 }
             )
             seen.add(group_id)
@@ -433,7 +449,15 @@ def fetch_device_query_snapshot(
         group_stats = fetch_device_groups(client)
         errors.extend(group_stats.get("errors") or [])
         auto_discovered_groups = list(group_stats.get("groups") or [])
-        selected_group_ids = [int(group["id"]) for group in auto_discovered_groups if group.get("id")]
+        queryable_groups = [
+            group for group in auto_discovered_groups
+            if group.get("id") and bool(group.get("leaf"))
+        ]
+        skipped_non_leaf_groups = [
+            group for group in auto_discovered_groups
+            if group.get("id") and not bool(group.get("leaf"))
+        ]
+        selected_group_ids = [int(group["id"]) for group in queryable_groups]
         if not selected_group_ids:
             return {
                 "rows": rows,
@@ -443,7 +467,10 @@ def fetch_device_query_snapshot(
                 "group_ids": [],
                 "auto_discovered": auto_discovered,
                 "auto_discovered_groups": auto_discovered_groups,
+                "skipped_non_leaf_groups": skipped_non_leaf_groups,
             }
+    else:
+        skipped_non_leaf_groups = []
 
     for group_id in selected_group_ids:
         page_no = 0
@@ -505,6 +532,7 @@ def fetch_device_query_snapshot(
         "group_ids": selected_group_ids,
         "auto_discovered": auto_discovered,
         "auto_discovered_groups": auto_discovered_groups,
+        "skipped_non_leaf_groups": skipped_non_leaf_groups,
     }
 
 
@@ -526,14 +554,17 @@ def sync_device_query_snapshot_from_omc(
         observed_at=observed_at,
         offline_days_marks_ever_online=cfg["offline_days_marks_ever_online"],
     )
+    covered_sns = set(sync_stats.get("covered_sns") or set())
     return {
         "enabled": bool(cfg["inventory_snapshot_enabled"]),
         "observed_at": to_utc_iso(observed_at),
         "group_ids": list(fetch_stats.get("group_ids") or []),
         "auto_discovered_groups": list(fetch_stats.get("auto_discovered_groups") or []),
         "auto_discovered": bool(fetch_stats.get("auto_discovered")),
+        "skipped_non_leaf_groups": list(fetch_stats.get("skipped_non_leaf_groups") or []),
         "page_size": int(cfg["inventory_page_size"]),
         "requests": int(fetch_stats["requests"]),
         "errors": list(fetch_stats["errors"]),
+        "snapshot_filter_usable": bool(covered_sns),
         **sync_stats,
     }

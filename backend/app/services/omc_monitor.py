@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import SessionLocal
 from app.utils.timezone import to_utc_iso
@@ -45,6 +46,19 @@ from app.services.cell_expansion import (
 from app.services.site_progress_service import rebuild_site_progress
 
 _monitor_thread: threading.Thread | None = None
+
+
+def _set_work_order_omc_status(wo: WorkOrder, summary: Dict[str, Any]) -> None:
+  """
+  保存 OMC 检查摘要到工单 JSON 字段。
+
+  SQLAlchemy 不会稳定追踪 JSON 字段内部原地变更；这里统一复制一份再标记
+  extra_data 已修改，确保本轮检查摘要能真正写回数据库，供前端详情页展示。
+  """
+  extra = dict(wo.extra_data or {})
+  extra["omc_status"] = summary
+  wo.extra_data = extra
+  flag_modified(wo, "extra_data")
 
 
 def _audit_site_status_change(db: Session, site_id: int, old_status: str, new_status: str, reason: str) -> None:
@@ -273,9 +287,7 @@ def refresh_opening_work_order_omc_status(
     )
 
   # 写入 extra_data.omc_status
-  extra = wo.extra_data or {}
-  extra["omc_status"] = summary
-  wo.extra_data = extra
+  _set_work_order_omc_status(wo, summary)
   wo.updated_at = datetime.utcnow()
   rebuild_site_progress(
     db,
@@ -374,9 +386,7 @@ def refresh_replacement_work_order_omc_status(
     except Exception as exc:  # pragma: no cover
       print(f"[WARN] 设备更换工单完成回滚站点状态失败: {exc}")
 
-  extra = wo.extra_data or {}
-  extra["omc_status"] = summary
-  wo.extra_data = extra
+  _set_work_order_omc_status(wo, summary)
   wo.updated_at = datetime.utcnow()
   rebuild_site_progress(
     db,
@@ -573,9 +583,7 @@ def refresh_cell_expansion_work_order_omc_status(
     wo.completed_at = datetime.utcnow()
     _commit_expansion_planning_if_needed(db, wo)
 
-  extra = dict(wo.extra_data or {})
-  extra["omc_status"] = summary
-  wo.extra_data = extra
+  _set_work_order_omc_status(wo, summary)
   wo.updated_at = datetime.utcnow()
   rebuild_site_progress(
     db,
@@ -686,8 +694,7 @@ def advance_cell_expansion_work_orders_by_ever(db: Session, site_id: int) -> Dic
       "missing_slots": list(summary.get("missing_slots") or []),
       "checked_at": to_utc_iso(datetime.utcnow()),
     })
-    extra["omc_status"] = omc_status
-    wo.extra_data = extra
+    _set_work_order_omc_status(wo, omc_status)
 
     if changed:
       result["work_orders"].append({"id": wo.id, "status": wo.status.value})
@@ -793,7 +800,8 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
   后台轮询线程：每 interval_seconds 针对未完成的开站工单执行一次 OMC 检查。
   """
   inventory_snapshot_last_at: Optional[float] = None
-  cached_inventory_sns: Optional[Set[str]] = None
+  cached_inventory_sns: Set[str] = set()
+  cached_inventory_filter_usable = False
 
   while True:
     try:
@@ -812,30 +820,36 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
         if inventory_cfg["inventory_snapshot_enabled"]:
           now_monotonic = time.monotonic()
           should_refresh_inventory = (
-            cached_inventory_sns is None
-            or inventory_snapshot_last_at is None
+            inventory_snapshot_last_at is None
             or now_monotonic - inventory_snapshot_last_at >= inventory_cfg["inventory_snapshot_interval_seconds"]
           )
           if should_refresh_inventory:
             try:
               snapshot_stats = sync_device_query_snapshot_from_omc(db, client, inventory_cfg)
               cached_inventory_sns = set(snapshot_stats.get("covered_sns") or set())
+              cached_inventory_filter_usable = bool(snapshot_stats.get("snapshot_filter_usable"))
               inventory_snapshot_last_at = now_monotonic
               db.commit()
+              skipped_non_leaf_groups = list(snapshot_stats.get("skipped_non_leaf_groups") or [])
+              fallback_note = "" if cached_inventory_filter_usable else " fallback=sn_api"
               print(
                 "[OMC] device/query 快照完成: "
                 f"groups={snapshot_stats.get('group_ids')} "
+                f"skipped_non_leaf={len(skipped_non_leaf_groups)} "
                 f"rows={snapshot_stats.get('total_rows')} "
                 f"covered={len(cached_inventory_sns)} "
                 f"newly_online={snapshot_stats.get('newly_online')} "
                 f"errors={len(snapshot_stats.get('errors') or [])}"
+                f"{fallback_note}"
               )
             except Exception as exc:
               db.rollback()
               cached_inventory_sns = set()
+              cached_inventory_filter_usable = False
               inventory_snapshot_last_at = now_monotonic
-              print(f"[OMC] device/query 快照失败，本轮跳过未覆盖 SN 的逐 SN 查询: {exc}")
-          inventory_sns = set(cached_inventory_sns or set())
+              print(f"[OMC] device/query 快照失败，本轮回退逐 SN 查询: {exc}")
+          if cached_inventory_filter_usable:
+            inventory_sns = set(cached_inventory_sns)
 
         work_orders = (
           db.query(WorkOrder)
