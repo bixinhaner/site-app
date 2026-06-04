@@ -65,18 +65,38 @@ export default {
           title: "Instal Situs Selesai",
           desc: "Dikirim dan di atas / total situs",
         },
+        partialOnline: {
+          title: "Situs Online Sebagian",
+          desc: "Sebagian perangkat online / total situs",
+        },
+        fullyOnline: {
+          title: "Situs Online Penuh",
+          desc: "Semua perangkat online / total situs",
+        },
+        partialActivated: {
+          title: "Situs Aktif Sebagian",
+          desc: "Sebagian perangkat aktif / total situs",
+        },
+        fullyActivated: {
+          title: "Situs Aktif Penuh",
+          desc: "Semua perangkat aktif / total situs",
+        },
         online: {
-          title: "Situs Daring",
-          desc: "Situs online dan di atas / total",
+          title: "Situs Online Penuh",
+          desc: "Semua perangkat online / total situs",
         },
         activated: {
-          title: "Situs yang Diaktifkan",
-          desc: "Situs yang diaktifkan dan di atas / total",
+          title: "Situs Aktif Penuh",
+          desc: "Semua perangkat aktif / total situs",
         },
         ssv: {
           title: "Situs SSV",
           desc: "Lulus SSV / total situs",
         },
+      },
+      deviceFraction: {
+        online: "Perangkat online {numerator}/{denominator}",
+        activated: "Perangkat aktif {numerator}/{denominator}",
       },
     },
     siteTrend: {

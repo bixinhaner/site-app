@@ -65,15 +65,35 @@ export default {
           title: "Install Completed Site",
           desc: "Submitted and above / total sites",
         },
+        partialOnline: {
+          title: "Partially Online Site",
+          desc: "Some devices online / total sites",
+        },
+        fullyOnline: {
+          title: "Fully Online Site",
+          desc: "All devices online / total sites",
+        },
+        partialActivated: {
+          title: "Partially Activated Site",
+          desc: "Some devices activated / total sites",
+        },
+        fullyActivated: {
+          title: "Fully Activated Site",
+          desc: "All devices activated / total sites",
+        },
         online: {
-          title: "Online Site",
-          desc: "Online and above / total sites",
+          title: "Fully Online Site",
+          desc: "All devices online / total sites",
         },
         activated: {
-          title: "Activated Site",
-          desc: "Activated and above / total sites",
+          title: "Fully Activated Site",
+          desc: "All devices activated / total sites",
         },
         ssv: { title: "SSV Site", desc: "Passed SSV / total sites" },
+      },
+      deviceFraction: {
+        online: "Devices online {numerator}/{denominator}",
+        activated: "Devices activated {numerator}/{denominator}",
       },
     },
     siteTrend: {

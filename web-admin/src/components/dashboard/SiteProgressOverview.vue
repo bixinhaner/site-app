@@ -16,7 +16,10 @@
           <span class="title">{{ card.title }}</span>
         </div>
         <div class="card-body">
-          <div class="value">{{ card.value }}</div>
+          <div class="value-block">
+            <div class="value">{{ card.value }}</div>
+            <div v-if="card.fraction" class="device-fraction">{{ card.fraction }}</div>
+          </div>
           <div class="desc">{{ card.desc }}</div>
         </div>
       </div>
@@ -37,6 +40,19 @@ const { t } = useI18n()
 
 const total = computed(() => Number(props.progress?.total || 0))
 const val = (k) => Number(props.progress?.[k] || 0)
+const valWithFallback = (key, fallbackKey) => {
+  if (props.progress?.[key] === undefined || props.progress?.[key] === null) {
+    return val(fallbackKey)
+  }
+  return Number(props.progress?.[key] || 0)
+}
+const deviceFraction = (key, type) => {
+  const bucket = props.progress?.device_progress?.[key]
+  const denominator = Number(bucket?.denominator || 0)
+  if (!denominator) return ''
+  const numerator = Number(bucket?.numerator || 0)
+  return t(`dashboard.siteOverview.deviceFraction.${type}`, { numerator, denominator })
+}
 const canViewSiteMap = computed(() => userStore.hasPermission('sites:list:read'))
 
 const cards = computed(() => [
@@ -44,8 +60,10 @@ const cards = computed(() => [
   { key: 'planning', title: t('dashboard.siteOverview.cards.planning.title'), value: `${val('planning_done')}/${total.value}`, desc: t('dashboard.siteOverview.cards.planning.desc'), icon: Finished, type: 'primary', route: { name: 'SitePlanningLld' } },
   { key: 'install_started', title: t('dashboard.siteOverview.cards.installStarted.title'), value: `${val('install_started')}/${total.value}`, desc: t('dashboard.siteOverview.cards.installStarted.desc'), icon: OfficeBuilding, type: 'install-start', route: { name: 'WorkOrderList' } },
   { key: 'installed', title: t('dashboard.siteOverview.cards.installed.title'), value: `${val('installed')}/${total.value}`, desc: t('dashboard.siteOverview.cards.installed.desc'), icon: OfficeBuilding, type: 'install', route: { name: 'WorkOrderList', query: { preset: 'installed_sites' } } },
-  { key: 'online', title: t('dashboard.siteOverview.cards.online.title'), value: `${val('online')}/${total.value}`, desc: t('dashboard.siteOverview.cards.online.desc'), icon: Promotion, type: 'success', route: { name: 'SiteList' } },
-  { key: 'activated', title: t('dashboard.siteOverview.cards.activated.title'), value: `${val('activated')}/${total.value}`, desc: t('dashboard.siteOverview.cards.activated.desc'), icon: MagicStick, type: 'warning', route: { name: 'SiteList' } },
+  { key: 'partial_online', title: t('dashboard.siteOverview.cards.partialOnline.title'), value: `${val('partial_online')}/${total.value}`, desc: t('dashboard.siteOverview.cards.partialOnline.desc'), icon: Promotion, type: 'partial-online', route: { name: 'SiteList' }, fraction: deviceFraction('partial_online', 'online') },
+  { key: 'fully_online', title: t('dashboard.siteOverview.cards.fullyOnline.title'), value: `${valWithFallback('fully_online', 'online')}/${total.value}`, desc: t('dashboard.siteOverview.cards.fullyOnline.desc'), icon: Promotion, type: 'success', route: { name: 'SiteList' }, fraction: deviceFraction('fully_online', 'online') },
+  { key: 'partial_activated', title: t('dashboard.siteOverview.cards.partialActivated.title'), value: `${val('partial_activated')}/${total.value}`, desc: t('dashboard.siteOverview.cards.partialActivated.desc'), icon: MagicStick, type: 'partial-activated', route: { name: 'SiteList' }, fraction: deviceFraction('partial_activated', 'activated') },
+  { key: 'fully_activated', title: t('dashboard.siteOverview.cards.fullyActivated.title'), value: `${valWithFallback('fully_activated', 'activated')}/${total.value}`, desc: t('dashboard.siteOverview.cards.fullyActivated.desc'), icon: MagicStick, type: 'warning', route: { name: 'SiteList' }, fraction: deviceFraction('fully_activated', 'activated') },
   { key: 'ssv', title: t('dashboard.siteOverview.cards.ssv.title'), value: `${val('ssv_passed')}/${total.value}`, desc: t('dashboard.siteOverview.cards.ssv.desc'), icon: SuccessFilled, type: 'success', route: { name: 'SiteList' } },
 ])
 
@@ -108,9 +126,13 @@ const goToSiteMap = () => emit('goto', { name: 'SiteMap' })
 .icon.install { background: linear-gradient(45deg,#0ea5e9,#22d3ee); }
 .icon.install-start { background: linear-gradient(45deg,#14b8a6,#2dd4bf); }
 .title { font-weight: 600; color: var(--text-secondary); }
-.card-body { display:flex; align-items:baseline; gap:10px; }
+.card-body { display:flex; align-items:flex-start; gap:10px; min-height: 48px; }
+.value-block { flex: 0 0 auto; min-width: 74px; }
 .value { font-size: 28px; font-weight: 700; color: var(--text-primary); }
-.desc { color: var(--text-light); font-size: 13px; }
+.device-fraction { margin-top: 2px; color: var(--text-light); font-size: 12px; line-height: 1.25; white-space: nowrap; }
+.desc { padding-top: 8px; color: var(--text-light); font-size: 13px; line-height: 1.35; }
+.icon.partial-online { background: linear-gradient(45deg,#0ea5e9,#10b981); }
+.icon.partial-activated { background: linear-gradient(45deg,#f97316,#f59e0b); }
 
 @media (max-width: 768px) {
   .section-head {

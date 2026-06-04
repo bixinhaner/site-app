@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -16,6 +16,8 @@ from app.models.site_group import SiteGroupAssignment, SiteGroupCategory, SiteGr
 from app.models.site_progress import SiteProgressSnapshot
 from app.models.survey_archive import SiteSurveyArchive
 from app.models.equipment import Inventory, Equipment, StockTransaction
+from app.models.omc_state import OmcDeviceState
+from app.services.omc_state import summarize_site_binding_slots
 from app.services.site_progress_service import (
     ensure_site_progress_snapshots,
     get_site_progress_rows,
@@ -161,6 +163,104 @@ def _count_events_by_bucket(
     return counts, baseline
 
 
+def _empty_device_progress_bucket() -> Dict[str, int]:
+    return {"sites": 0, "numerator": 0, "denominator": 0}
+
+
+def _build_site_device_progress(
+    db: Session,
+    *,
+    fully_online_site_ids: Iterable[int],
+    fully_activated_site_ids: Iterable[int],
+) -> Dict[str, Dict[str, int]]:
+    """
+    汇总 dashboard 站点卡片下方的设备分数。
+
+    站点“完全上线/完全激活”继续沿用 site_progress_snapshots 的口径；
+    设备分数按开站阶段有效设备位计算，规划有设备位时分母为规划位数量，
+    避免缺槽位的站点因为已绑定设备全部在线而被看成完整。
+    """
+    fully_online_ids = {int(site_id) for site_id in fully_online_site_ids}
+    fully_activated_ids = {int(site_id) for site_id in fully_activated_site_ids}
+
+    site_slot_rows: Dict[int, Dict[str, Any]] = {}
+    all_sns: set[str] = set()
+
+    for site_id, in db.query(Site.id).all():
+        binding_summary = summarize_site_binding_slots(db, int(site_id), opening_only=True)
+        slot_check_required = bool(binding_summary.get("slot_check_required"))
+        expected_slot_count = int(binding_summary.get("expected_slot_count") or 0)
+        bound_slot_count = int(binding_summary.get("bound_slot_count") or 0)
+        denominator = expected_slot_count if slot_check_required else bound_slot_count
+
+        rows = list(binding_summary.get("rows") or [])
+        slot_sns = [
+            sn
+            for row in rows
+            for sn in [str(getattr(row, "equipment_sn", "") or "").strip()]
+            if sn
+        ]
+        if denominator <= 0:
+            denominator = len(slot_sns)
+
+        site_slot_rows[int(site_id)] = {
+            "denominator": denominator,
+            "slot_sns": slot_sns,
+        }
+        all_sns.update(slot_sns)
+
+    state_map: Dict[str, OmcDeviceState] = {}
+    if all_sns:
+        state_map = {
+            state.sn: state
+            for state in db.query(OmcDeviceState)
+            .filter(OmcDeviceState.sn.in_(sorted(all_sns)))
+            .all()
+        }
+
+    result = {
+        "partial_online": _empty_device_progress_bucket(),
+        "fully_online": _empty_device_progress_bucket(),
+        "partial_activated": _empty_device_progress_bucket(),
+        "fully_activated": _empty_device_progress_bucket(),
+    }
+    result["fully_online"]["sites"] = len(fully_online_ids)
+    result["fully_activated"]["sites"] = len(fully_activated_ids)
+
+    def add_fraction(bucket: str, numerator: int, denominator: int) -> None:
+        result[bucket]["numerator"] += int(numerator)
+        result[bucket]["denominator"] += int(denominator)
+
+    def add_partial(bucket: str, numerator: int, denominator: int) -> None:
+        result[bucket]["sites"] += 1
+        add_fraction(bucket, numerator, denominator)
+
+    for site_id, info in site_slot_rows.items():
+        denominator = int(info["denominator"] or 0)
+        if denominator <= 0:
+            continue
+
+        slot_sns = list(info["slot_sns"] or [])
+        online_devices = sum(
+            1 for sn in slot_sns if bool(getattr(state_map.get(sn), "ever_online", False))
+        )
+        activated_devices = sum(
+            1 for sn in slot_sns if bool(getattr(state_map.get(sn), "ever_activated", False))
+        )
+
+        if site_id in fully_online_ids:
+            add_fraction("fully_online", online_devices, denominator)
+        elif 0 < online_devices < denominator:
+            add_partial("partial_online", online_devices, denominator)
+
+        if site_id in fully_activated_ids:
+            add_fraction("fully_activated", activated_devices, denominator)
+        elif 0 < activated_devices < denominator:
+            add_partial("partial_activated", activated_devices, denominator)
+
+    return result
+
+
 @router.get("/summary")
 async def get_dashboard_summary(
     db: Session = Depends(get_db),
@@ -174,7 +274,8 @@ async def get_dashboard_summary(
     - inventory: { low_stock_count, main_device_total_stock, recent_transactions }
     - installed_sites: { count, node }
     - sites: { approx: false, status }
-    - site_progress: { total, survey_done, planning_done, install_started, installed, online, activated, ssv_passed }
+    - site_progress: { total, survey_done, planning_done, install_started, installed, online, activated,
+      partial_online, fully_online, partial_activated, fully_activated, device_progress, ssv_passed }
     - inspections: { pending_review_count }
     - surveys: { last7d_new }
     - time_range: { from, to }
@@ -254,15 +355,28 @@ async def get_dashboard_summary(
     online = len(online_rows)
     activated = len(activated_rows)
     ssv_passed_cnt = len(ssv_rows)
+    online_site_ids = [int(site_id) for site_id, _ in online_rows]
+    activated_site_ids = [int(site_id) for site_id, _ in activated_rows]
+    device_progress = _build_site_device_progress(
+        db,
+        fully_online_site_ids=online_site_ids,
+        fully_activated_site_ids=activated_site_ids,
+    )
 
-    site_progress: Dict[str, int | str] = {
+    site_progress: Dict[str, Any] = {
         "total": total_sites,
         "survey_done": survey_done,
         "planning_done": planning_done,
         "install_started": install_started_site_count,
         "installed": installed_site_count,
+        # 兼容旧前端字段；新 dashboard 使用 fully_* 命名展示。
         "online": online,
         "activated": activated,
+        "partial_online": device_progress["partial_online"]["sites"],
+        "fully_online": online,
+        "partial_activated": device_progress["partial_activated"]["sites"],
+        "fully_activated": activated,
+        "device_progress": device_progress,
         "ssv_passed": ssv_passed_cnt,
         "metric_mode": metric_mode,
     }
