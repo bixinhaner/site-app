@@ -64,6 +64,10 @@ class OmcClient:
     normalized = "/" + path.strip("/")
     if normalized.endswith("/access/token"):
       return "/northboundApi/v1/access/token"
+    if normalized.endswith("/device/group"):
+      return "/northboundApi/v1/device/group"
+    if normalized.endswith("/device/query"):
+      return "/northboundApi/v1/device/query"
     if "/enodeb/infos/status/" in normalized:
       return "/northboundApi/v1/enodeb/infos/status/{sn}"
     if "/device/parameters/cellname/" in normalized:
@@ -215,6 +219,18 @@ class OmcClient:
           error = f"OMC 返回非 JSON 响应: {text[:200]}"
           last_exc = RuntimeError(error)
           raise last_exc from exc
+        if isinstance(data, dict):
+          try:
+            business_code = int(data.get("code"))
+          except (TypeError, ValueError):
+            business_code = None
+          if business_code == 401 and attempt == 0:
+            token_cache.invalidate(self._token_cache_key())
+            error = "OMC business token invalid; refreshed once"
+            continue
+          if business_code is not None and business_code not in (0, 200):
+            error = f"OMC business error code={business_code}: {data.get('message') or data.get('msg') or ''}"
+            return data
         success = True
         return data
       except Exception as exc:
@@ -246,6 +262,38 @@ class OmcClient:
     path = f"northboundApi/v1/enodeb/infos/status/{sn}"
     return self._request("GET", path)
 
+  def get_device_groups(self) -> Dict:
+    """
+    获取 OMC 设备分组:
+    GET /northboundApi/v1/device/group
+    """
+    path = "northboundApi/v1/device/group"
+    return self._authorized_json_request("GET", path)
+
+  def query_devices(
+    self,
+    *,
+    group_id: int,
+    page_size: int,
+    page_no: int = 0,
+    search_text: Optional[str] = None,
+    is_gnb: int = 0,
+  ) -> Dict:
+    """
+    批量查询 OMC 设备快照:
+    POST /northboundApi/v1/device/query
+    """
+    path = "northboundApi/v1/device/query"
+    payload = {
+      "groupId": int(group_id),
+      "pageSize": int(page_size),
+      "pageNo": int(page_no),
+      "isGnb": int(is_gnb),
+    }
+    if search_text:
+      payload["searchText"] = str(search_text)
+    return self._authorized_json_request("POST", path, json_payload=payload)
+
   def set_cell_name(self, sn: str, cell_name: str, sync_flag: int = 0) -> Dict:
     """
     修改设备小区名:
@@ -270,6 +318,8 @@ def load_omc_config(db: Session) -> Optional[dict]:
   password = (data.get("password") or "").strip()
   timeout = int(data.get("timeout_seconds") or 10)
   runtime_config = normalize_omc_runtime_config(data)
+  from app.services.omc_inventory import normalize_inventory_snapshot_config
+  inventory_config = normalize_inventory_snapshot_config(data)
   if not base_url or not username or not password:
     return None
   return {
@@ -278,6 +328,7 @@ def load_omc_config(db: Session) -> Optional[dict]:
     "password": password,
     "timeout_seconds": timeout,
     **runtime_config,
+    **inventory_config,
   }
 
 

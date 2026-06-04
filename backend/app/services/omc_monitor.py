@@ -1,7 +1,7 @@
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 from sqlalchemy.orm import Session
@@ -19,9 +19,14 @@ from app.models.work_order import (
 from app.services.omc_client import (
   OmcClient,
   get_omc_client,
+  load_omc_config,
   parse_online_flag,
   parse_activated_flag,
   is_success_status_payload,
+)
+from app.services.omc_inventory import (
+  normalize_inventory_snapshot_config,
+  sync_device_query_snapshot_from_omc,
 )
 from app.services.omc_runtime import runtime_stats
 from app.services.omc_state import (
@@ -69,6 +74,7 @@ def _check_site_devices_status(
   db: Session,
   client: OmcClient,
   sns: List[str],
+  inventory_sns: Optional[Set[str]] = None,
 ) -> Tuple[Dict[str, bool], Dict[str, bool]]:
   """
   对站点设备 SN 列表进行在线 / 激活状态检查。
@@ -83,14 +89,35 @@ def _check_site_devices_status(
 
   # 先检查在线状态
   for sn in sns:
+    if inventory_sns is not None and sn not in inventory_sns:
+      # 快照未覆盖的 SN 通常会在逐 SN 接口返回 401/402。这里不再反复打 OMC，
+      # 只把本轮实时视图记为 False，ever 状态仍以聚合表为准推进。
+      online_map[sn] = False
+      continue
+
     try:
       resp = client.get_enodeb_status(sn)
       status_payloads[sn] = resp
+      if not is_success_status_payload(resp):
+        online_map[sn] = False
+        try:
+          upsert_omc_device_state(
+            db=db,
+            sn=sn,
+            online_raw=None,
+            activated_raw=None,
+            source="monitor_error",
+            status_payload=resp,
+          )
+        except Exception as exc:  # pragma: no cover
+          print(f"[OMC] 写入失败响应 OmcDeviceState 失败 SN={sn}: {exc}")
+        continue
+
       online_flag = parse_online_flag(resp)
       activated_flag = parse_activated_flag(resp)
       online_map[sn] = online_flag
 
-      # 写入 SN 聚合表（只升不降 ever，raw 记录本次观测）。无论成功/404 都写入，便于离线落库
+      # 写入 SN 聚合表（只升不降 ever，raw 记录本次成功观测）
       try:
         state, newly_online, newly_activated = upsert_omc_device_state(
           db=db,
@@ -112,6 +139,17 @@ def _check_site_devices_status(
     except Exception as exc:  # pragma: no cover - 网络异常不终止整体流程
       print(f"[OMC] 查询在线状态失败 SN={sn}: {exc}")
       online_map[sn] = False
+      try:
+        upsert_omc_device_state(
+          db=db,
+          sn=sn,
+          online_raw=None,
+          activated_raw=None,
+          source="monitor_error",
+          status_payload={"error": str(exc)},
+        )
+      except Exception as state_exc:  # pragma: no cover
+        print(f"[OMC] 写入异常响应 OmcDeviceState 失败 SN={sn}: {state_exc}")
 
   if not sns or not all(online_map.values()):
     # 未全部在线，不进行激活状态检查
@@ -129,7 +167,12 @@ def _check_site_devices_status(
   return online_map, activated_map
 
 
-def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: WorkOrder) -> Dict:
+def refresh_opening_work_order_omc_status(
+  db: Session,
+  client: OmcClient,
+  wo: WorkOrder,
+  inventory_sns: Optional[Set[str]] = None,
+) -> Dict:
   """
   针对“开站工单”(opening_inspection)：
   - 读取站点绑定的设备 SN
@@ -156,7 +199,12 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
       "checked_at": to_utc_iso(datetime.utcnow()),
     }
   else:
-    online_map, activated_map = _check_site_devices_status(db, client, sns)
+    online_map, activated_map = _check_site_devices_status(
+      db,
+      client,
+      sns,
+      inventory_sns=inventory_sns,
+    )
     binding_ready = bool(binding_summary.get("ready_for_status"))
     all_online = binding_ready and all(online_map.values()) if sns else False
     all_activated = binding_ready and bool(activated_map) and all(activated_map.values()) if sns else False
@@ -238,7 +286,12 @@ def refresh_opening_work_order_omc_status(db: Session, client: OmcClient, wo: Wo
   return summary
 
 
-def refresh_replacement_work_order_omc_status(db: Session, client: OmcClient, wo: WorkOrder) -> Dict:
+def refresh_replacement_work_order_omc_status(
+  db: Session,
+  client: OmcClient,
+  wo: WorkOrder,
+  inventory_sns: Optional[Set[str]] = None,
+) -> Dict:
   """
   针对“设备更换工单”(equipment_replacement)：
   - 读取站点当前绑定设备 SN
@@ -266,7 +319,12 @@ def refresh_replacement_work_order_omc_status(db: Session, client: OmcClient, wo
       "checked_at": to_utc_iso(datetime.utcnow()),
     }
   else:
-    online_map, activated_map = _check_site_devices_status(db, client, sns)
+    online_map, activated_map = _check_site_devices_status(
+      db,
+      client,
+      sns,
+      inventory_sns=inventory_sns,
+    )
     binding_ready = bool(binding_summary.get("ready_for_status"))
     all_online = binding_ready and all(online_map.values()) if sns else False
     all_activated = binding_ready and bool(activated_map) and all(activated_map.values()) if sns else False
@@ -441,7 +499,12 @@ def _commit_expansion_planning_if_needed(
   return int(planning.id)
 
 
-def refresh_cell_expansion_work_order_omc_status(db: Session, client: OmcClient, wo: WorkOrder) -> Dict:
+def refresh_cell_expansion_work_order_omc_status(
+  db: Session,
+  client: OmcClient,
+  wo: WorkOrder,
+  inventory_sns: Optional[Set[str]] = None,
+) -> Dict:
   """
   针对“小区扩容工单”：
   - 只检查扩容目标新增小区/设备，不用当前规划的全部槽位做门禁
@@ -468,7 +531,12 @@ def refresh_cell_expansion_work_order_omc_status(db: Session, client: OmcClient,
       "checked_at": to_utc_iso(datetime.utcnow()),
     }
   else:
-    online_map, activated_map = _check_site_devices_status(db, client, sns)
+    online_map, activated_map = _check_site_devices_status(
+      db,
+      client,
+      sns,
+      inventory_sns=inventory_sns,
+    )
     binding_ready = bool(binding_summary.get("ready_for_status"))
     all_online = binding_ready and all(online_map.values()) if sns else False
     all_activated = binding_ready and bool(activated_map) and all(activated_map.values()) if sns else False
@@ -724,16 +792,50 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
   """
   后台轮询线程：每 interval_seconds 针对未完成的开站工单执行一次 OMC 检查。
   """
+  inventory_snapshot_last_at: Optional[float] = None
+  cached_inventory_sns: Optional[Set[str]] = None
+
   while True:
     try:
       db = SessionLocal()
       try:
+        cfg = load_omc_config(db)
         client = get_omc_client(db, source="monitor")
         if not client:
           # 未配置 OMC，则不做任何操作
           runtime_stats.finish_monitor_cycle()
           time.sleep(interval_seconds)
           continue
+
+        inventory_sns: Optional[Set[str]] = None
+        inventory_cfg = normalize_inventory_snapshot_config(cfg)
+        if inventory_cfg["inventory_snapshot_enabled"]:
+          now_monotonic = time.monotonic()
+          should_refresh_inventory = (
+            cached_inventory_sns is None
+            or inventory_snapshot_last_at is None
+            or now_monotonic - inventory_snapshot_last_at >= inventory_cfg["inventory_snapshot_interval_seconds"]
+          )
+          if should_refresh_inventory:
+            try:
+              snapshot_stats = sync_device_query_snapshot_from_omc(db, client, inventory_cfg)
+              cached_inventory_sns = set(snapshot_stats.get("covered_sns") or set())
+              inventory_snapshot_last_at = now_monotonic
+              db.commit()
+              print(
+                "[OMC] device/query 快照完成: "
+                f"groups={snapshot_stats.get('group_ids')} "
+                f"rows={snapshot_stats.get('total_rows')} "
+                f"covered={len(cached_inventory_sns)} "
+                f"newly_online={snapshot_stats.get('newly_online')} "
+                f"errors={len(snapshot_stats.get('errors') or [])}"
+              )
+            except Exception as exc:
+              db.rollback()
+              cached_inventory_sns = set()
+              inventory_snapshot_last_at = now_monotonic
+              print(f"[OMC] device/query 快照失败，本轮跳过未覆盖 SN 的逐 SN 查询: {exc}")
+          inventory_sns = set(cached_inventory_sns or set())
 
         work_orders = (
           db.query(WorkOrder)
@@ -752,11 +854,11 @@ def _monitor_loop(interval_seconds: int = 300) -> None:
         for index, wo in enumerate(work_orders):
           try:
             if wo.type == WorkOrderTypeEnum.OPENING_INSPECTION:
-              refresh_opening_work_order_omc_status(db, client, wo)
+              refresh_opening_work_order_omc_status(db, client, wo, inventory_sns=inventory_sns)
             elif wo.type == WorkOrderTypeEnum.EQUIPMENT_REPLACEMENT:
-              refresh_replacement_work_order_omc_status(db, client, wo)
+              refresh_replacement_work_order_omc_status(db, client, wo, inventory_sns=inventory_sns)
             elif wo.type == WorkOrderTypeEnum.CELL_EXPANSION:
-              refresh_cell_expansion_work_order_omc_status(db, client, wo)
+              refresh_cell_expansion_work_order_omc_status(db, client, wo, inventory_sns=inventory_sns)
             db.commit()
           except Exception as exc:
             db.rollback()

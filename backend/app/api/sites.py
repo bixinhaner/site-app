@@ -2518,6 +2518,21 @@ async def get_site_omc_devices(
             try:
                 status_payload = client.get_enodeb_status(sn)
                 status_payloads[sn] = status_payload
+                if not is_success_status_payload(status_payload):
+                    online_map[sn] = False
+                    try:
+                        upsert_omc_device_state(
+                            db=db,
+                            sn=sn,
+                            online_raw=None,
+                            activated_raw=None,
+                            source="api_poll_error",
+                            status_payload=status_payload,
+                        )
+                    except Exception as exc:  # pragma: no cover - 聚合表异常不影响主流程
+                        print(f"[OMC] 写入失败响应 OmcDeviceState 失败 SN={sn}: {exc}")
+                    continue
+
                 online_flag = parse_online_flag(status_payload)
                 activated_flag = parse_activated_flag(status_payload)
                 online_map[sn] = online_flag

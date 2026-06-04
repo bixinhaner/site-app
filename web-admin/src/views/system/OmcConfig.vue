@@ -104,6 +104,63 @@
       </el-form>
     </el-card>
 
+    <el-card v-loading="loading" class="mt16">
+      <template #header>设备快照</template>
+      <el-form :model="form" label-width="180px" :disabled="!canManageOmc">
+        <el-form-item label="启用device/query快照">
+          <el-switch
+            v-model="form.inventory_snapshot_enabled"
+            active-text="开启"
+            inactive-text="关闭"
+          />
+          <div class="tip">
+            开启后，后台轮询会先批量读取 OMC 设备表，再只对快照覆盖到的 SN 继续查实时状态，避免未知 SN 反复触发 OMC 权限错误。
+          </div>
+        </el-form-item>
+        <el-form-item label="快照周期(秒)">
+          <el-input-number
+            v-model="form.inventory_snapshot_interval_seconds"
+            :min="60"
+            :max="86400"
+            :step="60"
+          />
+          <div class="tip">
+            默认 300 秒；周期未到时复用上一轮快照覆盖集合，不重复请求设备表。
+          </div>
+        </el-form-item>
+        <el-form-item label="设备分组ID">
+          <el-input
+            v-model="form.inventory_device_group_ids_text"
+            placeholder="例如：30，多个用逗号分隔"
+          />
+          <div class="tip">
+            当前 Savanna 生产验证过的默认分组是 <code>30</code>（Default Device Group）。
+          </div>
+        </el-form-item>
+        <el-form-item label="每页设备数">
+          <el-input-number
+            v-model="form.inventory_page_size"
+            :min="1"
+            :max="5000"
+            :step="100"
+          />
+          <div class="tip">
+            设备量低于该值时，通常每个分组只消耗一次 <code>/device/query</code> 请求。
+          </div>
+        </el-form-item>
+        <el-form-item label="offlineDays补曾上线">
+          <el-switch
+            v-model="form.offline_days_marks_ever_online"
+            active-text="开启"
+            inactive-text="关闭"
+          />
+          <div class="tip">
+            开启后，离线设备只要 <code>offlineDays</code> 有值，就视为 OMC 曾观察到上线；该接口不能证明曾激活。
+          </div>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <el-card v-loading="runtimeLoading" class="mt16 runtime-card">
       <template #header>
         <div class="card-header">
@@ -149,6 +206,12 @@
         </el-descriptions-item>
         <el-descriptions-item label="Token缓存">
           {{ runtime?.config?.token_ttl_seconds ?? form.token_ttl_seconds }}s
+        </el-descriptions-item>
+        <el-descriptions-item label="快照周期">
+          {{ form.inventory_snapshot_enabled ? `${form.inventory_snapshot_interval_seconds}s` : '关闭' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="快照分组">
+          {{ form.inventory_device_group_ids_text || '30' }}
         </el-descriptions-item>
         <el-descriptions-item label="Token命中">
           {{ runtime?.token_cache?.hits ?? 0 }}
@@ -248,12 +311,41 @@ const form = ref({
   rate_limit_per_minute: 120,
   rate_limit_burst: 10,
   token_ttl_seconds: 600,
+  inventory_snapshot_enabled: true,
+  inventory_snapshot_interval_seconds: 300,
+  inventory_device_group_ids_text: '30',
+  inventory_page_size: 1000,
+  offline_days_marks_ever_online: true,
   manual_confirm_enabled: false,
   ssv_create_by_ever_activated_only: false,
   site_progress_metric_mode: 'workflow',
 })
 
 const canManageOmc = computed(() => userStore.hasPermission('system:mobile-settings:write'))
+
+const formatGroupIds = (value) => {
+  if (Array.isArray(value) && value.length) {
+    return value.join(',')
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value
+  }
+  return '30'
+}
+
+const parseGroupIds = (value) => {
+  const text = String(value || '').trim()
+  if (!text) return [30]
+  const seen = new Set()
+  return text
+    .split(/[,，]/)
+    .map(item => Number.parseInt(item.trim(), 10))
+    .filter((id) => {
+      if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return false
+      seen.add(id)
+      return true
+    })
+}
 
 const loadConfig = async () => {
   try {
@@ -266,6 +358,11 @@ const loadConfig = async () => {
     form.value.rate_limit_per_minute = res.rate_limit_per_minute || 120
     form.value.rate_limit_burst = res.rate_limit_burst || 10
     form.value.token_ttl_seconds = res.token_ttl_seconds || 600
+    form.value.inventory_snapshot_enabled = res.inventory_snapshot_enabled !== false
+    form.value.inventory_snapshot_interval_seconds = res.inventory_snapshot_interval_seconds || 300
+    form.value.inventory_device_group_ids_text = formatGroupIds(res.inventory_device_group_ids)
+    form.value.inventory_page_size = res.inventory_page_size || 1000
+    form.value.offline_days_marks_ever_online = res.offline_days_marks_ever_online !== false
     form.value.manual_confirm_enabled = !!res.manual_confirm_enabled
     form.value.ssv_create_by_ever_activated_only = !!res.ssv_create_by_ever_activated_only
     form.value.site_progress_metric_mode = res.site_progress_metric_mode || 'workflow'
@@ -302,6 +399,11 @@ const save = async () => {
   }
   try {
     saving.value = true
+    const inventoryGroupIds = parseGroupIds(form.value.inventory_device_group_ids_text)
+    if (!inventoryGroupIds.length) {
+      ElMessage.error('设备分组ID不能为空')
+      return
+    }
     const payload = {
       base_url: form.value.base_url,
       username: form.value.username,
@@ -310,6 +412,11 @@ const save = async () => {
       rate_limit_per_minute: form.value.rate_limit_per_minute || 120,
       rate_limit_burst: form.value.rate_limit_burst || 10,
       token_ttl_seconds: form.value.token_ttl_seconds || 600,
+      inventory_snapshot_enabled: !!form.value.inventory_snapshot_enabled,
+      inventory_snapshot_interval_seconds: form.value.inventory_snapshot_interval_seconds || 300,
+      inventory_device_group_ids: inventoryGroupIds,
+      inventory_page_size: form.value.inventory_page_size || 1000,
+      offline_days_marks_ever_online: !!form.value.offline_days_marks_ever_online,
       manual_confirm_enabled: !!form.value.manual_confirm_enabled,
       ssv_create_by_ever_activated_only: !!form.value.ssv_create_by_ever_activated_only,
       site_progress_metric_mode: form.value.site_progress_metric_mode || 'workflow',

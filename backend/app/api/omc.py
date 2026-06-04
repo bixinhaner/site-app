@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, Field, field_serializer
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -27,6 +27,7 @@ from app.services.omc_runtime import (
   get_omc_runtime_stats,
   normalize_omc_runtime_config,
 )
+from app.services.omc_inventory import normalize_inventory_snapshot_config
 from app.services.omc_state import upsert_omc_device_state
 from app.services.omc_monitor import (
   advance_opening_work_orders_by_ever,
@@ -55,6 +56,11 @@ class OmcConfigPayload(BaseModel):
   rate_limit_per_minute: Optional[int] = 120
   rate_limit_burst: Optional[int] = 10
   token_ttl_seconds: Optional[int] = 600
+  inventory_snapshot_enabled: Optional[bool] = True
+  inventory_snapshot_interval_seconds: Optional[int] = 300
+  inventory_device_group_ids: Optional[List[int]] = None
+  inventory_page_size: Optional[int] = 1000
+  offline_days_marks_ever_online: Optional[bool] = True
   manual_confirm_enabled: Optional[bool] = False
   ssv_create_by_ever_activated_only: Optional[bool] = None
   site_progress_metric_mode: Optional[Literal["workflow", "device_fact"]] = None
@@ -67,6 +73,11 @@ class OmcConfigResponse(BaseModel):
   rate_limit_per_minute: int = 120
   rate_limit_burst: int = 10
   token_ttl_seconds: int = 600
+  inventory_snapshot_enabled: bool = True
+  inventory_snapshot_interval_seconds: int = 300
+  inventory_device_group_ids: List[int] = Field(default_factory=lambda: [30])
+  inventory_page_size: int = 1000
+  offline_days_marks_ever_online: bool = True
   manual_confirm_enabled: bool = False
   ssv_create_by_ever_activated_only: bool = False
   site_progress_metric_mode: str = SITE_PROGRESS_METRIC_MODE_WORKFLOW
@@ -128,6 +139,7 @@ def _load_omc_config(db: Session) -> OmcConfigResponse:
     )
   data = row.value or {}
   runtime_config = normalize_omc_runtime_config(data)
+  inventory_config = normalize_inventory_snapshot_config(data)
   return OmcConfigResponse(
     base_url=data.get("base_url"),
     username=data.get("username"),
@@ -135,6 +147,11 @@ def _load_omc_config(db: Session) -> OmcConfigResponse:
     rate_limit_per_minute=runtime_config["rate_limit_per_minute"],
     rate_limit_burst=runtime_config["rate_limit_burst"],
     token_ttl_seconds=runtime_config["token_ttl_seconds"],
+    inventory_snapshot_enabled=inventory_config["inventory_snapshot_enabled"],
+    inventory_snapshot_interval_seconds=inventory_config["inventory_snapshot_interval_seconds"],
+    inventory_device_group_ids=inventory_config["inventory_device_group_ids"],
+    inventory_page_size=inventory_config["inventory_page_size"],
+    offline_days_marks_ever_online=inventory_config["offline_days_marks_ever_online"],
     manual_confirm_enabled=bool(data.get("manual_confirm_enabled") or False),
     ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
     site_progress_metric_mode=site_progress_metric_mode,
@@ -179,6 +196,15 @@ async def update_omc_config(
       "token_ttl_seconds": payload.token_ttl_seconds,
     }
   )
+  inventory_config = normalize_inventory_snapshot_config(
+    {
+      "inventory_snapshot_enabled": payload.inventory_snapshot_enabled,
+      "inventory_snapshot_interval_seconds": payload.inventory_snapshot_interval_seconds,
+      "inventory_device_group_ids": payload.inventory_device_group_ids,
+      "inventory_page_size": payload.inventory_page_size,
+      "offline_days_marks_ever_online": payload.offline_days_marks_ever_online,
+    }
+  )
   manual_confirm_enabled = bool(payload.manual_confirm_enabled or False)
   ssv_create_by_ever_activated_only = (
     get_ssv_create_by_ever_activated_only(db)
@@ -199,6 +225,7 @@ async def update_omc_config(
       "password": new_password,
       "timeout_seconds": timeout,
       **runtime_config,
+      **inventory_config,
       "manual_confirm_enabled": manual_confirm_enabled,
     }
     row = SystemConfig(key="omc_api", value=data)
@@ -209,6 +236,7 @@ async def update_omc_config(
     data["username"] = username
     data["timeout_seconds"] = timeout
     data.update(runtime_config)
+    data.update(inventory_config)
     data["manual_confirm_enabled"] = manual_confirm_enabled
     # 只有在传入非空 password 时才更新存储的密码
     if new_password:
@@ -235,6 +263,11 @@ async def update_omc_config(
     rate_limit_per_minute=runtime_config["rate_limit_per_minute"],
     rate_limit_burst=runtime_config["rate_limit_burst"],
     token_ttl_seconds=runtime_config["token_ttl_seconds"],
+    inventory_snapshot_enabled=inventory_config["inventory_snapshot_enabled"],
+    inventory_snapshot_interval_seconds=inventory_config["inventory_snapshot_interval_seconds"],
+    inventory_device_group_ids=inventory_config["inventory_device_group_ids"],
+    inventory_page_size=inventory_config["inventory_page_size"],
+    offline_days_marks_ever_online=inventory_config["offline_days_marks_ever_online"],
     manual_confirm_enabled=manual_confirm_enabled,
     ssv_create_by_ever_activated_only=ssv_create_by_ever_activated_only,
     site_progress_metric_mode=site_progress_metric_mode,
@@ -428,17 +461,17 @@ async def get_device_status_by_sn(
   try:
     status_payload = client.get_enodeb_status(sn)
   except Exception as exc:
-    # 兜底：遇到 404 等异常返回离线状态，仍向前端返回 200，便于查看最新状态
-    # 同时写入聚合表，避免保留旧值
+    # 兜底：遇到网络/HTTP 异常仍向前端返回 200，便于查看错误 payload。
+    # 但异常不代表设备真实离线，不能把 raw 状态写成 false。
     online = False
     activated = False
     status_payload = {"error": str(exc)}
     upsert_omc_device_state(
       db=db,
       sn=sn,
-      online_raw=online,
-      activated_raw=activated,
-      source="api_poll",
+      online_raw=None,
+      activated_raw=None,
+      source="api_poll_error",
       status_payload=status_payload,
     )
     db.commit()
@@ -450,13 +483,34 @@ async def get_device_status_by_sn(
       status_payload=status_payload,
     )
 
+  if not is_success_status_payload(status_payload):
+    online = False
+    activated = False
+    checked_at = datetime.utcnow().isoformat() + "Z"
+    upsert_omc_device_state(
+      db=db,
+      sn=sn,
+      online_raw=None,
+      activated_raw=None,
+      source="api_poll_error",
+      status_payload=status_payload,
+    )
+    db.commit()
+    return OmcDeviceStatusBySnResponse(
+      sn=sn,
+      online=online,
+      activated=activated,
+      checked_at=checked_at,
+      status_payload=status_payload,
+    )
+
   online = parse_online_flag(status_payload)
   # 设备激活: 基于 /enodeb/infos/status 返回中的 cellStatus 判断
   activated = parse_activated_flag(status_payload)
 
   checked_at = datetime.utcnow().isoformat() + "Z"
 
-  # 写入 SN 聚合状态（只升不降 ever，但原始状态可回退），无论 OMC 返回是否成功都更新 omc_online_raw
+  # 写入 SN 聚合状态（只升不降 ever，但原始状态可回退）
   upsert_omc_device_state(
     db=db,
     sn=sn,

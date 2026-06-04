@@ -50,18 +50,22 @@ def upsert_omc_device_state(
     activated_raw: Optional[bool],
     source: str,
     status_payload: Optional[Dict] = None,
+    observed_at: Optional[datetime] = None,
+    online_evidence_at: Optional[datetime] = None,
+    activated_evidence_at: Optional[datetime] = None,
 ) -> tuple[OmcDeviceState, bool, bool]:
     """
     将一次 OMC 观测写入 OmcDeviceState（SN 级聚合）:
 
-    - 更新最近一次观测的原始状态（允许回退）
+    - 更新最近一次观测的原始状态（允许回退；None 表示本次没有可靠原始状态）
     - 推进里程碑状态 ever_online / ever_activated（只升不降）
+    - 支持来自库存快照的“曾上线证据”时间，例如 device/query.offlineDays
     """
     sn = (sn or "").strip()
     if not sn:
         raise ValueError("sn is required")
 
-    now = datetime.utcnow()
+    now = observed_at or datetime.utcnow()
     newly_online = False
     newly_activated = False
 
@@ -80,23 +84,29 @@ def upsert_omc_device_state(
 
     if online_raw is not None:
         state.omc_online_raw = bool(online_raw)
-        # 里程碑：曾经在线（只升不降）
-        if online_raw:
-            if not state.ever_online:
-                state.ever_online = True
-            if not state.first_online_at:
-                state.first_online_at = now
-                newly_online = True
+
+    online_milestone_at = online_evidence_at
+    if online_raw:
+        online_milestone_at = online_milestone_at or now
+    if online_milestone_at is not None:
+        if not state.ever_online:
+            state.ever_online = True
+            newly_online = True
+        if not state.first_online_at or online_milestone_at < state.first_online_at:
+            state.first_online_at = online_milestone_at
 
     if activated_raw is not None:
         state.omc_active_raw = bool(activated_raw)
-        # 里程碑：曾经激活（只升不降）
-        if activated_raw:
-            if not state.ever_activated:
-                state.ever_activated = True
-            if not state.first_activated_at:
-                state.first_activated_at = now
-                newly_activated = True
+
+    activated_milestone_at = activated_evidence_at
+    if activated_raw:
+        activated_milestone_at = activated_milestone_at or now
+    if activated_milestone_at is not None:
+        if not state.ever_activated:
+            state.ever_activated = True
+            newly_activated = True
+        if not state.first_activated_at or activated_milestone_at < state.first_activated_at:
+            state.first_activated_at = activated_milestone_at
 
     return state, newly_online, newly_activated
 
