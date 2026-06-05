@@ -1,7 +1,7 @@
 import json
 import hashlib
 import time
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import requests
 from sqlalchemy.orm import Session
@@ -84,6 +84,8 @@ class OmcClient:
     started_at: float,
     wait_seconds: float,
     error: Optional[str] = None,
+    request_payload: Optional[Any] = None,
+    response_payload: Optional[Any] = None,
   ) -> None:
     runtime_stats.record_request(
       source=self.source,
@@ -94,7 +96,24 @@ class OmcClient:
       duration_seconds=time.monotonic() - started_at,
       wait_seconds=wait_seconds,
       error=error,
+      request_payload=request_payload,
+      response_payload=response_payload,
     )
+
+  @staticmethod
+  def _runtime_token_response_payload(data: Any) -> Any:
+    if not isinstance(data, dict):
+      return "<redacted-token-response>"
+    result: Dict[str, Any] = {}
+    for key in ("code", "message", "msg"):
+      if key in data:
+        result[key] = data.get(key)
+    if "data" in data:
+      result["data"] = "<redacted-token-data>"
+    for key in ("token", "accessToken", "access_token"):
+      if key in data:
+        result[key] = "***REDACTED***"
+    return result or "<redacted-token-response>"
 
   def _get_access_token(self, force_refresh: bool = False) -> str:
     """
@@ -114,6 +133,7 @@ class OmcClient:
     status_code = None
     success = False
     error = None
+    response_payload: Optional[Any] = None
     try:
       resp = self.session.post(url, json=payload, timeout=self.timeout)
       status_code = resp.status_code
@@ -125,8 +145,10 @@ class OmcClient:
 
       try:
         data = resp.json()
+        response_payload = self._runtime_token_response_payload(data)
       except json.JSONDecodeError:
         text = resp.text or ""
+        response_payload = {"_non_json_preview": text[:200]}
         error = f"OMC Token 接口返回非 JSON 响应: {text[:200]}"
         raise RuntimeError(error)
       # 文档中的 Response 示例被截图嵌入，这里做尽量宽松的兼容解析：
@@ -169,6 +191,8 @@ class OmcClient:
         started_at=started_at,
         wait_seconds=wait_seconds,
         error=error,
+        request_payload=payload,
+        response_payload=response_payload,
       )
 
   def _request(self, method: str, path: str) -> Dict:
@@ -194,6 +218,7 @@ class OmcClient:
       status_code = None
       success = False
       error = None
+      response_payload: Optional[Any] = None
       try:
         resp = self.session.request(
           method,
@@ -206,16 +231,20 @@ class OmcClient:
         if status_code == 401 and attempt == 0:
           token_cache.invalidate(self._token_cache_key())
           error = "OMC token expired or unauthorized; refreshed once"
+          response_payload = {"http_status": 401, "message": "unauthorized"}
           continue
         # 对 404 做降级处理：视为设备不存在/离线，返回空数据而不是抛异常
         if allow_404 and status_code == 404:
           success = True
-          return {"code": 404, "data": {}}
+          response_payload = {"code": 404, "data": {}}
+          return response_payload
         resp.raise_for_status()
         try:
           data = resp.json()
+          response_payload = data
         except json.JSONDecodeError as exc:
           text = resp.text or ""
+          response_payload = {"_non_json_preview": text[:200]}
           error = f"OMC 返回非 JSON 响应: {text[:200]}"
           last_exc = RuntimeError(error)
           raise last_exc from exc
@@ -248,6 +277,8 @@ class OmcClient:
           started_at=started_at,
           wait_seconds=wait_seconds,
           error=error,
+          request_payload=json_payload,
+          response_payload=response_payload,
         )
 
     raise RuntimeError(f"请求 OMC 接口失败: {url} ({last_exc})")

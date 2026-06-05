@@ -271,6 +271,13 @@
         </el-table-column>
         <el-table-column prop="wait_seconds" label="等待(s)" width="90" />
         <el-table-column prop="duration_seconds" label="耗时(s)" width="90" />
+        <el-table-column label="详情" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button text type="primary" size="small" @click="openRuntimeRequestDetail(row)">
+              查看
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
 
@@ -313,6 +320,50 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-drawer
+      v-model="runtimeRequestDetailVisible"
+      title="OMC 请求详情"
+      size="680px"
+      append-to-body
+    >
+      <div v-if="selectedRuntimeRequest" class="request-detail">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="时间">
+            {{ formatTime(selectedRuntimeRequest.time) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="来源">
+            {{ selectedRuntimeRequest.source || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="接口">
+            <div class="mono-text">
+              {{ selectedRuntimeRequest.method || '-' }} {{ selectedRuntimeRequest.endpoint || '-' }}
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="selectedRuntimeRequest.success ? 'success' : 'danger'" size="small">
+              {{ selectedRuntimeRequest.status_code || 'ERR' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="等待/耗时">
+            {{ selectedRuntimeRequest.wait_seconds ?? 0 }}s / {{ selectedRuntimeRequest.duration_seconds ?? 0 }}s
+          </el-descriptions-item>
+          <el-descriptions-item v-if="selectedRuntimeRequest.error" label="错误摘要">
+            <span class="danger-text">{{ selectedRuntimeRequest.error }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div class="payload-section">
+          <div class="payload-title">Request Body</div>
+          <pre class="payload-block">{{ formatRuntimePayload(selectedRuntimeRequest.request_payload) }}</pre>
+        </div>
+
+        <div class="payload-section">
+          <div class="payload-title">Response Body</div>
+          <pre class="payload-block">{{ formatRuntimePayload(selectedRuntimeRequest.response_payload) }}</pre>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -329,7 +380,9 @@ const saving = ref(false)
 const testing = ref(false)
 const runtimeLoading = ref(false)
 const deviceGroupsLoading = ref(false)
+const runtimeRequestDetailVisible = ref(false)
 const runtime = ref(null)
+const selectedRuntimeRequest = ref(null)
 const deviceGroupOptions = ref([])
 const form = ref({
   base_url: '',
@@ -550,6 +603,21 @@ const formatTime = (value) => {
   return date.toLocaleString()
 }
 
+const formatRuntimePayload = (payload) => {
+  if (payload === undefined || payload === null || payload === '') return '-'
+  if (typeof payload === 'string') return payload
+  try {
+    return JSON.stringify(payload, null, 2)
+  } catch (e) {
+    return String(payload)
+  }
+}
+
+const openRuntimeRequestDetail = (row) => {
+  selectedRuntimeRequest.value = row || null
+  runtimeRequestDetailVisible.value = true
+}
+
 onMounted(() => {
   if (canManageOmc.value) {
     refreshPage()
@@ -621,6 +689,43 @@ onMounted(() => {
 .group-select {
   flex: 1;
   min-width: 0;
+}
+.request-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.mono-text {
+  font-family: "Courier New", monospace;
+  word-break: break-all;
+}
+.danger-text {
+  color: #f56c6c;
+}
+.payload-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.payload-title {
+  color: #303133;
+  font-size: 13px;
+  font-weight: 600;
+}
+.payload-block {
+  max-height: 320px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #f7f8fa;
+  color: #303133;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 @media (max-width: 1200px) {
   .metric-grid {

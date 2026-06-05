@@ -12,6 +12,20 @@ DEFAULT_OMC_TOKEN_TTL_SECONDS = 600
 MAX_OMC_RATE_LIMIT_PER_MINUTE = 3000
 MAX_OMC_RATE_LIMIT_BURST = 500
 MAX_OMC_TOKEN_TTL_SECONDS = 86400
+MAX_RUNTIME_PAYLOAD_DEPTH = 5
+MAX_RUNTIME_PAYLOAD_LIST_ITEMS = 20
+MAX_RUNTIME_PAYLOAD_DICT_KEYS = 80
+MAX_RUNTIME_PAYLOAD_STRING_LENGTH = 1200
+REDACTED_RUNTIME_VALUE = "***REDACTED***"
+SENSITIVE_RUNTIME_KEYS = {
+    "authorization",
+    "access_token",
+    "accesstoken",
+    "password",
+    "pwd",
+    "secret",
+    "token",
+}
 
 
 def clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
@@ -47,6 +61,52 @@ def normalize_omc_runtime_config(data: Optional[Dict[str, Any]]) -> Dict[str, in
         "rate_limit_burst": min(burst, rate_limit),
         "token_ttl_seconds": token_ttl,
     }
+
+
+def _is_sensitive_runtime_key(key: Any) -> bool:
+    normalized = str(key or "").strip().replace("-", "_").lower()
+    return normalized in SENSITIVE_RUNTIME_KEYS or normalized.endswith("_token")
+
+
+def sanitize_runtime_payload(value: Any, *, depth: int = 0) -> Any:
+    """
+    为 OMC 运行态详情保留可排查信息，同时避免敏感字段和大响应体进入前端。
+
+    运行态只存在进程内存中，不落库；这里仍做脱敏和尺寸限制，避免 token/password
+    暴露，也避免 device/query 大响应拖慢页面。
+    """
+    if value is None:
+        return None
+    if depth >= MAX_RUNTIME_PAYLOAD_DEPTH:
+        return "<max-depth>"
+    if isinstance(value, dict):
+        result: Dict[str, Any] = {}
+        items = list(value.items())
+        for key, item_value in items[:MAX_RUNTIME_PAYLOAD_DICT_KEYS]:
+            text_key = str(key)
+            if _is_sensitive_runtime_key(text_key):
+                result[text_key] = REDACTED_RUNTIME_VALUE
+            else:
+                result[text_key] = sanitize_runtime_payload(item_value, depth=depth + 1)
+        if len(items) > MAX_RUNTIME_PAYLOAD_DICT_KEYS:
+            result["_truncated_keys"] = len(items) - MAX_RUNTIME_PAYLOAD_DICT_KEYS
+        return result
+    if isinstance(value, (list, tuple)):
+        items = list(value)
+        result = [
+            sanitize_runtime_payload(item, depth=depth + 1)
+            for item in items[:MAX_RUNTIME_PAYLOAD_LIST_ITEMS]
+        ]
+        if len(items) > MAX_RUNTIME_PAYLOAD_LIST_ITEMS:
+            result.append({"_truncated_items": len(items) - MAX_RUNTIME_PAYLOAD_LIST_ITEMS})
+        return result
+    if isinstance(value, str):
+        if len(value) > MAX_RUNTIME_PAYLOAD_STRING_LENGTH:
+            return value[:MAX_RUNTIME_PAYLOAD_STRING_LENGTH] + "...<truncated>"
+        return value
+    if isinstance(value, (int, float, bool)):
+        return value
+    return str(value)
 
 
 class OmcRateLimiter:
@@ -208,6 +268,8 @@ class OmcRuntimeStats:
         duration_seconds: float,
         wait_seconds: float,
         error: Optional[str] = None,
+        request_payload: Optional[Any] = None,
+        response_payload: Optional[Any] = None,
     ) -> None:
         now = time.time()
         status_key = str(status_code) if status_code is not None else "unknown"
@@ -222,9 +284,16 @@ class OmcRuntimeStats:
             "duration_seconds": round(duration_seconds, 3),
             "wait_seconds": round(wait_seconds, 3),
             "error": (error or "")[:200] or None,
+            "request_payload": sanitize_runtime_payload(request_payload),
+            "response_payload": sanitize_runtime_payload(response_payload),
+        }
+        summary_event = {
+            key: value
+            for key, value in event.items()
+            if key not in {"request_payload", "response_payload"}
         }
         with self._lock:
-            self._events.append(event)
+            self._events.append(summary_event)
             self._recent.appendleft(event)
             self._total += 1
             if success:
