@@ -167,6 +167,7 @@
 	import { onShow } from '@dcloudio/uni-app'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
+	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
@@ -434,7 +435,7 @@
 				userStore.logout()
 				return
 			}
-			uni.showToast({ title: String(res.data?.detail || res.data?.message || '加载失败'), icon: 'none' })
+			uni.showToast({ title: extractStockErrorMessage(res.data, $t, $t('messages.loadFailed')), icon: 'none' })
 		} catch (e) {
 			console.error('加载退库收货批次失败:', e)
 			uni.showToast({ title: $t('messages.networkError'), icon: 'none' })

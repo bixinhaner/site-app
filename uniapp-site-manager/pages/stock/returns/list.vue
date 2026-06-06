@@ -159,6 +159,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
+	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 
 	const MAX_DOC_PREVIEW = 8
 
@@ -409,7 +410,7 @@
 				userStore.logout()
 				return
 			}
-			uni.showToast({ title: String(res.data?.detail || res.data?.message || '加载失败'), icon: 'none' })
+			uni.showToast({ title: extractStockErrorMessage(res.data, $t, $t('messages.loadFailed')), icon: 'none' })
 		} catch (e) {
 			console.error('加载退库批次失败:', e)
 			uni.showToast({ title: $t('messages.networkError'), icon: 'none' })

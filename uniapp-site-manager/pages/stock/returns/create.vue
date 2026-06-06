@@ -167,6 +167,10 @@
 	import { API_ENDPOINTS, buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
+	import {
+		extractStockErrorMessage,
+		localizeStockBackendDisplayText,
+	} from '@/utils/stock-error-i18n.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
@@ -287,11 +291,13 @@
 		return map[code] || binding.reason || ''
 	}
 
+	const localizeBackendText = (text, fallback = '') => localizeStockBackendDisplayText(text, $t, fallback)
+
 	const openBindModalFromDetail = (detail) => {
 		const action = String(detail?.action || '').trim()
 		if (action !== 'need_unbind' && action !== 'unbind_blocked') return false
 		bindModalAction.value = action
-		bindModalMessage.value = String(detail?.message || detail?.detail || $t('messages.operationFailed') || '').trim()
+		bindModalMessage.value = localizeBackendText(detail?.message || detail?.detail, $t('messages.operationFailed'))
 		bindModalBindings.value = Array.isArray(detail?.need_unbind)
 			? detail.need_unbind
 			: Array.isArray(detail?.blocked_bindings)
@@ -331,26 +337,34 @@
 		return lines
 	}
 
-	const showDetailedError = (detail, fallbackSn = '') => {
-		if (!detail || typeof detail !== 'object') {
-			uni.showToast({ title: String(detail || $t('messages.operationFailed')), icon: 'none' })
-			return
+		const normalizeDetailedError = (data) => {
+			if (!data || typeof data !== 'object') return data
+			if (data.title || data.reason || data.suggestion || data.related_info) return data
+			const nested = data.detail ?? data.message
+			return nested || data
 		}
-		const reason = String(detail.reason || detail.message || detail.detail || '').trim()
-		const suggestion = String(detail.suggestion || '').trim()
+
+		const showDetailedError = (data, fallbackSn = '') => {
+			const detail = normalizeDetailedError(data)
+			if (!detail || typeof detail !== 'object') {
+				uni.showToast({ title: extractStockErrorMessage({ detail }, $t), icon: 'none' })
+				return
+			}
+		const reason = localizeBackendText(detail.reason || detail.message || detail.detail)
+		const suggestion = localizeBackendText(detail.suggestion)
 		const infoLines = formatRelatedInfoLines(detail.related_info)
 		const contentParts = []
-		if (reason) contentParts.push(`原因：${reason}`)
-		if (suggestion) contentParts.push(`建议：${suggestion}`)
+		if (reason) contentParts.push(`${$t('stock.stockErrorDetailedReasonLabel')}: ${reason}`)
+		if (suggestion) contentParts.push(`${$t('stock.stockErrorDetailedSuggestionLabel')}: ${suggestion}`)
 		if (infoLines.length > 0) {
-			contentParts.push('相关信息：')
+			contentParts.push(`${$t('stock.stockErrorDetailedRelatedInfoLabel')}:`)
 			contentParts.push(infoLines.join('\n'))
 		}
 		if (contentParts.length === 0 && fallbackSn) {
-			contentParts.push(`扫码SN为：${fallbackSn}`)
+			contentParts.push(`${$t('stock.stockErrorDetailedScannedSnLabel')}: ${fallbackSn}`)
 		}
 		uni.showModal({
-			title: String(detail.title || $t('common.hint')),
+			title: localizeBackendText(detail.title, $t('common.hint')),
 			content: contentParts.join('\n\n') || $t('messages.operationFailed'),
 			showCancel: false,
 			confirmText: $t('common.confirm'),
@@ -384,7 +398,7 @@
 				userStore.logout()
 				return false
 			}
-			showDetailedError(res.data?.detail || res.data?.message, value)
+				showDetailedError(res.data, value)
 			return false
 		} catch (e) {
 			console.error('校验SN失败:', e)
@@ -616,7 +630,7 @@
 				showDetailedError(detail)
 				return
 			}
-			uni.showToast({ title: String(detail || res.data?.message || $t('messages.operationFailed')), icon: 'none' })
+			uni.showToast({ title: extractStockErrorMessage(res.data, $t), icon: 'none' })
 		} catch (e) {
 			console.error('提交退库失败:', e)
 			uni.showToast({ title: $t('messages.networkError'), icon: 'none' })
@@ -672,8 +686,7 @@
 							return
 						}
 						if (ret.statusCode !== 200) {
-							const msg = ret.data?.detail || ret.data?.message || $t('messages.operationFailed')
-							uni.showToast({ title: String(msg), icon: 'none' })
+							uni.showToast({ title: extractStockErrorMessage(ret.data, $t), icon: 'none' })
 							return
 						}
 					}

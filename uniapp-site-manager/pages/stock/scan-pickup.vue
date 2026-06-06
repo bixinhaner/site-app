@@ -539,6 +539,7 @@
 	import { buildApiUrl, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
+	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { getCurrentInstance, watch, onMounted } from 'vue'
@@ -944,7 +945,7 @@ export default {
         if (this.deviceDetailPreviewReqId !== reqId) return
 
         if (res.statusCode !== 200) {
-          const detail = res.data?.detail || res.data?.message || this.$t('messages.requestFailedWithCode', { code: res.statusCode })
+          const detail = extractStockErrorMessage(res.data, this.$t, this.$t('messages.requestFailedWithCode', { code: res.statusCode }))
           this.deviceDetailPreviewAction = 'error'
           this.deviceDetailPreviewData = { detail }
           return
@@ -954,7 +955,7 @@ export default {
         this.deviceDetailPreviewData = res.data || {}
       } catch (error) {
         if (this.deviceDetailPreviewReqId !== reqId) return
-        const msg = error?.data?.detail || this.$t('messages.networkError')
+        const msg = extractStockErrorMessage(error?.data, this.$t, this.$t('messages.networkError'))
         this.deviceDetailPreviewAction = 'error'
         this.deviceDetailPreviewData = { detail: msg }
       } finally {
@@ -1008,11 +1009,11 @@ export default {
               await this.loadPickupHistory(true, 1)
               this.syncDeviceDetailRecordFromHistory()
             } else {
-              const msg = ret.data?.detail || ret.data?.message || this.$t('messages.operationFailed')
+              const msg = extractStockErrorMessage(ret.data, this.$t)
               uni.showToast({ title: msg, icon: 'none' })
             }
           } catch (error) {
-            const msg = error?.data?.detail || this.$t('messages.operationFailed')
+            const msg = extractStockErrorMessage(error?.data, this.$t)
             uni.showToast({ title: msg, icon: 'none' })
           } finally {
             this.deviceDetailActionLoading = false
@@ -1172,12 +1173,12 @@ export default {
         }
 
         if (statusCode && statusCode !== 200) {
-          const detail = equipmentData?.detail || equipmentData?.message || this.$t('messages.requestFailedWithCode', { code: statusCode })
+          const detail = extractStockErrorMessage(equipmentData, this.$t, this.$t('messages.requestFailedWithCode', { code: statusCode }))
           if (statusCode === 404) {
             showIdentifyModal('stock.deviceNotInInventoryTitle', 'stock.deviceNotInInventoryHint')
           } else {
             uni.showToast({
-              title: this.$t('messages.operationFailed') + ': ' + detail,
+              title: `${this.$t('messages.operationFailed')}: ${detail}`,
               icon: 'none'
             })
           }
@@ -1218,7 +1219,7 @@ export default {
         console.error('错误消息:', error.message)
         
         uni.showToast({
-          title: this.$t('messages.operationFailed') + ': ' + (error.response?.data?.detail || error.message),
+          title: `${this.$t('messages.operationFailed')}: ${extractStockErrorMessage(error.response?.data, this.$t, error.message || this.$t('messages.networkError'))}`,
           icon: 'none'
         })
       } finally {
@@ -1295,14 +1296,14 @@ export default {
             this.availablePackages = activePackages
             this.selectedPackageIndex = 0
             uni.showToast({
-              title: responseData.message || this.$t('stock.pleaseSelectPackage'),
+              title: extractStockErrorMessage({ detail: responseData.message }, this.$t, this.$t('stock.pleaseSelectPackage')),
               icon: 'none',
               duration: 2500
             })
             return
           }
 
-          const msg = responseData?.detail || responseData?.message || this.$t('messages.operationFailed')
+          const msg = extractStockErrorMessage(responseData, this.$t)
           uni.showToast({
             title: this.$t('stock.pickupFailedPrefix') + msg,
             icon: 'none',
@@ -1348,7 +1349,7 @@ export default {
           this.availablePackages = activePackages
           this.selectedPackageIndex = 0
           uni.showToast({
-            title: responseData.message || this.$t('stock.pleaseSelectPackage'),
+            title: extractStockErrorMessage({ detail: responseData.message }, this.$t, this.$t('stock.pleaseSelectPackage')),
             icon: 'none',
             duration: 2500
           })
@@ -1364,12 +1365,12 @@ export default {
         console.error('🚀 [confirmPickup] 错误详情:', error.data)
         console.error('🚀 [confirmPickup] 错误状态码:', error.statusCode)
         
-	        let errorMessage = this.$t('messages.networkError')
-	        if (error.data?.detail) {
-	          errorMessage = error.data.detail
-	        } else if (error.statusCode) {
-	          errorMessage = this.$t('messages.serverErrorWithCode', { code: error.statusCode })
-	        }
+        let errorMessage = this.$t('messages.networkError')
+        if (error.data?.detail) {
+          errorMessage = extractStockErrorMessage(error.data, this.$t)
+        } else if (error.statusCode) {
+          errorMessage = this.$t('messages.serverErrorWithCode', { code: error.statusCode })
+        }
         
         uni.showToast({
           title: this.$t('stock.pickupFailedPrefix') + errorMessage,
@@ -1478,9 +1479,9 @@ export default {
 	            return
 	          }
 
-	          const msg = response.data?.detail || response.data?.message || this.$t('messages.operationFailed')
-	          uni.showToast({ title: msg, icon: 'none' })
-	          return
+		          const msg = extractStockErrorMessage(response.data, this.$t)
+		          uni.showToast({ title: msg, icon: 'none' })
+		          return
 	        }
 
 	        const data = response.data || {}
@@ -1542,8 +1543,8 @@ export default {
 	          payload,
 	          data: response.data,
 	        })
-	        const msg = response.data?.detail || response.data?.message || this.$t('messages.operationFailed')
-	        uni.showToast({ title: msg, icon: 'none' })
+		        const msg = extractStockErrorMessage(response.data, this.$t)
+		        uni.showToast({ title: msg, icon: 'none' })
 	        return
 	      }
 
@@ -1554,8 +1555,8 @@ export default {
 	        return {
 	          item_type: 'main',
 	          status_group: r?.pickup_group || 'picked',
-	          source_tag: '扫码领料',
-	          method_tag: '套装领料',
+	          source_tag: this.$t('stock.stockLegacyScanPickupSourceTag'),
+	          method_tag: this.$t('stock.stockPackagePickupMethodTag'),
 	          out_transaction_id: r?.transaction_id || null,
 	          out_document_number: null,
 	          warehouse_id: null,

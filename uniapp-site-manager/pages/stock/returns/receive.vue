@@ -206,6 +206,7 @@
 	import { API_ENDPOINTS, buildApiUrl, getAuthHeaders } from '@/config/api.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { formatDateTime } from '@/utils/time.js'
+	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
@@ -285,12 +286,7 @@
 		return 'u-tag-info'
 	}
 
-	const extractErrorMessage = (data, fallback = '') => {
-		const detail = data?.detail
-		if (!detail) return fallback || $t('messages.operationFailed')
-		if (typeof detail === 'string') return detail
-		return detail?.message || fallback || $t('messages.operationFailed')
-	}
+	const extractErrorMessage = (data, fallback = '') => extractStockErrorMessage(data, $t, fallback)
 
 	const syncAuxRows = () => {
 		const prev = new Map((auxReceiveRows.value || []).map(row => [Number(row.equipment_id), Number(row.quantity || 0)]))

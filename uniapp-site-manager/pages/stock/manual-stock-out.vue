@@ -277,6 +277,7 @@
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { parseBarcode } from '@/utils/barcode-parser.js'
 	import { scanAndParseDeviceCode, ScanDeviceCodeError, isScanCanceled } from '@/utils/scan-code.js'
+	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 
@@ -336,12 +337,7 @@
 		})
 	})
 
-	const extractErrorMessage = (data, fallback = '') => {
-		const detail = data?.detail
-		if (!detail) return fallback || $t('messages.operationFailed')
-		if (typeof detail === 'string') return detail
-		return detail?.message || fallback || $t('messages.operationFailed')
-	}
+	const extractErrorMessage = (data, fallback = '') => extractStockErrorMessage(data, $t, fallback)
 
 		const ensureAccess = async () => {
 			if (!guardRouteAccess({

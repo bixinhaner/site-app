@@ -179,6 +179,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
+	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import ReasonInputDialog from '@/components/ReasonInputDialog.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
@@ -198,12 +199,7 @@
 	const abandonError = ref('')
 	const abandonSubmitting = ref(false)
 
-	const extractErrorMessage = (data, fallback = '') => {
-		const detail = data?.detail
-		if (!detail) return fallback || $t('messages.operationFailed')
-		if (typeof detail === 'string') return detail
-		return detail?.message || fallback || $t('messages.operationFailed')
-	}
+	const extractErrorMessage = (data, fallback = '') => extractStockErrorMessage(data, $t, fallback)
 
 	const statusLabel = (status) => {
 		const map = {

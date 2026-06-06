@@ -209,6 +209,7 @@
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
+	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 
 	const userStore = useUserStore()
@@ -287,12 +288,7 @@
 
 	const noop = () => {}
 
-	const extractErrorMessage = (data, fallback = '') => {
-		const detail = data?.detail
-		if (!detail) return fallback || $t('messages.operationFailed')
-		if (typeof detail === 'string') return detail
-		return detail?.message || fallback || $t('messages.operationFailed')
-	}
+	const extractErrorMessage = (data, fallback = '') => extractStockErrorMessage(data, $t, fallback)
 
 	const filterActivePackages = (source) => {
 		const list = Array.isArray(source) ? source : []
