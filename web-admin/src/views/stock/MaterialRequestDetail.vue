@@ -271,6 +271,64 @@
       </el-card>
     </div>
 
+    <el-card class="card linked-records" shadow="never">
+      <template #header>
+        <div class="section-header">
+          <div class="section-title">
+            <span class="title">关联出入库记录</span>
+            <span class="desc">展示由该申请单产生的出库与退库记录</span>
+          </div>
+        </div>
+      </template>
+
+      <el-table :data="linkedTransactions" style="width: 100%" empty-text="暂无关联出入库记录">
+        <el-table-column prop="document_number" label="单据号" min-width="210">
+          <template #default="{ row }">
+            <span class="mono table-mono">{{ row.document_number || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="110">
+          <template #default="{ row }">
+            <el-tag :type="txTypeTagType(row.transaction_type)" effect="plain">
+              {{ txTypeText(row.transaction_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="issue_draft_no" label="领料单号" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-button
+              v-if="row.issue_draft_id"
+              type="primary"
+              link
+              @click="goIssueDraft(row)"
+            >
+              <span class="mono table-mono">{{ row.issue_draft_no }}</span>
+            </el-button>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="warehouse_name" label="仓库" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="operator_name" label="操作人" width="120" show-overflow-tooltip />
+        <el-table-column prop="receiver_name" label="领取人" width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.transaction_type === 'stock_out' ? (row.receiver_name || '-') : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="total_quantity" label="数量" width="90" />
+        <el-table-column label="时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.operation_time) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="notes" label="备注" min-width="180" show-overflow-tooltip />
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link @click="goStockHistory(row)">查看记录</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <!-- 驳回对话框 -->
     <el-dialog v-model="rejectVisible" title="驳回申请" width="520px">
       <el-form label-width="90px">
@@ -442,6 +500,7 @@ const remainingTotal = computed(() => {
 const tableRows = computed(() => {
   return isDraft.value ? draftRows.value : (requestData.value?.items || [])
 })
+const linkedTransactions = computed(() => requestData.value?.linked_stock_transactions || [])
 
 const loadBaseOptions = async () => {
   try {
@@ -499,6 +558,38 @@ const removeDraftRow = (idx) => {
 
 const onDraftEquipChange = (row) => {
   if (!row.requested_qty || row.requested_qty < 1) row.requested_qty = 1
+}
+
+const txTypeText = (type) => {
+  const map = {
+    stock_in: '入库',
+    stock_out: '出库',
+    transfer: '调拨',
+    return: '退库',
+    adjustment: '调整',
+  }
+  return map[type] || type || '-'
+}
+
+const txTypeTagType = (type) => {
+  const map = {
+    stock_in: 'success',
+    stock_out: 'warning',
+    return: 'primary',
+    adjustment: 'danger',
+    transfer: 'info',
+  }
+  return map[type] || 'info'
+}
+
+const goIssueDraft = (row) => {
+  if (!row?.issue_draft_id) return
+  router.push({ name: 'IssueDraftDetail', params: { id: row.issue_draft_id } })
+}
+
+const goStockHistory = (row) => {
+  const keyword = row?.document_number || requestData.value?.request_no || ''
+  router.push({ name: 'StockHistory', query: { type: 'transaction', keyword } })
 }
 
 const saveDraft = async () => {
@@ -910,6 +1001,15 @@ onMounted(async () => {
   display: flex;
   gap: 10px;
   white-space: nowrap;
+}
+
+.linked-records {
+  margin-top: 18px;
+}
+
+.table-mono {
+  margin-left: 0;
+  font-size: 12px;
 }
 
 @media (max-width: 1200px) {

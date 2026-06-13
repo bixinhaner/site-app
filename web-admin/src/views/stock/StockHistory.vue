@@ -41,7 +41,7 @@
         </el-col>
         <el-col :xs="24" :sm="24" :md="8">
           <div class="keyword-search">
-            <el-input v-model="keyword" class="keyword-input" placeholder="搜索单据/设备/SN" clearable>
+            <el-input v-model="keyword" class="keyword-input" :placeholder="tableI18n.searchPlaceholder" clearable>
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
@@ -50,7 +50,7 @@
               </template>
             </el-input>
 	            <el-tooltip
-	              content="支持：单据号、文件名、仓库、操作人、领取人、设备编码、设备名称、SN"
+	              :content="tableI18n.searchTip"
 	              placement="top"
 	            >
               <span class="keyword-help" aria-label="搜索提示">?</span>
@@ -77,6 +77,20 @@
         </el-table-column>
 
         <el-table-column prop="documentLabel" :label="tableI18n.documentLabel" :min-width="isCompactTable ? 180 : 280" show-overflow-tooltip />
+
+        <el-table-column v-if="!isCompactTable" prop="materialRequestNo" :label="tableI18n.requestLabel" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-button
+              v-if="row.recordType === 'transaction' && row.materialRequestId"
+              type="primary"
+              link
+              @click.stop="goMaterialRequest(row)"
+            >
+              <span class="mono small">{{ row.materialRequestNo }}</span>
+            </el-button>
+            <span v-else class="muted">{{ row.materialRequestNo || '-' }}</span>
+          </template>
+        </el-table-column>
 
         <el-table-column v-if="!isCompactTable" prop="direction" :label="tableI18n.directionLabel" width="120">
           <template #default="{ row }">
@@ -328,6 +342,28 @@
             <span class="value">{{ currentTransactionRecord.total_quantity || 0 }}</span>
           </div>
           <div class="summary-item">
+            <span class="label">来源申请单</span>
+            <span class="value source-link">
+              <el-button
+                v-if="currentTransactionRecord.material_request_id"
+                type="primary"
+                link
+                @click="goMaterialRequest(currentTransactionRecord)"
+              >
+                {{ currentTransactionRecord.material_request_no }}
+              </el-button>
+              <span v-else>-</span>
+            </span>
+          </div>
+          <div class="summary-item">
+            <span class="label">来源领料单</span>
+            <span class="value">{{ currentTransactionRecord.issue_draft_no || '-' }}</span>
+          </div>
+          <div v-if="currentTransactionRecord.out_document_number" class="summary-item">
+            <span class="label">关联出库单</span>
+            <span class="value">{{ currentTransactionRecord.out_document_number }}</span>
+          </div>
+          <div class="summary-item">
             <span class="label">备注</span>
             <span class="value notes-value">
               <span>{{ currentTransactionRecord.notes || '-' }}</span>
@@ -513,11 +549,12 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search, Close } from '@element-plus/icons-vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi } from '../../api/stock'
 
 const route = useRoute()
+const router = useRouter()
 const { locale } = useI18n()
 const isEnglish = computed(() => locale.value === 'en-US')
 const tableI18n = computed(() => (isEnglish.value
@@ -529,11 +566,14 @@ const tableI18n = computed(() => (isEnglish.value
       quantityLabel: 'Quantity',
       operatorLabel: 'Operator',
       receiverLabel: 'Receiver',
+      requestLabel: 'Material request',
       timeLabel: 'Operation time',
       notesLabel: 'Notes',
       actionsLabel: 'Actions',
       detailsLabel: 'Details',
       snDetailsLabel: 'SN details',
+      searchPlaceholder: 'Search document/request/material/SN',
+      searchTip: 'Supports: document no., request no., issue draft no., file, warehouse, operator, receiver, material code/name, SN',
     }
   : {
       typeLabel: '类型',
@@ -543,11 +583,14 @@ const tableI18n = computed(() => (isEnglish.value
       quantityLabel: '数量',
       operatorLabel: '操作人',
       receiverLabel: '领取人',
+      requestLabel: '申请单号',
       timeLabel: '操作时间',
       notesLabel: '备注',
       actionsLabel: '操作',
       detailsLabel: '详情',
       snDetailsLabel: 'SN 明细',
+      searchPlaceholder: '搜索单据/申请单/物料/SN',
+      searchTip: '支持：出入库单号、申请单号、领料单号、文件名、仓库、操作人、领取人、设备编码、设备名称、SN',
     }))
 
 const loading = ref(false)
@@ -744,6 +787,11 @@ const buildRecords = computed(() => {
       recordType: 'transaction',
       transactionType: t.transaction_type,
       documentLabel: t.document_number || '-',
+      materialRequestId: t.material_request_id || '',
+      materialRequestNo: t.material_request_no || '',
+      issueDraftId: t.issue_draft_id || '',
+      issueDraftNo: t.issue_draft_no || '',
+      outDocumentNumber: t.out_document_number || '',
       direction: t.transaction_type === 'stock_out' ? 'out' : 'in',
 	      warehouseName: wname,
 	      totalQuantity: t.total_quantity || 0,
@@ -818,6 +866,9 @@ const filteredRecords = computed(() => {
       })
 	      return (
 	        (r.documentLabel || '').toLowerCase().includes(kw) ||
+	        (r.materialRequestNo || '').toLowerCase().includes(kw) ||
+	        (r.issueDraftNo || '').toLowerCase().includes(kw) ||
+	        (r.outDocumentNumber || '').toLowerCase().includes(kw) ||
 	        (r.warehouseName || '').toLowerCase().includes(kw) ||
 	        (r.operatorName || '').toLowerCase().includes(kw) ||
 	        (r.receiverName || '').toLowerCase().includes(kw) ||
@@ -877,7 +928,12 @@ const onImportSelectionChange = (rows) => {
 
 const loadTransactions = async () => {
   try {
-    const res = await stockApi.getStockTransactions(filters.value)
+    const params = {
+      ...filters.value,
+      search: (keyword.value || '').trim(),
+      limit: 500
+    }
+    const res = await stockApi.getStockTransactions(params)
     rawTransactions.value = res.transactions || []
   } catch (error) {
     console.error('加载出入库记录失败:', error)
@@ -1008,6 +1064,12 @@ const viewTransaction = (row) => {
     return
   }
   transactionDetailsVisible.value = true
+}
+
+const goMaterialRequest = (row) => {
+  const id = row?.materialRequestId || row?.material_request_id
+  if (!id) return
+  router.push({ name: 'MaterialRequestDetail', params: { id } })
 }
 
 const openEditTxNotes = () => {
@@ -1307,6 +1369,22 @@ onBeforeUnmount(() => {
 .summary-item .value {
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.mono.small {
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.source-link :deep(.el-button) {
+  padding: 0;
 }
 
 .notes-value {

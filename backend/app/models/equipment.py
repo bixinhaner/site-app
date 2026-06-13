@@ -265,6 +265,10 @@ class StockTransaction(Base):
     work_order_id = Column(String(32), ForeignKey("work_orders.id"))  # 关联工单
     related_transaction_id = Column(String(36), index=True)  # 关联的原始单据ID（如退库关联出库）
     offline_document_id = Column(String(32), ForeignKey("offline_documents.id"), index=True)  # 关联线下票据（可选）
+    material_request_id = Column(String(32), index=True)  # 来源物料申请单ID
+    material_request_no = Column(String(50), index=True)  # 来源物料申请单号（冗余便于检索与审计）
+    issue_draft_id = Column(String(32), index=True)  # 来源领料单ID
+    issue_draft_no = Column(String(50), index=True)  # 来源领料单号（冗余便于检索与审计）
     
     # 操作信息
     operator_id = Column(Integer, ForeignKey("users.id"), nullable=False)

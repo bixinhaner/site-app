@@ -201,6 +201,33 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _source_value(trans: Optional[StockTransaction], out_trans: Optional[StockTransaction], attr: str):
+    value = getattr(trans, attr, None) if trans else None
+    if value is not None and str(value).strip() != "":
+        return value
+    return getattr(out_trans, attr, None) if out_trans else None
+
+
+def _source_fields_payload(trans: Optional[StockTransaction], out_trans: Optional[StockTransaction] = None) -> dict:
+    return {
+        "material_request_id": _source_value(trans, out_trans, "material_request_id"),
+        "material_request_no": _source_value(trans, out_trans, "material_request_no"),
+        "issue_draft_id": _source_value(trans, out_trans, "issue_draft_id"),
+        "issue_draft_no": _source_value(trans, out_trans, "issue_draft_no"),
+    }
+
+
+def _source_kwargs_from_out(out_trans: Optional[StockTransaction]) -> dict:
+    if not out_trans:
+        return {}
+    return {
+        "material_request_id": getattr(out_trans, "material_request_id", None),
+        "material_request_no": getattr(out_trans, "material_request_no", None),
+        "issue_draft_id": getattr(out_trans, "issue_draft_id", None),
+        "issue_draft_no": getattr(out_trans, "issue_draft_no", None),
+    }
+
+
 # Pydantic模型
 class SNBatchCheckRequest(BaseModel):
     sn_list: List[str]
@@ -1583,6 +1610,7 @@ async def scan_return_request(
         notes=notes or f"扫码退库申请 - {sn}",
         approval_status="pending_receive",
         related_transaction_id=out_trans.id,
+        **_source_kwargs_from_out(out_trans),
     )
     db.add(return_trans)
 
@@ -1903,15 +1931,22 @@ async def list_return_requests(
 
     if keyword:
         kw = f"%{keyword.strip()}%"
+        related_out = aliased(StockTransaction)
+        query = query.outerjoin(related_out, related_out.id == StockTransaction.related_transaction_id)
         query = query.filter(
             or_(
                 StockTransaction.document_number.like(kw),
+                StockTransaction.material_request_no.like(kw),
+                StockTransaction.issue_draft_no.like(kw),
                 StockTransaction.scan_barcode.like(kw),
                 StockTransaction.notes.like(kw),
                 StockTransaction.approval_comments.like(kw),
                 Warehouse.warehouse_name.like(kw),
                 User.full_name.like(kw),
                 User.username.like(kw),
+                related_out.document_number.like(kw),
+                related_out.material_request_no.like(kw),
+                related_out.issue_draft_no.like(kw),
             )
         )
 
@@ -1960,6 +1995,7 @@ async def list_return_requests(
                 "out_document_number": out_trans.document_number if out_trans else None,
                 "out_warehouse_id": out_trans.warehouse_id if out_trans else None,
                 "out_warehouse_name": out_trans.warehouse.warehouse_name if out_trans and out_trans.warehouse else None,
+                **_source_fields_payload(trans, out_trans),
                 "items": items,
             }
         )
@@ -2052,6 +2088,7 @@ async def return_equipment_pickup(
         notes=(notes or "").strip() or f"扫码退库申请 - {sn}",
         approval_status="pending_receive",
         related_transaction_id=out_trans.id,
+        **_source_kwargs_from_out(out_trans),
     )
     db.add(return_trans)
 
@@ -2227,6 +2264,8 @@ async def get_stock_transactions(
     warehouse_id: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    keyword: Optional[str] = None,
+    search: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
@@ -2239,7 +2278,14 @@ async def get_stock_transactions(
     query = db.query(StockTransaction)
     
     if transaction_type:
-        query = query.filter(StockTransaction.transaction_type == transaction_type)
+        try:
+            tx_type = TransactionTypeEnum(str(transaction_type))
+        except Exception:
+            try:
+                tx_type = TransactionTypeEnum[str(transaction_type).upper()]
+            except Exception:
+                raise HTTPException(status_code=400, detail="transaction_type 参数不合法")
+        query = query.filter(StockTransaction.transaction_type == tx_type)
     if warehouse_id:
         query = query.filter(StockTransaction.warehouse_id == warehouse_id)
     if start_date:
@@ -2249,6 +2295,55 @@ async def get_stock_transactions(
     if end_date:
         query = query.filter(
             StockTransaction.operation_time <= datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        )
+
+    kw = (keyword or search or "").strip()
+    if kw:
+        like = f"%{kw}%"
+        related_out = aliased(StockTransaction)
+        receiver_alias = aliased(User)
+        item_match = (
+            db.query(StockTransactionItem.id)
+            .join(Equipment, Equipment.id == StockTransactionItem.equipment_id)
+            .outerjoin(EquipmentInstance, EquipmentInstance.id == StockTransactionItem.equipment_instance_id)
+            .filter(StockTransactionItem.transaction_id == StockTransaction.id)
+            .filter(
+                or_(
+                    Equipment.equipment_code.like(like),
+                    Equipment.equipment_name.like(like),
+                    EquipmentInstance.serial_number.like(like),
+                    EquipmentInstance.original_serial_number.like(like),
+                    StockTransactionItem.batch_number.like(like),
+                    StockTransactionItem.vendor.like(like),
+                    StockTransactionItem.item_notes.like(like),
+                )
+            )
+            .exists()
+        )
+        query = (
+            query.outerjoin(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+            .outerjoin(User, User.id == StockTransaction.operator_id)
+            .outerjoin(receiver_alias, receiver_alias.id == StockTransaction.issued_to)
+            .outerjoin(related_out, related_out.id == StockTransaction.related_transaction_id)
+            .filter(
+                or_(
+                    StockTransaction.document_number.like(like),
+                    StockTransaction.material_request_no.like(like),
+                    StockTransaction.issue_draft_no.like(like),
+                    StockTransaction.scan_barcode.like(like),
+                    StockTransaction.notes.like(like),
+                    StockTransaction.approval_comments.like(like),
+                    Warehouse.warehouse_name.like(like),
+                    User.full_name.like(like),
+                    User.username.like(like),
+                    receiver_alias.full_name.like(like),
+                    receiver_alias.username.like(like),
+                    related_out.document_number.like(like),
+                    related_out.material_request_no.like(like),
+                    related_out.issue_draft_no.like(like),
+                    item_match,
+                )
+            )
         )
     
     if has_global_inventory_scope(current_user):
@@ -2267,9 +2362,15 @@ async def get_stock_transactions(
 
     total = query.count()
     transactions = query.order_by(desc(StockTransaction.operation_time)).offset(skip).limit(limit).all()
+    related_ids = [getattr(t, "related_transaction_id", None) for t in transactions if getattr(t, "related_transaction_id", None)]
+    related_map: Dict[str, StockTransaction] = {}
+    if related_ids:
+        related_rows = db.query(StockTransaction).filter(StockTransaction.id.in_(list(set(related_ids)))).all()
+        related_map = {str(t.id): t for t in related_rows}
     
     result = []
     for trans in transactions:
+        out_trans = related_map.get(str(getattr(trans, "related_transaction_id", "") or ""))
         operator_id = getattr(trans, "operator_id", None)
         operator_name = None
         if operator_id is not None and str(operator_id).strip() != "":
@@ -2315,6 +2416,7 @@ async def get_stock_transactions(
                 "item_notes": item.item_notes,
             })
         
+        source_payload = _source_fields_payload(trans, out_trans)
         result.append({
             "id": trans.id,
             "document_number": trans.document_number,
@@ -2333,6 +2435,8 @@ async def get_stock_transactions(
             "scan_barcode": trans.scan_barcode,
             "notes": trans.notes,
             "related_transaction_id": getattr(trans, "related_transaction_id", None),
+            "out_document_number": out_trans.document_number if out_trans else None,
+            **source_payload,
             "offline_document_id": getattr(trans, "offline_document_id", None),
             "items": items,
             "task_id": None,
@@ -4284,7 +4388,78 @@ def _calc_request_pending_map(db: Session, request_id: str) -> Dict[int, int]:
     return pending
 
 
-def _serialize_material_request(db: Session, req: MaterialRequest) -> dict:
+def _serialize_material_request_linked_transactions(db: Session, req: MaterialRequest) -> list:
+    rows = (
+        db.query(StockTransaction)
+        .options(
+            joinedload(StockTransaction.warehouse),
+            joinedload(StockTransaction.operator),
+            joinedload(StockTransaction.receiver),
+            joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment),
+            joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment_instance),
+        )
+        .filter(
+            or_(
+                StockTransaction.material_request_id == req.id,
+                StockTransaction.material_request_no == req.request_no,
+            )
+        )
+        .order_by(desc(StockTransaction.operation_time), desc(StockTransaction.created_at))
+        .limit(200)
+        .all()
+    )
+
+    related_ids = [getattr(t, "related_transaction_id", None) for t in rows if getattr(t, "related_transaction_id", None)]
+    related_map: Dict[str, StockTransaction] = {}
+    if related_ids:
+        out_rows = db.query(StockTransaction).filter(StockTransaction.id.in_(list(set(related_ids)))).all()
+        related_map = {str(t.id): t for t in out_rows}
+
+    result = []
+    for trans in rows:
+        out_trans = related_map.get(str(getattr(trans, "related_transaction_id", "") or ""))
+        items = []
+        for item in trans.transaction_items or []:
+            inst = item.equipment_instance
+            serial_number = None
+            if inst:
+                serial_number = inst.original_serial_number if getattr(inst, "is_voided", False) and getattr(inst, "original_serial_number", None) else inst.serial_number
+            eq = item.equipment
+            items.append(
+                {
+                    "item_id": item.id,
+                    "equipment_id": item.equipment_id,
+                    "equipment_name": eq.equipment_name if eq else None,
+                    "equipment_code": eq.equipment_code if eq else None,
+                    "quantity": int(item.quantity or 0),
+                    "unit": getattr(eq, "unit", None) if eq else None,
+                    "serial_number": serial_number,
+                }
+            )
+
+        result.append(
+            {
+                "id": trans.id,
+                "document_number": trans.document_number,
+                "transaction_type": _enum_value(trans.transaction_type),
+                "warehouse_id": trans.warehouse_id,
+                "warehouse_name": trans.warehouse.warehouse_name if trans.warehouse else None,
+                "operator_name": _display_user_name(trans.operator),
+                "receiver_name": _display_user_name(trans.receiver),
+                "operation_time": to_utc_iso(trans.operation_time) if trans.operation_time else None,
+                "total_quantity": int(trans.total_quantity or 0),
+                "approval_status": trans.approval_status,
+                "notes": trans.notes,
+                "related_transaction_id": getattr(trans, "related_transaction_id", None),
+                "out_document_number": out_trans.document_number if out_trans else None,
+                **_source_fields_payload(trans, out_trans),
+                "items": items,
+            }
+        )
+    return result
+
+
+def _serialize_material_request(db: Session, req: MaterialRequest, *, include_transactions: bool = False) -> dict:
     pending_map = _calc_request_pending_map(db, req.id)
 
     items = []
@@ -4329,7 +4504,7 @@ def _serialize_material_request(db: Session, req: MaterialRequest) -> dict:
         else:
             main_summary = "，".join(parts) if parts else f"共{main_total}台"
 
-    return {
+    payload = {
         "id": req.id,
         "request_no": req.request_no,
         "warehouse_id": req.warehouse_id,
@@ -4346,6 +4521,9 @@ def _serialize_material_request(db: Session, req: MaterialRequest) -> dict:
         "main_summary": main_summary,
         "items": items,
     }
+    if include_transactions:
+        payload["linked_stock_transactions"] = _serialize_material_request_linked_transactions(db, req)
+    return payload
 
 
 @router.get("/material-requests")
@@ -4532,7 +4710,7 @@ async def get_material_request_detail(
     if req.requester_id != current_user.id and not _warehouse_in_scope(db, current_user, req.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限查看该申请单")
 
-    return {"request": _serialize_material_request(db, req)}
+    return {"request": _serialize_material_request(db, req, include_transactions=True)}
 
 
 @router.patch("/material-requests/{request_id}")
@@ -5775,6 +5953,10 @@ async def _confirm_issue_draft_impl(
         document_number=doc_no,
         total_quantity=sum(int(v) for v in requirements.values()),
         notes=notes or f"领料单确认出库 - {draft.draft_no}",
+        material_request_id=draft.request_id,
+        material_request_no=req.request_no if req else None,
+        issue_draft_id=draft.id,
+        issue_draft_no=draft.draft_no,
     )
     db.add(transaction)
 
@@ -8966,6 +9148,7 @@ async def create_return_request(
         total_quantity=0,
         notes="退库申请",
         approval_status="pending_receive",
+        **_source_kwargs_from_out(out_trans),
     )
     db.add(ret_trans)
     db.flush()
@@ -9151,6 +9334,10 @@ def _build_stock_out_meta_map(db: Session, out_ids: List[str]) -> Dict[str, dict
             "out_warehouse_id": out.warehouse_id,
             "out_warehouse_name": out.warehouse.warehouse_name if out.warehouse else None,
             "out_operator_name": _display_user_name(out.operator),
+            "material_request_id": getattr(out, "material_request_id", None),
+            "material_request_no": getattr(out, "material_request_no", None),
+            "issue_draft_id": getattr(out, "issue_draft_id", None),
+            "issue_draft_no": getattr(out, "issue_draft_no", None),
         }
     return out_map
 
@@ -9818,6 +10005,7 @@ async def create_return_request_by_actual(
             notes=notes or "按实际申请退库",
             approval_status="pending_receive",
             scan_location=loc,
+            **_source_kwargs_from_out(out_trans),
         )
         db.add(ret_trans)
         db.flush()
@@ -10150,6 +10338,7 @@ async def create_return_request_by_sns(
             notes=notes or ("设备更换退库申请" if work_order_id else "批量退库申请"),
             approval_status="pending_receive",
             scan_location=loc,
+            **_source_kwargs_from_out(out_trans),
         )
         db.add(ret_trans)
         db.flush()
@@ -10245,6 +10434,7 @@ def _serialize_return_transaction(db: Session, t: StockTransaction) -> dict:
         "out_document_number": out_trans.document_number if out_trans else None,
         "out_warehouse_id": out_trans.warehouse_id if out_trans else None,
         "out_warehouse_name": out_trans.warehouse.warehouse_name if out_trans and out_trans.warehouse else None,
+        **_source_fields_payload(t, out_trans),
         "items": items,
         "approval_comments": t.approval_comments,
     }
@@ -10678,6 +10868,7 @@ async def list_return_workbench_batches(
             "out_document_number": out_meta.get("out_document_number"),
             "out_warehouse_name": out_meta.get("out_warehouse_name"),
             "out_operator_name": out_meta.get("out_operator_name"),
+            **_source_fields_payload(t),
             "main_device_count": int(main_count),
             "aux_total_quantity": int(aux_qty),
             "pending_total_quantity": int(pending_qty),
@@ -10750,6 +10941,8 @@ async def list_return_workbench_batches(
                     fields = [
                         doc.get("document_number"),
                         doc.get("out_document_number"),
+                        doc.get("material_request_no"),
+                        doc.get("issue_draft_no"),
                         doc.get("warehouse_name"),
                         doc.get("out_warehouse_name"),
                         doc.get("operator_name"),
