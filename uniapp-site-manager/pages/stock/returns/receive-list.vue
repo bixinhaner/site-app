@@ -32,7 +32,7 @@
 						<input
 							class="search-input"
 							v-model="keyword"
-							:placeholder="$t('stock.materialRequestSearchPlaceholder')"
+							:placeholder="$t('stock.returnReceivingSearchPlaceholder')"
 							confirm-type="search"
 							@confirm="doSearch"
 						/>
@@ -126,6 +126,14 @@
 								</view>
 								<view class="doc-meta">
 									<text class="doc-meta-item">{{ $t('stock.returnDocumentNumber') }}: {{ doc.out_document_number || '-' }}</text>
+								</view>
+								<view v-if="doc.material_request_no || doc.issue_draft_no" class="doc-source">
+									<text v-if="doc.material_request_no" class="doc-source-item">
+										{{ $t('stock.sourceMaterialRequest') }}: {{ doc.material_request_no }}
+									</text>
+									<text v-if="doc.issue_draft_no" class="doc-source-item">
+										{{ $t('stock.sourceIssueDraft') }}: {{ doc.issue_draft_no }}
+									</text>
 								</view>
 								<view class="doc-stats">
 									<text class="doc-stat">{{ $t('stock.selectedMainDevices') }} {{ doc.main_device_count }}</text>
@@ -255,6 +263,10 @@
 		id: String(doc?.id || ''),
 		document_number: String(doc?.document_number || '-'),
 		out_document_number: String(doc?.out_document_number || '-'),
+		material_request_id: doc?.material_request_id || null,
+		material_request_no: String(doc?.material_request_no || ''),
+		issue_draft_id: doc?.issue_draft_id || null,
+		issue_draft_no: String(doc?.issue_draft_no || ''),
 		status: String(doc?.status || ''),
 		warehouse_name: String(doc?.warehouse_name || ''),
 		operator_name: String(doc?.operator_name || ''),
@@ -610,6 +622,21 @@
 	.doc-no { font-size: 12px; color: var(--text-primary); font-weight: 700; }
 	.doc-meta { margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 	.doc-meta-item { font-size: 11px; color: var(--text-secondary); }
+	.doc-source {
+		margin-top: 6px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.doc-source-item {
+		padding: 4px 7px;
+		border-radius: 8px;
+		background: rgba(var(--color-primary-rgb), 0.07);
+		color: #1d4ed8;
+		font-size: 11px;
+		font-weight: 700;
+	}
 	.doc-stats { margin-top: 8px; display: flex; gap: 10px; flex-wrap: wrap; }
 	.doc-stat { font-size: 11px; color: var(--text-secondary); }
 	.doc-actions { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }

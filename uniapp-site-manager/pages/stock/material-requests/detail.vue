@@ -121,6 +121,55 @@
 				</view>
 			</view>
 
+			<view class="section u-card" v-if="request">
+				<view class="u-card-header">
+					<view class="linked-title">
+						<text class="u-card-title">{{ $t('stock.linkedStockRecords') }}</text>
+						<text class="hint">{{ $t('stock.linkedStockRecordsDesc') }}</text>
+					</view>
+				</view>
+				<view class="u-card-content">
+					<view v-if="linkedTransactions.length === 0" class="empty">
+						<text class="empty-text">{{ $t('stock.linkedStockRecordsEmpty') }}</text>
+					</view>
+					<view v-else class="linked-list">
+						<view
+							v-for="tx in linkedTransactions"
+							:key="tx.id"
+							class="linked-record"
+							:class="{ clickable: canOpenLinkedDraft(tx) }"
+							@click="goLinkedDraft(tx)"
+						>
+							<view class="linked-head">
+								<text class="linked-no mono">{{ tx.document_number || '-' }}</text>
+								<view class="u-tag u-tag-small" :class="transactionTypeTagClass(tx.transaction_type)">
+									{{ transactionTypeLabel(tx.transaction_type) }}
+								</view>
+							</view>
+							<view v-if="tx.issue_draft_no || tx.out_document_number" class="linked-source">
+								<text v-if="tx.issue_draft_no" class="source-item">
+									{{ $t('stock.sourceIssueDraft') }}: {{ tx.issue_draft_no }}
+								</text>
+								<text v-if="tx.out_document_number" class="source-item">
+									{{ $t('stock.sourceStockOut') }}: {{ tx.out_document_number }}
+								</text>
+							</view>
+							<view class="linked-meta">
+								<text class="linked-meta-item">{{ tx.warehouse_name || '-' }}</text>
+								<text class="dot">·</text>
+								<text class="linked-meta-item">{{ tx.operator_name || tx.receiver_name || '-' }}</text>
+								<text class="dot">·</text>
+								<text class="linked-meta-item">{{ formatDt(tx.operation_time) }}</text>
+							</view>
+							<view class="linked-foot">
+								<text class="linked-qty">{{ $t('stock.linkedStockRecordQuantity') }} {{ tx.total_quantity || 0 }}</text>
+								<text v-if="canOpenLinkedDraft(tx)" class="linked-action">{{ $t('stock.linkedStockRecordViewDraft') }}</text>
+							</view>
+						</view>
+					</view>
+				</view>
+			</view>
+
 			<view class="bottom-spacer" />
 		</scroll-view>
 
@@ -178,6 +227,7 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLanguageStore } from '@/stores/language'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
+	import { formatDateTime } from '@/utils/time.js'
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
@@ -200,6 +250,7 @@
 	const abandonSubmitting = ref(false)
 
 	const extractErrorMessage = (data, fallback = '') => extractStockErrorMessage(data, $t, fallback)
+	const formatDt = (ts) => formatDateTime(ts) || '-'
 
 	const statusLabel = (status) => {
 		const map = {
@@ -264,6 +315,10 @@
 		const s = String(request.value?.status || '')
 		return (s === 'approved' || s === 'partially_approved') && issuedTotal.value <= 0 && (isRequester.value || hasWarehouseAccess.value)
 	})
+	const linkedTransactions = computed(() => {
+		const rows = request.value?.linked_stock_transactions
+		return Array.isArray(rows) ? rows : []
+	})
 
 	const stepActive = computed(() => {
 		const s = String(request.value?.status || '')
@@ -288,6 +343,30 @@
 		if (s === 'canceled') return $t('stock.materialRequestTipCanceled')
 		return ''
 	})
+
+	const transactionTypeLabel = (type) => {
+		const s = String(type || '')
+		const map = {
+			stock_in: $t('stock.stockRecordTypeStockIn'),
+			stock_out: $t('stock.stockRecordTypeStockOut'),
+			return: $t('stock.stockRecordTypeReturn'),
+			adjustment: $t('stock.stockRecordTypeAdjustment'),
+			transfer: $t('stock.stockRecordTypeTransfer'),
+			damage: $t('stock.stockRecordTypeDamage'),
+		}
+		return map[s] || s || '-'
+	}
+
+	const transactionTypeTagClass = (type) => {
+		const s = String(type || '')
+		if (s === 'stock_out') return 'u-tag-warning'
+		if (s === 'return') return 'u-tag-success'
+		if (s === 'stock_in') return 'u-tag-info'
+		if (s === 'adjustment') return 'u-tag-primary'
+		return 'u-tag-info'
+	}
+
+	const canOpenLinkedDraft = (tx) => !!String(tx?.issue_draft_id || '').trim()
 
 	const ensureLoggedIn = () => guardRouteAccess({
 		userStore,
@@ -328,6 +407,12 @@
 	const handleRefresh = async () => {
 		refreshing.value = true
 		await load()
+	}
+
+	const goLinkedDraft = (tx) => {
+		const draftId = String(tx?.issue_draft_id || '').trim()
+		if (!draftId) return
+		uni.navigateTo({ url: `/pages/stock/issue-drafts/detail?draft_id=${draftId}` })
 	}
 
 	const goEdit = () => {
@@ -627,6 +712,9 @@
 	.section { margin: 16px; border-radius: var(--radius-lg); overflow: hidden; }
 	.tiny { display: flex; align-items: center; gap: 8px; color: #6b7280; font-size: 12px; }
 	.tiny-dot { opacity: 0.5; }
+	.hint { margin-top: 4px; font-size: 11px; color: #6b7280; line-height: 1.4; }
+	.empty { padding: 18px 12px; text-align: center; }
+	.empty-text { font-size: 12px; color: #6b7280; }
 
 	.items { display: flex; flex-direction: column; gap: 12px; }
 	.item {
@@ -658,6 +746,44 @@
 	.reason { margin-top: 12px; padding: 10px 12px; border-radius: 14px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.18); }
 	.reason-k { font-size: 12px; color: #b91c1c; font-weight: 700; }
 	.reason-v { margin-top: 6px; font-size: 12px; color: #7f1d1d; line-height: 1.5; }
+
+	.linked-title { display: flex; flex-direction: column; }
+	.linked-list { display: flex; flex-direction: column; gap: 10px; }
+	.linked-record {
+		padding: 12px;
+		border-radius: 14px;
+		background: #fff;
+		border: 1px solid rgba(229, 231, 235, 0.9);
+	}
+	.linked-record.clickable:active { opacity: 0.82; }
+	.linked-head,
+	.linked-foot {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+	}
+	.linked-no { font-size: 13px; font-weight: 900; color: #111827; }
+	.u-tag-small { padding: 3px 8px; font-size: 11px; }
+	.linked-source,
+	.linked-meta {
+		margin-top: 8px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.source-item,
+	.linked-meta-item,
+	.linked-qty {
+		font-size: 11px;
+		color: #6b7280;
+	}
+	.linked-action {
+		font-size: 11px;
+		color: var(--color-primary);
+		font-weight: 800;
+	}
 
 	.bottom-spacer { height: 92px; }
 	.bottom-bar {

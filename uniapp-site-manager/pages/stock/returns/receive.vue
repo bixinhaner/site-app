@@ -64,6 +64,14 @@
 						<text class="info-k">{{ $t('stock.returnBatchCreatedTime') }}</text>
 						<text class="info-v">{{ formatDt(record.created_at || record.operation_time) }}</text>
 					</view>
+					<view class="info-row" v-if="record.material_request_no">
+						<text class="info-k">{{ $t('stock.sourceMaterialRequest') }}</text>
+						<text class="info-v mono">{{ record.material_request_no }}</text>
+					</view>
+					<view class="info-row" v-if="record.issue_draft_no">
+						<text class="info-k">{{ $t('stock.sourceIssueDraft') }}</text>
+						<text class="info-v mono">{{ record.issue_draft_no }}</text>
+					</view>
 				</view>
 
 				<view class="reject" v-if="String(record.status || '') === 'rejected' && record.approval_comments">
