@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 
-from app.models.inspection import SiteInspection
+from app.models.inspection import InspectionCheckItem, SiteInspection
 from app.models.omc_state import OmcDeviceState
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
@@ -137,6 +137,36 @@ def get_expected_device_slots_for_site(db: Session, site_id: int) -> List[Device
     return sorted(slots, key=_slot_sort_key)
 
 
+def get_opening_expected_device_slots_for_site(db: Session, site_id: int) -> List[DeviceSlot]:
+    """
+    获取开站工单生成时的设备位基线。
+
+    站点完成小区扩容后，当前 LLD 可能从 3 小区变成 6 小区；开站交付概况仍应按原开站
+    基线计算，不能用扩容后的当前规划拉大分母。
+    """
+    rows = (
+        db.query(InspectionCheckItem.sector_id, InspectionCheckItem.band)
+        .join(SiteInspection, SiteInspection.id == InspectionCheckItem.inspection_id)
+        .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
+        .filter(
+            SiteInspection.site_id == site_id,
+            WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+            InspectionCheckItem.is_active.is_(True),
+            InspectionCheckItem.sector_id.isnot(None),
+            InspectionCheckItem.band.isnot(None),
+        )
+        .all()
+    )
+    slots = {
+        slot
+        for sector_id, band in rows
+        for slot in [_normalize_device_slot(sector_id, band)]
+        if slot
+    }
+    return sorted(slots, key=_slot_sort_key)
+
+
 def get_bound_slot_rows_for_site(
     db: Session,
     site_id: int,
@@ -225,7 +255,12 @@ def summarize_site_binding_slots(
     *,
     opening_only: bool = False,
 ) -> Dict[str, Any]:
-    expected_slots = get_expected_device_slots_for_site(db, site_id)
+    if opening_only:
+        expected_slots = get_opening_expected_device_slots_for_site(db, site_id)
+        if not expected_slots:
+            expected_slots = get_expected_device_slots_for_site(db, site_id)
+    else:
+        expected_slots = get_expected_device_slots_for_site(db, site_id)
 
     all_bound_rows = [
         row for row in get_bound_slot_rows_for_site(db, site_id, opening_only=opening_only)

@@ -10,8 +10,10 @@
       </div>
     </div>
 
-    <!-- 站点概况（新卡组，置顶） -->
+    <!-- 开站交付概况（新卡组，置顶） -->
     <SiteProgressOverview :progress="topStats?.site_progress" @goto="handleGoto" />
+
+    <CellExpansionOverview :progress="topStats?.cell_expansion_progress" @goto="handleGoto" />
 
     <InstallProgressBreakdown ref="installProgressBreakdownRef" @goto="handleGoto" />
 
@@ -76,6 +78,7 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import StatsOverview from '@/components/dashboard/StatsOverview.vue'
 import SiteProgressOverview from '@/components/dashboard/SiteProgressOverview.vue'
+import CellExpansionOverview from '@/components/dashboard/CellExpansionOverview.vue'
 import InstallProgressBreakdown from '@/components/dashboard/InstallProgressBreakdown.vue'
 import SiteProgressTrend from '@/components/dashboard/SiteProgressTrend.vue'
 import MyTodos from '@/components/dashboard/MyTodos.vue'

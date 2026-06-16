@@ -43,17 +43,17 @@ export default {
   },
   dashboard: {
     siteOverview: {
-      title: "站点概况",
+      title: "开站交付概况",
       mapButton: "查看站点地图",
       cards: {
-        survey: { title: "勘察站点", desc: "完成勘察 / 总站点" },
-        planning: { title: "规划站点", desc: "完成规划 / 总站点" },
-        installStarted: { title: "安装开始站点", desc: "已开始绑定 / 总站点" },
-        installed: { title: "安装完成站点", desc: "已提交及以上 / 总站点" },
-        partialOnline: { title: "部分上线站点", desc: "部分设备上线 / 总站点" },
-        fullyOnline: { title: "完全上线站点", desc: "全部设备上线 / 总站点" },
-        partialActivated: { title: "部分激活站点", desc: "部分设备激活 / 总站点" },
-        fullyActivated: { title: "完全激活站点", desc: "全部设备激活 / 总站点" },
+        survey: { title: "勘察站点", desc: "开站勘察完成 / 总站点" },
+        planning: { title: "规划站点", desc: "开站规划完成 / 总站点" },
+        installStarted: { title: "安装开始站点", desc: "开站设备已开始绑定 / 总站点" },
+        installed: { title: "安装完成站点", desc: "开站工单已提交 / 总站点" },
+        partialOnline: { title: "部分上线站点", desc: "开站设备部分上线 / 总站点" },
+        fullyOnline: { title: "完全上线站点", desc: "开站设备全部上线 / 总站点" },
+        partialActivated: { title: "部分激活站点", desc: "开站设备部分激活 / 总站点" },
+        fullyActivated: { title: "完全激活站点", desc: "开站设备全部激活 / 总站点" },
         online: { title: "完全上线站点", desc: "全部设备上线 / 总站点" },
         activated: { title: "完全激活站点", desc: "全部设备激活 / 总站点" },
         ssv: { title: "SSV 站点", desc: "通过 SSV / 总站点" },
@@ -61,6 +61,20 @@ export default {
       deviceFraction: {
         online: "设备上线 {numerator}/{denominator}",
         activated: "设备激活 {numerator}/{denominator}",
+      },
+    },
+    cellExpansionOverview: {
+      title: "小区扩容概况",
+      subtitle: "仅统计扩容新增小区/设备，不影响开站交付概况",
+      viewOrders: "查看扩容工单",
+      cards: {
+        sites: { title: "扩容站点", desc: "存在小区扩容工单的站点" },
+        newCells: { title: "新增小区/设备", desc: "扩容目标新增范围" },
+        bound: { title: "已绑定", desc: "新增设备位已绑定 SN" },
+        online: { title: "已上线", desc: "完全 {full} · 部分 {partial}" },
+        activated: { title: "已激活", desc: "完全 {full} · 部分 {partial}" },
+        activeOrders: { title: "进行中扩容", desc: "未完成的扩容工单" },
+        completedOrders: { title: "已完成扩容", desc: "已完成的扩容工单" },
       },
     },
     installBreakdown: {

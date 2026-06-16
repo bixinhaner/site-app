@@ -46,40 +46,40 @@ export default {
   },
   dashboard: {
     siteOverview: {
-      title: "Site Overview",
+      title: "Site Installation Overview",
       mapButton: "View Site Map",
       cards: {
         survey: {
           title: "Survey Site",
-          desc: "Completion of survey / total sites",
+          desc: "Installation survey done / total sites",
         },
         planning: {
           title: "Planning Site",
-          desc: "Completed planning / total sites",
+          desc: "Installation planning done / total sites",
         },
         installStarted: {
           title: "Install Started Site",
-          desc: "Binding started / total sites",
+          desc: "Installation device binding started / total sites",
         },
         installed: {
           title: "Install Completed Site",
-          desc: "Submitted and above / total sites",
+          desc: "Installation work order submitted / total sites",
         },
         partialOnline: {
           title: "Partially Online Site",
-          desc: "Some devices online / total sites",
+          desc: "Some installation devices online / total sites",
         },
         fullyOnline: {
           title: "Fully Online Site",
-          desc: "All devices online / total sites",
+          desc: "All installation devices online / total sites",
         },
         partialActivated: {
           title: "Partially Activated Site",
-          desc: "Some devices activated / total sites",
+          desc: "Some installation devices activated / total sites",
         },
         fullyActivated: {
           title: "Fully Activated Site",
-          desc: "All devices activated / total sites",
+          desc: "All installation devices activated / total sites",
         },
         online: {
           title: "Fully Online Site",
@@ -94,6 +94,20 @@ export default {
       deviceFraction: {
         online: "Devices online {numerator}/{denominator}",
         activated: "Devices activated {numerator}/{denominator}",
+      },
+    },
+    cellExpansionOverview: {
+      title: "Cell Expansion Overview",
+      subtitle: "Counts only newly expanded cells/devices and does not change installation delivery progress",
+      viewOrders: "View Expansion Orders",
+      cards: {
+        sites: { title: "Expansion Sites", desc: "Sites with cell expansion work orders" },
+        newCells: { title: "New Cells/Devices", desc: "New target scope for expansion" },
+        bound: { title: "Bound", desc: "New device slots bound with SNs" },
+        online: { title: "Online", desc: "Full {full} · Partial {partial}" },
+        activated: { title: "Activated", desc: "Full {full} · Partial {partial}" },
+        activeOrders: { title: "In Progress", desc: "Unfinished expansion work orders" },
+        completedOrders: { title: "Completed", desc: "Completed expansion work orders" },
       },
     },
     installBreakdown: {

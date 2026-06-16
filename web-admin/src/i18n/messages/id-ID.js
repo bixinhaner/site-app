@@ -46,40 +46,40 @@ export default {
   },
   dashboard: {
     siteOverview: {
-      title: "Ikhtisar Situs",
+      title: "Ikhtisar Instalasi Situs",
       mapButton: "Lihat Peta Situs",
       cards: {
         survey: {
           title: "Situs Survei",
-          desc: "Penyelesaian survei / total lokasi",
+          desc: "Survei instalasi selesai / total situs",
         },
         planning: {
           title: "Situs Perencanaan",
-          desc: "Perencanaan selesai / total situs",
+          desc: "Perencanaan instalasi selesai / total situs",
         },
         installStarted: {
           title: "Instal Situs yang Dimulai",
-          desc: "Pengikatan dimulai / total situs",
+          desc: "Pengikatan perangkat instalasi dimulai / total situs",
         },
         installed: {
           title: "Instal Situs Selesai",
-          desc: "Dikirim dan di atas / total situs",
+          desc: "WO instalasi sudah dikirim / total situs",
         },
         partialOnline: {
           title: "Situs Online Sebagian",
-          desc: "Sebagian perangkat online / total situs",
+          desc: "Sebagian perangkat instalasi online / total situs",
         },
         fullyOnline: {
           title: "Situs Online Penuh",
-          desc: "Semua perangkat online / total situs",
+          desc: "Semua perangkat instalasi online / total situs",
         },
         partialActivated: {
           title: "Situs Aktif Sebagian",
-          desc: "Sebagian perangkat aktif / total situs",
+          desc: "Sebagian perangkat instalasi aktif / total situs",
         },
         fullyActivated: {
           title: "Situs Aktif Penuh",
-          desc: "Semua perangkat aktif / total situs",
+          desc: "Semua perangkat instalasi aktif / total situs",
         },
         online: {
           title: "Situs Online Penuh",
@@ -97,6 +97,20 @@ export default {
       deviceFraction: {
         online: "Perangkat online {numerator}/{denominator}",
         activated: "Perangkat aktif {numerator}/{denominator}",
+      },
+    },
+    cellExpansionOverview: {
+      title: "Ikhtisar Ekspansi Sel",
+      subtitle: "Hanya menghitung sel/perangkat tambahan dan tidak mengubah progres instalasi",
+      viewOrders: "Lihat WO Ekspansi",
+      cards: {
+        sites: { title: "Situs Ekspansi", desc: "Situs dengan WO ekspansi sel" },
+        newCells: { title: "Sel/Perangkat Baru", desc: "Cakupan target baru ekspansi" },
+        bound: { title: "Terikat", desc: "Slot perangkat baru sudah terikat SN" },
+        online: { title: "Online", desc: "Penuh {full} · Sebagian {partial}" },
+        activated: { title: "Aktif", desc: "Penuh {full} · Sebagian {partial}" },
+        activeOrders: { title: "Berjalan", desc: "WO ekspansi belum selesai" },
+        completedOrders: { title: "Selesai", desc: "WO ekspansi selesai" },
       },
     },
     installBreakdown: {

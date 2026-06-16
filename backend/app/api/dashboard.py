@@ -9,7 +9,8 @@ from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.user import User as UserModel
-from app.models.work_order import WorkOrder
+from app.models.equipment_binding_history import BindingActionEnum
+from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.models.inspection import SiteInspection, InspectionStatusEnum
 from app.models.site import Site
 from app.models.site_group import SiteGroupAssignment, SiteGroupCategory, SiteGroupOption
@@ -17,7 +18,8 @@ from app.models.site_progress import SiteProgressSnapshot
 from app.models.survey_archive import SiteSurveyArchive
 from app.models.equipment import Inventory, Equipment, StockTransaction
 from app.models.omc_state import OmcDeviceState
-from app.services.omc_state import summarize_site_binding_slots
+from app.services.cell_expansion import get_expansion_target_slots_from_work_order
+from app.services.omc_state import get_bound_slot_rows_for_site, summarize_site_binding_slots
 from app.services.site_progress_service import (
     ensure_site_progress_snapshots,
     get_site_progress_rows,
@@ -38,6 +40,14 @@ router = APIRouter()
 _TREND_GRANULARITIES = {"day", "week", "month"}
 _TREND_DEFAULT_PERIODS = {"day": 30, "week": 12, "month": 12}
 _TREND_MAX_PERIODS = {"day": 180, "week": 104, "month": 60}
+_EXPANSION_ACTIVE_STATUSES = {
+    WorkOrderStatusEnum.PENDING,
+    WorkOrderStatusEnum.ACTIVE,
+    WorkOrderStatusEnum.SUBMITTED,
+    WorkOrderStatusEnum.UNDER_REVIEW,
+    WorkOrderStatusEnum.APPROVED,
+    WorkOrderStatusEnum.ACTIVATED,
+}
 
 
 def _to_naive_utc(value: Optional[datetime | str]) -> Optional[datetime]:
@@ -185,8 +195,10 @@ def _build_site_device_progress_metrics(
     site_ids: Optional[Iterable[int]] = None,
 ) -> Dict[int, Dict[str, Any]]:
     """
-    设备分数按开站阶段有效设备位计算，规划有设备位时分母为规划位数量，
-    避免缺槽位的站点因为已绑定设备全部在线而被看成完整。
+    设备分数按开站阶段有效设备位计算。
+
+    summarize_site_binding_slots(opening_only=True) 会优先使用开站检查项里的原始设备位作为分母，
+    避免小区扩容合并当前 LLD 后把开站交付进度从 3/3 拉成 3/6。
     """
     requested_site_ids = _normalize_site_ids(site_ids)
     if requested_site_ids is not None and not requested_site_ids:
@@ -321,6 +333,180 @@ def _build_site_device_progress(
     )
 
 
+def _empty_cell_expansion_progress() -> Dict[str, Any]:
+    return {
+        "visible": False,
+        "orders": {"total": 0, "active": 0, "completed": 0},
+        "sites": {"total": 0, "active": 0, "completed": 0},
+        "new_cells": {"total": 0},
+        "new_devices": {"total": 0, "bound": 0, "online": 0, "activated": 0},
+        "online": {"partial_sites": 0, "full_sites": 0},
+        "activated": {"partial_sites": 0, "full_sites": 0},
+    }
+
+
+def _cell_expansion_cell_count(work_order: WorkOrder, target_slot_count: int) -> int:
+    extra = work_order.extra_data or {}
+    raw_count = extra.get("new_cell_count")
+    try:
+        count = int(raw_count)
+    except (TypeError, ValueError):
+        count = 0
+    if count > 0:
+        return count
+    target_cells = extra.get("new_cells") or extra.get("expansion_targets") or []
+    if isinstance(target_cells, list) and target_cells:
+        return len(target_cells)
+    return int(target_slot_count or 0)
+
+
+def _site_bound_slot_map(db: Session, site_id: int) -> Dict[Tuple[str, str], Any]:
+    rows = [
+        row
+        for row in get_bound_slot_rows_for_site(db, site_id, opening_only=False)
+        if row.action != BindingActionEnum.UNBIND and str(row.equipment_sn or "").strip()
+    ]
+    slot_map: Dict[Tuple[str, str], Any] = {}
+    for row in rows:
+        sector_id = str(row.sector_id or "").strip()
+        band = str(row.band or "").strip().upper()
+        if sector_id and band:
+            slot_map[(sector_id, band)] = row
+    return slot_map
+
+
+def _build_cell_expansion_progress(db: Session) -> Dict[str, Any]:
+    work_orders = (
+        db.query(WorkOrder)
+        .filter(
+            WorkOrder.type == WorkOrderTypeEnum.CELL_EXPANSION,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+        )
+        .all()
+    )
+    if not work_orders:
+        return _empty_cell_expansion_progress()
+
+    site_slot_maps: Dict[int, Dict[Tuple[str, str], Any]] = {}
+    order_metrics: List[Dict[str, int]] = []
+    all_sns: set[str] = set()
+
+    total_new_cells = 0
+    total_new_devices = 0
+    total_bound_devices = 0
+
+    for work_order in work_orders:
+        target_slots = get_expansion_target_slots_from_work_order(work_order)
+        expected_count = len(target_slots)
+        total_new_cells += _cell_expansion_cell_count(work_order, expected_count)
+        total_new_devices += expected_count
+
+        slot_map = site_slot_maps.get(work_order.site_id)
+        if slot_map is None:
+            slot_map = _site_bound_slot_map(db, work_order.site_id)
+            site_slot_maps[work_order.site_id] = slot_map
+
+        sns: List[str] = []
+        for slot in target_slots:
+            row = slot_map.get(slot)
+            sn = str(getattr(row, "equipment_sn", "") or "").strip() if row else ""
+            if not sn:
+                continue
+            sns.append(sn)
+            all_sns.add(sn)
+
+        bound_count = len(sns)
+        total_bound_devices += bound_count
+        order_metrics.append(
+            {
+                "site_id": int(work_order.site_id),
+                "expected": expected_count,
+                "bound": bound_count,
+                "online": 0,
+                "activated": 0,
+            }
+        )
+
+    state_map: Dict[str, OmcDeviceState] = {}
+    if all_sns:
+        state_map = {
+            state.sn: state
+            for state in db.query(OmcDeviceState)
+            .filter(OmcDeviceState.sn.in_(sorted(all_sns)))
+            .all()
+        }
+
+    total_online_devices = 0
+    total_activated_devices = 0
+    partial_online_sites: set[int] = set()
+    full_online_sites: set[int] = set()
+    partial_activated_sites: set[int] = set()
+    full_activated_sites: set[int] = set()
+
+    for metric, work_order in zip(order_metrics, work_orders):
+        target_slots = get_expansion_target_slots_from_work_order(work_order)
+        slot_map = site_slot_maps.get(work_order.site_id) or {}
+        sns = [
+            str(getattr(slot_map.get(slot), "equipment_sn", "") or "").strip()
+            for slot in target_slots
+            if slot_map.get(slot) and str(getattr(slot_map.get(slot), "equipment_sn", "") or "").strip()
+        ]
+        online_count = sum(
+            1 for sn in sns if bool(getattr(state_map.get(sn), "ever_online", False))
+        )
+        activated_count = sum(
+            1 for sn in sns if bool(getattr(state_map.get(sn), "ever_activated", False))
+        )
+        expected_count = int(metric["expected"] or 0)
+        metric["online"] = online_count
+        metric["activated"] = activated_count
+        total_online_devices += online_count
+        total_activated_devices += activated_count
+
+        if expected_count <= 0:
+            continue
+        if online_count >= expected_count:
+            full_online_sites.add(int(work_order.site_id))
+        elif online_count > 0:
+            partial_online_sites.add(int(work_order.site_id))
+        if activated_count >= expected_count:
+            full_activated_sites.add(int(work_order.site_id))
+        elif activated_count > 0:
+            partial_activated_sites.add(int(work_order.site_id))
+
+    active_orders = [wo for wo in work_orders if wo.status in _EXPANSION_ACTIVE_STATUSES]
+    completed_orders = [wo for wo in work_orders if wo.status == WorkOrderStatusEnum.COMPLETED]
+
+    return {
+        "visible": True,
+        "orders": {
+            "total": len(work_orders),
+            "active": len(active_orders),
+            "completed": len(completed_orders),
+        },
+        "sites": {
+            "total": len({int(wo.site_id) for wo in work_orders}),
+            "active": len({int(wo.site_id) for wo in active_orders}),
+            "completed": len({int(wo.site_id) for wo in completed_orders}),
+        },
+        "new_cells": {"total": total_new_cells},
+        "new_devices": {
+            "total": total_new_devices,
+            "bound": total_bound_devices,
+            "online": total_online_devices,
+            "activated": total_activated_devices,
+        },
+        "online": {
+            "partial_sites": len(partial_online_sites - full_online_sites),
+            "full_sites": len(full_online_sites),
+        },
+        "activated": {
+            "partial_sites": len(partial_activated_sites - full_activated_sites),
+            "full_sites": len(full_activated_sites),
+        },
+    }
+
+
 @router.get("/summary")
 async def get_dashboard_summary(
     db: Session = Depends(get_db),
@@ -336,6 +522,7 @@ async def get_dashboard_summary(
     - sites: { approx: false, status }
     - site_progress: { total, survey_done, planning_done, install_started, installed, online, activated,
       partial_online, fully_online, partial_activated, fully_activated, device_progress, ssv_passed }
+    - cell_expansion_progress: 独立的小区扩容新增设备进度，不混入开站交付概况
     - inspections: { pending_review_count }
     - surveys: { last7d_new }
     - time_range: { from, to }
@@ -455,6 +642,7 @@ async def get_dashboard_summary(
         },
         "sites": {"approx": False, "status": site_status},
         "site_progress": site_progress,
+        "cell_expansion_progress": _build_cell_expansion_progress(db),
         "inspections": {"pending_review_count": int(pending_review_count)},
         "surveys": {"last7d_new": int(surveys_last7d)},
         "time_range": {"from": to_utc_iso(start), "to": to_utc_iso(end)},
