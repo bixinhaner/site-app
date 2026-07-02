@@ -37,6 +37,7 @@ class UserCreate(UserBase):
     password: str
     role: Optional[str] = None
     roles: List[str] = Field(default_factory=list)
+    subcontractor_option_id: Optional[int] = None
 
     @validator('role')
     def validate_role(cls, v):
@@ -54,6 +55,7 @@ class UserUpdate(BaseModel):
     position: Optional[str] = None
     role: Optional[str] = None
     roles: Optional[List[str]] = None
+    subcontractor_option_id: Optional[int] = None
     is_active: Optional[bool] = None
 
     @validator('role')
@@ -98,6 +100,8 @@ class UserResponse(UserBase):
     managed_warehouse_ids: List[int] = Field(default_factory=list)
     managed_warehouse_count: int = 0
     has_managed_warehouses: bool = False
+    subcontractor_option_id: Optional[int] = None
+    subcontractor: Optional[Dict[str, object]] = None
     is_active: bool
     avatar: Optional[str] = None
     created_at: datetime

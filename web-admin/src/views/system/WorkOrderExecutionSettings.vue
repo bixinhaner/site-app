@@ -73,6 +73,46 @@
     <el-card class="mb16" v-loading="loading">
       <template #header>
         <div class="card-header">
+          <span>工单指派联动</span>
+        </div>
+      </template>
+      <el-form label-width="210px" :disabled="!canEdit">
+        <el-form-item label="分包商分类">
+          <el-select
+            v-model="assignmentForm.subcontractor_category_id"
+            placeholder="选择一个站点分组分类"
+            clearable
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="category in siteGroupCategories"
+              :key="category.id"
+              :label="category.name"
+              :value="category.id"
+            />
+          </el-select>
+          <div class="hint mt8">
+            这里明确指定哪个“站点分组分类”代表分包商，分类名称和编码可由用户自定义。
+          </div>
+        </el-form-item>
+        <el-form-item label="自动同步站点分包商">
+          <el-switch
+            v-model="assignmentForm.auto_sync_site_subcontractor_on_assignment"
+            active-text="启用"
+            inactive-text="关闭"
+            :disabled="!assignmentForm.subcontractor_category_id"
+          />
+          <div class="hint mt8">
+            开启后，创建或重新指派工单时，如果执行账号绑定了分包商且站点尚未分包，系统会自动把站点关联到该分包商；如果站点已有不同分包商，会阻止保存并要求人工确认。
+          </div>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card class="mb16" v-loading="loading">
+      <template #header>
+        <div class="card-header">
           <span>全局默认</span>
         </div>
       </template>
@@ -372,12 +412,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Document, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
-import { workOrderExecutionSettingsApi } from '@/api/system'
+import { workOrderAssignmentSettingsApi, workOrderExecutionSettingsApi } from '@/api/system'
+import siteGroupsApi from '@/api/siteGroups'
 import { userAPI } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 
@@ -387,6 +428,7 @@ const loading = ref(false)
 const saving = ref(false)
 const userSelectLoading = ref(false)
 const userOptions = ref([])
+const siteGroupCategories = ref([])
 
 const boolModeOptions = [
   { label: '跟随默认', value: '' },
@@ -464,6 +506,11 @@ const createDefaultForm = () => ({
 })
 
 const form = reactive(createDefaultForm())
+const assignmentForm = reactive({
+  config_version: 1,
+  subcontractor_category_id: null,
+  auto_sync_site_subcontractor_on_assignment: false,
+})
 const effective = reactive({
   enabled: false,
   allow_photo_upload: true,
@@ -481,6 +528,15 @@ const newUserRule = reactive({
 })
 
 const canEdit = computed(() => userStore.hasPermission('authz:manage:all'))
+
+watch(
+  () => assignmentForm.subcontractor_category_id,
+  (categoryId) => {
+    if (!categoryId) {
+      assignmentForm.auto_sync_site_subcontractor_on_assignment = false
+    }
+  },
+)
 
 const defaultBoolKeys = [
   'enabled',
@@ -724,8 +780,20 @@ const loadConfig = async () => {
   loading.value = true
   try {
     resetForm()
-    const data = await workOrderExecutionSettingsApi.getSettings()
+    const [data, assignmentData] = await Promise.all([
+      workOrderExecutionSettingsApi.getSettings(),
+      workOrderAssignmentSettingsApi.getSettings(),
+    ])
+    siteGroupCategories.value = await siteGroupsApi.listCategories()
     form.config_version = Number(data?.config_version || 1)
+    assignmentForm.config_version = Number(assignmentData?.config_version || 1)
+    assignmentForm.subcontractor_category_id = assignmentData?.subcontractor_category_id || null
+    assignmentForm.auto_sync_site_subcontractor_on_assignment = Boolean(
+      assignmentData?.auto_sync_site_subcontractor_on_assignment,
+    )
+    if (!assignmentForm.subcontractor_category_id) {
+      assignmentForm.auto_sync_site_subcontractor_on_assignment = false
+    }
 
     defaultBoolKeys.forEach((key) => {
       form[key].default = Boolean(data?.[key]?.default ?? form[key].default)
@@ -932,8 +1000,22 @@ const save = async () => {
   saving.value = true
   try {
     const payload = buildPayload()
-    const saved = await workOrderExecutionSettingsApi.updateSettings(payload)
+    const [saved, assignmentSaved] = await Promise.all([
+      workOrderExecutionSettingsApi.updateSettings(payload),
+      workOrderAssignmentSettingsApi.updateSettings({
+        config_version: assignmentForm.config_version,
+        subcontractor_category_id: assignmentForm.subcontractor_category_id || null,
+        auto_sync_site_subcontractor_on_assignment: Boolean(
+          assignmentForm.auto_sync_site_subcontractor_on_assignment,
+        ),
+      }),
+    ])
     form.config_version = Number(saved?.config_version || form.config_version)
+    assignmentForm.config_version = Number(assignmentSaved?.config_version || assignmentForm.config_version)
+    assignmentForm.subcontractor_category_id = assignmentSaved?.subcontractor_category_id || null
+    assignmentForm.auto_sync_site_subcontractor_on_assignment = Boolean(
+      assignmentSaved?.auto_sync_site_subcontractor_on_assignment,
+    )
     ElMessage.success('Web 工单执行配置已保存')
     await loadConfig()
   } catch (error) {

@@ -298,7 +298,7 @@ export default {
     summaryAlert:
       "The default profile applies to all sites. If a site is assigned to a Subcontractor group, its matching subcontractor payment profile is used first. Ratio amounts can be based on the site contract amount or the profile site unit price.",
     subcontractorMissingTip:
-      'No "Subcontractor" site group dimension was found. Create a manual site group with code subcontractor under System Management -> Site Groups, then add subcontractor options.',
+      'No subcontractor category is configured. Select the site group category that represents subcontractors under System Config -> Web Work Order Execution -> Work Order Assignment Linkage, then maintain its subcontractor options.',
     configVersion: "Config Version",
     configVersionTip:
       "The current version is stored as-is when saving. If strict version incrementing is needed, concurrency checks can be added later.",

@@ -21,6 +21,12 @@ from app.services.authz_service import (
     user_has_permission,
 )
 from app.services.warehouse_access_service import build_inventory_access_profile
+from app.services.subcontractor_assignment_service import (
+    get_subcontractor_options,
+    get_user_subcontractor_assignment,
+    serialize_user_subcontractor_assignment,
+    set_user_subcontractor_assignment,
+)
 
 router = APIRouter()
 
@@ -58,6 +64,10 @@ def _with_authz_payload(db: Session, user: User) -> User:
         setattr(user, 'managed_warehouse_ids', list(inventory_profile.get('managed_warehouse_ids') or []))
         setattr(user, 'managed_warehouse_count', int(inventory_profile.get('managed_warehouse_count') or 0))
         setattr(user, 'has_managed_warehouses', bool(inventory_profile.get('has_managed_warehouses')))
+        subcontractor_assignment = get_user_subcontractor_assignment(db, user.id)
+        subcontractor = serialize_user_subcontractor_assignment(subcontractor_assignment)
+        setattr(user, 'subcontractor_option_id', subcontractor.get('option_id') if subcontractor else None)
+        setattr(user, 'subcontractor', subcontractor)
     except Exception:
         pass
     return user
@@ -130,6 +140,19 @@ async def search_users(
     )
 
 
+@router.get('/subcontractor-options')
+async def get_user_subcontractor_options(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _assert_access(
+        current_user,
+        role_codes=['admin', 'manager'],
+        permission_codes=['users:list:read', 'users:create:write', 'users:update:write'],
+    )
+    return get_subcontractor_options(db)
+
+
 @router.get('/', response_model=List[UserResponse])
 async def get_users(
     skip: int = 0,
@@ -190,6 +213,13 @@ async def create_user(
     role_codes = _resolve_role_codes(user_data.role, user_data.roles)
     try:
         set_user_roles_by_codes(db, db_user, role_codes)
+        set_user_subcontractor_assignment(
+            db,
+            user_id=db_user.id,
+            option_id=user_data.subcontractor_option_id,
+            operator_id=current_user.id,
+        )
+        db.commit()
     except ValueError as exc:
         db.delete(db_user)
         db.commit()
@@ -272,7 +302,8 @@ async def update_user(
                 detail='Email already exists'
             )
 
-    update_data = user_update.dict(exclude_unset=True, exclude={'role', 'roles'})
+    update_data = user_update.dict(exclude_unset=True, exclude={'role', 'roles', 'subcontractor_option_id'})
+    subcontractor_requested = 'subcontractor_option_id' in user_update.model_fields_set
 
     if not can_update_any_user and current_user.id == user_id:
         disallowed_fields = {'is_active'}
@@ -292,6 +323,25 @@ async def update_user(
         try:
             set_user_roles_by_codes(db, user, requested_roles)
         except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        db.refresh(user)
+
+    if subcontractor_requested:
+        if not can_update_any_user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='Not enough permissions',
+            )
+        try:
+            set_user_subcontractor_assignment(
+                db,
+                user_id=user.id,
+                option_id=user_update.subcontractor_option_id,
+                operator_id=current_user.id,
+            )
+            db.commit()
+        except ValueError as exc:
+            db.rollback()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
         db.refresh(user)
 

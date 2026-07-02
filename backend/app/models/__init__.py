@@ -16,6 +16,7 @@ from .omc_cellname_sync import OmcCellNameSync
 from .app_version import AppVersion, AppVersionDownloadLog, AppVersionReleaseNote, AppVersionReleaseNoteItem, AppVersionUsageLog
 from .site_progress import SiteProgressSnapshot, SiteProgressEvent
 from .site_group import SiteGroupAssignment, SiteGroupCategory, SiteGroupOption
+from .user_subcontractor import UserSubcontractorAssignment
 
 __all__ = [
     "User",
@@ -69,4 +70,5 @@ __all__ = [
     "SiteGroupAssignment",
     "SiteGroupCategory",
     "SiteGroupOption",
+    "UserSubcontractorAssignment",
 ]

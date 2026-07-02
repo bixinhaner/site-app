@@ -301,7 +301,7 @@ export default {
     summaryAlert:
       "Profil default berlaku untuk semua situs. Jika situs memiliki dimensi grup Subkontraktor, profil pembayaran subkontraktor yang cocok akan dipakai lebih dulu. Nilai berbasis rasio dapat dihitung dari nilai kontrak situs atau harga satuan situs di profil.",
     subcontractorMissingTip:
-      'Dimensi grup situs "Subkontraktor" belum ditemukan. Buat grup manual dengan code subcontractor di Manajemen Sistem -> Grup Situs, lalu tambahkan opsi subkontraktor.',
+      "Kategori subkontraktor belum dikonfigurasi. Pilih kategori grup situs yang mewakili subkontraktor di Konfigurasi Sistem -> Eksekusi Work Order Web -> Tautan Penugasan Work Order, lalu kelola opsi subkontraktornya.",
     configVersion: "Versi Konfigurasi",
     configVersionTip:
       "Saat disimpan, versi saat ini akan langsung disimpan. Jika perlu kenaikan versi yang ketat, pemeriksaan konkurensi bisa ditambahkan nanti.",

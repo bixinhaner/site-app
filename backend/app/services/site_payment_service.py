@@ -10,6 +10,10 @@ from app.models.site import Site
 from app.models.site_group import SiteGroupAssignment, SiteGroupCategory, SiteGroupOption
 from app.models.system_config import SystemConfig
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
+from app.services.subcontractor_assignment_service import (
+    get_subcontractor_category as get_configured_subcontractor_category,
+    load_work_order_assignment_settings,
+)
 from app.services.site_progress_metric_service import get_site_progress_metric_mode
 from app.services.site_progress_service import get_site_progress_milestone_at, get_site_progress_snapshot
 
@@ -382,6 +386,10 @@ def get_site_payment_currency_options() -> List[Dict[str, str]]:
 
 
 def get_subcontractor_category(db: Session) -> Optional[SiteGroupCategory]:
+    assignment_settings = load_work_order_assignment_settings(db)
+    if assignment_settings.get("subcontractor_category_id"):
+        return get_configured_subcontractor_category(db, assignment_settings)
+
     categories = (
         db.query(SiteGroupCategory)
         .filter(SiteGroupCategory.is_active == True)

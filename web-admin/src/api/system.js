@@ -78,6 +78,16 @@ export const workOrderExecutionSettingsApi = {
   },
 }
 
+export const workOrderAssignmentSettingsApi = {
+  getSettings() {
+    return request.get('/api/system/workorder-assignment-settings')
+  },
+
+  updateSettings(data) {
+    return request.put('/api/system/workorder-assignment-settings', data)
+  },
+}
+
 // 逆地理缓存观测相关 API
 export const geocodeCacheApi = {
   getStats() {

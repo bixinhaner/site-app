@@ -101,6 +101,7 @@ from app.services.cell_expansion import (
     validate_expansion_target_cells,
 )
 from app.services.site_progress_service import rebuild_site_progress
+from app.services.subcontractor_assignment_service import sync_site_subcontractor_from_assignee
 from app.utils.archive_pdf import localized_text, normalize_locale
 from app.utils.timezone import to_utc_iso
 
@@ -139,6 +140,27 @@ def _rebuild_site_progress_if_needed(
         reason=reason,
         operator_id=operator_id,
     )
+
+
+def _sync_site_subcontractor_for_assignment(
+    db: Session,
+    *,
+    site_id: int,
+    assignee_id: Optional[int],
+    operator_id: Optional[int],
+) -> Dict[str, Any]:
+    try:
+        return sync_site_subcontractor_from_assignee(
+            db,
+            site_id=site_id,
+            assignee_id=assignee_id,
+            operator_id=operator_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
 SSV_IN_PROGRESS_STATUSES = (
     WorkOrderStatusEnum.PENDING,
     WorkOrderStatusEnum.ACTIVE,
@@ -1791,6 +1813,15 @@ async def create_work_order(
             "new_cells": normalized_expansion.get("new_cells") or [],
         }
 
+    subcontractor_sync = _sync_site_subcontractor_for_assignment(
+        db,
+        site_id=data.site_id,
+        assignee_id=data.assigned_to,
+        operator_id=current_user.id,
+    )
+    if subcontractor_sync.get("action") not in {"disabled"}:
+        extra_data["subcontractor_sync"] = subcontractor_sync
+
     wo = WorkOrder(
         id=str(uuid.uuid4()),
         site_id=data.site_id,
@@ -1922,10 +1953,20 @@ async def update_work_order(
         old_assignee_id = wo.assigned_to
         if new_assignee_id != old_assignee_id:
             old_assignee = db.query(User).filter(User.id == old_assignee_id).first()
+            subcontractor_sync = _sync_site_subcontractor_for_assignment(
+                db,
+                site_id=wo.site_id,
+                assignee_id=new_assignee_id,
+                operator_id=current_user.id,
+            )
 
             wo.assigned_to = new_assignee_id
             wo.assigned_by = current_user.id
             wo.assigned_at = datetime.utcnow()
+            if subcontractor_sync.get("action") not in {"disabled"}:
+                extra = dict(wo.extra_data or {})
+                extra["subcontractor_sync"] = subcontractor_sync
+                wo.extra_data = extra
 
             if wo.inspection_id:
                 inspection = db.query(SiteInspection).filter(SiteInspection.id == wo.inspection_id).first()

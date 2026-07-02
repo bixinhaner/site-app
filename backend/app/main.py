@@ -38,6 +38,7 @@ from app.models import mobile_client_log as _mobile_client_log_models  # noqa: F
 from app.models import site_progress as _site_progress_models  # noqa: F401
 from app.models import site_business as _site_business_models  # noqa: F401
 from app.models import site_group as _site_group_models  # noqa: F401
+from app.models import user_subcontractor as _user_subcontractor_models  # noqa: F401
 from app.models.user import User
 from app.api import auth, authz, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai, ai_management
 from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
@@ -46,6 +47,7 @@ from app.api import operation_logs, app_version
 from app.api import mobile_client_logs
 from app.api import mock_omc_proxy
 from app.api import work_order_execution_settings
+from app.api import work_order_assignment_settings
 from app.api import site_payment_settings
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
@@ -138,6 +140,7 @@ app.include_router(operation_logs.router, prefix="/api", tags=["操作日志"])
 app.include_router(mobile_client_logs.router, prefix="/api", tags=["移动端日志"])
 app.include_router(mobile_settings.router, prefix="/api/system", tags=["系统配置"])
 app.include_router(work_order_execution_settings.router, prefix="/api/system", tags=["系统配置"])
+app.include_router(work_order_assignment_settings.router, prefix="/api/system", tags=["系统配置"])
 app.include_router(site_payment_settings.router, prefix="/api/system", tags=["系统配置"])
 app.include_router(geocode_cache.router, prefix="/api/system", tags=["地理编码缓存"])
 app.include_router(ai_management.router, prefix="/api/system/ai", tags=["AI管理"])

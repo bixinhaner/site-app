@@ -60,6 +60,11 @@ export const userAPI = {
   // 获取用户统计信息
   getUserStats: () => {
     return request.get('/api/users/stats/summary')
+  },
+
+  // 获取当前配置下的分包商选项
+  getSubcontractorOptions: () => {
+    return request.get('/api/users/subcontractor-options')
   }
 }
 

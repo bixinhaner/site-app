@@ -45,6 +45,13 @@
             </el-tag>
           </div>
         </el-descriptions-item>
+
+        <el-descriptions-item label="分包商">
+          <el-tag v-if="user.subcontractor?.option_name" effect="plain">
+            {{ user.subcontractor.option_name }}
+          </el-tag>
+          <span v-else>-</span>
+        </el-descriptions-item>
         
         <el-descriptions-item label="部门">
           {{ user.department || '-' }}

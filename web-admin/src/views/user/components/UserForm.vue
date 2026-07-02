@@ -103,6 +103,29 @@
         </el-col>
       </el-row>
 
+      <el-row :gutter="20">
+        <el-col :span="12">
+          <el-form-item label="分包商">
+            <el-select
+              v-model="form.subcontractor_option_id"
+              placeholder="不绑定分包商"
+              clearable
+              filterable
+              style="width: 100%"
+              :disabled="!canEditSubcontractor"
+            >
+              <el-option
+                v-for="option in subcontractorOptions"
+                :key="option.id"
+                :label="option.name"
+                :value="option.id"
+              />
+            </el-select>
+            <div class="field-tip">开启工单指派联动后，指派给该账号会自动补齐站点分包商。</div>
+          </el-form-item>
+        </el-col>
+      </el-row>
+
       <el-row :gutter="20" v-if="showExecutionPreview">
         <el-col :span="24">
           <el-card class="execution-preview-card" shadow="never" v-loading="executionPreviewLoading">
@@ -277,6 +300,7 @@ const userStore = useUserStore()
 const loading = ref(false)
 const formRef = ref()
 const roleOptions = ref([])
+const subcontractorOptions = ref([])
 const executionPreviewLoading = ref(false)
 
 // 表单数据
@@ -288,6 +312,7 @@ const form = reactive({
   full_name: '',
   phone: '',
   roles: ['user'],
+  subcontractor_option_id: null,
   department: '',
   position: '',
   is_active: true
@@ -337,6 +362,7 @@ const executionPreview = computed(() => {
 // 计算属性
 const isEditing = computed(() => !!props.user)
 const canChangeRole = computed(() => userStore.hasPermission('authz:manage:all'))
+const canEditSubcontractor = computed(() => userStore.hasPermission('users:update:write') || userStore.hasPermission('users:create:write'))
 const canChangeStatus = computed(() => {
   if (!userStore.hasPermission('users:delete:write')) return false
   if (isEditing.value && props.user?.id === userStore.currentUser?.id) return false
@@ -432,6 +458,7 @@ const initForm = () => {
     form.phone = props.user.phone || ''
     const roles = Array.isArray(props.user.roles) ? props.user.roles : []
     form.roles = roles.length > 0 ? [...roles] : (props.user.role ? [props.user.role] : ['user'])
+    form.subcontractor_option_id = props.user.subcontractor_option_id || props.user.subcontractor?.option_id || null
     form.department = props.user.department || ''
     form.position = props.user.position || ''
     form.is_active = props.user.is_active
@@ -519,6 +546,7 @@ const resetForm = () => {
   form.full_name = ''
   form.phone = ''
   form.roles = ['user']
+  form.subcontractor_option_id = null
   form.department = ''
   form.position = ''
   form.is_active = true
@@ -542,6 +570,9 @@ const handleSubmit = async () => {
         position: form.position || null,
         is_active: form.is_active
       }
+      if (canEditSubcontractor.value) {
+        updateData.subcontractor_option_id = form.subcontractor_option_id || null
+      }
 
       // 角色由 authz:manage:all 控制
       if (canChangeRole.value) {
@@ -561,6 +592,9 @@ const handleSubmit = async () => {
         roles: form.roles,
         department: form.department || null,
         position: form.position || null
+      }
+      if (canEditSubcontractor.value) {
+        createData.subcontractor_option_id = form.subcontractor_option_id || null
       }
 
       await userAPI.createUser(createData)
@@ -595,6 +629,7 @@ watch(
 // 组件挂载
 onMounted(() => {
   loadRoleOptions()
+  loadSubcontractorOptions()
   initForm()
 })
 
@@ -613,6 +648,14 @@ const loadRoleOptions = async () => {
       { code: 'planner', name: '规划人员' },
       { code: 'admin', name: '系统管理员' },
     ]
+  }
+}
+
+const loadSubcontractorOptions = async () => {
+  try {
+    subcontractorOptions.value = await userAPI.getSubcontractorOptions()
+  } catch (error) {
+    subcontractorOptions.value = []
   }
 }
 </script>
@@ -672,5 +715,12 @@ const loadRoleOptions = async () => {
 .preview-muted {
   color: #909399;
   font-size: 12px;
+}
+
+.field-tip {
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>

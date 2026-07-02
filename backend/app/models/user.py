@@ -33,6 +33,13 @@ class User(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     role_links = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
+    subcontractor_assignment = relationship(
+        "UserSubcontractorAssignment",
+        foreign_keys="UserSubcontractorAssignment.user_id",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     @property
     def role_codes(self):

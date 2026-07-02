@@ -136,6 +136,15 @@
             </div>
           </template>
         </el-table-column>
+
+        <el-table-column prop="subcontractor" label="分包商" width="150">
+          <template #default="{ row }">
+            <el-tag v-if="row.subcontractor?.option_name" effect="plain">
+              {{ row.subcontractor.option_name }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         
         <el-table-column prop="department" label="部门" width="120">
           <template #default="{ row }">
