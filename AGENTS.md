@@ -54,7 +54,7 @@
   - User：`baicells`
   - Port：`53680`
   - IdentityFile：`/Users/like/.ssh/site_app_savanna_ed25519`
-- 权限声明：Surge 和 Savanna 两个生产环境均按“具备 sudo 免密 root 权限”的运维前提处理。Savanna 登录 `admin82` 后可执行 `sudo su -` 切换到 root，再做部署、重启服务或编辑 root 拥有文件。执行生产写入/重启前，优先用 `sudo -n true` 或 `sudo su -` 验证 root 权限；如果验证失败，停止写入/重启动作并向用户说明权限配置异常。
+- 权限声明：Surge 和 Savanna 两个生产环境均按“具备 sudo 免密 root 权限”的运维前提处理。Savanna 登录 `admin82` 后可执行 `sudo su -` 切换到 root，再做部署、重启服务或编辑 root 拥有文件。执行生产写入/重启前，优先用 `sudo su -` 验证 root 权限；如果验证失败，停止写入/重启动作并向用户说明权限配置异常。
 
 ## Git 与提交规则
 
