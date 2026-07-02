@@ -209,7 +209,9 @@
         <div class="card-header">
           <span>{{ t('siteDetail.payment.title') }}</span>
           <div class="payment-summary">
-            <span>{{ t('siteDetail.payment.contractAmount') }}：{{ formatMoney(site?.contract_amount, paymentData.currency) }}</span>
+            <span>{{ t('siteDetail.payment.profile') }}：{{ paymentProfileName }}</span>
+            <span>{{ t('siteDetail.payment.subcontractor') }}：{{ paymentSubcontractorName }}</span>
+            <span>{{ paymentAmountBaseLabel }}：{{ formatMoney(paymentData.amount_base, paymentData.currency) }}</span>
             <span>{{ t('siteDetail.payment.openingWorkOrder') }}：{{ paymentOpeningStatusText }}</span>
           </div>
         </div>
@@ -707,6 +709,10 @@ const manualMilestoneRecords = ref({
 const paymentLoading = ref(false)
 const paymentData = ref({
   contract_amount: null,
+  amount_base: null,
+  amount_base_source: 'site',
+  payment_profile: null,
+  subcontractor: null,
   currency: 'USD',
   opening_work_order: {},
   items: [],
@@ -852,6 +858,10 @@ const loadPaymentRecords = async () => {
     const res = await request.get(`/api/sites/${route.params.id}/payment-records`)
     paymentData.value = {
       contract_amount: res?.contract_amount ?? null,
+      amount_base: res?.amount_base ?? res?.contract_amount ?? null,
+      amount_base_source: res?.amount_base_source || 'site',
+      payment_profile: res?.payment_profile || null,
+      subcontractor: res?.subcontractor || null,
       currency: res?.currency || 'USD',
       opening_work_order: res?.opening_work_order || {},
       items: Array.isArray(res?.items) ? res.items : [],
@@ -860,6 +870,10 @@ const loadPaymentRecords = async () => {
     console.error(e)
     paymentData.value = {
       contract_amount: null,
+      amount_base: null,
+      amount_base_source: 'site',
+      payment_profile: null,
+      subcontractor: null,
       currency: 'USD',
       opening_work_order: {},
       items: [],
@@ -1242,8 +1256,18 @@ const formatPriority = (priority) => {
 }
 
 const paymentNeedsContractAmount = computed(() => (
-  (site.value?.contract_amount === null || site.value?.contract_amount === undefined || site.value?.contract_amount === '') &&
+  (paymentData.value.amount_base === null || paymentData.value.amount_base === undefined || paymentData.value.amount_base === '') &&
   paymentData.value.items.some((item) => item.amount_type === 'ratio' && item.enabled !== false)
+))
+
+const paymentProfileName = computed(() => paymentData.value.payment_profile?.name || t('siteDetail.payment.defaultProfile'))
+
+const paymentSubcontractorName = computed(() => paymentData.value.subcontractor?.option_name || t('siteDetail.payment.noSubcontractor'))
+
+const paymentAmountBaseLabel = computed(() => (
+  paymentData.value.amount_base_source === 'profile_fixed'
+    ? t('siteDetail.payment.profileAmountBase')
+    : t('siteDetail.payment.contractAmount')
 ))
 
 const paymentOpeningStatusText = computed(() => {

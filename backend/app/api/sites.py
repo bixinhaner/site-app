@@ -201,6 +201,10 @@ class SitePaymentRecordsResponse(BaseModel):
     config_version: int
     currency: str
     contract_amount: Optional[float] = None
+    amount_base: Optional[float] = None
+    amount_base_source: Optional[str] = None
+    payment_profile: Optional[Dict[str, Any]] = None
+    subcontractor: Optional[Dict[str, Any]] = None
     opening_work_order: Dict[str, Any]
     items: List[SitePaymentRuleItemResponse]
 
@@ -1932,6 +1936,10 @@ async def get_site_payment_records(
         config_version=int(payload["config_version"]),
         currency=str(payload["currency"]),
         contract_amount=payload.get("contract_amount"),
+        amount_base=payload.get("amount_base"),
+        amount_base_source=payload.get("amount_base_source"),
+        payment_profile=payload.get("payment_profile"),
+        subcontractor=payload.get("subcontractor"),
         opening_work_order=payload.get("opening_work_order") or {},
         items=items,
     )

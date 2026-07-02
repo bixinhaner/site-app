@@ -7,12 +7,15 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.inspection import InspectionCheckItem
 from app.models.site import Site
+from app.models.site_group import SiteGroupAssignment, SiteGroupCategory, SiteGroupOption
 from app.models.system_config import SystemConfig
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.services.site_progress_metric_service import get_site_progress_metric_mode
 from app.services.site_progress_service import get_site_progress_milestone_at, get_site_progress_snapshot
 
 SITE_PAYMENT_SETTINGS_KEY = "site_payment_settings"
+SUBCONTRACTOR_CATEGORY_CODES = {"subcontractor", "sub_contractor", "contractor"}
+SUBCONTRACTOR_CATEGORY_NAMES = {"分包商", "subcontractor", "sub contractor", "contractor"}
 SITE_PAYMENT_MILESTONE_OPTIONS = [
     "install_started",
     "install_completed",
@@ -41,8 +44,21 @@ SITE_PAYMENT_CURRENCY_PRESET_OPTIONS = [
 ]
 
 DEFAULT_SITE_PAYMENT_SETTINGS: Dict[str, Any] = {
-    "config_version": 1,
+    "config_version": 2,
     "currency": "USD",
+    "profiles": [
+        {
+            "id": "default",
+            "name": "默认付款方案",
+            "scope_type": "default",
+            "subcontractor_option_id": None,
+            "enabled": True,
+            "contract_amount_source": "site",
+            "profile_contract_amount": None,
+            "sort_order": 0,
+            "remark": "",
+        }
+    ],
     "rules": [
         {
             "id": "install_started_ratio_30",
@@ -119,9 +135,12 @@ def normalize_site_payment_currency(value: Any) -> str:
 
 def _clone_default_settings() -> Dict[str, Any]:
     rules = [dict(rule) for rule in DEFAULT_SITE_PAYMENT_SETTINGS["rules"]]
+    profiles = [dict(profile) for profile in DEFAULT_SITE_PAYMENT_SETTINGS["profiles"]]
+    profiles[0]["rules"] = [dict(rule) for rule in rules]
     return {
         "config_version": int(DEFAULT_SITE_PAYMENT_SETTINGS["config_version"]),
         "currency": str(DEFAULT_SITE_PAYMENT_SETTINGS["currency"]),
+        "profiles": profiles,
         "rules": rules,
     }
 
@@ -171,12 +190,90 @@ def normalize_site_payment_rule(raw_rule: Dict[str, Any], index: int = 0) -> Dic
     }
 
 
+def _normalize_nullable_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_optional_amount(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(amount, 0.0)
+
+
+def normalize_site_payment_profile(
+    raw_profile: Dict[str, Any],
+    index: int = 0,
+    *,
+    default_rules: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    profile = raw_profile if isinstance(raw_profile, dict) else {}
+    scope_type = str(profile.get("scope_type") or "default").strip().lower()
+    if scope_type not in {"default", "subcontractor"}:
+        scope_type = "default"
+    if index == 0 and scope_type != "subcontractor":
+        scope_type = "default"
+
+    raw_rules = profile.get("rules")
+    if isinstance(raw_rules, list):
+        rules = [normalize_site_payment_rule(rule, rule_index) for rule_index, rule in enumerate(raw_rules)]
+    elif default_rules is not None:
+        rules = [normalize_site_payment_rule(rule, rule_index) for rule_index, rule in enumerate(default_rules)]
+    else:
+        rules = [
+            normalize_site_payment_rule(rule, rule_index)
+            for rule_index, rule in enumerate(_clone_default_settings()["rules"])
+        ]
+
+    try:
+        sort_order = int(profile.get("sort_order") or (index * 10))
+    except (TypeError, ValueError):
+        sort_order = index * 10
+
+    profile_id = str(profile.get("id") or "").strip()
+    if not profile_id:
+        profile_id = "default" if scope_type == "default" else f"subcontractor_{index + 1}"
+    if scope_type == "default":
+        profile_id = "default"
+
+    contract_amount_source = str(profile.get("contract_amount_source") or "site").strip().lower()
+    if contract_amount_source not in {"site", "profile_fixed"}:
+        contract_amount_source = "site"
+
+    name = str(profile.get("name") or "").strip()
+    if not name:
+        name = "默认付款方案" if scope_type == "default" else "分包商付款方案"
+
+    return {
+        "id": profile_id,
+        "name": name,
+        "scope_type": scope_type,
+        "subcontractor_option_id": _normalize_nullable_int(profile.get("subcontractor_option_id")),
+        "subcontractor_option_code": str(profile.get("subcontractor_option_code") or "").strip(),
+        "subcontractor_option_name": str(profile.get("subcontractor_option_name") or "").strip(),
+        "enabled": bool(profile.get("enabled", True)),
+        "contract_amount_source": contract_amount_source,
+        "profile_contract_amount": _normalize_optional_amount(profile.get("profile_contract_amount")),
+        "sort_order": sort_order,
+        "remark": str(profile.get("remark") or "").strip(),
+        "rules": rules,
+    }
+
+
 def normalize_site_payment_settings(raw_settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     src = raw_settings if isinstance(raw_settings, dict) else {}
-    rules = src.get("rules")
+    raw_rules = src.get("rules")
     normalized_rules = []
-    if isinstance(rules, list):
-        for index, rule in enumerate(rules):
+    if isinstance(raw_rules, list):
+        for index, rule in enumerate(raw_rules):
             normalized_rules.append(normalize_site_payment_rule(rule, index))
     else:
         normalized_rules = [normalize_site_payment_rule(rule, index) for index, rule in enumerate(_clone_default_settings()["rules"])]
@@ -190,9 +287,62 @@ def normalize_site_payment_settings(raw_settings: Optional[Dict[str, Any]]) -> D
 
     normalized_rules.sort(key=lambda item: (int(item.get("sort_order") or 0), item.get("name") or ""))
 
+    raw_profiles = src.get("profiles")
+    normalized_profiles: List[Dict[str, Any]] = []
+    if isinstance(raw_profiles, list) and raw_profiles:
+        for index, profile in enumerate(raw_profiles):
+            normalized_profiles.append(
+                normalize_site_payment_profile(profile, index, default_rules=normalized_rules)
+            )
+    else:
+        normalized_profiles.append(
+            normalize_site_payment_profile(
+                {
+                    **_clone_default_settings()["profiles"][0],
+                    "rules": normalized_rules,
+                },
+                0,
+                default_rules=normalized_rules,
+            )
+        )
+
+    has_default = any(profile["scope_type"] == "default" for profile in normalized_profiles)
+    if not has_default:
+        normalized_profiles.insert(
+            0,
+            normalize_site_payment_profile(
+                {
+                    **_clone_default_settings()["profiles"][0],
+                    "rules": normalized_rules,
+                },
+                0,
+                default_rules=normalized_rules,
+            ),
+        )
+
+    normalized_profiles.sort(
+        key=lambda item: (
+            0 if item.get("scope_type") == "default" else 1,
+            int(item.get("sort_order") or 0),
+            item.get("name") or "",
+        )
+    )
+    for index, profile in enumerate(normalized_profiles):
+        if profile["scope_type"] == "default":
+            profile["id"] = "default"
+            profile["subcontractor_option_id"] = None
+            profile["subcontractor_option_code"] = ""
+            profile["subcontractor_option_name"] = ""
+        profile["rules"].sort(key=lambda item: (int(item.get("sort_order") or 0), item.get("name") or ""))
+    default_profile = next((profile for profile in normalized_profiles if profile["scope_type"] == "default"), None)
+    if default_profile is not None:
+        normalized_rules = [dict(rule) for rule in default_profile["rules"]]
+
     return {
         "config_version": max(config_version, 1),
         "currency": currency,
+        "profiles": normalized_profiles,
+        # 兼容旧前端/API 调用：顶层 rules 始终代表默认方案。
         "rules": normalized_rules,
     }
 
@@ -229,6 +379,123 @@ def get_site_payment_currency_options() -> List[Dict[str, str]]:
         {"value": code, "label": code}
         for code in SITE_PAYMENT_CURRENCY_PRESET_OPTIONS
     ]
+
+
+def get_subcontractor_category(db: Session) -> Optional[SiteGroupCategory]:
+    categories = (
+        db.query(SiteGroupCategory)
+        .filter(SiteGroupCategory.is_active == True)
+        .order_by(SiteGroupCategory.sort_order.asc(), SiteGroupCategory.id.asc())
+        .all()
+    )
+    for category in categories:
+        code = str(category.code or "").strip().lower()
+        if code in SUBCONTRACTOR_CATEGORY_CODES:
+            return category
+    for category in categories:
+        name = str(category.name or "").strip().lower()
+        if name in SUBCONTRACTOR_CATEGORY_NAMES:
+            return category
+    return None
+
+
+def get_subcontractor_options(db: Session) -> List[Dict[str, Any]]:
+    category = get_subcontractor_category(db)
+    if not category:
+        return []
+    rows = (
+        db.query(SiteGroupOption)
+        .filter(
+            SiteGroupOption.category_id == category.id,
+            SiteGroupOption.is_active == True,
+        )
+        .order_by(SiteGroupOption.sort_order.asc(), SiteGroupOption.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "category_id": row.category_id,
+            "code": row.code,
+            "name": row.name,
+            "color": row.color,
+        }
+        for row in rows
+    ]
+
+
+def get_site_subcontractor_assignment(db: Session, site_id: int) -> Optional[SiteGroupAssignment]:
+    category = get_subcontractor_category(db)
+    if not category:
+        return None
+    return (
+        db.query(SiteGroupAssignment)
+        .join(SiteGroupOption, SiteGroupOption.id == SiteGroupAssignment.option_id)
+        .filter(
+            SiteGroupAssignment.site_id == site_id,
+            SiteGroupAssignment.category_id == category.id,
+            SiteGroupOption.is_active == True,
+        )
+        .first()
+    )
+
+
+def _serialize_subcontractor_assignment(assignment: Optional[SiteGroupAssignment]) -> Optional[Dict[str, Any]]:
+    if not assignment or not assignment.option:
+        return None
+    option = assignment.option
+    category = assignment.category
+    return {
+        "category_id": assignment.category_id,
+        "category_code": category.code if category else "",
+        "category_name": category.name if category else "",
+        "option_id": option.id,
+        "option_code": option.code,
+        "option_name": option.name,
+        "option_color": option.color,
+    }
+
+
+def _profile_matches_subcontractor(profile: Dict[str, Any], assignment: Optional[SiteGroupAssignment]) -> bool:
+    if profile.get("scope_type") != "subcontractor" or not assignment or not assignment.option:
+        return False
+    option = assignment.option
+    option_id = profile.get("subcontractor_option_id")
+    if option_id is not None and int(option_id) == int(option.id):
+        return True
+    option_code = str(profile.get("subcontractor_option_code") or "").strip().lower()
+    if option_code and option_code == str(option.code or "").strip().lower():
+        return True
+    option_name = str(profile.get("subcontractor_option_name") or "").strip().lower()
+    if option_name and option_name == str(option.name or "").strip().lower():
+        return True
+    return False
+
+
+def resolve_site_payment_profile(
+    db: Session,
+    site: Site,
+    settings: Optional[Dict[str, Any]] = None,
+) -> tuple[Dict[str, Any], Optional[SiteGroupAssignment]]:
+    normalized = settings or load_site_payment_settings(db)
+    profiles = list(normalized.get("profiles") or [])
+    default_profile = next((profile for profile in profiles if profile.get("scope_type") == "default"), None)
+    if default_profile is None:
+        default_profile = normalize_site_payment_profile(
+            {
+                **_clone_default_settings()["profiles"][0],
+                "rules": normalized.get("rules") or _clone_default_settings()["rules"],
+            },
+            0,
+        )
+
+    assignment = get_site_subcontractor_assignment(db, site.id)
+    for profile in profiles:
+        if not profile.get("enabled", True):
+            continue
+        if _profile_matches_subcontractor(profile, assignment):
+            return profile, assignment
+    return default_profile, assignment
 
 
 def _resolve_primary_opening_work_order(db: Session, site_id: int) -> Optional[WorkOrder]:
@@ -272,8 +539,21 @@ def _get_amounts(
     return round(contract_amount * amount_value / 100.0, 2), None
 
 
+def _resolve_amount_base(site: Site, profile: Dict[str, Any]) -> tuple[Optional[float], str, str]:
+    source = str(profile.get("contract_amount_source") or "site")
+    if source == "profile_fixed":
+        amount = profile.get("profile_contract_amount")
+        if amount is None:
+            return None, "profile_fixed", "分包商付款方案未填写站点单价，无法计算比例金额"
+        return float(amount), "profile_fixed", ""
+    if getattr(site, "contract_amount", None) is None:
+        return None, "site", "站点合同金额未填写，无法计算比例金额"
+    return float(site.contract_amount), "site", ""
+
+
 def build_site_payment_records(db: Session, site: Site) -> Dict[str, Any]:
     settings = load_site_payment_settings(db)
+    profile, subcontractor_assignment = resolve_site_payment_profile(db, site, settings)
     snapshot = get_site_progress_snapshot(db, site.id)
     metric_mode = get_site_progress_metric_mode(db)
     opening_work_order = _resolve_primary_opening_work_order(db, site.id)
@@ -281,7 +561,9 @@ def build_site_payment_records(db: Session, site: Site) -> Dict[str, Any]:
     opening_approved = bool(opening_work_order and opening_work_order.status == WorkOrderStatusEnum.APPROVED)
 
     items: List[Dict[str, Any]] = []
-    for rule in settings["rules"]:
+    amount_base, amount_base_source, amount_base_error = _resolve_amount_base(site, profile)
+
+    for rule in profile["rules"]:
         milestone_code = rule["milestone_code"]
         milestone_at = None
         if snapshot is not None:
@@ -289,10 +571,12 @@ def build_site_payment_records(db: Session, site: Site) -> Dict[str, Any]:
         milestone_reached = milestone_at is not None
 
         base_amount, amount_error = _get_amounts(
-            contract_amount=float(site.contract_amount) if getattr(site, "contract_amount", None) is not None else None,
+            contract_amount=amount_base,
             amount_type=rule["amount_type"],
             amount_value=float(rule["amount_value"]),
         )
+        if rule["amount_type"] == "ratio" and amount_base_error:
+            amount_error = amount_base_error
 
         adjusted_amount = base_amount
         warning_discount_applied = False
@@ -361,6 +645,17 @@ def build_site_payment_records(db: Session, site: Site) -> Dict[str, Any]:
         "config_version": settings["config_version"],
         "currency": settings["currency"],
         "contract_amount": float(site.contract_amount) if getattr(site, "contract_amount", None) is not None else None,
+        "amount_base": amount_base,
+        "amount_base_source": amount_base_source,
+        "payment_profile": {
+            "id": profile.get("id"),
+            "name": profile.get("name"),
+            "scope_type": profile.get("scope_type"),
+            "contract_amount_source": profile.get("contract_amount_source"),
+            "profile_contract_amount": profile.get("profile_contract_amount"),
+            "remark": profile.get("remark"),
+        },
+        "subcontractor": _serialize_subcontractor_assignment(subcontractor_assignment),
         "opening_work_order": {
             "id": opening_work_order.id if opening_work_order else None,
             "status": opening_work_order.status.value if opening_work_order else None,

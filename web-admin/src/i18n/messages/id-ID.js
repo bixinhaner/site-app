@@ -293,11 +293,15 @@ export default {
     actions: {
       refresh: "Segarkan",
       addRule: "Tambah Aturan",
+      addProfile: "Tambah Profil Subkontraktor",
+      copyDefaultRules: "Salin Aturan Default",
       save: "Simpan",
       delete: "Hapus",
     },
     summaryAlert:
-      'Nilai berbasis rasio dihitung dari nilai kontrak situs. Jika nilai kontrak situs belum diisi, node berbasis rasio akan tetap berstatus "dasar nilai belum ada".',
+      "Profil default berlaku untuk semua situs. Jika situs memiliki dimensi grup Subkontraktor, profil pembayaran subkontraktor yang cocok akan dipakai lebih dulu. Nilai berbasis rasio dapat dihitung dari nilai kontrak situs atau harga satuan situs di profil.",
+    subcontractorMissingTip:
+      'Dimensi grup situs "Subkontraktor" belum ditemukan. Buat grup manual dengan code subcontractor di Manajemen Sistem -> Grup Situs, lalu tambahkan opsi subkontraktor.',
     configVersion: "Versi Konfigurasi",
     configVersionTip:
       "Saat disimpan, versi saat ini akan langsung disimpan. Jika perlu kenaikan versi yang ketat, pemeriksaan konkurensi bisa ditambahkan nanti.",
@@ -310,14 +314,32 @@ export default {
       "Atur apakah sebuah node dibayar, rasio atau jumlah tetapnya, apakah bergantung pada approval akhir work order instalasi situs, dan aturan diskon warning di sini.",
     empty:
       'Belum ada aturan pembayaran. Klik "Tambah Aturan" di kanan atas untuk mulai.',
+    emptyRules: "Profil ini belum memiliki aturan pembayaran.",
+    defaultProfileName: "Profil Pembayaran Default",
+    newProfileName: "Profil Pembayaran Subkontraktor Baru",
+    profileCardTitle: "Profil Pembayaran {index}",
+    scope: {
+      default: "Profil Default",
+      subcontractor: "Profil Subkontraktor",
+      subcontractorWithName: "Subkontraktor: {name}",
+    },
     ruleCardTitle: "Aturan {index}",
     fields: {
+      profileName: "Nama Profil",
+      scope: "Cakupan",
+      subcontractor: "Subkontraktor",
+      subcontractorPlaceholder: "Pilih subkontraktor",
       name: "Nama Aturan",
       namePlaceholder: "Contoh: Instalasi Selesai 40%",
       milestone: "Node",
       enabled: "Dibayar",
+      ruleEnabled: "Dibayar",
       enabledOn: "Bayar",
       enabledOff: "Tidak Bayar",
+      amountBase: "Dasar Nilai",
+      amountBaseSite: "Nilai Kontrak Situs",
+      amountBaseProfile: "Harga Satuan Situs Profil",
+      profileAmount: "Harga Satuan Situs",
       amountType: "Jenis Nilai",
       amountTypeRatio: "Rasio",
       amountTypeFixed: "Nilai Tetap",
@@ -329,9 +351,13 @@ export default {
       remark: "Catatan / Syarat",
       remarkPlaceholder:
         "Contoh: pembayaran hanya dapat diajukan setelah ada konfirmasi tertulis dari pelanggan",
+      profileRemarkPlaceholder:
+        "Contoh: subkontraktor ini memakai harga satuan kontrak baru",
     },
     messages: {
       loadFailed: "Gagal memuat aturan pembayaran situs",
+      incompleteProfile:
+        "Harap lengkapi nama profil, subkontraktor, dan harga satuan situs",
       incompleteRule: "Harap lengkapi nama aturan dan node terlebih dahulu",
       currencyTooLong: "Kode mata uang tidak boleh lebih dari 20 karakter",
       saveSuccess: "Berhasil disimpan",
@@ -464,9 +490,14 @@ export default {
     },
     payment: {
       title: "Catatan Pembayaran",
+      profile: "Profil Pembayaran",
+      defaultProfile: "Profil Pembayaran Default",
+      subcontractor: "Subkontraktor",
+      noSubcontractor: "Belum ditetapkan",
       contractAmount: "Nilai Kontrak",
+      profileAmountBase: "Harga Satuan Profil",
       contractAmountMissing:
-        "Situs ini belum memiliki nilai kontrak. Node pembayaran berbasis rasio belum bisa dihitung.",
+        "Profil pembayaran saat ini belum memiliki dasar nilai. Node pembayaran berbasis rasio belum bisa dihitung.",
       openingWorkOrder: "Perintah Kerja Instalasi Situs",
       noOpeningWorkOrder: "Belum ada perintah kerja instalasi situs",
       empty: "Belum ada aturan pembayaran",

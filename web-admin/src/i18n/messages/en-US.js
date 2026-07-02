@@ -290,11 +290,15 @@ export default {
     actions: {
       refresh: "Refresh",
       addRule: "Add Rule",
+      addProfile: "Add Subcontractor Profile",
+      copyDefaultRules: "Copy Default Rules",
       save: "Save",
       delete: "Delete",
     },
     summaryAlert:
-      'Ratio-based amounts are calculated from the site contract amount. If the site contract amount is empty, ratio-based nodes stay in "missing amount base".',
+      "The default profile applies to all sites. If a site is assigned to a Subcontractor group, its matching subcontractor payment profile is used first. Ratio amounts can be based on the site contract amount or the profile site unit price.",
+    subcontractorMissingTip:
+      'No "Subcontractor" site group dimension was found. Create a manual site group with code subcontractor under System Management -> Site Groups, then add subcontractor options.',
     configVersion: "Config Version",
     configVersionTip:
       "The current version is stored as-is when saving. If strict version incrementing is needed, concurrency checks can be added later.",
@@ -307,14 +311,32 @@ export default {
       "Configure whether a node is payable, its ratio or fixed amount, whether it depends on final site installation work order approval, and warning discount rules here.",
     empty:
       'No payment rules yet. Click "Add Rule" in the top-right corner to start.',
+    emptyRules: "This profile has no payment rules.",
+    defaultProfileName: "Default Payment Profile",
+    newProfileName: "New Subcontractor Payment Profile",
+    profileCardTitle: "Payment Profile {index}",
+    scope: {
+      default: "Default Profile",
+      subcontractor: "Subcontractor Profile",
+      subcontractorWithName: "Subcontractor: {name}",
+    },
     ruleCardTitle: "Rule {index}",
     fields: {
+      profileName: "Profile Name",
+      scope: "Scope",
+      subcontractor: "Subcontractor",
+      subcontractorPlaceholder: "Select subcontractor",
       name: "Rule Name",
       namePlaceholder: "Example: Install Completed 40%",
       milestone: "Milestone",
       enabled: "Payable",
+      ruleEnabled: "Payable",
       enabledOn: "Pay",
       enabledOff: "No Pay",
+      amountBase: "Amount Base",
+      amountBaseSite: "Site Contract Amount",
+      amountBaseProfile: "Profile Site Unit Price",
+      profileAmount: "Site Unit Price",
       amountType: "Amount Type",
       amountTypeRatio: "Ratio",
       amountTypeFixed: "Fixed Amount",
@@ -326,9 +348,13 @@ export default {
       remark: "Remark / Conditions",
       remarkPlaceholder:
         "Example: payment can only be requested after written customer confirmation",
+      profileRemarkPlaceholder:
+        "Example: this subcontractor uses the new contract unit price",
     },
     messages: {
       loadFailed: "Failed to load site payment rules",
+      incompleteProfile:
+        "Please complete the profile name, subcontractor, and site unit price",
       incompleteRule: "Please complete the rule name and milestone first",
       currencyTooLong: "Currency code cannot exceed 20 characters",
       saveSuccess: "Saved successfully",
@@ -461,9 +487,14 @@ export default {
     },
     payment: {
       title: "Payment Records",
+      profile: "Payment Profile",
+      defaultProfile: "Default Payment Profile",
+      subcontractor: "Subcontractor",
+      noSubcontractor: "Unassigned",
       contractAmount: "Contract Amount",
+      profileAmountBase: "Profile Unit Price",
       contractAmountMissing:
-        "This site does not have a contract amount yet. Ratio-based payment nodes cannot be calculated for now.",
+        "The current payment profile is missing an amount base. Ratio-based payment nodes cannot be calculated for now.",
       openingWorkOrder: "Site Installation Work Order",
       noOpeningWorkOrder: "No site installation work order",
       empty: "No payment rules configured",
