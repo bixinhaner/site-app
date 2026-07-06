@@ -125,6 +125,12 @@
       </div>
     </div>
 
+    <div v-if="activeSiteProgressFilterLabel" class="active-filter-bar">
+      <el-tag type="primary" effect="plain" closable @close="clearSiteProgressFilter">
+        {{ t('siteList.dashboardProgressFilterPrefix') }}{{ activeSiteProgressFilterLabel }}
+      </el-tag>
+    </div>
+
     <el-card>
       <el-table ref="siteTableRef" :data="displayedSites" v-loading="loading" stripe @selection-change="handleSelectionChange">
         <el-table-column v-if="canBatchEditSite" type="selection" width="48" />
@@ -404,6 +410,7 @@ const sortOrder = ref('desc')
 const groupCategories = ref([])
 const groupCategoryFilter = ref(null)
 const groupOptionFilter = ref(null)
+const siteProgressFilter = ref('')
 
 const userOptions = ref([])
 const usersLoaded = ref(false)
@@ -432,9 +439,34 @@ const trackSearch = () => {
       sort_order: sortOrder.value || undefined,
       group_category_id: groupCategoryFilter.value || undefined,
       group_option_id: groupOptionFilter.value || undefined,
+      site_progress_filter: siteProgressFilter.value || undefined,
     },
   })
 }
+
+const SITE_PROGRESS_FILTER_VALUES = [
+  'survey_done',
+  'planning_done',
+  'install_started',
+  'installed',
+  'partial_online',
+  'fully_online',
+  'partial_activated',
+  'fully_activated',
+  'ssv_passed',
+]
+const siteProgressFilterValueSet = new Set(SITE_PROGRESS_FILTER_VALUES)
+const firstQueryValue = (value) => (Array.isArray(value) ? value[0] : value)
+const normalizeSiteProgressFilter = (value) => {
+  const normalized = String(firstQueryValue(value) || '').trim()
+  return siteProgressFilterValueSet.has(normalized) ? normalized : ''
+}
+const activeSiteProgressFilterLabel = computed(() => {
+  if (!siteProgressFilter.value) return ''
+  const key = `siteList.dashboardProgressFilters.${siteProgressFilter.value}`
+  const label = t(key)
+  return label === key ? siteProgressFilter.value : label
+})
 
 const onStatusFilterChange = () => {
   trackSearch()
@@ -479,6 +511,19 @@ const applyGroupFiltersFromRoute = () => {
   groupOptionFilter.value = optionId || null
 }
 
+const applySiteProgressFilterFromRoute = () => {
+  const nextFilter = normalizeSiteProgressFilter(route.query.site_progress_filter)
+  if (siteProgressFilter.value === nextFilter) return false
+  siteProgressFilter.value = nextFilter
+  return true
+}
+
+const clearSiteProgressFilter = () => {
+  const query = { ...route.query }
+  delete query.site_progress_filter
+  router.replace({ name: 'SiteList', query })
+}
+
 const applyGroupParams = (params) => {
   if (!groupCategoryFilter.value) return params
   params.group_category_id = groupCategoryFilter.value
@@ -502,6 +547,7 @@ const reload = async () => {
     if (assigneeFilter.value) params.assigned_to = assigneeFilter.value
     if (sortBy.value) params.sort_by = sortBy.value
     if (sortOrder.value) params.sort_order = sortOrder.value
+    if (siteProgressFilter.value) params.site_progress_filter = siteProgressFilter.value
     applyGroupParams(params)
     const res = await request.get('/api/sites/search', { params })
     const list = Array.isArray(res?.sites) ? res.sites : []
@@ -708,6 +754,7 @@ const exportSites = async () => {
     if (keyword.value) params.keyword = keyword.value
     if (statusFilter.value) params.status = statusFilter.value
     if (assigneeFilter.value) params.assigned_to = assigneeFilter.value
+    if (siteProgressFilter.value) params.site_progress_filter = siteProgressFilter.value
     applyGroupParams(params)
 
     const blob = await request.get('/api/sites/export', { params, responseType: 'blob' })
@@ -835,9 +882,17 @@ const userName = (id) => {
 onMounted(async () => {
   await loadGroupCategories()
   applyGroupFiltersFromRoute()
+  applySiteProgressFilterFromRoute()
   reload()
   // 预热用户列表（仅管理员有效）
   loadUsers()
+})
+
+watch(() => route.query.site_progress_filter, () => {
+  if (!applySiteProgressFilterFromRoute()) return
+  currentPage.value = 1
+  trackSearch()
+  reload()
 })
 
 // 关键字动态生效：重置到第1页并走后端搜索
@@ -864,6 +919,7 @@ watch(batchEditVisible, (visible) => {
 .page { padding: 24px; }
 .page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
 .header-actions { display:flex; gap: 12px; flex-wrap: wrap; }
+.active-filter-bar { margin: -4px 0 12px; }
 .pagination { margin-top: 12px; display:flex; justify-content: flex-end; }
 .sort-panel :deep(.el-radio-group) { width: 100%; }
 .sort-panel :deep(.el-radio-button) { width: 50%; }

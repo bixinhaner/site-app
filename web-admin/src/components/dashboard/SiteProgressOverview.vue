@@ -54,17 +54,21 @@ const deviceFraction = (key, type) => {
   return t(`dashboard.siteOverview.deviceFraction.${type}`, { numerator, denominator })
 }
 const canViewSiteMap = computed(() => userStore.hasPermission('sites:list:read'))
+const siteListRoute = (siteProgressFilter) => ({
+  name: 'SiteList',
+  query: { site_progress_filter: siteProgressFilter },
+})
 
 const cards = computed(() => [
-  { key: 'survey', title: t('dashboard.siteOverview.cards.survey.title'), value: `${val('survey_done')}/${total.value}`, desc: t('dashboard.siteOverview.cards.survey.desc'), icon: Tickets, type: 'info', route: { name: 'SurveyArchives' } },
-  { key: 'planning', title: t('dashboard.siteOverview.cards.planning.title'), value: `${val('planning_done')}/${total.value}`, desc: t('dashboard.siteOverview.cards.planning.desc'), icon: Finished, type: 'primary', route: { name: 'SitePlanningLld' } },
-  { key: 'install_started', title: t('dashboard.siteOverview.cards.installStarted.title'), value: `${val('install_started')}/${total.value}`, desc: t('dashboard.siteOverview.cards.installStarted.desc'), icon: OfficeBuilding, type: 'install-start', route: { name: 'WorkOrderList' } },
-  { key: 'installed', title: t('dashboard.siteOverview.cards.installed.title'), value: `${val('installed')}/${total.value}`, desc: t('dashboard.siteOverview.cards.installed.desc'), icon: OfficeBuilding, type: 'install', route: { name: 'WorkOrderList', query: { preset: 'installed_sites' } } },
-  { key: 'partial_online', title: t('dashboard.siteOverview.cards.partialOnline.title'), value: `${val('partial_online')}/${total.value}`, desc: t('dashboard.siteOverview.cards.partialOnline.desc'), icon: Promotion, type: 'partial-online', route: { name: 'SiteList' }, fraction: deviceFraction('partial_online', 'online') },
-  { key: 'fully_online', title: t('dashboard.siteOverview.cards.fullyOnline.title'), value: `${valWithFallback('fully_online', 'online')}/${total.value}`, desc: t('dashboard.siteOverview.cards.fullyOnline.desc'), icon: Promotion, type: 'success', route: { name: 'SiteList' }, fraction: deviceFraction('fully_online', 'online') },
-  { key: 'partial_activated', title: t('dashboard.siteOverview.cards.partialActivated.title'), value: `${val('partial_activated')}/${total.value}`, desc: t('dashboard.siteOverview.cards.partialActivated.desc'), icon: MagicStick, type: 'partial-activated', route: { name: 'SiteList' }, fraction: deviceFraction('partial_activated', 'activated') },
-  { key: 'fully_activated', title: t('dashboard.siteOverview.cards.fullyActivated.title'), value: `${valWithFallback('fully_activated', 'activated')}/${total.value}`, desc: t('dashboard.siteOverview.cards.fullyActivated.desc'), icon: MagicStick, type: 'warning', route: { name: 'SiteList' }, fraction: deviceFraction('fully_activated', 'activated') },
-  { key: 'ssv', title: t('dashboard.siteOverview.cards.ssv.title'), value: `${val('ssv_passed')}/${total.value}`, desc: t('dashboard.siteOverview.cards.ssv.desc'), icon: SuccessFilled, type: 'success', route: { name: 'SiteList' } },
+  { key: 'survey', title: t('dashboard.siteOverview.cards.survey.title'), value: `${val('survey_done')}/${total.value}`, desc: t('dashboard.siteOverview.cards.survey.desc'), icon: Tickets, type: 'info', route: siteListRoute('survey_done') },
+  { key: 'planning', title: t('dashboard.siteOverview.cards.planning.title'), value: `${val('planning_done')}/${total.value}`, desc: t('dashboard.siteOverview.cards.planning.desc'), icon: Finished, type: 'primary', route: siteListRoute('planning_done') },
+  { key: 'install_started', title: t('dashboard.siteOverview.cards.installStarted.title'), value: `${val('install_started')}/${total.value}`, desc: t('dashboard.siteOverview.cards.installStarted.desc'), icon: OfficeBuilding, type: 'install-start', route: siteListRoute('install_started') },
+  { key: 'installed', title: t('dashboard.siteOverview.cards.installed.title'), value: `${val('installed')}/${total.value}`, desc: t('dashboard.siteOverview.cards.installed.desc'), icon: OfficeBuilding, type: 'install', route: siteListRoute('installed') },
+  { key: 'partial_online', title: t('dashboard.siteOverview.cards.partialOnline.title'), value: `${val('partial_online')}/${total.value}`, desc: t('dashboard.siteOverview.cards.partialOnline.desc'), icon: Promotion, type: 'partial-online', route: siteListRoute('partial_online'), fraction: deviceFraction('partial_online', 'online') },
+  { key: 'fully_online', title: t('dashboard.siteOverview.cards.fullyOnline.title'), value: `${valWithFallback('fully_online', 'online')}/${total.value}`, desc: t('dashboard.siteOverview.cards.fullyOnline.desc'), icon: Promotion, type: 'success', route: siteListRoute('fully_online'), fraction: deviceFraction('fully_online', 'online') },
+  { key: 'partial_activated', title: t('dashboard.siteOverview.cards.partialActivated.title'), value: `${val('partial_activated')}/${total.value}`, desc: t('dashboard.siteOverview.cards.partialActivated.desc'), icon: MagicStick, type: 'partial-activated', route: siteListRoute('partial_activated'), fraction: deviceFraction('partial_activated', 'activated') },
+  { key: 'fully_activated', title: t('dashboard.siteOverview.cards.fullyActivated.title'), value: `${valWithFallback('fully_activated', 'activated')}/${total.value}`, desc: t('dashboard.siteOverview.cards.fullyActivated.desc'), icon: MagicStick, type: 'warning', route: siteListRoute('fully_activated'), fraction: deviceFraction('fully_activated', 'activated') },
+  { key: 'ssv', title: t('dashboard.siteOverview.cards.ssv.title'), value: `${val('ssv_passed')}/${total.value}`, desc: t('dashboard.siteOverview.cards.ssv.desc'), icon: SuccessFilled, type: 'success', route: siteListRoute('ssv_passed') },
 ])
 
 const onClick = (route) => emit('goto', route)

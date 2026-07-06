@@ -262,6 +262,18 @@ export default {
     },
   },
   siteList: {
+    dashboardProgressFilterPrefix: "Dashboard filter: ",
+    dashboardProgressFilters: {
+      survey_done: "Survey Sites",
+      planning_done: "Planning Sites",
+      install_started: "Install Started Sites",
+      installed: "Install Completed Sites",
+      partial_online: "Partially Online Sites",
+      fully_online: "Fully Online Sites",
+      partial_activated: "Partially Activated Sites",
+      fully_activated: "Fully Activated Sites",
+      ssv_passed: "SSV Sites",
+    },
     actions: {
       more: "More Actions",
       rebuildProgress: "Rebuild Site Lifecycle",

@@ -265,6 +265,18 @@ export default {
     },
   },
   siteList: {
+    dashboardProgressFilterPrefix: "Filter dasbor: ",
+    dashboardProgressFilters: {
+      survey_done: "Situs Survei",
+      planning_done: "Situs Perencanaan",
+      install_started: "Situs Instalasi Dimulai",
+      installed: "Situs Instalasi Selesai",
+      partial_online: "Situs Online Sebagian",
+      fully_online: "Situs Online Penuh",
+      partial_activated: "Situs Aktif Sebagian",
+      fully_activated: "Situs Aktif Penuh",
+      ssv_passed: "Situs SSV",
+    },
     actions: {
       more: "Tindakan Lainnya",
       rebuildProgress: "Hitung Ulang Siklus Hidup Situs",

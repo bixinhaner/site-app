@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,7 @@ from app.models.omc_state import OmcDeviceState
 from app.models.site import Site
 from app.models.site_business import SiteMilestoneRecord
 from app.models.site_progress import SiteProgressEvent, SiteProgressSnapshot
+from app.models.survey_archive import SiteSurveyArchive
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
 from app.services.omc_state import summarize_site_binding_slots
 from app.services.site_progress_metric_service import (
@@ -20,6 +21,36 @@ from app.services.site_progress_metric_service import (
 
 
 CURRENT_SITE_PROGRESS_SNAPSHOT_VERSION = 4
+SITE_PROGRESS_FILTER_SURVEY_DONE = "survey_done"
+SITE_PROGRESS_FILTER_PLANNING_DONE = "planning_done"
+SITE_PROGRESS_FILTER_INSTALL_STARTED = "install_started"
+SITE_PROGRESS_FILTER_INSTALLED = "installed"
+SITE_PROGRESS_FILTER_PARTIAL_ONLINE = "partial_online"
+SITE_PROGRESS_FILTER_FULLY_ONLINE = "fully_online"
+SITE_PROGRESS_FILTER_PARTIAL_ACTIVATED = "partial_activated"
+SITE_PROGRESS_FILTER_FULLY_ACTIVATED = "fully_activated"
+SITE_PROGRESS_FILTER_SSV_PASSED = "ssv_passed"
+
+SUPPORTED_SITE_PROGRESS_FILTERS = {
+    SITE_PROGRESS_FILTER_SURVEY_DONE,
+    SITE_PROGRESS_FILTER_PLANNING_DONE,
+    SITE_PROGRESS_FILTER_INSTALL_STARTED,
+    SITE_PROGRESS_FILTER_INSTALLED,
+    SITE_PROGRESS_FILTER_PARTIAL_ONLINE,
+    SITE_PROGRESS_FILTER_FULLY_ONLINE,
+    SITE_PROGRESS_FILTER_PARTIAL_ACTIVATED,
+    SITE_PROGRESS_FILTER_FULLY_ACTIVATED,
+    SITE_PROGRESS_FILTER_SSV_PASSED,
+}
+
+PLANNING_DONE_SITE_STATUSES = [
+    "planned",
+    "construction",
+    "pending_online",
+    "online_pending_activation",
+    "operational",
+    "maintenance",
+]
 
 MILESTONE_FIELD_MAP = {
     "install_started": "install_started_at",
@@ -499,3 +530,146 @@ def get_site_progress_milestone_at(
         return None
     field_name = resolve_site_progress_field_name(milestone_code, metric_mode=metric_mode)
     return getattr(snapshot, field_name, None)
+
+
+def _site_ids_from_snapshot_field(db: Session, field_name: str) -> Set[int]:
+    event_column = getattr(SiteProgressSnapshot, field_name)
+    return {
+        int(site_id)
+        for site_id, in db.query(SiteProgressSnapshot.site_id)
+        .filter(event_column.isnot(None))
+        .all()
+    }
+
+
+def _build_opening_device_progress_metrics(
+    db: Session,
+    *,
+    site_ids: Optional[Iterable[int]] = None,
+) -> Dict[int, Dict[str, int]]:
+    requested_site_ids = set(_normalize_site_ids(site_ids))
+
+    site_query = db.query(Site.id)
+    if requested_site_ids:
+        site_query = site_query.filter(Site.id.in_(sorted(requested_site_ids)))
+
+    metrics: Dict[int, Dict[str, object]] = {}
+    all_sns: Set[str] = set()
+
+    for site_id, in site_query.all():
+        normalized_site_id = int(site_id)
+        binding_summary = summarize_site_binding_slots(db, normalized_site_id, opening_only=True)
+        slot_check_required = bool(binding_summary.get("slot_check_required"))
+        expected_slot_count = int(binding_summary.get("expected_slot_count") or 0)
+        bound_slot_count = int(binding_summary.get("bound_slot_count") or 0)
+        denominator = expected_slot_count if slot_check_required else bound_slot_count
+
+        rows = list(binding_summary.get("rows") or [])
+        slot_sns = [
+            sn
+            for row in rows
+            for sn in [str(getattr(row, "equipment_sn", "") or "").strip()]
+            if sn
+        ]
+        if denominator <= 0:
+            denominator = len(slot_sns)
+
+        metrics[normalized_site_id] = {
+            "denominator": denominator,
+            "slot_sns": slot_sns,
+            "online_devices": 0,
+            "activated_devices": 0,
+        }
+        all_sns.update(slot_sns)
+
+    state_map: Dict[str, OmcDeviceState] = {}
+    if all_sns:
+        state_map = {
+            str(state.sn or "").strip(): state
+            for state in db.query(OmcDeviceState)
+            .filter(OmcDeviceState.sn.in_(sorted(all_sns)))
+            .all()
+        }
+
+    result: Dict[int, Dict[str, int]] = {}
+    for site_id, info in metrics.items():
+        slot_sns = list(info.get("slot_sns") or [])
+        result[int(site_id)] = {
+            "denominator": int(info.get("denominator") or 0),
+            "online_devices": sum(
+                1 for sn in slot_sns if bool(getattr(state_map.get(sn), "ever_online", False))
+            ),
+            "activated_devices": sum(
+                1 for sn in slot_sns if bool(getattr(state_map.get(sn), "ever_activated", False))
+            ),
+        }
+    return result
+
+
+def get_site_ids_for_progress_filter(
+    db: Session,
+    progress_filter: str,
+    *,
+    metric_mode: str = SITE_PROGRESS_METRIC_MODE_WORKFLOW,
+) -> Set[int]:
+    normalized_filter = str(progress_filter or "").strip()
+    if normalized_filter not in SUPPORTED_SITE_PROGRESS_FILTERS:
+        raise ValueError("不支持的仪表盘站点筛选")
+
+    if normalized_filter == SITE_PROGRESS_FILTER_SURVEY_DONE:
+        return {
+            int(site_id)
+            for site_id, in db.query(SiteSurveyArchive.site_id)
+            .filter(SiteSurveyArchive.site_id.isnot(None))
+            .distinct()
+            .all()
+        }
+
+    if normalized_filter == SITE_PROGRESS_FILTER_PLANNING_DONE:
+        return {
+            int(site_id)
+            for site_id, in db.query(Site.id)
+            .filter(Site.status.in_(PLANNING_DONE_SITE_STATUSES))
+            .all()
+        }
+
+    if normalized_filter == SITE_PROGRESS_FILTER_INSTALL_STARTED:
+        return _site_ids_from_snapshot_field(db, "install_started_at")
+
+    if normalized_filter == SITE_PROGRESS_FILTER_INSTALLED:
+        return _site_ids_from_snapshot_field(db, "install_completed_at")
+
+    if normalized_filter == SITE_PROGRESS_FILTER_SSV_PASSED:
+        return _site_ids_from_snapshot_field(db, "ssv_at")
+
+    online_field = resolve_site_progress_field_name("online", metric_mode=metric_mode)
+    activated_field = resolve_site_progress_field_name("activated", metric_mode=metric_mode)
+    fully_online_ids = _site_ids_from_snapshot_field(db, online_field)
+    fully_activated_ids = _site_ids_from_snapshot_field(db, activated_field)
+
+    if normalized_filter == SITE_PROGRESS_FILTER_FULLY_ONLINE:
+        return fully_online_ids
+
+    if normalized_filter == SITE_PROGRESS_FILTER_FULLY_ACTIVATED:
+        return fully_activated_ids
+
+    metrics = _build_opening_device_progress_metrics(db)
+    if normalized_filter == SITE_PROGRESS_FILTER_PARTIAL_ONLINE:
+        return {
+            site_id
+            for site_id, info in metrics.items()
+            if site_id not in fully_online_ids
+            and int(info.get("denominator") or 0) > 0
+            and 0 < int(info.get("online_devices") or 0) < int(info.get("denominator") or 0)
+        }
+
+    if normalized_filter == SITE_PROGRESS_FILTER_PARTIAL_ACTIVATED:
+        return {
+            site_id
+            for site_id, info in metrics.items()
+            if site_id not in fully_activated_ids
+            and int(info.get("denominator") or 0) > 0
+            and 0 < int(info.get("activated_devices") or 0) < int(info.get("denominator") or 0)
+        }
+
+    return set()

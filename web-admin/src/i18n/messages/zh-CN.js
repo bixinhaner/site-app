@@ -226,6 +226,18 @@ export default {
     },
   },
   siteList: {
+    dashboardProgressFilterPrefix: "仪表盘筛选：",
+    dashboardProgressFilters: {
+      survey_done: "勘察站点",
+      planning_done: "规划站点",
+      install_started: "安装开始站点",
+      installed: "安装完成站点",
+      partial_online: "部分上线站点",
+      fully_online: "完全上线站点",
+      partial_activated: "部分激活站点",
+      fully_activated: "完全激活站点",
+      ssv_passed: "SSV 站点",
+    },
     actions: {
       more: "更多操作",
       rebuildProgress: "重算站点生命周期",

@@ -50,6 +50,7 @@ from app.services.omc_state import summarize_site_binding_slots, summarize_site_
 from app.services.authz_service import user_has_any_role_or_permission
 from app.services.site_progress_service import (
     ensure_site_progress_snapshots,
+    get_site_ids_for_progress_filter,
     get_site_progress_milestone_at,
     get_site_progress_snapshot,
     rebuild_site_progress,
@@ -406,6 +407,7 @@ async def search_sites(
     group_category_id: Optional[int] = Query(None),
     group_option_id: Optional[int] = Query(None),
     group_unassigned: Optional[bool] = Query(None),
+    site_progress_filter: Optional[str] = Query(None, description="仪表盘站点进度筛选"),
     sort_by: Optional[str] = Query(None, description="排序字段: site_code|site_name|city|status|created_at|updated_at"),
     sort_order: str = Query("desc", description="排序方向: asc|desc"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
@@ -441,6 +443,11 @@ async def search_sites(
         group_category_id=group_category_id,
         group_option_id=group_option_id,
         group_unassigned=group_unassigned,
+    )
+    query = _apply_site_progress_filter(
+        query,
+        db=db,
+        site_progress_filter=site_progress_filter,
     )
 
     total = query.count()
@@ -515,6 +522,7 @@ async def export_sites(
     group_category_id: Optional[int] = Query(None),
     group_option_id: Optional[int] = Query(None),
     group_unassigned: Optional[bool] = Query(None),
+    site_progress_filter: Optional[str] = Query(None, description="仪表盘站点进度筛选"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -552,6 +560,11 @@ async def export_sites(
         group_category_id=group_category_id,
         group_option_id=group_option_id,
         group_unassigned=group_unassigned,
+    )
+    query = _apply_site_progress_filter(
+        query,
+        db=db,
+        site_progress_filter=site_progress_filter,
     )
 
     records = query.order_by(Site.id.asc()).all()
@@ -1171,6 +1184,32 @@ def _apply_group_filter(
         )
 
     return query
+
+
+def _apply_site_progress_filter(
+    query,
+    *,
+    db: Session,
+    site_progress_filter: Optional[str],
+):
+    progress_filter = str(site_progress_filter or "").strip()
+    if not progress_filter:
+        return query
+
+    ensure_result = ensure_site_progress_snapshots(db, reason="site_list_progress_filter_read")
+    if ensure_result["rebuilt_site_ids"]:
+        db.commit()
+
+    try:
+        site_ids = get_site_ids_for_progress_filter(
+            db,
+            progress_filter,
+            metric_mode=get_site_progress_metric_mode(db),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return query.filter(Site.id.in_(sorted(site_ids) if site_ids else []))
 
 
 def _resolve_group_updates_from_row(
