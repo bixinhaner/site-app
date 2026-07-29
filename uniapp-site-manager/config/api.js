@@ -326,6 +326,13 @@ export const buildApiUrl = (endpoint) => {
   return url
 }
 
+export const buildApiUrlForBase = (baseUrl, endpoint) => {
+  if (!endpoint) return normalizeApiBaseUrl(baseUrl)
+  if (String(endpoint).startsWith('http')) return endpoint
+  const normalizedBaseUrl = normalizeApiBaseUrl(baseUrl)
+  return `${normalizedBaseUrl}${String(endpoint || '')}`
+}
+
 /**
  * 判断是否为本地图片路径（不应拼接 API BASE URL）
  * @param {string} filePath

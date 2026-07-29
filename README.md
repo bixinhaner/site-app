@@ -100,6 +100,11 @@ npm run build:prod            # 构建 App 版本
 - **App 库存错误提示统一国际化（2026-06-06）**
 - 移动端库存模块新增统一错误翻译入口，物料申请、领料单、出库确认、退库、快速出库和旧扫码入口都会先把后端中文错误映射到当前语言；英文和印尼语界面下未命中的中文错误不再原样弹出，而是显示本地化兜底提示。
 - `Pick Order / View request / Continue picking` 对应的印尼语词条已补齐，退库详细错误弹窗里的“原因 / 建议 / 相关信息 / 扫码 SN”等标签也会跟随当前语言显示。
+- **App 跨服务器更新修复（2026-07-29）**
+- 版本检测接口会把数据库中的相对 APK 路径转换为当前服务器的绝对地址，因此仍在使用旧版 App 的用户也能立即从正确服务器下载更新包。
+- 生产后端通过 `APP_PUBLIC_BASE_URL` 明确自己的 HTTPS 公网地址，兼容 Savanna 在防火墙终止 TLS、应用层只能看到 HTTP 的组网。
+- App版本检测会把安装包地址固定到返回版本信息的服务器；用户在登录页切换 Indonesia、Uganda 或 China 后，旧服务器的升级状态会立即清空，并在登录后按当前服务器重新检测。
+- 点击更新前还会再次核对版本来源；如果服务器在检测后发生变化，App会重新获取当前服务器版本，不再把 Uganda 的相对安装包路径拼接到 Indonesia 域名而长期停在 `0%`。
 - **App 列表默认 100 条上限修复（2026-03-10）**
 - 移动端 `站点/工单` 在未传分页参数时，已改为自动翻页聚合，不再被后端默认 `limit=100` 截断；首页 `Total Sites / Operational / Maintenance` 和工单统计会基于完整数据计算。
 - 需要分页的页面（例如检查前“选择站点”）仍可继续传 `skip/limit` 按页取数，避免一次性加载过多数据。
@@ -273,6 +278,7 @@ backend/venv/bin/python temp/delete_site_bundle.py --site-id 32 --site-id 33 --e
 ### 生产部署组网差异（Indonesia / Savanna）
 - **标准模式（Indonesia）**：公网 `80/443` 直达 Caddy，由 Caddy 自动申请和续期 HTTPS 证书（Let’s Encrypt）。
 - **Savanna 模式（Uganda）**：HTTPS 证书和 TLS 终止放在防火墙/网关，Caddy 仅接收 HTTP 回源（通常 `:80`），不做证书签发和 HTTPS 跳转。
+- **上传文件访问**：两种模式都由 Caddy 直接读取 `backend/uploads`，不再经 FastAPI 转发；Web/App 图片 URL 保持 `/uploads/...` 不变，可减少检查项大图传输中断。
 - **域名要求**：域名必须与入口证书匹配；例如证书是 `*.savannafibre.com` 时，应使用 `siteapp.savannafibre.com`，不要使用 `siteapp.savannafibre.co.ug`。
 - **详细操作**：见 `surge-deployment.md` 第 `2.6` 节（两套 Caddyfile 模板）。
 

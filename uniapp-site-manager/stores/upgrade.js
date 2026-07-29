@@ -5,7 +5,15 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
+import {
+    buildApiUrl,
+    buildApiUrlForBase,
+    API_ENDPOINTS,
+    getApiBaseUrl,
+    getAuthHeaders,
+    normalizeApiBaseUrl,
+} from '@/config/api.js'
+import { bindVersionInfoToSource, isSameUpgradeSource } from '@/utils/upgradeSource.js'
 import {
     getCurrentVersion,
     getDeviceId,
@@ -55,6 +63,9 @@ export const useUpgradeStore = defineStore('upgrade', () => {
 
     // 下载日志ID（用于统计）
     const downloadLogId = ref(null)
+
+    // 当前版本检测结果来自哪个服务器
+    const checkedApiBaseUrl = ref('')
 
     // 错误信息
     const errorMessage = ref(null)
@@ -119,7 +130,13 @@ export const useUpgradeStore = defineStore('upgrade', () => {
      * @param {boolean} silent 是否静默检测（不显示loading）
      * @returns {Promise<boolean>} 是否有更新
      */
-    const checkUpdate = async (silent = true) => {
+    let checkRequestSequence = 0
+
+    const checkUpdate = async (silent = true, options = {}) => {
+        const requestSequence = ++checkRequestSequence
+        const checkBaseUrl = normalizeApiBaseUrl(getApiBaseUrl())
+        const autoDownloadSilent = options.autoDownloadSilent !== false
+
         try {
             const currentVersion = getCurrentVersion()
             const deviceId = getDeviceId()
@@ -129,7 +146,7 @@ export const useUpgradeStore = defineStore('upgrade', () => {
             console.log('检测版本更新:', { currentVersion, deviceId, username: userInfo.username })
 
             const response = await uni.request({
-                url: buildApiUrl(API_ENDPOINTS.APP_VERSION.CHECK),
+                url: buildApiUrlForBase(checkBaseUrl, API_ENDPOINTS.APP_VERSION.CHECK),
                 method: 'POST',
                 data: {
                     current_version_code: currentVersion.versionCode,
@@ -143,28 +160,55 @@ export const useUpgradeStore = defineStore('upgrade', () => {
                 }
             })
 
+            const currentBaseUrl = normalizeApiBaseUrl(getApiBaseUrl())
+            if (
+                requestSequence !== checkRequestSequence ||
+                !isSameUpgradeSource(checkBaseUrl, currentBaseUrl)
+            ) {
+                console.warn('版本检测期间服务器已切换，忽略旧服务器返回结果:', {
+                    checkBaseUrl,
+                    currentBaseUrl,
+                })
+                return false
+            }
+
             if (response.statusCode === 200) {
-                checkResult.value = response.data
+                const responseData = response.data || {}
+                const boundVersionInfo = bindVersionInfoToSource(
+                    responseData.version_info,
+                    checkBaseUrl,
+                )
+                checkResult.value = {
+                    ...responseData,
+                    version_info: boundVersionInfo,
+                }
+                checkedApiBaseUrl.value = checkBaseUrl
                 lastCheckTime.value = Date.now()
                 uni.setStorageSync('upgrade_last_check', lastCheckTime.value)
 
-                console.log('版本检测结果:', response.data)
+                console.log('版本检测结果:', checkResult.value)
 
                 // 如果有更新且是静默更新，自动开始下载
-                if (response.data.has_update && response.data.update_type === 'silent') {
+                if (
+                    checkResult.value.has_update &&
+                    checkResult.value.update_type === 'silent' &&
+                    autoDownloadSilent
+                ) {
                     startDownload()
                 }
 
                 // 如果有更新且不是静默更新，设置全局弹窗标志
-                if (response.data.has_update && response.data.update_type !== 'silent') {
+                if (checkResult.value.has_update && checkResult.value.update_type !== 'silent') {
                     // 检查是否被跳过（强制更新不能跳过）
-                    const versionCode = response.data.version_info?.version_code
-                    if (skippedVersion.value !== versionCode || response.data.update_type === 'force') {
+                    const versionCode = checkResult.value.version_info?.version_code
+                    if (skippedVersion.value !== versionCode || checkResult.value.update_type === 'force') {
                         shouldShowDialog.value = true
                     }
+                } else {
+                    shouldShowDialog.value = false
                 }
 
-                return response.data.has_update
+                return checkResult.value.has_update
             }
 
             return false
@@ -178,6 +222,27 @@ export const useUpgradeStore = defineStore('upgrade', () => {
      * 开始下载
      */
     const startDownload = async () => {
+        const currentBaseUrl = normalizeApiBaseUrl(getApiBaseUrl())
+        if (
+            checkedApiBaseUrl.value &&
+            !isSameUpgradeSource(checkedApiBaseUrl.value, currentBaseUrl)
+        ) {
+            console.warn('下载前检测到服务器已切换，重新获取当前服务器版本信息:', {
+                checkedApiBaseUrl: checkedApiBaseUrl.value,
+                currentBaseUrl,
+            })
+            resetForServerChange()
+            const hasCurrentServerUpdate = await checkUpdate(true, {
+                autoDownloadSilent: false,
+            })
+            if (!hasCurrentServerUpdate) {
+                if (!checkResult.value) {
+                    errorMessage.value = '版本信息刷新失败，请重试'
+                }
+                return false
+            }
+        }
+
         if (!versionInfo.value?.download_url) {
             errorMessage.value = '下载地址无效'
             return false
@@ -342,6 +407,20 @@ export const useUpgradeStore = defineStore('upgrade', () => {
         downloadLogId.value = null
     }
 
+    const resetForServerChange = () => {
+        checkRequestSequence += 1
+        checkResult.value = null
+        checkedApiBaseUrl.value = ''
+        shouldShowDialog.value = false
+        lastCheckTime.value = null
+        try {
+            uni.removeStorageSync('upgrade_last_check')
+        } catch (error) {
+            // ignore
+        }
+        resetDownload()
+    }
+
     /**
      * 重试下载
      */
@@ -370,6 +449,7 @@ export const useUpgradeStore = defineStore('upgrade', () => {
         downloadStatus,
         downloadProgress,
         downloadedFile,
+        checkedApiBaseUrl,
         lastCheckTime,
         skippedVersion,
         errorMessage,
@@ -390,6 +470,7 @@ export const useUpgradeStore = defineStore('upgrade', () => {
         installUpdate,
         skipCurrentVersion,
         resetDownload,
+        resetForServerChange,
         retryDownload,
         showDialog,
         hideDialog

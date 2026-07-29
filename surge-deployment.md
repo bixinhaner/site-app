@@ -27,7 +27,8 @@
   - 监听 `:80`、`:443`
   - 自动申请/续期证书（Let’s Encrypt）
   - 路由：
-    - `/api/*`、`/uploads/*`、`/health` 转发到 `127.0.0.1:8000`
+    - `/uploads/*` 由 Caddy 直接读取 `/usr/local/site-app/backend/uploads`，避免大图片经过应用层转发
+    - `/api/*`、`/health` 转发到 `127.0.0.1:8000`
     - 其余路径由 `/usr/local/site-app/web-admin/dist` 提供（SPA 回退 `index.html`）
 
 ### 模式 B：Savanna 模式（防火墙终止 HTTPS）
@@ -152,6 +153,7 @@ cat > /usr/local/site-app/backend/.env <<EOF
 DEBUG=False
 SECRET_KEY=${SECRET_KEY}
 DATABASE_URL=sqlite:///./site_manager.db
+APP_PUBLIC_BASE_URL=https://siteapp.indonesiacentral.cloudapp.azure.com
 ALLOWED_HOSTS_STR=*
 
 # 启动自检：默认管理员（仅首次创建；已存在绝不重置密码）
@@ -191,7 +193,12 @@ siteapp.indonesiacentral.cloudapp.azure.com {
     respond 404
   }
 
-  @backend path /api/* /uploads/* /health
+  handle_path /uploads/* {
+    root * /usr/local/site-app/backend/uploads
+    file_server
+  }
+
+  @backend path /api/* /health
   handle @backend {
     reverse_proxy 127.0.0.1:8000
   }
@@ -227,7 +234,12 @@ http://siteapp.savannafibre.com, http://102.209.110.241 {
     respond 404
   }
 
-  @backend path /api/* /uploads/* /health
+  handle_path /uploads/* {
+    root * /usr/local/site-app/backend/uploads
+    file_server
+  }
+
+  @backend path /api/* /health
   handle @backend {
     reverse_proxy 127.0.0.1:8000
   }
@@ -242,6 +254,10 @@ EOF
 ```
 
 > 将 `siteapp.savannafibre.com` 和 `102.209.110.241` 替换为你的实际域名与公网入口 IP。
+>
+> Savanna 的后端 `.env` 需要配置
+> `APP_PUBLIC_BASE_URL=https://siteapp.savannafibre.com`。由于 TLS 在防火墙终止，
+> 后端无法从回源请求可靠判断外部协议；该配置确保 App 版本接口始终返回 HTTPS 安装包地址。
 
 组网与配置差异（重点）：
 
@@ -395,6 +411,19 @@ cd /usr/local/site-app/backend
 
 常见原因：管理员邮箱使用了 `@xxx.local` 之类保留域名，触发后端响应模型 `EmailStr` 校验失败。  
 解决：将管理员邮箱改为合法邮箱（如 `admin@example.com`）。后端启动逻辑会自动修复非法邮箱。
+
+### 4.5 Web/App 检查项图片加载失败
+
+先确认数据库中的图片路径与 `/usr/local/site-app/backend/uploads` 下的文件一致。如果文件存在，但 Caddy 日志出现 `H3_REQUEST_CANCELLED` 或 `aborting with incomplete response`，检查 `/uploads/*` 是否仍被反向代理到 FastAPI。
+
+生产配置应使用本章 Caddyfile 模板，让 Caddy 直接提供上传文件；应用后先执行配置校验，再热加载：
+
+```bash
+caddy validate --config /usr/local/site-app/Caddyfile --adapter caddyfile
+caddy reload --config /usr/local/site-app/Caddyfile --adapter caddyfile
+```
+
+该调整不改变图片公网 URL，Web 和 App 无需同步升级。
 
 ---
 

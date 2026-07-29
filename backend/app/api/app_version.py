@@ -7,6 +7,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urljoin
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, Query
 from sqlalchemy.orm import Session
@@ -84,6 +85,17 @@ def _calculate_md5(file_path: str) -> str:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
+
+
+def _resolve_download_url(req: Request, download_url: str) -> str:
+    """将相对下载路径绑定到本次版本查询实际访问的服务器。"""
+    raw_url = str(download_url or "").strip()
+    if raw_url.lower().startswith(("http://", "https://")):
+        return raw_url
+
+    configured_base_url = str(settings.APP_PUBLIC_BASE_URL or "").strip()
+    base_url = f"{(configured_base_url or str(req.base_url)).rstrip('/')}/"
+    return urljoin(base_url, raw_url.lstrip("/"))
 
 
 def _check_gray_scale(device_id: Optional[str], percent: int) -> bool:
@@ -212,7 +224,7 @@ async def check_version(
             version_name=latest_version.version_name,
             version_code=latest_version.version_code,
             update_type=update_type,
-            download_url=latest_version.download_url,
+            download_url=_resolve_download_url(req, latest_version.download_url),
             file_size=latest_version.file_size,
             file_md5=latest_version.file_md5,
             release_notes=latest_version.release_notes,
@@ -224,7 +236,7 @@ async def check_version(
 
 
 @router.get("/latest", response_model=AppVersionInfo)
-async def get_latest_version(db: Session = Depends(get_db)):
+async def get_latest_version(req: Request, db: Session = Depends(get_db)):
     """获取最新版本信息（公开接口）"""
     latest_version = db.query(AppVersion).filter(
         AppVersion.is_active == True
@@ -233,7 +245,9 @@ async def get_latest_version(db: Session = Depends(get_db)):
     if not latest_version:
         raise HTTPException(status_code=404, detail="暂无可用版本")
     
-    return AppVersionInfo.from_orm(latest_version)
+    version_info = AppVersionInfo.from_orm(latest_version)
+    version_info.download_url = _resolve_download_url(req, version_info.download_url)
+    return version_info
 
 
 @router.post("/download-start", response_model=DownloadStartResponse)

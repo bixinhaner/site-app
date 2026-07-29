@@ -12,7 +12,8 @@
     "build:h5:dev": "node scripts/build.js --env development --platform h5",
     "build:h5:prod": "node scripts/build.js --env production --platform h5",
     "build:mp:dev": "node scripts/build.js --env development --platform mp-weixin",
-    "build:mp:prod": "node scripts/build.js --env production --platform mp-weixin"
+    "build:mp:prod": "node scripts/build.js --env production --platform mp-weixin",
+    "test:upgrade-source": "node --experimental-default-type=module --test tests/upgrade-source.test.js"
   },
   "dependencies": {
     "@dcloudio/uni-app": "^3.0.0-alpha-4020020240930001",

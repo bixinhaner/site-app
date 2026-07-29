@@ -102,12 +102,14 @@
 	import { useUserStore } from '@/stores/user'
 	import { useLoggerStore } from '@/stores/logger'
 	import { useLanguageStore } from '@/stores/language'
+	import { useUpgradeStore } from '@/stores/upgrade'
 	import { env, getVersion } from '@/config/env.js'
-		import { API_SERVERS, getApiBaseUrl, normalizeApiBaseUrlForMatch, setApiBaseUrl } from '@/config/api.js'
+	import { API_SERVERS, getApiBaseUrl, normalizeApiBaseUrlForMatch, setApiBaseUrl } from '@/config/api.js'
 	
 	const userStore = useUserStore()
 	const logger = useLoggerStore()
 	const languageStore = useLanguageStore()
+	const upgradeStore = useUpgradeStore()
 	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	
 	const loading = ref(false)
@@ -225,6 +227,7 @@
 			
 			// 切换服务器前先清理跨服数据（保留 savedCredentials）
 			clearServerSensitiveStorage()
+			upgradeStore.resetForServerChange()
 			
 			setApiBaseUrl(next)
 			currentBaseUrl.value = getApiBaseUrl()
@@ -350,6 +353,13 @@
 				
 				// 保存登录凭据（根据用户选择）
 				saveCredentials()
+
+				// 登录后以当前服务器重新确认版本，避免沿用切服前的安装包地址
+				if (!upgradeStore.checkedApiBaseUrl) {
+					upgradeStore.checkUpdate(true).catch((error) => {
+						console.warn('登录后版本检测失败:', error)
+					})
+				}
 				
 				// 跳转到首页（自定义底部导航，使用 reLaunch 作为入口）
 				setTimeout(() => {

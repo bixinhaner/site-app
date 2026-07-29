@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "your-secret-key-change-in-production"
     DEBUG: bool = True
+    # 对外访问根地址。TLS 在上游网关终止时必须显式配置，避免生成 HTTP 下载链接。
+    APP_PUBLIC_BASE_URL: str = ""
 
     # 启动自检：默认管理员（仅首次创建；已存在不会重置密码）
     AUTO_CREATE_ADMIN: bool = True
