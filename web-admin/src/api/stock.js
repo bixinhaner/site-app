@@ -4,6 +4,16 @@ export const stockApi = {
   // 获取库存列表
   getInventoryList: (params = {}) => 
     request.get('/api/stock/inventory', { params }),
+
+  // 库存管理新版聚合、主设备 SN 下钻与辅材明细
+  getInventoryOverview: (params = {}) =>
+    request.get('/api/stock/inventory/overview', { params }),
+
+  getMainInventoryInstances: (params = {}) =>
+    request.get('/api/stock/inventory/main-instances', { params }),
+
+  getAuxiliaryInventoryDetails: (equipmentId, params = {}) =>
+    request.get(`/api/stock/inventory/auxiliary-details/${equipmentId}`, { params }),
   
   // 获取库存看板数据
   getInventoryDashboard: () => 

@@ -53,6 +53,12 @@ from app.services.equipment_unbind_service import (
     is_device_level_check_item,
     rollback_equipment_status_after_unbind,
 )
+from app.services.inventory_overview_service import (
+    get_auxiliary_inventory_details,
+    get_auxiliary_inventory_overview,
+    get_main_inventory_instances,
+    get_main_inventory_overview,
+)
 from app.services.warehouse_access_service import (
     get_managed_warehouse_ids as get_inventory_managed_warehouse_ids,
     has_global_inventory_scope,
@@ -255,7 +261,10 @@ async def get_inventory_list(
     if equipment_id:
         query = query.filter(Inventory.equipment_id == equipment_id)
     if low_stock_only:
-        query = query.filter(Inventory.current_stock <= Inventory.min_stock)
+        query = query.filter(
+            Inventory.min_stock > 0,
+            Inventory.current_stock <= Inventory.min_stock,
+        )
     
     inventory_list = query.all()
     
@@ -277,12 +286,112 @@ async def get_inventory_list(
             "allocated_stock": inv.allocated_stock,
             "min_stock": inv.min_stock,
             "max_stock": inv.max_stock,
-            "is_low_stock": inv.current_stock <= inv.min_stock,
+            "is_low_stock": bool(
+                int(inv.min_stock or 0) > 0
+                and int(inv.current_stock or 0) <= int(inv.min_stock or 0)
+            ),
             # 库存更新时间来自数据库 CURRENT_TIMESTAMP，按 UTC 输出
             "last_updated_at": to_utc_iso(inv.last_updated_at) if inv.last_updated_at else None
         })
     
     return {"inventory": result}
+
+
+@router.get("/inventory/overview")
+async def get_inventory_overview(
+    category: str = "main_device",
+    view_mode: str = "equipment",
+    keyword: str = "",
+    warehouse_id: Optional[int] = None,
+    status_filter: str = "",
+    include_zero: bool = False,
+    page: int = 1,
+    page_size: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按设备或仓库聚合库存，所有数字均可继续下钻。"""
+    if category not in {
+        EquipmentCategoryEnum.MAIN_DEVICE.value,
+        EquipmentCategoryEnum.AUXILIARY.value,
+    }:
+        raise HTTPException(status_code=400, detail="不支持的库存类别")
+    if view_mode not in {"equipment", "warehouse"}:
+        raise HTTPException(status_code=400, detail="不支持的查看方式")
+    if page < 1 or page_size < 1 or page_size > 1000:
+        raise HTTPException(status_code=400, detail="分页参数不合法")
+
+    common_params = {
+        "view_mode": view_mode,
+        "keyword": keyword.strip(),
+        "warehouse_id": warehouse_id,
+        "status_filter": status_filter.strip(),
+        "include_zero": include_zero,
+        "page": page,
+        "page_size": page_size,
+    }
+    if category == EquipmentCategoryEnum.MAIN_DEVICE.value:
+        return get_main_inventory_overview(db, **common_params)
+    return get_auxiliary_inventory_overview(db, **common_params)
+
+
+@router.get("/inventory/main-instances")
+async def get_main_inventory_instance_list(
+    equipment_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+    status_filter: str = "",
+    keyword: str = "",
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """下钻查看主设备 SN、状态、归属站点和最近出库信息。"""
+    if page < 1 or page_size < 1 or page_size > 1000:
+        raise HTTPException(status_code=400, detail="分页参数不合法")
+    return get_main_inventory_instances(
+        db,
+        equipment_id=equipment_id,
+        warehouse_id=warehouse_id,
+        status_filter=status_filter.strip(),
+        keyword=keyword.strip(),
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/inventory/auxiliary-details/{equipment_id}")
+async def get_auxiliary_inventory_detail_list(
+    equipment_id: int,
+    mode: str = "distribution",
+    keyword: str = "",
+    warehouse_id: Optional[int] = None,
+    include_zero: bool = False,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """下钻查看辅材仓库分布、未归还出库量或完整流水。"""
+    if mode not in {"distribution", "outbound", "transactions"}:
+        raise HTTPException(status_code=400, detail="不支持的辅材明细方式")
+    if page < 1 or page_size < 1 or page_size > 1000:
+        raise HTTPException(status_code=400, detail="分页参数不合法")
+    try:
+        return get_auxiliary_inventory_details(
+            db,
+            equipment_id=equipment_id,
+            mode=mode,
+            keyword=keyword.strip(),
+            warehouse_id=warehouse_id,
+            include_zero=include_zero,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        if str(exc) == "auxiliary_not_found":
+            raise HTTPException(status_code=404, detail="辅材不存在") from exc
+        raise
 
 @router.get("/inventory/dashboard")
 async def get_inventory_dashboard(
@@ -299,7 +408,8 @@ async def get_inventory_dashboard(
     # 总体统计
     total_items = active_inventory.with_entities(func.count(Inventory.id)).scalar()
     low_stock_items = active_inventory.with_entities(func.count(Inventory.id)).filter(
-        Inventory.current_stock <= Inventory.min_stock
+        Inventory.min_stock > 0,
+        Inventory.current_stock <= Inventory.min_stock,
     ).scalar()
     
     # 主设备库存总量

@@ -1,888 +1,503 @@
 <template>
   <div class="inventory-page">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <h1>设备库存管理</h1>
-      <div class="header-actions">
-        <el-button @click="exportInventory" type="success">
-          <el-icon><Download /></el-icon>
-          导出Excel
-        </el-button>
-        <el-button @click="loadInventoryList" :loading="loading">
-          <el-icon><Refresh /></el-icon>
-          刷新
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 库存统计卡片 -->
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-number">{{ totalItems }}</div>
-        <div class="stat-label">库存种类</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-number">{{ totalStock }}</div>
-        <div class="stat-label">库存总量</div>
-      </div>
-      <div class="stat-card warning">
-        <div class="stat-number">{{ lowStockCount }}</div>
-        <div class="stat-label">预警数量</div>
-      </div>
-    </div>
-
-    <!-- 搜索筛选 -->
-    <el-card class="search-card">
-      <div class="search-row">
-        <div class="search-left">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索设备名称或编码"
-            style="width: 300px"
-            clearable
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-          
-          <el-select
-            v-model="filterCategory"
-            placeholder="设备类别"
-            style="width: 150px"
-            clearable
-            @change="handleSearch"
-          >
-            <el-option label="主设备" value="main_device" />
-            <el-option label="辅材" value="auxiliary" />
-          </el-select>
-          
-          <el-select
-            v-model="filterStockStatus"
-            placeholder="库存状态"
-            style="width: 136px"
-            clearable
-            @change="handleSearch"
-          >
-            <el-option label="正常" value="normal" />
-            <el-option label="预警" value="low_stock" />
-            <el-option label="缺货" value="out_of_stock" />
-          </el-select>
-        </div>
-        
-        <div class="search-right">
-          <el-button type="primary" @click="handleSearch">
-            <el-icon><Search /></el-icon>
-            搜索
-          </el-button>
-          <el-button @click="resetSearch">重置</el-button>
-        </div>
-      </div>
-    </el-card>
-
-    <!-- 库存类型选择 -->
-    <el-card class="inventory-tabs-card">
-      <el-tabs v-model="activeTab" @tab-change="handleTabChange">
-        <el-tab-pane label="主设备库存" name="main_device">
-          <div class="tab-stats">
-            <el-tag type="primary" size="small">共 {{ mainDeviceList.length }} 种主设备</el-tag>
-            <el-tag type="info" size="small">总库存量: {{ mainDeviceTotalStock }}</el-tag>
-          </div>
-          
-          <!-- 主设备表格 -->
-          <el-table
-            :data="mainDeviceList"
-            v-loading="loading"
-            stripe
-            style="width: 100%; margin-top: 16px;"
-          >
-            <el-table-column prop="equipment_code" label="设备编码" width="140" />
-            <el-table-column prop="equipment_name" label="设备名称" min-width="200" />
-            <el-table-column prop="warehouse_name" label="仓库" width="120" />
-            <el-table-column prop="current_stock" label="当前库存" width="100" sortable>
-              <template #default="{ row }">
-                <span :class="{ 'low-stock': row.is_low_stock }">
-                  {{ row.current_stock }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="available_stock" label="可用库存" width="130" />
-            <el-table-column prop="allocated_stock" label="已分配" width="120" />
-            <el-table-column prop="unit" label="单位" width="90" />
-            <el-table-column label="操作" width="240">
-              <template #default="{ row }">
-                <div class="en-op-actions en-op-actions--stack">
-                  <el-button size="small" type="primary" @click="viewDeviceInstances(row)" link>
-                    查看实例 ({{ row.current_stock }})
-                  </el-button>
-                  <el-button size="small" @click="viewStockHistory(row)" link>
-                    出入库记录
-                  </el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-
-        <el-tab-pane label="辅材库存" name="auxiliary">
-          <div class="tab-stats">
-            <el-tag type="success" size="small">共 {{ auxiliaryList.length }} 种辅材</el-tag>
-            <el-tag type="info" size="small">总库存量: {{ auxiliaryTotalStock }}</el-tag>
-          </div>
-          
-          <!-- 辅材表格 -->
-          <el-table
-            :data="auxiliaryList"
-            v-loading="loading"
-            stripe
-            style="width: 100%; margin-top: 16px;"
-          >
-            <el-table-column prop="equipment_code" label="设备编码" width="140" />
-            <el-table-column prop="equipment_name" label="设备名称" min-width="200" />
-            <el-table-column prop="warehouse_name" label="仓库" width="120" />
-            <el-table-column prop="current_stock" label="当前库存" width="100" sortable>
-              <template #default="{ row }">
-                <span :class="{ 'low-stock': row.is_low_stock }">
-                  {{ row.current_stock }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="available_stock" label="可用库存" width="130" />
-            <el-table-column prop="allocated_stock" label="已分配" width="120" />
-            <el-table-column prop="unit" label="单位" width="90" />
-            <el-table-column prop="min_stock" label="最低库存" width="100" />
-            <el-table-column label="库存状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="getStockStatusType(row)" size="small">
-                  {{ getStockStatusText(row) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="150">
-              <template #default="{ row }">
-                <div class="en-op-actions">
-                  <el-button size="small" @click="viewStockHistory(row)" link>
-                    出入库记录
-                  </el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
-    </el-card>
-
-	    <!-- 设备实例详情弹窗 -->
-	    <el-dialog
-	      v-model="showInstanceDialog"
-	      :title="`${selectedEquipment?.equipment_name} - ${selectedEquipment?.warehouse_name || '-'} - 设备实例详情`"
-	      width="80%"
-	      top="5vh"
-	    >
-	        <div v-if="selectedEquipment">
-	          <div class="instance-stats">
-	            <el-checkbox
-	              v-model="includeOutInstances"
-	              :disabled="instanceLoading"
-	              @change="loadDeviceInstances"
-	            >
-	              包含已出库（按上个仓库）
-	            </el-checkbox>
-	            <el-tag type="info" size="small">总数量: {{ deviceInstances.length }}</el-tag>
-	            <el-tag type="success" size="small">在库: {{ getInstancesByStatus('in_stock').length }}</el-tag>
-	            <el-tag type="warning" size="small">待检查: {{ getInstancesByStatus('pending_inspection').length }}</el-tag>
-	            <el-tag type="success" size="small">已检查: {{ getInstancesByStatus('inspected').length }}</el-tag>
-	            <el-tag type="warning" size="small">退库待收货: {{ getInstancesByStatus('return_pending_receive').length }}</el-tag>
-	            <el-tag type="info" size="small">已出库: {{ getInstancesByStatus('issued').length }}</el-tag>
-	            <el-tag type="danger" size="small">损坏/报损: {{ getInstancesByStatus('damaged').length }}</el-tag>
-	          </div>
-
-	        <el-table
-	          :data="deviceInstances"
-	          v-loading="instanceLoading"
-	          stripe
-	          style="width: 100%; margin-top: 16px;"
-	          max-height="400"
-	        >
-	          <el-table-column prop="serial_number" label="SN序列号" width="150" />
-	          <el-table-column prop="mac_address" label="MAC地址" width="150" />
-	          <el-table-column prop="imei" label="IMEI" width="150" />
-	          <el-table-column prop="firmware_version" label="固件版本" width="100" />
-          <el-table-column prop="hardware_version" label="硬件版本" width="100" />
-          <el-table-column prop="vendor" label="供应商" width="100" />
-          <el-table-column prop="batch_number" label="批次号" width="100" />
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="getInstanceStatusType(row.status)" size="small">
-                {{ getInstanceStatusText(row.status) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="location" label="库位" width="100" />
-          <el-table-column label="操作" width="100">
-            <template #default="{ row }">
-              <el-button size="small" @click="trackDevice(row.serial_number)" type="primary" link>
-                设备追踪
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </el-dialog>
-
-    <!-- 原有的库存列表（作为备用视图） -->
-    <el-card class="table-card" style="display: none;">
-      <template #header>
-        <div class="table-header">
-          <span>库存明细</span>
-          <div class="table-stats">
-            <el-tag type="info" size="small">共 {{ inventoryList.length }} 种设备</el-tag>
-          </div>
-        </div>
-      </template>
-
-      <el-table
-        :data="inventoryList"
-        v-loading="loading"
-        stripe
-        style="width: 100%"
-      >
-        <el-table-column prop="equipment_code" label="设备编码" width="140" />
-        
-        <el-table-column prop="equipment_name" label="设备名称" min-width="200" />
-        
-        <el-table-column prop="category" label="类别" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.category === 'main_device' ? 'primary' : 'success'" size="small">
-              {{ row.category === 'main_device' ? '主设备' : '辅材' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="warehouse_name" label="仓库" width="120" />
-        
-        <el-table-column prop="current_stock" label="当前库存" width="100" sortable>
-          <template #default="{ row }">
-            <span :class="{ 'low-stock': row.is_low_stock }">
-              {{ row.current_stock }}
-            </span>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="available_stock" label="可用库存" width="100" sortable>
-          <template #default="{ row }">
-            <span :class="{ 'low-stock': row.available_stock <= (row.min_stock || 0) }">
-              {{ row.available_stock }}
-            </span>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="reserved_stock" label="预留库存" width="100" />
-        
-        <el-table-column prop="min_stock" label="最低库存" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" type="info">{{ row.min_stock || 0 }}</el-tag>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="unit" label="单位" width="80" />
-        
-        <el-table-column label="库存状态" width="120">
-          <template #default="{ row }">
-            <el-tag 
-              :type="getStockStatusType(row)" 
-              size="small"
-            >
-              {{ getStockStatusText(row) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="last_updated_at" label="最后更新" width="160">
-          <template #default="{ row }">
-            {{ formatDateTime(row.last_updated_at) }}
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="{ row }">
-            <el-button type="primary" size="small" @click="viewDetails(row)" link>
-              <el-icon><View /></el-icon>
-              详情
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <div class="pagination-container">
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadInventoryList"
-          @current-change="loadInventoryList"
-        />
-      </div>
-    </el-card>
-
-    <!-- 库存详情弹窗 -->
-    <el-dialog
-      v-model="showDetailDialog"
-      title="库存详情"
-      width="500px"
+    <el-tabs
+      class="inventory-category-tabs"
+      :model-value="category"
+      @tab-change="changeCategory"
     >
-      <div v-if="selectedInventory" class="detail-content">
-        <div class="detail-item">
-          <label>设备名称:</label>
-          <span>{{ selectedInventory.equipment_name }}</span>
-        </div>
-        <div class="detail-item">
-          <label>设备编码:</label>
-          <span>{{ selectedInventory.equipment_code }}</span>
-        </div>
-        <div class="detail-item">
-          <label>当前库存:</label>
-          <span>{{ selectedInventory.current_stock }} {{ selectedInventory.unit }}</span>
-        </div>
-        <div class="detail-item">
-          <label>可用库存:</label>
-          <span>{{ selectedInventory.available_stock }} {{ selectedInventory.unit }}</span>
-        </div>
-        <div class="detail-item">
-          <label>预留库存:</label>
-          <span>{{ selectedInventory.reserved_stock }} {{ selectedInventory.unit }}</span>
-        </div>
-        <div class="detail-item">
-          <label>最低库存:</label>
-          <span>{{ selectedInventory.min_stock }} {{ selectedInventory.unit }}</span>
-        </div>
+      <el-tab-pane :label="t('inventory.page.mainDeviceInventory')" name="main_device" />
+      <el-tab-pane :label="t('inventory.page.auxiliaryInventory')" name="auxiliary" />
+    </el-tabs>
+
+    <InventoryKpiStrip
+      :category="category"
+      :summary="summary"
+      :loading="loading"
+      :active-filter="statusFilter"
+      @select="handleKpiSelect"
+    />
+
+    <section class="inventory-toolbar" :aria-label="t('inventory.page.filters')">
+      <el-radio-group :model-value="viewMode" @change="value => updateQuery({ view: value, page: 1 })">
+        <el-radio-button label="equipment">{{ t('inventory.page.byEquipment') }}</el-radio-button>
+        <el-radio-button label="warehouse">{{ t('inventory.page.byWarehouse') }}</el-radio-button>
+      </el-radio-group>
+
+      <el-input
+        v-model="searchInput"
+        class="search-input"
+        clearable
+        :prefix-icon="Search"
+        :placeholder="searchPlaceholder"
+        @input="scheduleSearch"
+        @keyup.enter="commitSearch"
+        @clear="commitSearch"
+      />
+
+      <el-select
+        :model-value="warehouseId"
+        clearable
+        :placeholder="t('inventory.page.warehouse')"
+        @change="value => updateQuery({ warehouse: value || undefined, page: 1 })"
+      >
+        <el-option
+          v-for="warehouse in warehouses"
+          :key="warehouse.id"
+          :label="warehouse.warehouse_name"
+          :value="warehouse.id"
+        />
+      </el-select>
+
+      <el-select
+        :model-value="statusFilter"
+        clearable
+        :placeholder="category === 'main_device' ? t('inventory.page.deviceStatus') : t('inventory.page.stockStatus')"
+        @change="value => updateQuery({ status: value || undefined, page: 1 })"
+      >
+        <el-option
+          v-for="option in statusOptions"
+          :key="option.value"
+          :label="option.label"
+          :value="option.value"
+        />
+      </el-select>
+
+      <el-switch
+        :model-value="includeZero"
+        :active-text="t('inventory.page.showZeroStock')"
+        @change="value => updateQuery({ zero: value ? '1' : undefined, page: 1 })"
+      />
+    </section>
+
+    <div class="inventory-meta">
+      <div class="inventory-meta__text">
+        <span>{{ metaText }}</span>
+        <span v-if="category === 'main_device' && meta.hidden_zero_record_count">
+          · {{ t('inventory.page.hiddenZeroRecords', { count: meta.hidden_zero_record_count }) }}
+        </span>
       </div>
-      
-      <template #footer>
-        <el-button @click="showDetailDialog = false">关闭</el-button>
-      </template>
-    </el-dialog>
+      <div class="toolbar-actions">
+        <el-button type="primary" :icon="Download" :loading="exporting" @click="exportInventory">
+          {{ t('inventory.page.exportExcel') }}
+        </el-button>
+        <el-tooltip :content="t('inventory.page.refresh')" placement="top">
+          <el-button :icon="Refresh" :loading="loading" @click="loadOverview" />
+        </el-tooltip>
+      </div>
+    </div>
+
+    <section class="inventory-results" aria-live="polite">
+      <div v-if="errorMessage" class="result-state result-state--error">
+        <el-icon><WarningFilled /></el-icon>
+        <h3>{{ t('inventory.page.loadFailed') }}</h3>
+        <p>{{ errorMessage }}</p>
+        <el-button @click="loadOverview">{{ t('inventory.page.retry') }}</el-button>
+      </div>
+
+      <div v-else-if="!loading && !items.length" class="result-state">
+        <el-icon><Search /></el-icon>
+        <h3>{{ hasFilters ? t('inventory.page.noMatchingInventory') : t('inventory.page.noInventoryRecords') }}</h3>
+        <p>{{ hasFilters ? t('inventory.page.adjustFilters') : t('inventory.page.inventoryEmptyHint') }}</p>
+        <el-button v-if="hasFilters" @click="clearFilters">{{ t('inventory.page.clearFilters') }}</el-button>
+      </div>
+
+      <InventoryMainTable
+        v-else-if="category === 'main_device'"
+        :rows="items"
+        :view-mode="viewMode"
+        :loading="loading"
+        @open-instances="openMainInstances"
+        @open-history="openStockHistory"
+      />
+
+      <InventoryAuxiliaryTable
+        v-else
+        :rows="items"
+        :view-mode="viewMode"
+        :loading="loading"
+        @open-details="openAuxiliaryDetails"
+      />
+    </section>
+
+    <div v-if="total > pageSize" class="page-pagination">
+      <el-pagination
+        :current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        @current-change="value => updateQuery({ page: value })"
+        @size-change="value => updateQuery({ page_size: value, page: 1 })"
+      />
+    </div>
+
+    <MainInstanceDrawer
+      v-model="mainDrawerVisible"
+      :context="drawerContext"
+      :initial-status="mainDrawerStatus"
+      :warehouses="warehouses"
+    />
+
+    <AuxiliaryDetailDrawer
+      v-model="auxiliaryDrawerVisible"
+      :context="drawerContext"
+      :initial-mode="auxiliaryDrawerMode"
+      :warehouses="warehouses"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { stockApi } from '../../api/stock'
+import { Download, Refresh, Search, WarningFilled } from '@element-plus/icons-vue'
 import * as XLSX from 'xlsx'
-import { trackOperation } from '@/utils/operationTrack'
+import { stockApi } from '@/api/stock'
+import InventoryKpiStrip from '@/components/inventory/InventoryKpiStrip.vue'
+import InventoryMainTable from '@/components/inventory/InventoryMainTable.vue'
+import InventoryAuxiliaryTable from '@/components/inventory/InventoryAuxiliaryTable.vue'
+import MainInstanceDrawer from '@/components/inventory/MainInstanceDrawer.vue'
+import AuxiliaryDetailDrawer from '@/components/inventory/AuxiliaryDetailDrawer.vue'
+import { formatInventoryUnit } from '@/utils/inventoryDisplay'
 
+const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 
-const loading = ref(false)
-const inventoryList = ref([])
-const currentPage = ref(1)
-const pageSize = ref(20)
+const category = ref('main_device')
+const viewMode = ref('equipment')
+const searchInput = ref('')
+const keyword = ref('')
+const warehouseId = ref(null)
+const statusFilter = ref('')
+const includeZero = ref(false)
+const page = ref(1)
+const pageSize = ref(100)
+const summary = ref({})
+const meta = ref({})
+const items = ref([])
 const total = ref(0)
+const warehouses = ref([])
+const loading = ref(false)
+const exporting = ref(false)
+const errorMessage = ref('')
+const mainDrawerVisible = ref(false)
+const auxiliaryDrawerVisible = ref(false)
+const drawerContext = ref({})
+const mainDrawerStatus = ref('')
+const auxiliaryDrawerMode = ref('distribution')
+let searchTimer = null
+let requestSequence = 0
 
-const searchKeyword = ref('')
-const filterCategory = ref('')
-const filterStockStatus = ref('')
+const mainStatuses = ['in_stock', 'issued', 'pending_inspection', 'inspected', 'return_pending_receive', 'abnormal']
+const auxiliaryStatuses = ['stocked', 'zero_stock', 'needs_restock']
 
-const showDetailDialog = ref(false)
-const selectedInventory = ref(null)
+const statusOptions = computed(() => (
+  category.value === 'main_device'
+    ? mainStatuses.map(value => ({ value, label: t(`inventory.page.status.${value}`) }))
+    : auxiliaryStatuses.map(value => ({ value, label: t(`inventory.page.auxFilter.${value}`) }))
+))
 
-// 新增Tab页相关状态
-const activeTab = ref('main_device')
-const showInstanceDialog = ref(false)
-const selectedEquipment = ref(null)
-const deviceInstances = ref([])
-const includeOutInstances = ref(false)
-const instanceLoading = ref(false)
+const searchPlaceholder = computed(() => (
+  category.value === 'main_device'
+    ? t('inventory.page.searchMain')
+    : t('inventory.page.searchAuxiliary')
+))
 
-// 计算属性 - 设备分类列表
-const mainDeviceList = computed(() => 
-  inventoryList.value.filter(item => item.category === 'main_device')
-)
+const hasFilters = computed(() => Boolean(
+  keyword.value || warehouseId.value || statusFilter.value || includeZero.value,
+))
 
-const auxiliaryList = computed(() => 
-  inventoryList.value.filter(item => item.category === 'auxiliary')
-)
-
-// 计算属性 - 分类库存统计
-const mainDeviceTotalStock = computed(() => 
-  mainDeviceList.value.reduce((sum, item) => sum + item.current_stock, 0)
-)
-
-const auxiliaryTotalStock = computed(() => 
-  auxiliaryList.value.reduce((sum, item) => sum + item.current_stock, 0)
-)
-
-// 计算统计数据
-const totalItems = computed(() => inventoryList.value.length)
-const totalStock = computed(() => 
-  inventoryList.value.reduce((sum, item) => sum + item.current_stock, 0)
-)
-const lowStockCount = computed(() => 
-  inventoryList.value.filter(item => item.is_low_stock).length
-)
-
-// 获取库存状态
-const getStockStatusType = (row) => {
-  if (row.current_stock <= 0) return 'danger'
-  if (row.is_low_stock) return 'warning'
-  return 'success'
-}
-
-const getStockStatusText = (row) => {
-  if (row.current_stock <= 0) return '缺货'
-  if (row.is_low_stock) return '预警'
-  return '正常'
-}
-
-// 格式化时间
-const formatDateTime = (dateStr) => {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleString('zh-CN')
-}
-
-// 加载库存列表
-const loadInventoryList = async () => {
-  try {
-    loading.value = true
-    const params = {}
-    
-    if (filterCategory.value) {
-      params.category = filterCategory.value
-    }
-    if (filterStockStatus.value === 'low_stock') {
-      params.low_stock_only = true
-    }
-    
-    const response = await stockApi.getInventoryList(params)
-    inventoryList.value = response.inventory || []
-    total.value = inventoryList.value.length
-    
-  } catch (error) {
-    console.error('加载库存列表失败:', error)
-    ElMessage.error('加载库存列表失败: ' + error.message)
-  } finally {
-    loading.value = false
+const metaText = computed(() => {
+  if (category.value === 'main_device') {
+    return [
+      t('inventory.page.equipmentCount', { count: meta.value.equipment_count || 0 }),
+      t('inventory.page.warehouseCount', { count: meta.value.warehouse_count || 0 }),
+    ].join(' · ')
   }
-}
-
-// 搜索处理
-const handleSearch = () => {
-  trackOperation({
-    module: '库存管理',
-    action: '查询',
-    object_type: '库存',
-    data: {
-      keyword: searchKeyword.value || undefined,
-      category: filterCategory.value || undefined,
-      stock_status: filterStockStatus.value || undefined,
-    },
-  })
-  loadInventoryList()
-}
-
-// 重置搜索
-const resetSearch = () => {
-  searchKeyword.value = ''
-  filterCategory.value = ''
-  filterStockStatus.value = ''
-  trackOperation({
-    module: '库存管理',
-    action: '重置筛选',
-    object_type: '库存',
-  })
-  loadInventoryList()
-}
-
-// 查看详情
-const viewDetails = (inventory) => {
-  selectedInventory.value = inventory
-  showDetailDialog.value = true
-}
-
-// 导出Excel
-const exportInventory = () => {
-  try {
-    // 根据当前选中的Tab确定导出数据
-    let dataToExport = []
-    let sheetName = ''
-    let fileName = ''
-    
-    if (activeTab.value === 'main_device') {
-      dataToExport = mainDeviceList.value
-      sheetName = '主设备库存'
-      fileName = `主设备库存_${formatExportDate()}.xlsx`
-    } else {
-      dataToExport = auxiliaryList.value
-      sheetName = '辅材库存'
-      fileName = `辅材库存_${formatExportDate()}.xlsx`
-    }
-    
-    if (dataToExport.length === 0) {
-      ElMessage.warning('暂无数据可导出')
-      return
-    }
-    
-    // 格式化导出数据
-    const exportData = dataToExport.map((item, index) => {
-      const baseData = {
-        '序号': index + 1,
-        '设备编码': item.equipment_code || '',
-        '设备名称': item.equipment_name || '',
-        '仓库': item.warehouse_name || '',
-        '当前库存': item.current_stock || 0,
-        '可用库存': item.available_stock || 0,
-        '已分配': item.allocated_stock || 0,
-        '单位': item.unit || '',
-        '库存状态': getStockStatusText(item),
-        '最后更新': formatDateTime(item.last_updated_at)
-      }
-      
-      // 辅材增加最低库存字段
-      if (activeTab.value === 'auxiliary') {
-        baseData['最低库存'] = item.min_stock || 0
-      }
-      
-      return baseData
-    })
-    
-    // 创建工作簿
-    const worksheet = XLSX.utils.json_to_sheet(exportData)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName)
-    
-    // 设置列宽
-    const columnWidths = [
-      { wch: 6 },  // 序号
-      { wch: 15 }, // 设备编码
-      { wch: 25 }, // 设备名称
-      { wch: 12 }, // 仓库
-      { wch: 10 }, // 当前库存
-      { wch: 10 }, // 可用库存
-      { wch: 10 }, // 已分配
-      { wch: 8 },  // 单位
-      { wch: 10 }, // 库存状态
-      { wch: 18 }  // 最后更新
-    ]
-    
-    if (activeTab.value === 'auxiliary') {
-      columnWidths.splice(8, 0, { wch: 10 }) // 最低库存
-    }
-    
-    worksheet['!cols'] = columnWidths
-    
-    // 导出文件
-    XLSX.writeFile(workbook, fileName)
-    
-    ElMessage.success(`成功导出 ${dataToExport.length} 条数据`)
-  } catch (error) {
-    console.error('导出Excel失败:', error)
-    ElMessage.error('导出失败: ' + error.message)
-  }
-}
-
-// 格式化导出日期
-const formatExportDate = () => {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  const hours = String(now.getHours()).padStart(2, '0')
-  const minutes = String(now.getMinutes()).padStart(2, '0')
-  return `${year}${month}${day}_${hours}${minutes}`
-}
-
-// Tab切换处理
-const handleTabChange = (tabName) => {
-  activeTab.value = tabName
-}
-
-	// 查看设备实例
-	const loadDeviceInstances = async () => {
-	  if (!selectedEquipment.value) {
-	    deviceInstances.value = []
-	    return
-	  }
-	  try {
-	    instanceLoading.value = true
-	    const params = {}
-	    if (selectedEquipment.value.warehouse_id !== undefined && selectedEquipment.value.warehouse_id !== null) {
-	      params.warehouse_id = selectedEquipment.value.warehouse_id
-	    }
-	    if (includeOutInstances.value) {
-	      params.include_out = true
-	    }
-	    const response = await stockApi.getEquipmentInstances(selectedEquipment.value.equipment_id, params)
-	    deviceInstances.value = response.instances || []
-	  } catch (error) {
-	    console.error('获取设备实例失败:', error)
-	    ElMessage.error('获取设备实例失败: ' + (error.response?.data?.detail || error.message))
-	    deviceInstances.value = []
-	  } finally {
-	    instanceLoading.value = false
-	  }
-	}
-
-	const viewDeviceInstances = async (equipment) => {
-	  try {
-	    selectedEquipment.value = equipment
-	    includeOutInstances.value = false
-	    showInstanceDialog.value = true
-	    await loadDeviceInstances()
-
-	    if (deviceInstances.value.length === 0) {
-	      ElMessage.info(`${equipment.equipment_name} 在当前仓库暂无实例`)
-	    }
-	  } catch (error) {
-	    console.error('获取设备实例失败:', error)
-	    ElMessage.error('获取设备实例失败: ' + (error.response?.data?.detail || error.message))
-	  }
-	}
-
-// 设备追踪：跳转到设备生命周期追踪页面，并自动带入 SN
-const trackDevice = (serialNumber) => {
-  const sn = (serialNumber || '').trim()
-  if (!sn) {
-    ElMessage.warning('该实例缺少 SN，无法追踪')
-    return
-  }
-  router.push({
-    name: 'EquipmentLifecycle',
-    query: { sn }
-  })
-}
-
-// 查看出入库历史
-const viewStockHistory = (equipment) => {
-  const code = (equipment?.equipment_code || '').trim()
-  if (!code) {
-    ElMessage.warning('缺少设备编码，无法跳转到出入库记录')
-    return
-  }
-  router.push({
-    name: 'StockHistory',
-    query: {
-      type: 'transaction',
-      keyword: code
-    }
-  })
-}
-
-// 获取设备实例按状态筛选
-const getInstancesByStatus = (status) => {
-  return deviceInstances.value.filter(instance => instance.status === status)
-}
-
-// 获取设备实例状态标签类型
-const getInstanceStatusType = (status) => {
-  const statusMap = {
-    'in_stock': 'success',
-    'issued': 'info',
-    'pending_inspection': 'warning',
-    'inspected': 'success',
-    'return_pending_receive': 'warning',
-    'damaged': 'danger',
-    // 兼容保留（历史值）
-    'allocated': 'warning',
-    'returned': 'info'
-  }
-  return statusMap[status] || 'info'
-}
-
-// 获取设备实例状态文本
-const getInstanceStatusText = (status) => {
-  const statusMap = {
-    'in_stock': '在库',
-    'issued': '已出库',
-    'pending_inspection': '待检查',
-    'inspected': '已检查',
-    'return_pending_receive': '退库待收货',
-    'damaged': '损坏/报损',
-    // 兼容保留（历史值）
-    'allocated': '已分配(旧)',
-    'returned': '已归还(旧)'
-  }
-  return statusMap[status] || '未知'
-}
-
-onMounted(() => {
-  loadInventoryList()
+  return [
+    t('inventory.page.auxiliaryCount', { count: meta.value.equipment_count || 0 }),
+    t('inventory.page.inventoryRecordCount', { count: meta.value.record_count || 0 }),
+    t('inventory.page.warehouseCount', { count: meta.value.warehouse_count || 0 }),
+  ].join(' · ')
 })
+
+const normalizeQuery = (query) => {
+  const nextCategory = ['main_device', 'auxiliary'].includes(query.category) ? query.category : 'main_device'
+  const allowedStatuses = nextCategory === 'main_device' ? mainStatuses : auxiliaryStatuses
+  return {
+    category: nextCategory,
+    view: ['equipment', 'warehouse'].includes(query.view) ? query.view : 'equipment',
+    q: String(query.q || ''),
+    warehouse: query.warehouse ? Number(query.warehouse) : null,
+    status: allowedStatuses.includes(query.status) ? query.status : '',
+    zero: query.zero === '1',
+    page: Math.max(Number(query.page) || 1, 1),
+    page_size: [20, 50, 100].includes(Number(query.page_size)) ? Number(query.page_size) : 100,
+  }
+}
+
+const syncStateFromRoute = () => {
+  const state = normalizeQuery(route.query)
+  category.value = state.category
+  viewMode.value = state.view
+  keyword.value = state.q
+  searchInput.value = state.q
+  warehouseId.value = state.warehouse
+  statusFilter.value = state.status
+  includeZero.value = state.zero
+  page.value = state.page
+  pageSize.value = state.page_size
+}
+
+const cleanQuery = (query) => Object.fromEntries(
+  Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '' && value !== false),
+)
+
+const updateQuery = (changes) => {
+  router.replace({
+    name: 'InventoryList',
+    query: cleanQuery({
+      category: category.value,
+      view: viewMode.value,
+      q: keyword.value || undefined,
+      warehouse: warehouseId.value || undefined,
+      status: statusFilter.value || undefined,
+      zero: includeZero.value ? '1' : undefined,
+      page: page.value > 1 ? page.value : undefined,
+      page_size: pageSize.value !== 100 ? pageSize.value : undefined,
+      ...changes,
+    }),
+  })
+}
+
+const overviewParams = (overrides = {}) => ({
+  category: category.value,
+  view_mode: viewMode.value,
+  keyword: keyword.value,
+  warehouse_id: warehouseId.value || undefined,
+  status_filter: statusFilter.value,
+  include_zero: includeZero.value,
+  page: page.value,
+  page_size: pageSize.value,
+  ...overrides,
+})
+
+const loadOverview = async () => {
+  const sequence = ++requestSequence
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const response = await stockApi.getInventoryOverview(overviewParams())
+    if (sequence !== requestSequence) return
+    summary.value = response.summary || {}
+    meta.value = response.meta || {}
+    items.value = response.items || []
+    total.value = response.total || 0
+  } catch (error) {
+    if (sequence !== requestSequence) return
+    errorMessage.value = error.response?.data?.detail || error.message || t('inventory.page.loadFailed')
+  } finally {
+    if (sequence === requestSequence) loading.value = false
+  }
+}
+
+const loadWarehouses = async () => {
+  try {
+    const response = await stockApi.getWarehouses()
+    warehouses.value = response.warehouses || []
+  } catch (_error) {
+    warehouses.value = []
+  }
+}
+
+const changeCategory = (nextCategory) => {
+  updateQuery({ category: nextCategory, status: undefined, page: 1 })
+}
+
+const scheduleSearch = () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(commitSearch, 300)
+}
+
+const commitSearch = () => {
+  clearTimeout(searchTimer)
+  updateQuery({ q: searchInput.value.trim() || undefined, page: 1 })
+}
+
+const clearFilters = () => updateQuery({
+  q: undefined,
+  warehouse: undefined,
+  status: undefined,
+  zero: undefined,
+  page: 1,
+})
+
+const handleKpiSelect = (item) => {
+  if (item.action === 'warehouse') {
+    updateQuery({ view: 'warehouse', status: undefined, page: 1 })
+    return
+  }
+  const nextStatus = statusFilter.value === item.filter ? undefined : item.filter || undefined
+  updateQuery({ status: nextStatus, page: 1 })
+}
+
+const openMainInstances = (row, status) => {
+  drawerContext.value = { ...row }
+  mainDrawerStatus.value = status || ''
+  mainDrawerVisible.value = true
+}
+
+const openAuxiliaryDetails = (row, mode) => {
+  if (!row.equipment_id) return
+  drawerContext.value = { ...row }
+  auxiliaryDrawerMode.value = mode || 'distribution'
+  auxiliaryDrawerVisible.value = true
+}
+
+const openStockHistory = (row) => {
+  const query = { type: 'transaction' }
+  if (row.equipment_code) query.keyword = row.equipment_code
+  if (row.warehouse_id) query.warehouse_id = row.warehouse_id
+  router.push({ name: 'StockHistory', query })
+}
+
+const exportInventory = async () => {
+  exporting.value = true
+  try {
+    const groups = []
+    let exportPage = 1
+    let exportTotal = 0
+    let batch = []
+    do {
+      const response = await stockApi.getInventoryOverview(overviewParams({ page: exportPage, page_size: 1000 }))
+      batch = response.items || []
+      groups.push(...batch)
+      exportTotal = response.total || 0
+      exportPage += 1
+    } while (batch.length > 0 && groups.length < exportTotal)
+
+    const children = groups.flatMap(group => group.children || [])
+    const data = category.value === 'main_device'
+      ? children.map(row => ({
+          [t('inventory.page.equipmentCode')]: row.equipment_code,
+          [t('inventory.page.equipmentName')]: row.equipment_name,
+          [t('inventory.page.warehouse')]: row.warehouse_name || t('inventory.page.unassignedWarehouse'),
+          [t('inventory.page.status.in_stock')]: row.in_stock,
+          [t('inventory.page.status.issued')]: row.issued,
+          [t('inventory.page.status.pending_inspection')]: row.pending_inspection,
+          [t('inventory.page.status.inspected')]: row.inspected,
+          [t('inventory.page.status.return_pending_receive')]: row.return_pending_receive,
+          [t('inventory.page.status.abnormal')]: row.abnormal,
+          [t('inventory.page.deviceTotal')]: row.device_total,
+          [t('inventory.page.unit')]: formatInventoryUnit(row.unit, t),
+        }))
+      : children.map(row => ({
+          [t('inventory.page.equipmentCode')]: row.equipment_code,
+          [t('inventory.page.equipmentName')]: row.equipment_name,
+          [t('inventory.page.warehouse')]: row.warehouse_name,
+          [t('inventory.page.currentStock')]: row.current_stock,
+          [t('inventory.page.outboundPending')]: row.allocated_stock,
+          [t('inventory.page.unit')]: formatInventoryUnit(row.unit, t),
+          [t('inventory.page.reorderPoint')]: row.reorder_configured ? row.min_stock : t('inventory.page.notConfigured'),
+          [t('inventory.page.stockStatus')]: t(`inventory.page.auxStatus.${row.stock_status}`),
+        }))
+    const worksheet = XLSX.utils.json_to_sheet(data)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, category.value === 'main_device' ? 'Main devices' : 'Auxiliary')
+    XLSX.writeFile(workbook, `inventory-${category.value}-${Date.now()}.xlsx`)
+    ElMessage.success(t('inventory.page.exportSuccess', { count: data.length }))
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || t('inventory.page.exportFailed'))
+  } finally {
+    exporting.value = false
+  }
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    syncStateFromRoute()
+    loadOverview()
+  },
+  { immediate: true },
+)
+
+onMounted(loadWarehouses)
+onBeforeUnmount(() => clearTimeout(searchTimer))
 </script>
 
-<style scoped lang="scss">
+<style scoped>
 .inventory-page {
-  padding: 24px;
+  min-width: 0;
+  padding: 14px 24px 24px;
+  color: #202733;
+  background: #fff;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-  
-  h1 {
-    color: var(--text-primary);
-    font-size: 28px;
-    font-weight: 600;
-    margin: 0;
-  }
-  
-  .header-actions {
-    display: flex;
-    gap: 12px;
-  }
-}
+.inventory-category-tabs { margin: 0 0 10px; }
+.inventory-category-tabs :deep(.el-tabs__header) { margin: 0; }
+.inventory-category-tabs :deep(.el-tabs__content) { display: none; }
+.inventory-category-tabs :deep(.el-tabs__item) { height: 40px; padding: 0 18px; font-size: 16px; }
 
-.stats-row {
+.inventory-toolbar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-  
-  .stat-card {
-    background: white;
-    border-radius: 8px;
-    padding: 20px;
-    text-align: center;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-    border: 1px solid var(--border-color);
-    
-    &.warning {
-      border-left: 4px solid var(--warning-color);
-    }
-    
-    .stat-number {
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--primary-color);
-      margin-bottom: 8px;
-    }
-    
-    .stat-label {
-      color: var(--text-secondary);
-      font-size: 14px;
-    }
-  }
-}
-
-.search-card {
-  margin-bottom: 24px;
-  border-radius: 8px;
-  
-  .search-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    
-    .search-left {
-      display: flex;
-      gap: 12px;
-      flex: 1;
-    }
-    
-    .search-right {
-      display: flex;
-      gap: 8px;
-    }
-  }
-}
-
-.table-card {
-  border-radius: 8px;
-  
-  .table-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-}
-
-.low-stock {
-  color: var(--danger-color);
-  font-weight: 600;
-}
-
-.detail-content {
-  .detail-item {
-    display: flex;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid #f1f5f9;
-    
-    &:last-child {
-      border-bottom: none;
-    }
-    
-    label {
-      font-weight: 500;
-      color: var(--text-secondary);
-    }
-    
-    span {
-      color: var(--text-primary);
-    }
-  }
-}
-
-.pagination-container {
-  margin-top: 24px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.inventory-tabs-card {
-  border-radius: 8px;
-  
-  .tab-stats {
-    margin-bottom: 16px;
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-}
-
-.instance-stats {
-  margin-bottom: 16px;
-  display: flex;
+  grid-template-columns: auto minmax(220px, 1fr) 150px 140px auto;
   gap: 12px;
   align-items: center;
+  padding-top: 12px;
 }
 
-// 响应式设计
-@media (max-width: 1200px) {
-  .search-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 16px;
-    
-    .search-left {
-      flex-direction: column;
-    }
+.inventory-toolbar :deep(.el-radio-button__inner) { min-width: 112px; }
+.search-input { width: 100%; }
+.toolbar-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.toolbar-actions .el-button + .el-button { margin-left: 0; }
+
+.inventory-meta {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #4f5867;
+  font-size: 14px;
+}
+.inventory-meta__text { min-width: 0; }
+
+.inventory-results { min-height: 360px; }
+.result-state {
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #dfe3ea;
+  border-radius: 6px;
+  background: #fff;
+  text-align: center;
+}
+.result-state .el-icon { color: #a4acb9; font-size: 44px; }
+.result-state h3 { margin: 18px 0 0; font-size: 17px; letter-spacing: 0; }
+.result-state p { margin: 9px 0 20px; color: #7a8391; }
+.result-state--error .el-icon { color: #e5484d; }
+.page-pagination { display: flex; justify-content: flex-end; padding-top: 18px; }
+
+@media (max-width: 1100px) {
+  .inventory-toolbar {
+    grid-template-columns: auto minmax(180px, 1fr) 140px 140px;
+    gap: 12px;
   }
+  .inventory-toolbar > .el-switch { grid-column: 1 / -1; }
 }
 
-@media (max-width: 768px) {
-  .inventory-page {
-    padding: 16px;
-  }
-  
-  .page-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
-  }
-  
-  .stats-row {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 920px) {
+  .inventory-page { padding: 16px; }
+  .inventory-toolbar { grid-template-columns: 1fr 1fr; }
+  .inventory-toolbar > * { width: 100%; }
+  .search-input { grid-column: 1 / -1; }
+  .inventory-meta { align-items: flex-start; flex-direction: column; padding: 10px 0; }
+  .toolbar-actions { width: 100%; justify-content: flex-start; }
 }
 </style>
