@@ -1,5 +1,5 @@
 <template>
-  <el-card class="block-card" :body-style="{ padding: '12px' }">
+  <el-card class="block-card" :body-style="{ padding: '12px' }" v-loading="loading">
     <template #header>
       <div class="card-header">
         <span class="card-title"><el-icon><Bell /></el-icon> 最近动态</span>

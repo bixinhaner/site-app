@@ -102,6 +102,8 @@ export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('access_token'))
   const refreshToken = ref(localStorage.getItem('refresh_token'))
   const refreshing = ref(false)
+  let initializationPromise = null
+  let sessionValidated = false
 
   const isLoggedIn = computed(() => !!token.value && !!user.value?.id)
   const roleCodes = computed(() => normalizeCodeList(user.value?.roles || (user.value?.role ? [user.value.role] : [])))
@@ -164,6 +166,7 @@ export const useUserStore = defineStore('user', () => {
       if (response.access_token) {
         token.value = response.access_token
         refreshToken.value = response.refresh_token
+        sessionValidated = true
         persistUser(response.user)
         localStorage.setItem('access_token', response.access_token)
         if (response.refresh_token) localStorage.setItem('refresh_token', response.refresh_token)
@@ -204,6 +207,8 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function logout() {
+    sessionValidated = false
+    initializationPromise = null
     user.value = null
     token.value = null
     refreshToken.value = null
@@ -212,10 +217,25 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('user_info')
   }
 
-  async function initialize() {
-    if (token.value && !user.value?.id) {
-      await fetchUserInfo()
-    }
+  async function initialize({ validateSession = false } = {}) {
+    if (!token.value) return null
+    if (sessionValidated && user.value?.id) return user.value
+    if (!validateSession && user.value?.id) return user.value
+    if (initializationPromise) return initializationPromise
+
+    initializationPromise = fetchUserInfo()
+      .then(() => {
+        // 请求拦截器可能已刷新令牌，Pinia 状态需与本地存储保持一致。
+        token.value = localStorage.getItem('access_token')
+        refreshToken.value = localStorage.getItem('refresh_token')
+        sessionValidated = Boolean(token.value && user.value?.id)
+        return user.value
+      })
+      .finally(() => {
+        initializationPromise = null
+      })
+
+    return initializationPromise
   }
 
   return {

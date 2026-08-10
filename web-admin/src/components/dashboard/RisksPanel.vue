@@ -1,5 +1,5 @@
 <template>
-  <el-card class="block-card" :body-style="{ padding: '12px' }">
+  <el-card class="block-card" :body-style="{ padding: '12px' }" v-loading="loading">
     <template #header>
       <div class="card-header">
         <span class="card-title"><el-icon><Warning /></el-icon> 风险与预警</span>
@@ -80,4 +80,3 @@ const formatDateTime = (v) => v ? new Date(v).toLocaleString() : ''
 .title:hover { text-decoration: underline; }
 .sub { color: var(--text-light); font-size: 12px; margin-top: 2px; }
 </style>
-

@@ -385,12 +385,25 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫
-router.beforeEach((to, from, next) => {
+// 受保护页面挂载前验证一次会话，避免过期令牌触发整页并发 401 和重复请求。
+router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
+  const requiresAuth = Boolean(to.meta.requiresAuth)
+
+  if ((requiresAuth || to.path === '/login') && userStore.token) {
+    try {
+      await userStore.initialize({ validateSession: true })
+    } catch (error) {
+      if (requiresAuth) {
+        next('/login')
+        return
+      }
+    }
+  }
+
   const fallbackRoute = resolveDefaultAuthenticatedRoute(router.options.routes, userStore)
 
-  if (to.meta.requiresAuth && !userStore.isLoggedIn) {
+  if (requiresAuth && !userStore.isLoggedIn) {
     next('/login')
   } else if (to.path === '/login' && userStore.isLoggedIn) {
     if (fallbackRoute) {

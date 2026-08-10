@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1>仪表盘</h1>
       <div class="header-actions">
-        <el-button @click="refresh" :loading="loading" type="primary">
+        <el-button @click="refresh" :loading="refreshing" type="primary">
           <el-icon><Refresh /></el-icon>
           刷新数据
         </el-button>
@@ -11,7 +11,11 @@
     </div>
 
     <!-- 开站交付概况（新卡组，置顶） -->
-    <SiteProgressOverview :progress="topStats?.site_progress" @goto="handleGoto" />
+    <SiteProgressOverview
+      :progress="topStats?.site_progress"
+      :loading="topStatsLoading"
+      @goto="handleGoto"
+    />
 
     <CellExpansionOverview :progress="topStats?.cell_expansion_progress" @goto="handleGoto" />
 
@@ -21,20 +25,20 @@
     <SiteProgressTrend ref="siteProgressTrendRef" class="mt-24 mb-24" />
 
     <!-- 顶部概览（保留原工单/库存等卡片） -->
-    <StatsOverview :data="topStats" :loading="loading" @card-click="handleCardClick" />
+    <StatsOverview :data="topStats" :loading="topStatsLoading" @card-click="handleCardClick" />
 
     <!-- 中部：待办 + 风险预警 -->
     <el-row :gutter="24" class="mt-24">
       <el-col :xl="14" :lg="14" :md="24" :sm="24">
-        <MyTodos :data="todos" :loading="loading" @goto="handleGoto" />
+        <MyTodos :data="todos" :loading="todosLoading" @goto="handleGoto" />
       </el-col>
       <el-col :xl="10" :lg="10" :md="24" :sm="24">
-        <RisksPanel :data="risks" :loading="loading" @goto="handleGoto" />
+        <RisksPanel :data="risks" :loading="risksLoading" @goto="handleGoto" />
       </el-col>
     </el-row>
 
     <!-- 底部：最近动态 -->
-    <ActivityFeed :data="activity" :loading="loading" @goto="handleGoto" class="mt-24" />
+    <ActivityFeed :data="activity" :loading="activityLoading" @goto="handleGoto" class="mt-24" />
 
     <!-- 快捷操作（保留并扩展） -->
     <el-card class="quick-actions mt-24">
@@ -87,7 +91,11 @@ import ActivityFeed from '@/components/dashboard/ActivityFeed.vue'
 import { fetchTopStats, fetchTodos, fetchRisks, fetchActivity } from '@/api/dashboard'
 
 const router = useRouter()
-const loading = ref(false)
+const refreshing = ref(false)
+const topStatsLoading = ref(false)
+const todosLoading = ref(false)
+const risksLoading = ref(false)
+const activityLoading = ref(false)
 const topStats = ref(null)
 const todos = ref(null)
 const risks = ref(null)
@@ -95,34 +103,70 @@ const activity = ref(null)
 const siteProgressTrendRef = ref(null)
 const installProgressBreakdownRef = ref(null)
 
-const loadAll = async () => {
+const loadTopStats = async () => {
   try {
-    loading.value = true
-    const [ts, td, rk, act] = await Promise.all([
-      fetchTopStats(),
-      fetchTodos(),
-      fetchRisks(),
-      fetchActivity(),
-    ])
-    topStats.value = ts
-    todos.value = td
-    risks.value = rk
-    activity.value = act
+    topStatsLoading.value = true
+    topStats.value = await fetchTopStats()
   } catch (e) {
     console.error(e)
-    ElMessage.error('加载仪表盘失败')
+    ElMessage.error('加载仪表盘概况失败')
   } finally {
-    loading.value = false
+    topStatsLoading.value = false
   }
 }
 
+const loadTodos = async () => {
+  try {
+    todosLoading.value = true
+    todos.value = await fetchTodos()
+  } catch (e) {
+    console.error(e)
+  } finally {
+    todosLoading.value = false
+  }
+}
+
+const loadRisks = async () => {
+  try {
+    risksLoading.value = true
+    risks.value = await fetchRisks()
+  } catch (e) {
+    console.error(e)
+  } finally {
+    risksLoading.value = false
+  }
+}
+
+const loadActivity = async () => {
+  try {
+    activityLoading.value = true
+    activity.value = await fetchActivity()
+  } catch (e) {
+    console.error(e)
+  } finally {
+    activityLoading.value = false
+  }
+}
+
+const loadAll = () => Promise.allSettled([
+  loadTopStats(),
+  loadTodos(),
+  loadRisks(),
+  loadActivity(),
+])
+
 const refresh = async () => {
-  await Promise.all([
-    loadAll(),
-    installProgressBreakdownRef.value?.refresh?.() || Promise.resolve(),
-    siteProgressTrendRef.value?.refresh?.() || Promise.resolve(),
-  ])
-  ElMessage.success('数据已刷新')
+  try {
+    refreshing.value = true
+    await Promise.allSettled([
+      loadAll(),
+      installProgressBreakdownRef.value?.refresh?.() || Promise.resolve(),
+      siteProgressTrendRef.value?.refresh?.() || Promise.resolve(),
+    ])
+    ElMessage.success('数据已刷新')
+  } finally {
+    refreshing.value = false
+  }
 }
 
 const handleGoto = (route) => {

@@ -203,8 +203,17 @@ siteapp.indonesiacentral.cloudapp.azure.com {
     reverse_proxy 127.0.0.1:8000
   }
 
+  # Vite 产物文件名包含内容哈希，可跨页面和版本长期复用。
+  handle /assets/* {
+    root * /usr/local/site-app/web-admin/dist
+    header Cache-Control "public, max-age=31536000, immutable"
+    file_server
+  }
+
   handle {
     root * /usr/local/site-app/web-admin/dist
+    # SPA 入口始终向服务端校验，发布后不会继续使用旧入口文件。
+    header Cache-Control "no-cache"
     try_files {path} /index.html
     file_server
   }
@@ -244,8 +253,17 @@ http://siteapp.savannafibre.com, http://102.209.110.241 {
     reverse_proxy 127.0.0.1:8000
   }
 
+  # Vite 产物文件名包含内容哈希，可跨页面和版本长期复用。
+  handle /assets/* {
+    root * /usr/local/site-app/web-admin/dist
+    header Cache-Control "public, max-age=31536000, immutable"
+    file_server
+  }
+
   handle {
     root * /usr/local/site-app/web-admin/dist
+    # SPA 入口始终向服务端校验，发布后不会继续使用旧入口文件。
+    header Cache-Control "no-cache"
     try_files {path} /index.html
     file_server
   }
@@ -258,6 +276,9 @@ EOF
 > Savanna 的后端 `.env` 需要配置
 > `APP_PUBLIC_BASE_URL=https://siteapp.savannafibre.com`。由于 TLS 在防火墙终止，
 > 后端无法从回源请求可靠判断外部协议；该配置确保 App 版本接口始终返回 HTTPS 安装包地址。
+
+两种组网使用相同的静态资源缓存规则：仅 `/assets/*` 使用一年不可变缓存，HTML 和 SPA
+路由使用协商缓存。该规则依赖 Vite 的内容哈希文件名，不应套用到 `/uploads/*` 或 API。
 
 组网与配置差异（重点）：
 

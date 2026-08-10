@@ -1,5 +1,5 @@
 <template>
-  <div class="stats-grid">
+  <div class="stats-grid" v-loading="loading">
     <!-- 工单概览 -->
     <div class="stat-card" @click="emit('card-click', { route: { name: 'WorkOrderList' } })">
       <div class="stat-header">

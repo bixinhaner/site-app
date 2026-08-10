@@ -1861,20 +1861,29 @@ async def create_work_order(
 @router.get("/", response_model=List[WorkOrderResponse])
 async def list_work_orders(
     status_filter: Optional[WorkOrderStatusEnum] = None,
+    status: Optional[WorkOrderStatusEnum] = None,
     assigned_to: Optional[int] = None,
     type_filter: Optional[WorkOrderTypeEnum] = None,
+    type: Optional[WorkOrderTypeEnum] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if status_filter and status and status_filter != status:
+        raise HTTPException(status_code=400, detail="status 与 status_filter 不能冲突")
+    if type_filter and type and type_filter != type:
+        raise HTTPException(status_code=400, detail="type 与 type_filter 不能冲突")
+
+    effective_status = status_filter or status
+    effective_type = type_filter or type
     q = db.query(WorkOrder)
-    if status_filter:
-        q = q.filter(WorkOrder.status == status_filter)
+    if effective_status:
+        q = q.filter(WorkOrder.status == effective_status)
     if assigned_to:
         q = q.filter(WorkOrder.assigned_to == assigned_to)
-    if type_filter:
-        q = q.filter(WorkOrder.type == type_filter)
+    if effective_type:
+        q = q.filter(WorkOrder.type == effective_type)
 
     if _is_field_worker(current_user):
         q = q.filter(WorkOrder.assigned_to == current_user.id)

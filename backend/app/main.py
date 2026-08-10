@@ -53,6 +53,7 @@ from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
 from app.services.mobile_client_log_retention_scheduler import start_mobile_client_log_retention_scheduler
 from app.middleware.operation_log import OperationLogMiddleware
+from app.middleware.request_timing import RequestTimingMiddleware
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -113,6 +114,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# 通用请求耗时响应头与慢请求日志，覆盖 API、上传资源及健康检查。
+app.add_middleware(RequestTimingMiddleware)
 
 # 静态文件服务
 uploads_dir = "uploads"

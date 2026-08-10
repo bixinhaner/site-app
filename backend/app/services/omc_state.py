@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from app.models.inspection import InspectionCheckItem, SiteInspection
 from app.models.omc_state import OmcDeviceState
 from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+from app.models.planning import SitePlanning, SitePlanningCell, SitePlanningSector
 from app.models.work_order import WorkOrder, WorkOrderStatusEnum, WorkOrderTypeEnum
-from app.services.cell_generator import CellGenerator
 from app.utils.timezone import to_utc_iso
 
 
@@ -41,6 +41,21 @@ def _serialize_slot(slot: DeviceSlot) -> Dict[str, str]:
         "band": band,
         "cell_id": f"{sector_id}_{band}",
     }
+
+
+def _normalize_site_ids(site_ids: Iterable[int]) -> List[int]:
+    normalized: List[int] = []
+    seen: set[int] = set()
+    for raw_site_id in site_ids or []:
+        try:
+            site_id = int(raw_site_id)
+        except (TypeError, ValueError):
+            continue
+        if site_id in seen:
+            continue
+        seen.add(site_id)
+        normalized.append(site_id)
+    return normalized
 
 
 def upsert_omc_device_state(
@@ -122,19 +137,106 @@ def get_device_state_by_sn(db: Session, sn: str) -> Optional[OmcDeviceState]:
 
 
 def get_expected_device_slots_for_site(db: Session, site_id: int) -> List[DeviceSlot]:
-    planning = CellGenerator.get_site_planning(db, site_id)
-    if not planning:
-        return []
+    return get_expected_device_slots_for_sites(db, [site_id]).get(int(site_id), [])
 
-    slots = {
-        slot
-        for slot in (
-            _normalize_device_slot(getattr(device, "sector_id", None), getattr(device, "band", None))
-            for device in CellGenerator.generate_devices_from_planning(db, site_id)
-        )
-        if slot
+
+def get_expected_device_slots_for_sites(
+    db: Session,
+    site_ids: Iterable[int],
+) -> Dict[int, List[DeviceSlot]]:
+    """批量读取站点当前规划中的设备位，查询数量不随站点数增长。"""
+    normalized_site_ids = _normalize_site_ids(site_ids)
+    result: Dict[int, List[DeviceSlot]] = {
+        site_id: [] for site_id in normalized_site_ids
     }
-    return sorted(slots, key=_slot_sort_key)
+    if not normalized_site_ids:
+        return result
+
+    planning_by_site: Dict[int, SitePlanning] = {}
+    planning_rows = (
+        db.query(SitePlanning)
+        .filter(
+            SitePlanning.site_id.in_(normalized_site_ids),
+            SitePlanning.is_current.is_(True),
+        )
+        .order_by(SitePlanning.site_id.asc(), SitePlanning.id.asc())
+        .all()
+    )
+    for planning in planning_rows:
+        planning_by_site.setdefault(int(planning.site_id), planning)
+
+    planning_ids = [int(planning.id) for planning in planning_by_site.values()]
+    if not planning_ids:
+        return result
+
+    cells_by_planning: Dict[int, List[SitePlanningCell]] = {
+        planning_id: [] for planning_id in planning_ids
+    }
+    planning_site_by_id = {
+        int(planning.id): site_id for site_id, planning in planning_by_site.items()
+    }
+    for cell in (
+        db.query(SitePlanningCell)
+        .filter(
+            SitePlanningCell.planning_id.in_(planning_ids),
+            SitePlanningCell.site_id.in_(normalized_site_ids),
+        )
+        .order_by(
+            SitePlanningCell.planning_id.asc(),
+            SitePlanningCell.local_cell_id.asc(),
+            SitePlanningCell.band_code.asc(),
+            SitePlanningCell.frequency.asc(),
+            SitePlanningCell.id.asc(),
+        )
+        .all()
+    ):
+        if int(cell.site_id) != planning_site_by_id.get(int(cell.planning_id)):
+            continue
+        cells_by_planning.setdefault(int(cell.planning_id), []).append(cell)
+
+    fallback_planning_ids = [
+        planning_id
+        for planning_id, cells in cells_by_planning.items()
+        if not cells
+    ]
+    sectors_by_planning: Dict[int, List[SitePlanningSector]] = {
+        planning_id: [] for planning_id in fallback_planning_ids
+    }
+    if fallback_planning_ids:
+        for sector in (
+            db.query(SitePlanningSector)
+            .filter(SitePlanningSector.planning_id.in_(fallback_planning_ids))
+            .order_by(
+                SitePlanningSector.planning_id.asc(),
+                SitePlanningSector.sector_index.asc(),
+                SitePlanningSector.id.asc(),
+            )
+            .all()
+        ):
+            sectors_by_planning.setdefault(int(sector.planning_id), []).append(sector)
+
+    for site_id, planning in planning_by_site.items():
+        slots: set[DeviceSlot] = set()
+        planning_id = int(planning.id)
+        cells = cells_by_planning.get(planning_id, [])
+        for cell in cells:
+            if cell.local_cell_id is None or not cell.band_code:
+                continue
+            slot = _normalize_device_slot(str(int(cell.local_cell_id)), cell.band_code)
+            if slot:
+                slots.add(slot)
+
+        if not cells:
+            for sector in sectors_by_planning.get(planning_id, []):
+                sector_bands = sector.bands or planning.bands or ["default"]
+                for band in sector_bands:
+                    slot = _normalize_device_slot(str(sector.sector_index), band)
+                    if slot:
+                        slots.add(slot)
+
+        result[site_id] = sorted(slots, key=_slot_sort_key)
+
+    return result
 
 
 def get_opening_expected_device_slots_for_site(db: Session, site_id: int) -> List[DeviceSlot]:
@@ -144,27 +246,51 @@ def get_opening_expected_device_slots_for_site(db: Session, site_id: int) -> Lis
     站点完成小区扩容后，当前 LLD 可能从 3 小区变成 6 小区；开站交付概况仍应按原开站
     基线计算，不能用扩容后的当前规划拉大分母。
     """
+    return get_opening_expected_device_slots_for_sites(db, [site_id]).get(int(site_id), [])
+
+
+def get_opening_expected_device_slots_for_sites(
+    db: Session,
+    site_ids: Iterable[int],
+) -> Dict[int, List[DeviceSlot]]:
+    """批量读取开站工单设备位基线。"""
+    normalized_site_ids = _normalize_site_ids(site_ids)
+    result: Dict[int, List[DeviceSlot]] = {
+        site_id: [] for site_id in normalized_site_ids
+    }
+    if not normalized_site_ids:
+        return result
+
     rows = (
         db.query(InspectionCheckItem.sector_id, InspectionCheckItem.band)
         .join(SiteInspection, SiteInspection.id == InspectionCheckItem.inspection_id)
         .join(WorkOrder, WorkOrder.id == SiteInspection.work_order_id)
         .filter(
-            SiteInspection.site_id == site_id,
+            SiteInspection.site_id.in_(normalized_site_ids),
             WorkOrder.type == WorkOrderTypeEnum.OPENING_INSPECTION,
             WorkOrder.status != WorkOrderStatusEnum.VOIDED,
             InspectionCheckItem.is_active.is_(True),
             InspectionCheckItem.sector_id.isnot(None),
             InspectionCheckItem.band.isnot(None),
         )
+        .with_entities(
+            SiteInspection.site_id,
+            InspectionCheckItem.sector_id,
+            InspectionCheckItem.band,
+        )
         .all()
     )
-    slots = {
-        slot
-        for sector_id, band in rows
-        for slot in [_normalize_device_slot(sector_id, band)]
-        if slot
+    opening_slots: Dict[int, set[DeviceSlot]] = {
+        site_id: set() for site_id in normalized_site_ids
     }
-    return sorted(slots, key=_slot_sort_key)
+    for site_id, sector_id, band in rows:
+        slot = _normalize_device_slot(sector_id, band)
+        if slot:
+            opening_slots[int(site_id)].add(slot)
+
+    for site_id in normalized_site_ids:
+        result[site_id] = sorted(opening_slots[site_id], key=_slot_sort_key)
+    return result
 
 
 def get_bound_slot_rows_for_site(
@@ -173,21 +299,44 @@ def get_bound_slot_rows_for_site(
     *,
     opening_only: bool = False,
 ) -> List[EquipmentBindingHistory]:
+    return get_bound_slot_rows_for_sites(
+        db,
+        [site_id],
+        opening_only=opening_only,
+    ).get(int(site_id), [])
+
+
+def get_bound_slot_rows_for_sites(
+    db: Session,
+    site_ids: Iterable[int],
+    *,
+    opening_only: bool = False,
+) -> Dict[int, List[EquipmentBindingHistory]]:
+    """批量读取每个站点、每个设备位最后一次绑定操作。"""
+    normalized_site_ids = _normalize_site_ids(site_ids)
+    result: Dict[int, List[EquipmentBindingHistory]] = {
+        site_id: [] for site_id in normalized_site_ids
+    }
+    if not normalized_site_ids:
+        return result
+
     latest_at_query = (
         db.query(
+            EquipmentBindingHistory.site_id.label("site_id"),
             EquipmentBindingHistory.sector_id.label("sector_id"),
             EquipmentBindingHistory.band.label("band"),
             func.max(EquipmentBindingHistory.operated_at).label("latest_at"),
         )
-        .filter(EquipmentBindingHistory.site_id == site_id)
+        .filter(EquipmentBindingHistory.site_id.in_(normalized_site_ids))
     )
     latest_id_query = (
         db.query(
+            EquipmentBindingHistory.site_id.label("site_id"),
             EquipmentBindingHistory.sector_id.label("sector_id"),
             EquipmentBindingHistory.band.label("band"),
             func.max(EquipmentBindingHistory.id).label("latest_id"),
         )
-        .filter(EquipmentBindingHistory.site_id == site_id)
+        .filter(EquipmentBindingHistory.site_id.in_(normalized_site_ids))
     )
 
     if opening_only:
@@ -213,6 +362,7 @@ def get_bound_slot_rows_for_site(
     latest_at_subq = (
         latest_at_query
         .group_by(
+            EquipmentBindingHistory.site_id,
             EquipmentBindingHistory.sector_id,
             EquipmentBindingHistory.band,
         )
@@ -224,22 +374,31 @@ def get_bound_slot_rows_for_site(
         .join(
             latest_at_subq,
             and_(
+                EquipmentBindingHistory.site_id == latest_at_subq.c.site_id,
                 EquipmentBindingHistory.sector_id == latest_at_subq.c.sector_id,
                 EquipmentBindingHistory.band == latest_at_subq.c.band,
                 EquipmentBindingHistory.operated_at == latest_at_subq.c.latest_at,
             ),
         )
         .group_by(
+            EquipmentBindingHistory.site_id,
             EquipmentBindingHistory.sector_id,
             EquipmentBindingHistory.band,
         )
         .subquery()
     )
 
-    return (
+    rows = (
         db.query(EquipmentBindingHistory)
-        .join(latest_id_subq, EquipmentBindingHistory.id == latest_id_subq.c.latest_id)
+        .join(
+            latest_id_subq,
+            and_(
+                EquipmentBindingHistory.id == latest_id_subq.c.latest_id,
+                EquipmentBindingHistory.site_id == latest_id_subq.c.site_id,
+            ),
+        )
         .order_by(
+            EquipmentBindingHistory.site_id.asc(),
             EquipmentBindingHistory.sector_id.asc(),
             EquipmentBindingHistory.band.asc(),
             EquipmentBindingHistory.cell_id.asc(),
@@ -247,23 +406,18 @@ def get_bound_slot_rows_for_site(
         )
         .all()
     )
+    for row in rows:
+        result.setdefault(int(row.site_id), []).append(row)
+    return result
 
 
-def summarize_site_binding_slots(
-    db: Session,
+def _summarize_binding_slots(
     site_id: int,
-    *,
-    opening_only: bool = False,
+    expected_slots: List[DeviceSlot],
+    bound_rows: List[EquipmentBindingHistory],
 ) -> Dict[str, Any]:
-    if opening_only:
-        expected_slots = get_opening_expected_device_slots_for_site(db, site_id)
-        if not expected_slots:
-            expected_slots = get_expected_device_slots_for_site(db, site_id)
-    else:
-        expected_slots = get_expected_device_slots_for_site(db, site_id)
-
     all_bound_rows = [
-        row for row in get_bound_slot_rows_for_site(db, site_id, opening_only=opening_only)
+        row for row in bound_rows
         if row.action != BindingActionEnum.UNBIND and str(row.equipment_sn or "").strip()
     ]
 
@@ -298,6 +452,64 @@ def summarize_site_binding_slots(
         "rows": relevant_rows,
         "all_rows": all_bound_rows,
         "ready_for_status": bool(relevant_rows) and (all_slots_bound or not slot_check_required),
+    }
+
+
+def summarize_site_binding_slots(
+    db: Session,
+    site_id: int,
+    *,
+    opening_only: bool = False,
+) -> Dict[str, Any]:
+    return summarize_site_binding_slots_for_sites(
+        db,
+        [site_id],
+        opening_only=opening_only,
+    )[int(site_id)]
+
+
+def summarize_site_binding_slots_for_sites(
+    db: Session,
+    site_ids: Iterable[int],
+    *,
+    opening_only: bool = False,
+) -> Dict[int, Dict[str, Any]]:
+    """批量汇总站点设备位，业务口径与单站点接口完全一致。"""
+    normalized_site_ids = _normalize_site_ids(site_ids)
+    if not normalized_site_ids:
+        return {}
+
+    if opening_only:
+        expected_slots_by_site = get_opening_expected_device_slots_for_sites(
+            db,
+            normalized_site_ids,
+        )
+        fallback_site_ids = [
+            site_id
+            for site_id in normalized_site_ids
+            if not expected_slots_by_site.get(site_id)
+        ]
+        fallback_slots = get_expected_device_slots_for_sites(db, fallback_site_ids)
+        for site_id in fallback_site_ids:
+            expected_slots_by_site[site_id] = fallback_slots.get(site_id, [])
+    else:
+        expected_slots_by_site = get_expected_device_slots_for_sites(
+            db,
+            normalized_site_ids,
+        )
+    bound_rows_by_site = get_bound_slot_rows_for_sites(
+        db,
+        normalized_site_ids,
+        opening_only=opening_only,
+    )
+
+    return {
+        site_id: _summarize_binding_slots(
+            site_id,
+            expected_slots_by_site.get(site_id, []),
+            bound_rows_by_site.get(site_id, []),
+        )
+        for site_id in normalized_site_ids
     }
 
 

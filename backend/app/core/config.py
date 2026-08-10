@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     # 对外访问根地址。TLS 在上游网关终止时必须显式配置，避免生成 HTTP 下载链接。
     APP_PUBLIC_BASE_URL: str = ""
 
+    # 性能观测：超过阈值的请求写入应用日志，便于所有部署环境定位慢接口。
+    SLOW_REQUEST_LOG_ENABLED: bool = True
+    SLOW_REQUEST_THRESHOLD_MS: int = 500
+
     # 启动自检：默认管理员（仅首次创建；已存在不会重置密码）
     AUTO_CREATE_ADMIN: bool = True
     DEFAULT_ADMIN_USERNAME: str = "admin"

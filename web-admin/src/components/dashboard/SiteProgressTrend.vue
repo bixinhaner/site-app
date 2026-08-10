@@ -34,7 +34,6 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { TrendCharts } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
-import * as echarts from 'echarts'
 import { fetchSiteProgressTrend } from '@/api/dashboard'
 
 const { t, locale } = useI18n()
@@ -46,6 +45,7 @@ const chartMode = ref('auto')
 const trendData = ref(null)
 
 let chartInstance = null
+let echartsPromise = null
 
 const PERIODS_BY_GRANULARITY = {
   day: 30,
@@ -93,9 +93,16 @@ const resolveSeriesLabel = (key, fallback = '') => {
   return fallback || key
 }
 
-const ensureChart = () => {
+const loadEcharts = () => {
+  if (!echartsPromise) echartsPromise = import('echarts')
+  return echartsPromise
+}
+
+const ensureChart = async () => {
   if (!chartRef.value) return
   if (!chartInstance) {
+    const echarts = await loadEcharts()
+    if (!chartRef.value) return
     chartInstance = echarts.init(chartRef.value)
   }
 }
@@ -125,8 +132,8 @@ const buildSeriesValues = (key) => {
   })
 }
 
-const renderChart = () => {
-  ensureChart()
+const renderChart = async () => {
+  await ensureChart()
   if (!chartInstance) return
 
   const buckets = Array.isArray(trendData.value?.buckets) ? trendData.value.buckets : []
@@ -228,7 +235,7 @@ const loadTrend = async () => {
       tz_offset_minutes: new Date().getTimezoneOffset(),
     })
     await nextTick()
-    renderChart()
+    await renderChart()
   } catch (e) {
     console.error(e)
     ElMessage.error(t('dashboard.siteTrend.loadFailed'))

@@ -1,5 +1,5 @@
 <template>
-  <div class="site-progress">
+  <div class="site-progress" v-loading="loading">
     <div class="section-head">
       <h2 class="section-title">{{ t('dashboard.siteOverview.title') }}</h2>
       <el-button v-if="canViewSiteMap" class="map-jump-btn" type="primary" plain size="small" @click="goToSiteMap">
@@ -33,7 +33,10 @@ import { Tickets, Finished, Promotion, MagicStick, SuccessFilled, OfficeBuilding
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 
-const props = defineProps({ progress: { type: Object, default: null } })
+const props = defineProps({
+  progress: { type: Object, default: null },
+  loading: { type: Boolean, default: false },
+})
 const emit = defineEmits(['goto'])
 const userStore = useUserStore()
 const { t } = useI18n()

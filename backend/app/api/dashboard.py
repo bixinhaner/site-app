@@ -19,7 +19,10 @@ from app.models.survey_archive import SiteSurveyArchive
 from app.models.equipment import Inventory, Equipment, StockTransaction
 from app.models.omc_state import OmcDeviceState
 from app.services.cell_expansion import get_expansion_target_slots_from_work_order
-from app.services.omc_state import get_bound_slot_rows_for_site, summarize_site_binding_slots
+from app.services.omc_state import (
+    get_bound_slot_rows_for_site,
+    summarize_site_binding_slots_for_sites,
+)
 from app.services.site_progress_service import (
     ensure_site_progress_snapshots,
     get_site_progress_rows,
@@ -208,11 +211,18 @@ def _build_site_device_progress_metrics(
     if requested_site_ids is not None:
         site_query = site_query.filter(Site.id.in_(sorted(requested_site_ids)))
 
+    site_id_rows = [int(site_id) for site_id, in site_query.all()]
+    binding_summaries = summarize_site_binding_slots_for_sites(
+        db,
+        site_id_rows,
+        opening_only=True,
+    )
+
     metrics: Dict[int, Dict[str, Any]] = {}
     all_sns: set[str] = set()
 
-    for site_id, in site_query.all():
-        binding_summary = summarize_site_binding_slots(db, int(site_id), opening_only=True)
+    for site_id in site_id_rows:
+        binding_summary = binding_summaries.get(site_id) or {}
         slot_check_required = bool(binding_summary.get("slot_check_required"))
         expected_slot_count = int(binding_summary.get("expected_slot_count") or 0)
         bound_slot_count = int(binding_summary.get("bound_slot_count") or 0)

@@ -21,13 +21,11 @@ export async function fetchInstallProgressBreakdown(params = {}) {
 export async function fetchTodos() {
   const userStore = useUserStore()
   const uid = userStore.user?.id
-  const isAdmin = userStore.isAdmin
-  const isManager = userStore.isManager
 
   // 我的工单：待分配/已分配
   const [minePending, mineActive] = await Promise.all([
-    safeGet(() => workOrderAPI.getWorkOrders({ status: 'PENDING', assigned_to: uid }), []),
-    safeGet(() => workOrderAPI.getWorkOrders({ status: 'ACTIVE', assigned_to: uid }), []),
+    safeGet(() => workOrderAPI.getWorkOrders({ status_filter: 'PENDING', assigned_to: uid }), []),
+    safeGet(() => workOrderAPI.getWorkOrders({ status_filter: 'ACTIVE', assigned_to: uid }), []),
   ])
 
   const myOrders = [...(minePending || []), ...(mineActive || [])]
@@ -49,7 +47,10 @@ export async function fetchRisks() {
   const lowStock = Array.isArray(lowStockResp?.inventory) ? lowStockResp.inventory.slice(0, 5) : []
 
   // 逾期工单：PENDING/ACTIVE，管理员看全部，其它看分配给自己的
-  const baseParams = (status) => ({ status, ...(isAdmin || isManager ? {} : { assigned_to: uid }) })
+  const baseParams = (status) => ({
+    status_filter: status,
+    ...(isAdmin || isManager ? {} : { assigned_to: uid }),
+  })
   const [woP, woA] = await Promise.all([
     safeGet(() => workOrderAPI.getWorkOrders(baseParams('PENDING')) , []),
     safeGet(() => workOrderAPI.getWorkOrders(baseParams('ACTIVE')) , []),
