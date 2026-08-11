@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test:api-error": "node --experimental-default-type=module --test test_api_error.mjs",
     "test:chunk-recovery": "node --experimental-default-type=module --test test_chunk_load_recovery.mjs"
   },
   "dependencies": {

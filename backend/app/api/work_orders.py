@@ -350,15 +350,8 @@ def _ensure_web_execution_assignee(wo: WorkOrder, current_user: User, detail: st
         raise HTTPException(status_code=403, detail=detail)
 
 
-def _has_bound_device_check_items(db: Session, wo: WorkOrder) -> bool:
-    """判断工单是否仍存在“设备级”检查项绑定（equipment_sn 未解绑）。
-
-    与库存侧扫码解绑逻辑保持一致：
-    - 仅要求“设备级”检查项解绑
-    - 设备级定义：sector_id + band 存在，且 cell_id 为空或等于 f"{sector_id}_{band}"
-    """
-    from sqlalchemy import or_
-
+def _bound_device_check_items_query(db: Session, wo: WorkOrder):
+    """构造工单设备级检查项绑定查询。"""
     inspection_filters = [SiteInspection.work_order_id == wo.id]
     if getattr(wo, "inspection_id", None):
         inspection_filters.append(SiteInspection.id == wo.inspection_id)
@@ -368,8 +361,8 @@ def _has_bound_device_check_items(db: Session, wo: WorkOrder) -> bool:
 
     device_key_expr = InspectionCheckItem.sector_id + "_" + InspectionCheckItem.band
 
-    exists_row = (
-        db.query(InspectionCheckItem.id)
+    return (
+        db.query(InspectionCheckItem)
         .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
         .filter(
             inspection_cond,
@@ -385,9 +378,80 @@ def _has_bound_device_check_items(db: Session, wo: WorkOrder) -> bool:
                 InspectionCheckItem.cell_id == device_key_expr,
             ),
         )
+    )
+
+
+def _has_bound_device_check_items(db: Session, wo: WorkOrder) -> bool:
+    """判断工单是否仍存在“设备级”检查项绑定（equipment_sn 未解绑）。
+
+    与库存侧扫码解绑逻辑保持一致：
+    - 仅要求“设备级”检查项解绑
+    - 设备级定义：sector_id + band 存在，且 cell_id 为空或等于 f"{sector_id}_{band}"
+    """
+    exists_row = (
+        _bound_device_check_items_query(db, wo)
+        .with_entities(InspectionCheckItem.id)
         .first()
     )
     return bool(exists_row)
+
+
+def _get_bound_device_bindings(db: Session, wo: WorkOrder) -> List[Dict[str, str]]:
+    """返回作废阻断所需的设备绑定摘要，同一 SN 只展示一次。"""
+    rows = (
+        _bound_device_check_items_query(db, wo)
+        .with_entities(
+            InspectionCheckItem.equipment_sn,
+            InspectionCheckItem.sector_id,
+            InspectionCheckItem.band,
+        )
+        .order_by(
+            InspectionCheckItem.sector_id.asc(),
+            InspectionCheckItem.band.asc(),
+            InspectionCheckItem.equipment_sn.asc(),
+        )
+        .all()
+    )
+
+    bindings_by_sn: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        sn = str(row.equipment_sn or "").strip()
+        if not sn or sn in bindings_by_sn:
+            continue
+        bindings_by_sn[sn] = {
+            "sn": sn,
+            "sector_id": str(row.sector_id or "").strip(),
+            "band": str(row.band or "").strip(),
+        }
+    return list(bindings_by_sn.values())
+
+
+def _format_bound_device_void_block_reason(
+    bindings: List[Dict[str, str]],
+    *,
+    preview_limit: int = 6,
+) -> str:
+    """生成用户可直接照做的工单作废阻断说明。"""
+    labels = []
+    for binding in bindings[:preview_limit]:
+        sn = str(binding.get("sn") or "").strip()
+        sector_id = str(binding.get("sector_id") or "").strip()
+        band = str(binding.get("band") or "").strip()
+        location_parts = []
+        if sector_id:
+            location_parts.append(f"扇区 {sector_id}")
+        if band:
+            location_parts.append(band)
+        location = f"（{' / '.join(location_parts)}）" if location_parts else ""
+        labels.append(f"{sn}{location}")
+
+    remaining = max(0, len(bindings) - preview_limit)
+    remaining_text = f"，另有 {remaining} 台" if remaining else ""
+    device_text = "、".join(labels)
+    return (
+        f"该工单仍绑定 {len(bindings)} 台设备：{device_text}{remaining_text}。"
+        "请先由工单执行人在 App 对应工单中解绑设备，再返回 Web 作废。"
+    )
 
 
 def _get_related_inspections(db: Session, wo: WorkOrder) -> List[SiteInspection]:
@@ -596,8 +660,12 @@ def _apply_void_work_order(
     if wo.status not in VOIDABLE_WORK_ORDER_STATUSES:
         raise HTTPException(status_code=400, detail=f"无法作废{wo.status}状态的工单")
 
-    if _has_bound_device_check_items(db, wo):
-        raise HTTPException(status_code=409, detail="该工单存在已绑定设备检查项，无法作废；请先在APP解绑设备")
+    bound_devices = _get_bound_device_bindings(db, wo)
+    if bound_devices:
+        raise HTTPException(
+            status_code=409,
+            detail=_format_bound_device_void_block_reason(bound_devices),
+        )
 
     archive_block_reason = _get_work_order_archive_block_reason(db, wo.id)
     if archive_block_reason:

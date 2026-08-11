@@ -552,6 +552,7 @@ import { sitePlanningApi } from '@/api/sitePlanning'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Edit, Delete, Search, Refresh, Plus, Sort, WarningFilled, Download, Upload } from '@element-plus/icons-vue'
 import { createDebouncedTracker } from '@/utils/operationTrack'
+import { getApiErrorMessage, getApiErrorStatus } from '@/utils/apiError'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -1697,7 +1698,24 @@ const voidWorkOrder = async (id, reason) => {
     await load()
   } catch (e) {
     console.error(e)
-    ElMessage.error(e?.response?.data?.detail || t('workOrderList.messages.voidFailed'))
+    const isConflict = getApiErrorStatus(e) === 409
+    const message = getApiErrorMessage(
+      e,
+      t(
+        isConflict
+          ? 'workOrderList.messages.voidBlockedFallback'
+          : 'workOrderList.messages.voidFailed'
+      )
+    )
+    if (isConflict) {
+      await ElMessageBox.alert(message, t('workOrderList.messages.voidBlockedTitle'), {
+        type: 'warning',
+        confirmButtonText: t('workOrderList.actions.confirm'),
+        closeOnClickModal: false,
+      }).catch(() => {})
+      return
+    }
+    ElMessage.error(message)
   }
 }
 

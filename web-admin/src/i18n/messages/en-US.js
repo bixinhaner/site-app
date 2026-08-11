@@ -1124,6 +1124,9 @@ export default {
       deleteFailed: "Delete failed",
       voidSuccess: "Work order voided",
       voidFailed: "Void failed",
+      voidBlockedTitle: "Work order cannot be voided yet",
+      voidBlockedFallback:
+        "This work order does not currently meet the voiding conditions. Check for bound devices or generated delivery archives.",
       batchDeleteSuccess: "Deleted {count} work order(s) successfully",
       batchDeleteFailed: "Batch delete failed",
       batchVoidSuccess: "Voided {count} work order(s) successfully",

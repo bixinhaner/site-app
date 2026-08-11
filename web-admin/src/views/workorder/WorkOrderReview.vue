@@ -2402,6 +2402,7 @@ import request from "@/utils/request";
 import { inspectionExecutionApi } from "@/api/workorder";
 import { copyTextToClipboard } from "@/utils/clipboard";
 import { translateLegacyText } from "@/i18n/translator";
+import { getApiErrorMessage, getApiErrorStatus } from "@/utils/apiError";
 import { ElMessage, ElMessageBox, ElLoading } from "element-plus";
 import { aiAPI } from "@/api/ai";
 import {
@@ -4413,7 +4414,28 @@ const voidCurrentWorkOrder = async () => {
   } catch (e) {
     if (e === "cancel" || e === "close") return;
     console.error(e);
-    ElMessage.error(e?.response?.data?.detail || "作废失败");
+    const isConflict = getApiErrorStatus(e) === 409;
+    const message = getApiErrorMessage(
+      e,
+      t(
+        isConflict
+          ? "workOrderList.messages.voidBlockedFallback"
+          : "workOrderList.messages.voidFailed",
+      ),
+    );
+    if (isConflict) {
+      await ElMessageBox.alert(
+        message,
+        t("workOrderList.messages.voidBlockedTitle"),
+        {
+          type: "warning",
+          confirmButtonText: t("workOrderList.actions.confirm"),
+          closeOnClickModal: false,
+        },
+      ).catch(() => {});
+      return;
+    }
+    ElMessage.error(message);
   }
 };
 

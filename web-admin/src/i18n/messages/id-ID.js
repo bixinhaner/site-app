@@ -1128,6 +1128,9 @@ export default {
       deleteFailed: "Gagal menghapus",
       voidSuccess: "Perintah kerja dibatalkan",
       voidFailed: "Gagal membatalkan",
+      voidBlockedTitle: "Perintah kerja belum dapat dibatalkan",
+      voidBlockedFallback:
+        "Perintah kerja ini belum memenuhi syarat pembatalan. Periksa perangkat yang masih terikat atau arsip serah terima yang sudah dibuat.",
       batchDeleteSuccess: "Berhasil menghapus {count} perintah kerja",
       batchDeleteFailed: "Gagal menghapus secara massal",
       batchVoidSuccess: "Berhasil membatalkan {count} perintah kerja",

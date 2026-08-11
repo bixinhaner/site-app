@@ -1059,6 +1059,9 @@ export default {
       deleteFailed: "删除失败",
       voidSuccess: "工单已作废",
       voidFailed: "作废失败",
+      voidBlockedTitle: "暂时无法作废",
+      voidBlockedFallback:
+        "该工单当前不满足作废条件。请确认是否仍有绑定设备或已生成交付档案。",
       batchDeleteSuccess: "成功删除 {count} 个工单",
       batchDeleteFailed: "批量删除失败",
       batchVoidSuccess: "成功作废 {count} 个工单",
