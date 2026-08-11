@@ -109,6 +109,7 @@ const dynamicPatternsId = [
   { pattern: '^确定要删除选中的 (.*?) 个套装吗？$', replacement: 'Apakah Anda yakin ingin menghapus paket $1 yang dipilih?' },
   { pattern: '^确定要删除选中的 (.*?) 个工单吗？\\\\n\\\\n注意：只能删除"待分配"或"已分配"状态的工单。$', replacement: 'Apakah Anda yakin ingin menghapus tiket $1 yang dipilih? \\n\\nCatatan: Hanya perintah kerja dengan status "Ditugaskan" atau "Ditugaskan" yang dapat dihapus.' },
   { pattern: '^确定要删除这个(.*?) Cell \\((.*?), 扇区(.*?)\\) 吗？$', replacement: 'Apakah Anda yakin ingin menghapus Sel $1 ini ($2, sektor $3)?' },
+  { pattern: '^确定删除这个未使用的(.*?) Cell \\((.*?), 扇区(.*?)\\) 吗？系统只会在未绑定、未填写、无照片且未审核时删除，并同步工单检查项。$', replacement: 'Hapus Sel $1 yang belum digunakan ini ($2, sektor $3)? Sel hanya akan dihapus jika belum terikat, tidak memiliki data atau foto, dan belum ditinjau. Pemeriksaan perintah kerja terkait akan disinkronkan.' },
   { pattern: '^确定要重新分配选中的 (.*?) 个工单吗？\\\\n\\\\n注意：只能重新分配"待分配"或"已分配"状态的工单。$', replacement: 'Apakah Anda yakin ingin menetapkan ulang tiket $1 yang dipilih? \\n\\nCatatan: Hanya perintah kerja dengan status "Ditugaskan" atau "Ditugaskan" yang dapat ditetapkan ulang.' },
   { pattern: '^确定要作废工单“(.*?)”吗？$', replacement: 'Apakah Anda yakin ingin membatalkan perintah kerja "$1"?' },
   { pattern: '^确定要作废选中的 (.*?) 个工单吗？$', replacement: 'Apakah Anda yakin ingin membatalkan perintah kerja $1 yang dipilih?' },

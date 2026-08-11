@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case, or_
+from sqlalchemy import and_, func, case, or_
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from functools import lru_cache
@@ -17,6 +17,14 @@ from app.api.auth import get_current_user
 from app.models.user import User
 from app.models.site import Site
 from app.models.work_order import WorkOrder, WorkOrderTypeEnum, WorkOrderStatusEnum
+from app.models.inspection import (
+    CheckItemStatusEnum,
+    InspectionCheckItem,
+    InspectionPhoto,
+    InspectionStatusEnum,
+    SiteInspection,
+)
+from app.models.equipment_binding_history import EquipmentBindingHistory
 from app.models.planning import (
     SitePlanning,
     SitePlanningSector,
@@ -28,6 +36,7 @@ from app.models.planning import (
 from app.services.authz_service import user_has_any_role_or_permission
 from app.services.cell_expansion import validate_expansion_target_cells
 from app.services.site_progress_service import rebuild_site_progress
+from app.services.inspection_template_sync import recalculate_inspection_stats
 from app.utils.planning_schema import LLD_CELL_EXTRA_FIELD_CANDIDATES
 from app.utils.timezone import to_utc_iso
 from app.schemas.planning import (
@@ -78,6 +87,16 @@ LLD_ACTIVE_OPENING_WO_STATUSES = [
     WorkOrderStatusEnum.APPROVED,
     WorkOrderStatusEnum.ACTIVATED,
 ]
+LLD_SAFE_DELETE_WORK_ORDER_STATUSES = {
+    WorkOrderStatusEnum.PENDING,
+    WorkOrderStatusEnum.ACTIVE,
+    WorkOrderStatusEnum.REJECTED,
+}
+LLD_SAFE_DELETE_INSPECTION_STATUSES = {
+    InspectionStatusEnum.DRAFT,
+    InspectionStatusEnum.IN_PROGRESS,
+    InspectionStatusEnum.REJECTED,
+}
 
 
 def _ensure_planning_editor(current_user: User) -> None:
@@ -236,6 +255,7 @@ def _compute_lld_edit_policy(site: Site, has_active_opening_wo: bool, current_us
             can_import=False,
             can_add_cell=False,
             can_delete_cell=False,
+            can_delete_unbound_cell=False,
             locked_fields=LLD_LOCKED_FIELDS,
             reason="无权限编辑规划",
         )
@@ -247,6 +267,7 @@ def _compute_lld_edit_policy(site: Site, has_active_opening_wo: bool, current_us
             can_import=False,
             can_add_cell=False,
             can_delete_cell=False,
+            can_delete_unbound_cell=False,
             locked_fields=LLD_LOCKED_FIELDS,
             reason="站点尚处于勘察阶段（survey_pending），暂不允许录入/编辑规划信息",
         )
@@ -259,6 +280,7 @@ def _compute_lld_edit_policy(site: Site, has_active_opening_wo: bool, current_us
             can_import=True,
             can_add_cell=True,
             can_delete_cell=True,
+            can_delete_unbound_cell=True,
             locked_fields=LLD_LOCKED_FIELDS,
             reason=None,
         )
@@ -276,6 +298,7 @@ def _compute_lld_edit_policy(site: Site, has_active_opening_wo: bool, current_us
         can_import=True,
         can_add_cell=False,
         can_delete_cell=False,
+        can_delete_unbound_cell=True,
         locked_fields=LLD_LOCKED_FIELDS,
         reason=reason,
     )
@@ -1460,6 +1483,10 @@ def _build_lld_summary_from_cells(planning: SitePlanning, cells: List[SitePlanni
 def _sync_planning_from_cells(db: Session, planning: SitePlanning, cells: List[SitePlanningCell]):
     """根据 Cell 明细同步更新基础规划数据，确保数据一致性。"""
     if not cells:
+        planning.bands = []
+        planning.sector_count = 0
+        for sector in planning.sectors or []:
+            db.delete(sector)
         return planning
 
     # 从 Cells 聚合基础规划数据
@@ -3416,6 +3443,305 @@ async def update_lld_cell(
     return PlanningCell.model_validate(updated_cell_obj, from_attributes=True)
 
 
+def _normalize_lld_delete_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _has_lld_delete_fact(value: Any) -> bool:
+    value = _normalize_lld_delete_value(value)
+    return value not in (None, "", [], {})
+
+
+def _collect_lld_check_item_fact_reasons(
+    check_item: InspectionCheckItem,
+    *,
+    photo_count: int = 0,
+    binding_history_count: int = 0,
+) -> List[str]:
+    """收集阻止规划项删除的现场事实，不把模板字段定义视为已填写数据。"""
+    reasons: List[str] = []
+    equipment_sn = str(getattr(check_item, "equipment_sn", None) or "").strip()
+    if equipment_sn:
+        reasons.append(f"已绑定 SN {equipment_sn}")
+
+    status_value = getattr(getattr(check_item, "status", None), "value", None)
+    status_value = status_value or str(getattr(check_item, "status", None) or "").strip()
+    if status_value and status_value != CheckItemStatusEnum.PENDING.value:
+        reasons.append(f"检查项状态为 {status_value}")
+
+    if _has_lld_delete_fact(getattr(check_item, "data_value", None)):
+        reasons.append("已有填写数据")
+    if _has_lld_delete_fact(getattr(check_item, "notes", None)):
+        reasons.append("已有现场备注")
+    if _has_lld_delete_fact(getattr(check_item, "validation_result", None)):
+        reasons.append("已有校验结果")
+    if getattr(check_item, "checked_by", None) or getattr(check_item, "checked_at", None):
+        reasons.append("已有检查记录")
+
+    review_values = [
+        getattr(check_item, "review_status", None),
+        getattr(check_item, "review_comments", None),
+        getattr(check_item, "review_comments_manual", None),
+        getattr(check_item, "review_comments_i18n", None),
+        getattr(check_item, "field_issue_comments", None),
+        getattr(check_item, "field_review_results", None),
+        getattr(check_item, "reviewed_by", None),
+        getattr(check_item, "reviewed_at", None),
+    ]
+    if any(_has_lld_delete_fact(value) for value in review_values):
+        reasons.append("已有审核记录")
+
+    ai_status = str(getattr(check_item, "ai_status", None) or "").strip().lower()
+    if ai_status and ai_status != "none":
+        reasons.append("已有 AI 检查记录")
+    elif _has_lld_delete_fact(getattr(check_item, "ai_result", None)):
+        reasons.append("已有 AI 检查结果")
+
+    if photo_count > 0:
+        reasons.append(f"已有 {photo_count} 张照片")
+    if binding_history_count > 0:
+        reasons.append(f"已有 {binding_history_count} 条设备绑定历史")
+    return reasons
+
+
+def _build_lld_cell_delete_scope(
+    existing_cell: SitePlanningCell,
+    remaining_cells: List[SitePlanningCell],
+) -> Dict[str, Any]:
+    sector_id = str(int(existing_cell.local_cell_id))
+    band = str(existing_cell.band_code or "").strip()
+    band_upper = band.upper()
+    frequency = existing_cell.frequency
+    frequency_key = str(int(frequency)) if frequency is not None else "NA"
+
+    def _same_sector(cell: SitePlanningCell) -> bool:
+        return cell.local_cell_id is not None and str(int(cell.local_cell_id)) == sector_id
+
+    def _same_slot(cell: SitePlanningCell) -> bool:
+        return _same_sector(cell) and str(cell.band_code or "").strip().upper() == band_upper
+
+    def _same_carrier(cell: SitePlanningCell) -> bool:
+        if not _same_slot(cell):
+            return False
+        cell_frequency = str(int(cell.frequency)) if cell.frequency is not None else "NA"
+        return cell_frequency == frequency_key
+
+    return {
+        "sector_id": sector_id,
+        "band": band,
+        "device_cell_id": f"{sector_id}_{band}",
+        "carrier_cell_id": f"{sector_id}_{band}_{frequency_key}",
+        "remove_carrier_cell": not any(_same_carrier(cell) for cell in remaining_cells),
+        "remove_device_slot": not any(_same_slot(cell) for cell in remaining_cells),
+        "remove_sector": not any(_same_sector(cell) for cell in remaining_cells),
+    }
+
+
+def _get_lld_delete_matching_items(
+    db: Session,
+    site_id: int,
+    scope: Dict[str, Any],
+) -> List[Tuple[InspectionCheckItem, SiteInspection, WorkOrder]]:
+    sector_id = scope["sector_id"]
+    band_upper = str(scope["band"]).upper()
+    match_conditions = []
+
+    if scope["remove_carrier_cell"]:
+        match_conditions.append(
+            and_(
+                InspectionCheckItem.sector_id == sector_id,
+                func.upper(InspectionCheckItem.band) == band_upper,
+                func.upper(InspectionCheckItem.cell_id)
+                == str(scope["carrier_cell_id"]).upper(),
+            )
+        )
+    if scope["remove_device_slot"]:
+        match_conditions.append(
+            and_(
+                InspectionCheckItem.sector_id == sector_id,
+                func.upper(InspectionCheckItem.band) == band_upper,
+                or_(
+                    InspectionCheckItem.cell_id.is_(None),
+                    InspectionCheckItem.cell_id == "",
+                    func.upper(InspectionCheckItem.cell_id)
+                    == str(scope["device_cell_id"]).upper(),
+                ),
+            )
+        )
+    if scope["remove_sector"]:
+        match_conditions.append(
+            and_(
+                InspectionCheckItem.sector_id == sector_id,
+                or_(InspectionCheckItem.band.is_(None), InspectionCheckItem.band == ""),
+                or_(
+                    InspectionCheckItem.cell_id.is_(None),
+                    InspectionCheckItem.cell_id == "",
+                ),
+            )
+        )
+
+    if not match_conditions:
+        return []
+
+    rows = (
+        db.query(InspectionCheckItem, SiteInspection, WorkOrder)
+        .join(SiteInspection, InspectionCheckItem.inspection_id == SiteInspection.id)
+        .join(
+            WorkOrder,
+            or_(
+                WorkOrder.id == SiteInspection.work_order_id,
+                WorkOrder.inspection_id == SiteInspection.id,
+            ),
+        )
+        .filter(
+            SiteInspection.site_id == site_id,
+            WorkOrder.status != WorkOrderStatusEnum.VOIDED,
+            InspectionCheckItem.is_active.is_(True),
+            or_(*match_conditions),
+        )
+        .with_for_update(of=InspectionCheckItem)
+        .all()
+    )
+
+    unique_rows = {}
+    for item, inspection, work_order in rows:
+        unique_rows[item.id] = (item, inspection, work_order)
+    return list(unique_rows.values())
+
+
+def _raise_lld_safe_delete_blockers(blockers: List[str]) -> None:
+    if not blockers:
+        return
+    preview = blockers[:8]
+    if len(blockers) > len(preview):
+        preview.append(f"另有 {len(blockers) - len(preview)} 项阻断")
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "LLD_CELL_HAS_OPERATION_FACTS",
+            "message": "该规划项已经被工单使用，不能安全删除",
+            "reasons": preview,
+        },
+    )
+
+
+def _prepare_lld_unbound_cell_delete(
+    db: Session,
+    site_id: int,
+    scope: Dict[str, Any],
+) -> Dict[str, int]:
+    rows = _get_lld_delete_matching_items(db, site_id, scope)
+    if not rows:
+        return {"removed_check_items": 0, "synchronized_inspections": 0}
+
+    item_ids = [item.id for item, _, _ in rows]
+    photo_counts = dict(
+        db.query(InspectionPhoto.check_item_id, func.count(InspectionPhoto.id))
+        .filter(InspectionPhoto.check_item_id.in_(item_ids))
+        .group_by(InspectionPhoto.check_item_id)
+        .all()
+    )
+    history_counts = dict(
+        db.query(
+            EquipmentBindingHistory.check_item_id,
+            func.count(EquipmentBindingHistory.id),
+        )
+        .filter(EquipmentBindingHistory.check_item_id.in_(item_ids))
+        .group_by(EquipmentBindingHistory.check_item_id)
+        .all()
+    )
+
+    blockers: List[str] = []
+    removable_rows = []
+    for item, inspection, work_order in rows:
+        work_order_status = getattr(work_order.status, "value", work_order.status)
+        inspection_status = getattr(inspection.status, "value", inspection.status)
+        if work_order.type != WorkOrderTypeEnum.OPENING_INSPECTION:
+            blockers.append(f"工单“{work_order.title}”类型不支持同步删除规划项")
+            continue
+        if work_order.status not in LLD_SAFE_DELETE_WORK_ORDER_STATUSES:
+            blockers.append(
+                f"工单“{work_order.title}”状态为 {work_order_status}，不允许调整检查项"
+            )
+            continue
+        if inspection.status not in LLD_SAFE_DELETE_INSPECTION_STATUSES:
+            blockers.append(
+                f"工单“{work_order.title}”的检查状态为 {inspection_status}，不允许调整检查项"
+            )
+            continue
+
+        fact_reasons = _collect_lld_check_item_fact_reasons(
+            item,
+            photo_count=int(photo_counts.get(item.id, 0) or 0),
+            binding_history_count=int(history_counts.get(item.id, 0) or 0),
+        )
+        if fact_reasons:
+            blockers.append(
+                f"{work_order.title} / {item.item_name}：{'、'.join(fact_reasons)}"
+            )
+            continue
+        removable_rows.append((item, inspection, work_order))
+
+    _raise_lld_safe_delete_blockers(blockers)
+
+    now = datetime.utcnow()
+    inspections = {}
+    for item, inspection, _ in removable_rows:
+        item.is_active = False
+        item.removed_by_template = True
+        item.removed_at = now
+        item.updated_at = now
+        inspections[inspection.id] = inspection
+
+    for inspection in inspections.values():
+        recalculate_inspection_stats(db, inspection)
+
+    # 匹配查询已锁定检查项；写入后再读取关键事实，防止并发扫码绕过删除校验。
+    db.flush()
+    concurrent_blockers = []
+    for item, inspection, work_order in removable_rows:
+        db.refresh(item)
+        db.refresh(inspection)
+        db.refresh(work_order)
+        work_order_status = getattr(work_order.status, "value", work_order.status)
+        inspection_status = getattr(inspection.status, "value", inspection.status)
+        if work_order.status not in LLD_SAFE_DELETE_WORK_ORDER_STATUSES:
+            concurrent_blockers.append(
+                f"工单“{work_order.title}”状态已变为 {work_order_status}，请刷新后重试"
+            )
+            continue
+        if inspection.status not in LLD_SAFE_DELETE_INSPECTION_STATUSES:
+            concurrent_blockers.append(
+                f"工单“{work_order.title}”的检查状态已变为 {inspection_status}，请刷新后重试"
+            )
+            continue
+        fact_reasons = _collect_lld_check_item_fact_reasons(
+            item,
+            photo_count=(
+                db.query(InspectionPhoto.id)
+                .filter(InspectionPhoto.check_item_id == item.id)
+                .count()
+            ),
+            binding_history_count=(
+                db.query(EquipmentBindingHistory.id)
+                .filter(EquipmentBindingHistory.check_item_id == item.id)
+                .count()
+            ),
+        )
+        if fact_reasons:
+            concurrent_blockers.append(
+                f"{work_order.title} / {item.item_name}：{'、'.join(fact_reasons)}"
+            )
+    _raise_lld_safe_delete_blockers(concurrent_blockers)
+
+    return {
+        "removed_check_items": len(removable_rows),
+        "synchronized_inspections": len(inspections),
+    }
+
+
 @router.delete("/{site_id}/planning/lld/cells/{cell_id}")
 async def delete_lld_cell(
     site_id: int,
@@ -3425,8 +3751,9 @@ async def delete_lld_cell(
     current_user: User = Depends(get_current_user),
 ):
     """
-    删除指定的 LLD Cell。
-    会自动创建新规划版本并复制其他 Cell 到新版本。
+    删除指定的 LLD Cell，并自动创建新规划版本。
+    受限编辑状态下仅允许删除无绑定、无填写、无照片且未审核的规划项，
+    同时停用进行中开站工单里的对应检查项。
     """
     _ensure_planning_editor(current_user)
 
@@ -3437,17 +3764,18 @@ async def delete_lld_cell(
 
     has_active_opening_wo = _has_active_opening_work_order(db, site_id)
     edit_policy = _compute_lld_edit_policy(site, has_active_opening_wo, current_user)
-    if edit_policy.mode != "full":
+    if edit_policy.mode == "readonly":
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "LLD_EDIT_MODE_RESTRICTED",
-                "message": "当前站点处于受限编辑状态，禁止删除 Cell",
+                "message": "当前站点规划为只读状态，禁止删除 Cell",
                 "reason": edit_policy.reason,
                 "mode": edit_policy.mode,
                 "locked_fields": edit_policy.locked_fields,
             },
         )
+    safe_delete_only = edit_policy.mode == "limited"
 
     current = _get_current_planning(db, site_id)
     if not current:
@@ -3473,8 +3801,24 @@ async def delete_lld_cell(
     if not existing_cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
+    remaining_cells = (
+        db.query(SitePlanningCell)
+        .filter(
+            SitePlanningCell.planning_id == current.id,
+            SitePlanningCell.id != cell_id,
+        )
+        .all()
+    )
+    sync_result = {"removed_check_items": 0, "synchronized_inspections": 0}
+    if safe_delete_only:
+        delete_scope = _build_lld_cell_delete_scope(existing_cell, remaining_cells)
+        try:
+            sync_result = _prepare_lld_unbound_cell_delete(db, site_id, delete_scope)
+        except Exception:
+            db.rollback()
+            raise
+
     # 创建新规划版本
-    old_snapshot = _snapshot(current)
     data = SitePlanningBase(
         bands=current.bands or [],
         sector_count=current.sector_count or 0,
@@ -3515,28 +3859,44 @@ async def delete_lld_cell(
         site_id,
         data,
         current_user.id,
-        operation="lld_delete_cell",
-        summary=f"Delete {existing_cell.rat} cell: {existing_cell.band_code}",
+        operation="lld_delete_unbound_cell" if safe_delete_only else "lld_delete_cell",
+        summary=(
+            f"Safe delete unused {existing_cell.rat} cell: "
+            f"LCID={existing_cell.local_cell_id}, Band={existing_cell.band_code}"
+            if safe_delete_only
+            else f"Delete {existing_cell.rat} cell: {existing_cell.band_code}"
+        ),
+        commit=False,
     )
 
     # 复制除要删除的 Cell 之外的所有 Cell
-    old_cells = (
-        db.query(SitePlanningCell)
-        .filter(SitePlanningCell.planning_id == current.id)
-        .all()
-    )
-    for old_cell in old_cells:
-        if old_cell.id != cell_id:
-            db.add(SitePlanningCell(planning_id=new_planning.id, **_cell_kwargs_from_model(old_cell)))
-
-    db.commit()
+    for old_cell in remaining_cells:
+        db.add(SitePlanningCell(planning_id=new_planning.id, **_cell_kwargs_from_model(old_cell)))
+    db.flush()
 
     # 同步基础规划数据
     all_cells = db.query(SitePlanningCell).filter(SitePlanningCell.planning_id == new_planning.id).all()
     _sync_planning_from_cells(db, new_planning, all_cells)
+    rebuild_site_progress(
+        db,
+        site_id,
+        reason="delete_unused_lld_cell" if safe_delete_only else "delete_lld_cell",
+        operator_id=current_user.id,
+    )
     db.commit()
+    db.refresh(new_planning)
 
-    return {"message": "Cell deleted successfully", "deleted_cell_id": cell_id}
+    return {
+        "message": (
+            "未使用规划项已删除，并已同步工单检查项"
+            if safe_delete_only and sync_result["removed_check_items"] > 0
+            else "Cell deleted successfully"
+        ),
+        "deleted_cell_id": cell_id,
+        "planning_version": new_planning.version,
+        "safe_delete": safe_delete_only,
+        **sync_result,
+    }
 
 
 def _build_lld_planning_query(

@@ -4514,7 +4514,8 @@ async def bind_equipment_to_sector(
     if band:
         check_items = check_items.filter(InspectionCheckItem.band == band)
     
-    check_items = check_items.all()
+    # 与 LLD 未使用规划项删除共用行锁，避免删除校验与现场扫码同时写入同一设备位。
+    check_items = check_items.with_for_update().all()
     
     if not check_items:
         raise HTTPException(

@@ -109,6 +109,7 @@ const dynamicPatterns = [
   { pattern: '^确定要删除选中的 (.*?) 个套装吗？$', replacement: 'Are you sure you want to delete the selected $1 packages?' },
   { pattern: '^确定要删除选中的 (.*?) 个工单吗？\\\\n\\\\n注意：只能删除"待分配"或"已分配"状态的工单。$', replacement: 'Are you sure you want to delete the selected $1 tickets? \\n\\nNote: Only work orders with "To Be Assigned" or "Assigned" status can be deleted.' },
   { pattern: '^确定要删除这个(.*?) Cell \\((.*?), 扇区(.*?)\\) 吗？$', replacement: 'Are you sure you want to delete this $1 Cell ($2, sector $3)?' },
+  { pattern: '^确定删除这个未使用的(.*?) Cell \\((.*?), 扇区(.*?)\\) 吗？系统只会在未绑定、未填写、无照片且未审核时删除，并同步工单检查项。$', replacement: 'Delete this unused $1 Cell ($2, sector $3)? It will only be deleted when it is unbound, has no entered data or photos, and has not been reviewed. Matching work order checks will be synchronized.' },
   { pattern: '^确定要重新分配选中的 (.*?) 个工单吗？\\\\n\\\\n注意：只能重新分配"待分配"或"已分配"状态的工单。$', replacement: 'Are you sure you want to reassign the selected $1 tickets? \\n\\nNote: Only work orders with "To Be Assigned" or "Assigned" status can be reassigned.' },
   { pattern: '^确定要作废工单“(.*?)”吗？$', replacement: 'Are you sure you want to void work order "$1"?' },
   { pattern: '^确定要作废选中的 (.*?) 个工单吗？$', replacement: 'Are you sure you want to void the selected $1 work orders?' },

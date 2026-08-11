@@ -350,6 +350,7 @@ class LldEditPolicy(BaseModel):
     can_import: bool = False
     can_add_cell: bool = False
     can_delete_cell: bool = False
+    can_delete_unbound_cell: bool = False
     locked_fields: List[str] = Field(default_factory=list)
     reason: Optional[str] = None
 

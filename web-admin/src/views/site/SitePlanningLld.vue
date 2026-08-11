@@ -340,11 +340,17 @@
             <el-table-column v-if="editMode" label="操作" width="180" fixed="right">
               <template #default="{ row, $index }">
                 <el-button size="small" @click="editCell(row)">编辑</el-button>
-                <template v-if="canDeleteCell">
-                  <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                <template v-if="canAttemptDeleteCell">
+                  <el-tooltip
+                    :disabled="canDeleteCell"
+                    content="仅可删除未绑定且无现场数据的 Cell"
+                    placement="top"
+                  >
+                    <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                  </el-tooltip>
                 </template>
                 <template v-else>
-                  <el-tooltip content="受限编辑：禁止删除 Cell" placement="top">
+                  <el-tooltip content="当前状态禁止删除 Cell" placement="top">
                     <span>
                       <el-button size="small" type="danger" disabled>删除</el-button>
                     </span>
@@ -558,11 +564,17 @@
                 <el-table-column v-if="editMode" label="操作" width="180" fixed="right">
                   <template #default="{ row, $index }">
                     <el-button size="small" @click="editCell(row)">编辑</el-button>
-                    <template v-if="canDeleteCell">
-                      <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                    <template v-if="canAttemptDeleteCell">
+                      <el-tooltip
+                        :disabled="canDeleteCell"
+                        content="仅可删除未绑定且无现场数据的 Cell"
+                        placement="top"
+                      >
+                        <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                      </el-tooltip>
                     </template>
                     <template v-else>
-                      <el-tooltip content="受限编辑：禁止删除 Cell" placement="top">
+                      <el-tooltip content="当前状态禁止删除 Cell" placement="top">
                         <span>
                           <el-button size="small" type="danger" disabled>删除</el-button>
                         </span>
@@ -600,11 +612,17 @@
                 <el-table-column v-if="editMode" label="操作" width="180" fixed="right">
                   <template #default="{ row, $index }">
                     <el-button size="small" @click="editCell(row)">编辑</el-button>
-                    <template v-if="canDeleteCell">
-                      <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                    <template v-if="canAttemptDeleteCell">
+                      <el-tooltip
+                        :disabled="canDeleteCell"
+                        content="仅可删除未绑定且无现场数据的 Cell"
+                        placement="top"
+                      >
+                        <el-button size="small" type="danger" @click="deleteCell(row)">删除</el-button>
+                      </el-tooltip>
                     </template>
                     <template v-else>
-                      <el-tooltip content="受限编辑：禁止删除 Cell" placement="top">
+                      <el-tooltip content="当前状态禁止删除 Cell" placement="top">
                         <span>
                           <el-button size="small" type="danger" disabled>删除</el-button>
                         </span>
@@ -1770,6 +1788,8 @@ const canEdit = computed(() => !!editPolicy.value?.can_edit)
 const canImport = computed(() => !!editPolicy.value?.can_import)
 const canAddCell = computed(() => !!editPolicy.value?.can_add_cell)
 const canDeleteCell = computed(() => !!editPolicy.value?.can_delete_cell)
+const canDeleteUnboundCell = computed(() => !!editPolicy.value?.can_delete_unbound_cell)
+const canAttemptDeleteCell = computed(() => canDeleteCell.value || canDeleteUnboundCell.value)
 
 const extractErrorMessage = (error, fallback = '操作失败') => {
   const detail = error?.response?.data?.detail
@@ -1780,6 +1800,9 @@ const extractErrorMessage = (error, fallback = '操作失败') => {
     const parts = []
     if (detail.message) parts.push(detail.message)
     if (detail.reason) parts.push(detail.reason)
+    if (Array.isArray(detail.reasons) && detail.reasons.length) {
+      parts.push(...detail.reasons)
+    }
     if (Array.isArray(detail.attempted_fields) && detail.attempted_fields.length) {
       parts.push(`尝试修改字段：${detail.attempted_fields.join('，')}`)
     }
@@ -2173,13 +2196,16 @@ const saveCell = async () => {
 
 const deleteCell = async (row) => {
   try {
-    if (!canDeleteCell.value) {
-      ElMessage.warning('受限编辑：禁止删除 Cell')
+    if (!canAttemptDeleteCell.value) {
+      ElMessage.warning('当前状态禁止删除 Cell')
       return
     }
+    const safeDeleteOnly = editPolicyMode.value === 'limited'
     await ElMessageBox.confirm(
-      `确定要删除这个${row.rat} Cell (${row.band_code}, 扇区${row.local_cell_id}) 吗？`,
-      '删除确认',
+      safeDeleteOnly
+        ? `确定删除这个未使用的${row.rat} Cell (${row.band_code}, 扇区${row.local_cell_id}) 吗？系统只会在未绑定、未填写、无照片且未审核时删除，并同步工单检查项。`
+        : `确定要删除这个${row.rat} Cell (${row.band_code}, 扇区${row.local_cell_id}) 吗？`,
+      safeDeleteOnly ? '删除未使用规划项' : '删除确认',
       {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
@@ -2187,8 +2213,8 @@ const deleteCell = async (row) => {
       }
     )
 
-    await sitePlanningApi.deleteLldCell(siteId, row.id, planning.value.version)
-    ElMessage.success('删除Cell成功')
+    const result = await sitePlanningApi.deleteLldCell(siteId, row.id, planning.value.version)
+    ElMessage.success(result?.message || '删除Cell成功')
 
     hasChanges.value = true
 
@@ -2198,8 +2224,15 @@ const deleteCell = async (row) => {
 
   } catch (error) {
     if (error === 'cancel') return
-
-    ElMessage.error(extractErrorMessage(error, '删除失败'))
+    const message = extractErrorMessage(error, '删除失败')
+    if (error?.response?.status === 409) {
+      await ElMessageBox.alert(message, '无法删除规划项', {
+        type: 'warning',
+        confirmButtonText: '知道了',
+      }).catch(() => {})
+      return
+    }
+    ElMessage.error(message)
   }
 }
 

@@ -2212,8 +2212,17 @@ const legacyIdMap = {
   手机号: "Nomor telepon",
   受限: "restricted",
   受限编辑: "Pengeditan terbatas",
+  "仅可删除未绑定且无现场数据的 Cell":
+    "Hanya Sel yang belum terikat dan tanpa data lapangan yang dapat dihapus",
+  "当前状态禁止删除 Cell": "Sel tidak dapat dihapus dalam status saat ini",
   "受限编辑：禁止删除 Cell": "Pengeditan terbatas: penghapusan sel dilarang",
   "受限编辑：禁止新增 Cell": "Pengeditan terbatas: Menambah Sel baru dilarang",
+  删除未使用规划项: "Hapus item perencanaan yang belum digunakan",
+  无法删除规划项: "Item perencanaan tidak dapat dihapus",
+  "未使用规划项已删除，并已同步工单检查项":
+    "Item perencanaan yang belum digunakan telah dihapus dan pemeriksaan perintah kerja telah disinkronkan",
+  "该规划项已经被工单使用，不能安全删除":
+    "Item perencanaan ini sudah digunakan oleh perintah kerja dan tidak dapat dihapus dengan aman",
   输入客户: "Masukkan pelanggan",
   输入区域: "daerah masukan",
   输入任务ID: "Masukkan ID tugas",

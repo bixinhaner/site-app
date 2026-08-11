@@ -2189,10 +2189,19 @@ const legacyEnMap = {
   手机号: "Phone number",
   受限: "restricted",
   受限编辑: "Restricted editing",
+  "仅可删除未绑定且无现场数据的 Cell":
+    "Only unbound Cells without field data can be deleted",
+  "当前状态禁止删除 Cell": "Cells cannot be deleted in the current state",
   "受限编辑：禁止删除 Cell":
     "Restricted editing: deletion of cells is prohibited",
   "受限编辑：禁止新增 Cell":
     "Restricted editing: Adding new Cells is prohibited",
+  删除未使用规划项: "Delete unused planning item",
+  无法删除规划项: "Planning item cannot be deleted",
+  "未使用规划项已删除，并已同步工单检查项":
+    "The unused planning item was deleted and work order checks were synchronized",
+  "该规划项已经被工单使用，不能安全删除":
+    "This planning item is already used by a work order and cannot be safely deleted",
   输入客户: "Enter customer",
   输入区域: "input area",
   输入任务ID: "Enter task ID",
