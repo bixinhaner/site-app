@@ -172,11 +172,16 @@ EOF
 ```bash
 cd /usr/local/site-app/web-admin
 npm ci
-npm run build
+
+# 回到项目根目录，通过统一发布器构建并发布
+cd /usr/local/site-app
+node scripts/publish-web-admin.mjs
 
 # 确认产物存在
 ls -la /usr/local/site-app/web-admin/dist | head
 ```
+
+发布器会先复制新版本全部哈希资源，最后原子替换 `index.html`，并保留最近 30 天的旧哈希资源。不要在生产目录直接执行 `npm run build`，否则 Vite 会清空 `dist/assets`，仍开着旧页面的用户点击懒加载菜单时会请求不到旧文件。
 
 ### 2.6 写 Caddyfile（按组网选择）
 
@@ -375,11 +380,15 @@ cd /usr/local/site-app/backend
 # 前端重新构建
 cd /usr/local/site-app/web-admin
 npm ci
-npm run build
 
-# 重启服务
+cd /usr/local/site-app
+node scripts/publish-web-admin.mjs
+
+# 后端代码有变化时重启后端
 pm2 restart site-backend
-pm2 restart site-caddy
+
+# 仅发布静态前端不需要重启 Caddy；只有 Caddyfile 变化时才 reload
+# pm2 restart site-caddy
 
 # 健康检查
 curl -sS https://siteapp.indonesiacentral.cloudapp.azure.com/health
@@ -397,28 +406,38 @@ git pull
 pm2 restart site-backend
 
 # 如果只是前端代码变更（但仍需要重新 build）
-cd /usr/local/site-app/web-admin
-npm run build
-pm2 restart site-caddy
+cd /usr/local/site-app
+node scripts/publish-web-admin.mjs
 ```
+
+如需调整旧哈希资源保留周期，可显式传入 `--retain-days`，例如 `node scripts/publish-web-admin.mjs --retain-days 45`。默认 30 天适合常规发布频率，不建议缩短到活跃用户可能保持页面打开的时间以内。
 
 ---
 
 ## 4. 常见问题（排障要点）
 
-### 4.1 Let’s Encrypt 签发失败（Timeout / 连接问题）
+### 4.1 点击左侧菜单无反应，控制台出现 `/assets/*.js` 404
+
+原因：旧标签页仍引用上一版本的懒加载文件，而发布过程已经删除该哈希资源。新版本客户端会自动刷新一次并继续打开目标页面；统一发布器还会保留 30 天旧资源，从源头避免正常发布触发此问题。
+
+处理：
+- 先确认生产发布使用 `node scripts/publish-web-admin.mjs`，没有直接执行 `npm run build` 覆盖 `dist`。
+- 检查 404 文件是否早于 30 天；超过保留期的长期未刷新页面，用户首次点击时会自动更新。
+- 已经停留在修复上线前旧版本且当前已经报错的标签页，需要手动强制刷新一次，之后会进入自动恢复机制。
+
+### 4.2 Let’s Encrypt 签发失败（Timeout / 连接问题）
 
 重点检查：
 - Azure 防火墙 / NSG 是否放行 `80/443` 入站
 - 本机是否还有进程占用 `80/443`：`ss -lntp | egrep ':(80|443)\b'`
 - 若启用 `ufw`：确认允许 `80/443`
 
-### 4.2 WebAdmin 登录 `POST /api/auth/login` 返回 405
+### 4.3 WebAdmin 登录 `POST /api/auth/login` 返回 405
 
 原因：Caddy 把 `/api/*` 也走了 `try_files ... /index.html`，POST 被静态站点处理而返回 405。  
 解决：确保 Caddyfile 用 `handle @backend { reverse_proxy ... }` 单独处理后端路径（见上文示例）。
 
-### 4.3 创建管理员时报 bcrypt / passlib 报错
+### 4.4 创建管理员时报 bcrypt / passlib 报错
 
 原因：`passlib==1.7.4` 与新版 `bcrypt` 不兼容。  
 解决：`backend/requirements.txt` 已加 `bcrypt<4`；部署/更新时执行一次：
@@ -428,12 +447,12 @@ cd /usr/local/site-app/backend
 ./venv/bin/pip install -r requirements.txt
 ```
 
-### 4.4 登录返回 500（Internal Server Error）
+### 4.5 登录返回 500（Internal Server Error）
 
 常见原因：管理员邮箱使用了 `@xxx.local` 之类保留域名，触发后端响应模型 `EmailStr` 校验失败。  
 解决：将管理员邮箱改为合法邮箱（如 `admin@example.com`）。后端启动逻辑会自动修复非法邮箱。
 
-### 4.5 Web/App 检查项图片加载失败
+### 4.6 Web/App 检查项图片加载失败
 
 先确认数据库中的图片路径与 `/usr/local/site-app/backend/uploads` 下的文件一致。如果文件存在，但 Caddy 日志出现 `H3_REQUEST_CANCELLED` 或 `aborting with incomplete response`，检查 `/uploads/*` 是否仍被反向代理到 FastAPI。
 

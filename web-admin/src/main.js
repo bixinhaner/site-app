@@ -7,7 +7,10 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 import i18n from './i18n'
+import { installChunkLoadRecovery } from './utils/chunkLoadRecovery'
 import './styles/theme.scss'
+
+installChunkLoadRecovery(router)
 
 const app = createApp(App)
 const pinia = createPinia()
