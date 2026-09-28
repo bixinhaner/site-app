@@ -101,7 +101,7 @@ app = FastAPI(
 @app.exception_handler(StarletteHTTPException)
 async def localized_http_exception_handler(request: Request, exc: StarletteHTTPException):
     locale = get_request_locale(request.headers)
-    if locale and locale != "zh-CN":
+    if locale:
         exc = StarletteHTTPException(
             status_code=exc.status_code,
             detail=localize_detail(exc.detail, locale),

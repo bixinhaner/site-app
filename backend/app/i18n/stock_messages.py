@@ -124,6 +124,7 @@ EXACT: Dict[str, Tuple[str, str]] = {
     "缺少SN": ("SN is missing", "SN tidak ada"),
     "请填写SN": ("Please enter the SN", "Silakan isi SN"),
     "请填写SN用于核验": ("Please enter the SN for verification", "Silakan isi SN untuk verifikasi"),
+    "SN序列号不能为空": ("SN is required", "SN wajib diisi"),
     "该SN实例已撤销": ("This SN instance has been revoked", "Instans SN ini telah dibatalkan"),
     "已撤销实例不可编辑": ("Revoked instances cannot be edited", "Instans yang dibatalkan tidak dapat diubah"),
     "SN/条码不允许修改，请使用“撤销入库 + 重导”": (
