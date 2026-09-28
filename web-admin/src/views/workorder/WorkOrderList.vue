@@ -105,6 +105,7 @@
     <el-card>
       <div class="table-wheel-area" @wheel.capture="handleTableWheel">
         <el-table 
+          ref="workOrderTableRef"
           :data="items" 
           v-loading="loading" 
           stripe
@@ -684,6 +685,7 @@ const trackSearch = () => {
 
 // 批量操作相关
 const selectedWorkOrders = ref([])
+const workOrderTableRef = ref(null)
 const batchLoading = ref(false)
 const showBatchStatusDialog = ref(false)
 const showBatchAssignDialog = ref(false)
@@ -2088,6 +2090,7 @@ const handleSelectionChange = (selection) => {
 }
 
 const clearSelection = () => {
+  workOrderTableRef.value?.clearSelection()
   selectedWorkOrders.value = []
 }
 
@@ -2327,8 +2330,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .page { padding: 24px; }
-.page-header { display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; }
-.header-actions { display:flex; gap: 8px; align-items:center; }
+.page-header { display:flex; justify-content: space-between; align-items:center; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.page-header h1 { flex-shrink: 0; white-space: nowrap; margin: 0; }
+.header-actions { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; justify-content: flex-end; }
+.header-actions > * { margin-left: 0 !important; }
 .table-wheel-area { width: 100%; }
 .pagination { margin-top: 12px; display:flex; justify-content: flex-end; }
 .sort-panel :deep(.el-radio-group) { width: 100%; }
