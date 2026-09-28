@@ -20,7 +20,7 @@
 							<text class="meta-item">{{ request.warehouse_name || '-' }}</text>
 							<template v-if="request.site_name">
 								<text class="dot">·</text>
-								<text class="meta-item">{{ $t('stock.targetSite') }}：{{ request.site_name }}</text>
+								<text class="meta-item">{{ $t('stock.targetSiteWithValue', { value: request.site_name }) }}</text>
 							</template>
 						</view>
 					</view>

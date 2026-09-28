@@ -185,6 +185,7 @@ export default {
     filterSite: "Site (rencana atau terpasang)",
     receiver: "Penerima",
     targetSite: "Site tujuan",
+    targetSiteWithValue: "Site tujuan: {value}",
     targetSiteNone: "Tidak ditentukan",
     targetSitePlaceholder: "Opsional: cari nama/kode site",
     recent: "Terakhir dipakai",

@@ -185,6 +185,7 @@ export default {
     filterSite: "Site (planned or installed)",
     receiver: "Receiver",
     targetSite: "Target site",
+    targetSiteWithValue: "Target site: {value}",
     targetSiteNone: "Not specified",
     targetSitePlaceholder: "Optional: search site name/code",
     recent: "Recent",

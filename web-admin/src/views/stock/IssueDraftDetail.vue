@@ -19,7 +19,7 @@
             <span class="dot">·</span>
             <span>申请单：{{ draft?.request?.request_no || draft?.request_id || '-' }}</span>
             <span class="dot">·</span>
-            <span>{{ t('stockTrace.targetSite') }}：{{ draft?.request?.site_name || t('stockTrace.targetSiteNone') }}</span>
+            <span>{{ t('stockTrace.targetSiteWithValue', { value: draft?.request?.site_name || t('stockTrace.targetSiteNone') }) }}</span>
           </div>
         </div>
       </div>

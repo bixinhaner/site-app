@@ -17,7 +17,7 @@
             <span class="dot">·</span>
             <span>申请人：{{ requestData?.requester_name || '-' }}</span>
             <span class="dot">·</span>
-            <span>{{ t('stockTrace.targetSite') }}：{{ requestData?.site_name || t('stockTrace.targetSiteNone') }}</span>
+            <span>{{ t('stockTrace.targetSiteWithValue', { value: requestData?.site_name || t('stockTrace.targetSiteNone') }) }}</span>
           </div>
         </div>
       </div>

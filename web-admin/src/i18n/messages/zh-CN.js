@@ -182,6 +182,7 @@ export default {
     filterSite: "站点（计划或实际安装）",
     receiver: "领取人",
     targetSite: "目标站点",
+    targetSiteWithValue: "目标站点：{value}",
     targetSiteNone: "未指定",
     targetSitePlaceholder: "选填：搜索站点名称/编码",
     recent: "最近使用",
