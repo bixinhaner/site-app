@@ -27,6 +27,7 @@ class InspectionStatusEnum(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     COMPLETED = "completed"
+    VOIDED = "voided"
 
 class InspectionTypeEnum(str, Enum):
     OPENING = "OPENING"
