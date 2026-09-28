@@ -159,4 +159,14 @@ ENTRIES = [
         "Site terhubung ke subkontraktor {0}, berbeda dengan subkontraktor pelaksana terpilih {1}. Konfirmasi subkontraktor site secara manual sebelum menugaskan.",
     ),
     ("只有权限管理员可以管理工单指派联动配置", "Only permission admins can manage work order assignment settings", "Hanya admin izin yang dapat mengelola pengaturan penugasan perintah kerja"),
+    # ---- 结算标记 ----
+    ("结算状态参数不合法", "Invalid settlement status", "Status penyelesaian tidak valid"),
+    ("无权限标记工单结算", "No permission to mark work order settlement", "Tidak ada izin menandai penyelesaian perintah kerja"),
+    ("请至少选择一张工单", "Please select at least one work order", "Silakan pilih minimal satu perintah kerja"),
+    ("单次最多标记 {0} 张工单", "At most {0} work orders can be marked at once", "Maksimal {0} perintah kerja dapat ditandai sekaligus"),
+    ("结算批次号不能超过 100 个字符", "The settlement batch number cannot exceed 100 characters", "Nomor batch penyelesaian tidak boleh lebih dari 100 karakter"),
+    ("结算备注不能超过 500 个字符", "Settlement notes cannot exceed 500 characters", "Catatan penyelesaian tidak boleh lebih dari 500 karakter"),
+    ("结算日期格式不正确，应为 YYYY-MM-DD", "Invalid settlement date; use YYYY-MM-DD", "Format tanggal penyelesaian tidak valid; gunakan YYYY-MM-DD"),
+    ("工单尚未审核通过，不能标记为已结算", "The work order has not been approved and cannot be marked as settled", "Perintah kerja belum disetujui dan tidak dapat ditandai selesai dibayar"),
+    ("已更新 {0} 张工单的结算状态", "Updated the settlement status of {0} work orders", "Status penyelesaian {0} perintah kerja diperbarui"),
 ]

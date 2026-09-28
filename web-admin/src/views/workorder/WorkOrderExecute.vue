@@ -809,6 +809,7 @@ const typeText = (type) => {
     transmission_issue: '传输问题',
     gps_issue: 'GPS问题',
     signal_issue: '信号问题',
+    other: '其他',
   }[value] || value || type)
 }
 

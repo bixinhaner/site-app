@@ -492,7 +492,8 @@ const getWorkOrderTypeLabel = (value) => {
     power_issue: '断电问题',
     transmission_issue: '传输问题',
     gps_issue: 'GPS问题',
-    signal_issue: '信号问题'
+    signal_issue: '信号问题',
+    other: '其他'
   }
   return typeMap[value] || value
 }

@@ -34,6 +34,7 @@ class WorkOrderTypeEnum(str, Enum):
     SIGNAL_ISSUE = "signal_issue"
     SITE_SURVEY = "site_survey"
     SSV = "ssv"
+    OTHER = "other"
 
 
 class WorkOrderPriorityEnum(str, Enum):
@@ -214,6 +215,12 @@ class WorkOrderResponse(BaseModel):
     duplicate_photo_count: int = 0
     has_similar_photos: bool = False
     similar_photo_count: int = 0
+    template_id: Optional[str] = None
+    template_name: Optional[str] = None
+    settlement_status: Optional[str] = "unsettled"
+    settlement_batch_no: Optional[str] = None
+    settled_at: Optional[datetime] = None
+    settlement_notes: Optional[str] = None
     extra_data: Optional[Dict[str, Any]] = {}
     
     @validator('extra_data', pre=True)
@@ -279,3 +286,12 @@ class WorkOrderListResponse(BaseModel):
     page: int
     size: int
     pages: int
+
+
+class WorkOrderSettlementRequest(BaseModel):
+    """批量标记工单结算状态"""
+    work_order_ids: List[str]
+    settlement_status: str  # settled / unsettled
+    batch_no: Optional[str] = None
+    settled_at: Optional[str] = None  # YYYY-MM-DD，标记已结算时为空则取当天
+    notes: Optional[str] = None

@@ -39,6 +39,7 @@ from app.models.ssv_archive import SiteSSVArchive
 from app.models.equipment import StockTransaction, PickupRecord
 from app.models.equipment_binding_history import EquipmentBindingHistory
 from app.schemas.work_order import (
+    WorkOrderSettlementRequest,
     WorkOrderCreate,
     WorkOrderUpdate,
     WorkOrderResponse,
@@ -64,6 +65,7 @@ from app.services.inspection_template_sync import (
     validate_inspection_for_submit,
 )
 from app.services.work_order_sync import get_work_order_sync_service
+from app.services.work_order_check_data_export import build_check_data_sheets
 from app.utils.field_validator import FieldValidator
 from app.schemas.inspection_enhanced import FieldDefinition
 from app.services.omc_monitor import (
@@ -211,7 +213,25 @@ WORK_ORDER_EXPORT_COLUMNS = [
     ("description", ("描述", "Description", "Deskripsi")),
     ("duplicate_photo_risk", ("重复照片风险", "Duplicate Photo Risk", "Risiko Foto Duplikat")),
     ("similar_photo_risk", ("相似照片风险", "Similar Photo Risk", "Risiko Foto Serupa")),
+    ("template_name", ("检查模板", "Inspection Template", "Template Inspeksi")),
+    ("settlement_status", ("结算状态", "Settlement Status", "Status Penyelesaian")),
+    ("settlement_batch_no", ("结算批次号", "Settlement Batch No.", "No. Batch Penyelesaian")),
+    ("settled_at", ("结算日期", "Settlement Date", "Tanggal Penyelesaian")),
+    ("settlement_notes", ("结算备注", "Settlement Notes", "Catatan Penyelesaian")),
 ]
+SETTLEMENT_STATUS_UNSETTLED = "unsettled"
+SETTLEMENT_STATUS_SETTLED = "settled"
+SETTLEMENT_STATUS_LABELS = {
+    SETTLEMENT_STATUS_UNSETTLED: ("未结算", "Unsettled", "Belum diselesaikan"),
+    SETTLEMENT_STATUS_SETTLED: ("已结算", "Settled", "Sudah diselesaikan"),
+}
+# 可标记为“已结算”的工单状态（已审核通过及之后）
+SETTLEABLE_WORK_ORDER_STATUSES = {
+    WorkOrderStatusEnum.APPROVED,
+    WorkOrderStatusEnum.ACTIVATED,
+    WorkOrderStatusEnum.COMPLETED,
+}
+SETTLEMENT_MAX_BATCH = 500
 WORK_ORDER_TYPE_LABELS = {
     WorkOrderTypeEnum.OPENING_INSPECTION.value: ("新站安装", "New Site Installation", "Instalasi Situs Baru"),
     WorkOrderTypeEnum.MAINTENANCE.value: ("维护检查", "Maintenance Inspection", "Inspeksi Pemeliharaan"),
@@ -223,6 +243,7 @@ WORK_ORDER_TYPE_LABELS = {
     WorkOrderTypeEnum.SIGNAL_ISSUE.value: ("信号问题", "Signal Issue", "Masalah Sinyal"),
     WorkOrderTypeEnum.SITE_SURVEY.value: ("站点勘查", "Site Survey", "Survei Situs"),
     WorkOrderTypeEnum.SSV.value: ("SSV 验收", "SSV Acceptance", "Penerimaan SSV"),
+    WorkOrderTypeEnum.OTHER.value: ("其他", "Other", "Lainnya"),
 }
 WORK_ORDER_STATUS_LABELS = {
     WorkOrderStatusEnum.PENDING.value: ("待分配", "Pending Assignment", "Menunggu Penugasan"),
@@ -1024,6 +1045,8 @@ def _build_work_order_search_query(
     assigned_to: Optional[int] = None,
     priority: Optional[WorkOrderPriorityEnum] = None,
     site_id: Optional[int] = None,
+    settlement_status: Optional[str] = None,
+    template_id: Optional[str] = None,
 ):
     is_admin_or_manager = _has_work_order_admin_scope(current_user)
     is_field_worker = _is_field_worker(current_user)
@@ -1087,6 +1110,33 @@ def _build_work_order_search_query(
     if site_id:
         query = query.filter(WorkOrder.site_id == site_id)
 
+    settlement_value = str(settlement_status or "").strip().lower()
+    if settlement_value:
+        if settlement_value not in SETTLEMENT_STATUS_LABELS:
+            raise HTTPException(status_code=400, detail="结算状态参数不合法")
+        if settlement_value == SETTLEMENT_STATUS_UNSETTLED:
+            query = query.filter(
+                or_(WorkOrder.settlement_status.is_(None), WorkOrder.settlement_status == SETTLEMENT_STATUS_UNSETTLED)
+            )
+        else:
+            query = query.filter(WorkOrder.settlement_status == settlement_value)
+
+    template_value = str(template_id or "").strip()
+    if template_value:
+        inspection_ids = db.query(SiteInspection.id).filter(SiteInspection.template_id == template_value)
+        work_order_ids = db.query(SiteInspection.work_order_id).filter(
+            SiteInspection.template_id == template_value,
+            SiteInspection.work_order_id.isnot(None),
+        )
+        query = query.filter(
+            or_(
+                WorkOrder.inspection_id.in_(inspection_ids),
+                WorkOrder.id.in_(work_order_ids),
+                # 尚未接单（未生成检查记录）时按建单时选择的模板匹配
+                WorkOrder.extra_data["template_id"].as_string() == template_value,
+            )
+        )
+
     return query
 
 
@@ -1105,10 +1155,46 @@ def _apply_work_order_sort(query, *, sort_by: Optional[str], sort_order: Optiona
     return query.order_by(primary, secondary)
 
 
+def _autosize_export_sheet(worksheet, column_labels: List[str], df) -> None:
+    for idx, column_name in enumerate(column_labels, start=1):
+        max_length = len(str(column_name))
+        if not df.empty:
+            max_length = max(max_length, *(len(str(value if value is not None else "")) for value in df.iloc[:, idx - 1].tolist()))
+        worksheet.column_dimensions[worksheet.cell(row=1, column=idx).column_letter].width = min(max(max_length + 2, 12), 36)
+
+
+def _localize_settlement_status(value: Optional[str], locale_code: str) -> str:
+    key = str(value or SETTLEMENT_STATUS_UNSETTLED).strip().lower()
+    label = SETTLEMENT_STATUS_LABELS.get(key)
+    return _localized_tuple_text(label, locale_code) if label else key
+
+
+def _resolve_work_order_template_ids(db: Session, work_orders: List[WorkOrder]) -> Dict[str, Optional[str]]:
+    """工单 → 实际使用的检查模板ID（优先取关联检查，其次取创建时记录的 template_id）。"""
+    result: Dict[str, Optional[str]] = {}
+    inspection_ids = [wo.inspection_id for wo in work_orders if wo.inspection_id]
+    by_inspection: Dict[str, Optional[str]] = {}
+    if inspection_ids:
+        by_inspection = {
+            ins_id: tpl_id
+            for ins_id, tpl_id in db.query(SiteInspection.id, SiteInspection.template_id)
+            .filter(SiteInspection.id.in_(inspection_ids))
+            .all()
+        }
+    for wo in work_orders:
+        template_id = by_inspection.get(wo.inspection_id) if wo.inspection_id else None
+        if not template_id:
+            extra = wo.extra_data if isinstance(wo.extra_data, dict) else {}
+            template_id = extra.get("template_id") or None
+        result[wo.id] = template_id
+    return result
+
+
 def _build_work_order_export_rows(
     db: Session,
     work_orders: List[WorkOrder],
     locale_code: str,
+    raw_rows_out: Optional[Dict[str, dict]] = None,
 ) -> List[dict]:
     if not work_orders:
         return []
@@ -1227,6 +1313,19 @@ def _build_work_order_export_rows(
         for field_key, label in WORK_ORDER_EXPORT_COLUMNS
     ]
 
+    template_id_by_wo = _resolve_work_order_template_ids(db, work_orders)
+    template_ids = {tid for tid in template_id_by_wo.values() if tid}
+    template_names = (
+        {
+            tid: name
+            for tid, name in db.query(InspectionTemplate.id, InspectionTemplate.template_name)
+            .filter(InspectionTemplate.id.in_(list(template_ids)))
+            .all()
+        }
+        if template_ids
+        else {}
+    )
+
     rows = []
     for wo in work_orders:
         site = sites_by_id.get(wo.site_id)
@@ -1264,7 +1363,14 @@ def _build_work_order_export_rows(
             "description": getattr(wo, "description", None) or "",
             "duplicate_photo_risk": _localize_bool(duplicate_count > 0, locale_code),
             "similar_photo_risk": _localize_bool(similar_count > 0, locale_code),
+            "template_name": template_names.get(template_id_by_wo.get(wo.id)) or "",
+            "settlement_status": _localize_settlement_status(getattr(wo, "settlement_status", None), locale_code),
+            "settlement_batch_no": getattr(wo, "settlement_batch_no", None) or "",
+            "settled_at": (wo.settled_at.strftime("%Y-%m-%d") if getattr(wo, "settled_at", None) else ""),
+            "settlement_notes": getattr(wo, "settlement_notes", None) or "",
         }
+        if raw_rows_out is not None:
+            raw_rows_out[wo.id] = raw_row
         rows.append({column_label: raw_row[field_key] for field_key, column_label in localized_columns})
 
     return rows
@@ -1285,6 +1391,8 @@ async def search_work_orders(
     assigned_to: Optional[int] = Query(None),
     priority: Optional[WorkOrderPriorityEnum] = Query(None),
     site_id: Optional[int] = Query(None),
+    settlement_status: Optional[str] = Query(None, description="结算状态: unsettled|settled"),
+    template_id: Optional[str] = Query(None, description="检查模板ID"),
     sort_by: Optional[str] = Query(
         None,
         description="排序字段: created_at|updated_at|assigned_at|due_date|priority|status|type|site_code|site_name",
@@ -1312,6 +1420,8 @@ async def search_work_orders(
         assigned_to=assigned_to,
         priority=priority,
         site_id=site_id,
+        settlement_status=settlement_status,
+        template_id=template_id,
     )
 
     # 计算总数
@@ -1363,12 +1473,15 @@ async def export_work_orders(
     assigned_to: Optional[int] = Query(None),
     priority: Optional[WorkOrderPriorityEnum] = Query(None),
     site_id: Optional[int] = Query(None),
+    settlement_status: Optional[str] = Query(None, description="结算状态: unsettled|settled"),
+    template_id: Optional[str] = Query(None, description="检查模板ID"),
     sort_by: Optional[str] = Query(
         None,
         description="排序字段: created_at|updated_at|assigned_at|due_date|priority|status|type|site_code|site_name",
     ),
     sort_order: str = Query("desc", description="排序方向: asc|desc"),
     locale: Optional[str] = Query(None, description="导出语言，支持 zh-CN / en-US / id-ID"),
+    include_check_data: bool = Query(False, description="是否按检查模板追加检查数据表"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1392,6 +1505,8 @@ async def export_work_orders(
         assigned_to=assigned_to,
         priority=priority,
         site_id=site_id,
+        settlement_status=settlement_status,
+        template_id=template_id,
     )
     total = query.count()
     if total > WORK_ORDER_EXPORT_MAX_ROWS:
@@ -1411,20 +1526,27 @@ async def export_work_orders(
         sort_order=sort_order,
     ).limit(WORK_ORDER_EXPORT_MAX_ROWS).all()
 
-    rows = _build_work_order_export_rows(db, work_orders, locale_code)
+    raw_rows: Dict[str, dict] = {}
+    rows = _build_work_order_export_rows(db, work_orders, locale_code, raw_rows_out=raw_rows)
     column_labels = [_localized_tuple_text(label, locale_code) for _, label in WORK_ORDER_EXPORT_COLUMNS]
     df = pd.DataFrame(rows, columns=column_labels)
 
     output = io.BytesIO()
     sheet_name = _localized_tuple_text(WORK_ORDER_EXPORT_SHEET_NAME, locale_code)
+    check_data_sheets = (
+        build_check_data_sheets(db, work_orders, raw_rows, locale_code, reserved_sheet_names={sheet_name})
+        if include_check_data
+        else []
+    )
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
-        worksheet = writer.sheets[sheet_name]
-        for idx, column_name in enumerate(column_labels, start=1):
-            max_length = len(str(column_name))
-            if not df.empty:
-                max_length = max(max_length, *(len(str(value or "")) for value in df.iloc[:, idx - 1].tolist()))
-            worksheet.column_dimensions[worksheet.cell(row=1, column=idx).column_letter].width = min(max(max_length + 2, 12), 36)
+        _autosize_export_sheet(writer.sheets[sheet_name], column_labels, df)
+        for extra_name, extra_header, extra_rows in check_data_sheets:
+            extra_df = pd.DataFrame(extra_rows, columns=extra_header)
+            extra_df.to_excel(writer, sheet_name=extra_name, index=False)
+            worksheet = writer.sheets[extra_name]
+            worksheet.freeze_panes = "C2"
+            _autosize_export_sheet(worksheet, extra_header, extra_df)
 
     output.seek(0)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M")
@@ -1478,7 +1600,18 @@ def _enrich_work_order_response(
         "extra_data": wo.extra_data or {},
         "created_at": wo.created_at or current_time,
         "updated_at": wo.updated_at or current_time,
+        "settlement_status": getattr(wo, "settlement_status", None) or SETTLEMENT_STATUS_UNSETTLED,
+        "settlement_batch_no": getattr(wo, "settlement_batch_no", None),
+        "settled_at": getattr(wo, "settled_at", None),
+        "settlement_notes": getattr(wo, "settlement_notes", None),
     }
+
+    template_id = _resolve_work_order_template_ids(db, [wo]).get(wo.id)
+    if template_id:
+        data["template_id"] = template_id
+        template_row = db.query(InspectionTemplate.template_name).filter(InspectionTemplate.id == template_id).first()
+        if template_row:
+            data["template_name"] = template_row[0]
     
     # Add enriched fields
     # site fields
@@ -3831,6 +3964,106 @@ def recall_work_order(
     return {
         "message": recall_message,
         "work_order": _enrich_work_order_response(db, wo)
+    }
+
+
+@router.post("/settlement")
+async def update_work_order_settlement(
+    payload: WorkOrderSettlementRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量标记工单结算状态（与分包商/施工队结算，所有工单类型通用）。"""
+    if not _has_access(
+        current_user,
+        role_codes=["admin", "manager"],
+        permission_codes=["workorder:settlement:write"],
+    ):
+        raise HTTPException(status_code=403, detail="无权限标记工单结算")
+
+    target_status = str(payload.settlement_status or "").strip().lower()
+    if target_status not in SETTLEMENT_STATUS_LABELS:
+        raise HTTPException(status_code=400, detail="结算状态参数不合法")
+
+    ids = []
+    for raw in payload.work_order_ids or []:
+        value = str(raw or "").strip()
+        if value and value not in ids:
+            ids.append(value)
+    if not ids:
+        raise HTTPException(status_code=400, detail="请至少选择一张工单")
+    if len(ids) > SETTLEMENT_MAX_BATCH:
+        raise HTTPException(status_code=400, detail=f"单次最多标记 {SETTLEMENT_MAX_BATCH} 张工单")
+
+    batch_no = str(payload.batch_no or "").strip() or None
+    if batch_no and len(batch_no) > 100:
+        raise HTTPException(status_code=400, detail="结算批次号不能超过 100 个字符")
+    notes = str(payload.notes or "").strip() or None
+    if notes and len(notes) > 500:
+        raise HTTPException(status_code=400, detail="结算备注不能超过 500 个字符")
+
+    settled_at = None
+    if target_status == SETTLEMENT_STATUS_SETTLED:
+        raw_date = str(payload.settled_at or "").strip()
+        if raw_date:
+            try:
+                settled_at = datetime.strptime(raw_date[:10], "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="结算日期格式不正确，应为 YYYY-MM-DD")
+        else:
+            settled_at = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    work_orders = db.query(WorkOrder).filter(WorkOrder.id.in_(ids)).all()
+    found = {wo.id: wo for wo in work_orders}
+    now = datetime.utcnow()
+    updated: List[str] = []
+    skipped: List[Dict[str, str]] = []
+
+    for wo_id in ids:
+        wo = found.get(wo_id)
+        if not wo:
+            skipped.append({"id": wo_id, "title": "", "reason": "工单不存在"})
+            continue
+        if target_status == SETTLEMENT_STATUS_SETTLED and wo.status not in SETTLEABLE_WORK_ORDER_STATUSES:
+            skipped.append({"id": wo.id, "title": wo.title or "", "reason": "工单尚未审核通过，不能标记为已结算"})
+            continue
+
+        old_status = getattr(wo, "settlement_status", None) or SETTLEMENT_STATUS_UNSETTLED
+        wo.settlement_status = target_status
+        if target_status == SETTLEMENT_STATUS_SETTLED:
+            wo.settlement_batch_no = batch_no
+            wo.settled_at = settled_at
+            wo.settlement_notes = notes
+        else:
+            wo.settlement_batch_no = None
+            wo.settled_at = None
+            wo.settlement_notes = notes
+        wo.settlement_updated_by = current_user.id
+        wo.settlement_updated_at = now
+        db.add(
+            AuditEvent(
+                id=str(uuid.uuid4()),
+                resource_type="work_order",
+                resource_id=wo.id,
+                action="settlement",
+                from_status=old_status,
+                to_status=target_status,
+                operator_id=current_user.id,
+                comments=notes,
+                details={
+                    "batch_no": batch_no,
+                    "settled_at": settled_at.strftime("%Y-%m-%d") if settled_at else None,
+                },
+            )
+        )
+        updated.append(wo.id)
+
+    db.commit()
+    return {
+        "message": f"已更新 {len(updated)} 张工单的结算状态",
+        "updated_count": len(updated),
+        "updated_ids": updated,
+        "skipped": skipped,
     }
 
 

@@ -35,6 +35,7 @@ class WorkOrderTypeEnum(str, enum.Enum):
     GPS_ISSUE = "gps_issue"
     SIGNAL_ISSUE = "signal_issue"
     SITE_SURVEY = "site_survey"
+    OTHER = "other"  # 其他：通用工单，由模板自定义内容（如零星PO）
 
 
 class ItemStatusEnum(str, enum.Enum):
@@ -87,6 +88,14 @@ class WorkOrder(Base):
 
     # 扩展信息 (JSON格式存储其他配置)
     extra_data = Column(JSON, default={})
+
+    # 结算标记（与分包商/施工队结算，所有工单类型通用）
+    settlement_status = Column(String(20), default="unsettled", index=True)  # unsettled / settled
+    settlement_batch_no = Column(String(100))
+    settled_at = Column(DateTime)
+    settlement_notes = Column(Text)
+    settlement_updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    settlement_updated_at = Column(DateTime)
 
     # 系统字段
     created_at = Column(DateTime, server_default=func.now())

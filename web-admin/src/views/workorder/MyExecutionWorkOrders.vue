@@ -193,6 +193,7 @@ const TYPE_LABEL_MAP = {
   transmission_issue: '传输问题',
   gps_issue: 'GPS问题',
   signal_issue: '信号问题',
+  other: '其他',
 }
 
 const STATUS_LABEL_MAP = {

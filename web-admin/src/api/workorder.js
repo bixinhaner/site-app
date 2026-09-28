@@ -89,6 +89,9 @@ export const workOrderAPI = {
   },
 
   // 批量操作工单
+  // 批量标记结算（所有工单类型通用）
+  updateSettlement: (payload) => request.post('/api/work-orders/settlement', payload),
+
   batchOperation: (workOrderIds, operation, value = null, reason = null) => {
     return request.post('/api/work-orders/batch-operation', {
       work_order_ids: workOrderIds,
@@ -159,7 +162,8 @@ export const WorkOrderType = {
   TRANSMISSION_ISSUE: 'transmission_issue',
   GPS_ISSUE: 'gps_issue',
   SIGNAL_ISSUE: 'signal_issue',
-  SITE_SURVEY: 'site_survey'
+  SITE_SURVEY: 'site_survey',
+  OTHER: 'other'
 }
 
 export default workOrderAPI

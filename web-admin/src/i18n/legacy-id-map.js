@@ -3583,6 +3583,7 @@ const legacyIdMap = {
   "浏览器定位不可用，且当前策略禁止无定位上传": "Lokasi browser tidak tersedia, dan kebijakan saat ini melarang unggahan tanpa lokasi",
   "扩容设备在线 / 激活状态": "Status online / aktivasi perangkat ekspansi",
   "已按当前站点坐标刷新": "Diperbarui dengan koordinat site saat ini",
+  "其他": "Lainnya",
 };
 
 export default legacyIdMap;

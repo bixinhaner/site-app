@@ -14,6 +14,7 @@ SUPPORTED_WEB_EXECUTION_WORK_ORDER_TYPES = (
     'transmission_issue',
     'gps_issue',
     'signal_issue',
+    'other',
 )
 
 LOCAL_UPLOAD_WITHOUT_GEO_POLICY_DENY = 'deny'

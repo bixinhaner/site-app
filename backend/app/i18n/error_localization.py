@@ -146,7 +146,7 @@ def localize_detail(detail: Any, locale: Optional[str]) -> Any:
 
 # 成功响应中需要翻译的位置：顶层 message，以下列表中各项的 message，以及顶层字典值（下一层）的 message。
 # 不做深层递归，避免误改日志等业务数据中的 message 字段。
-_RESPONSE_LIST_KEYS = ("errors", "warnings", "issues", "failures")
+_RESPONSE_LIST_KEYS = ("errors", "warnings", "issues", "failures", "skipped")
 
 
 def localize_response_payload(payload: Any, locale: Optional[str]) -> Any:

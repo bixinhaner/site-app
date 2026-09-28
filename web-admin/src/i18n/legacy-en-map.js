@@ -3551,6 +3551,7 @@ const legacyEnMap = {
   "浏览器定位不可用，且当前策略禁止无定位上传": "Browser location is unavailable, and the current policy forbids uploads without location",
   "扩容设备在线 / 激活状态": "Expansion device online / activation status",
   "已按当前站点坐标刷新": "Refreshed with the current site coordinates",
+  "其他": "Other",
 };
 
 export default legacyEnMap;

@@ -14,6 +14,12 @@ def ensure_work_order_schema(engine: Engine) -> None:
             "void_reason": "void_reason TEXT",
             "voided_by": "voided_by INTEGER",
             "voided_at": "voided_at DATETIME",
+            "settlement_status": "settlement_status VARCHAR(20) DEFAULT 'unsettled'",
+            "settlement_batch_no": "settlement_batch_no VARCHAR(100)",
+            "settled_at": "settled_at DATETIME",
+            "settlement_notes": "settlement_notes TEXT",
+            "settlement_updated_by": "settlement_updated_by INTEGER",
+            "settlement_updated_at": "settlement_updated_at DATETIME",
         },
     }
 
@@ -39,7 +45,32 @@ def ensure_work_order_schema(engine: Engine) -> None:
                     print(f"[Schema Migration] Skipped {column_name} on {table_name}: {e}")
                     continue
 
+        try:
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_work_orders_settlement_status ON work_orders (settlement_status)")
+            )
+        except Exception as e:
+            print(f"[Schema Migration] Skipped index ix_work_orders_settlement_status: {e}")
+
         if engine.dialect.name == "mysql":
+            # 工单类型为原生 ENUM 时补充新增类型（存储值为枚举名）；非 ENUM 列不做修改
+            try:
+                type_row = conn.execute(text("SHOW COLUMNS FROM work_orders LIKE 'type'")).fetchone()
+                type_def = str(type_row[1] if type_row else "").lower()
+                if type_def.startswith("enum(") and "'other'" not in type_def:
+                    conn.execute(
+                        text(
+                            """
+                            ALTER TABLE work_orders
+                            MODIFY COLUMN type ENUM(
+                                'OPENING_INSPECTION', 'SSV', 'MAINTENANCE', 'EQUIPMENT_REPLACEMENT', 'CELL_EXPANSION',
+                                'POWER_ISSUE', 'TRANSMISSION_ISSUE', 'GPS_ISSUE', 'SIGNAL_ISSUE', 'SITE_SURVEY', 'OTHER'
+                            ) NOT NULL
+                            """
+                        )
+                    )
+            except Exception as e:
+                print(f"[Schema Migration] Skipped enum alter for work_orders.type: {e}")
             try:
                 conn.execute(
                     text(

@@ -472,6 +472,7 @@ const WORK_ORDER_TYPE_VALUES = [
   'transmission_issue',
   'gps_issue',
   'signal_issue',
+  'other',
 ]
 
 const createBoolRule = (defaultValue) => ({

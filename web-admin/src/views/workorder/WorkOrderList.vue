@@ -26,6 +26,21 @@
         <el-select v-model="typeFilter" clearable :placeholder="t('workOrderList.filters.typePlaceholder')" style="width: 180px">
           <el-option v-for="option in filterTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
+        <el-select v-model="settlementFilter" clearable :placeholder="t('workOrderList.settlement.filterPlaceholder')" style="width: 140px">
+          <el-option value="unsettled" :label="t('workOrderList.settlement.unsettled')" />
+          <el-option value="settled" :label="t('workOrderList.settlement.settled')" />
+        </el-select>
+        <el-select
+          v-model="templateFilter"
+          clearable
+          filterable
+          :placeholder="t('workOrderList.settlement.templatePlaceholder')"
+          :loading="templateOptionsLoading"
+          style="width: 200px"
+          @visible-change="v => v && loadTemplates()"
+        >
+          <el-option v-for="tpl in templateOptions" :key="tpl.id" :label="tpl.template_name" :value="tpl.id" />
+        </el-select>
         <el-popover placement="bottom" :width="280" trigger="click">
           <template #reference>
             <el-button>
@@ -53,9 +68,21 @@
           </div>
         </el-popover>
         <el-button @click="load"><el-icon><Refresh /></el-icon>{{ t('workOrderList.actions.refresh') }}</el-button>
-        <el-button :loading="exporting" @click="exportCurrentFilters">
-          <el-icon><Download /></el-icon>{{ t('workOrderList.actions.export') }}
-        </el-button>
+        <el-dropdown split-button :disabled="exporting" @click="exportCurrentFilters(false)" @command="(cmd) => exportCurrentFilters(cmd === 'withCheckData')">
+          <el-icon v-if="!exporting"><Download /></el-icon>
+          <el-icon v-else class="is-loading"><Refresh /></el-icon>
+          {{ t('workOrderList.actions.export') }}
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="plain">{{ t('workOrderList.settlement.exportPlain') }}</el-dropdown-item>
+              <el-dropdown-item command="withCheckData">
+                <el-tooltip :content="t('workOrderList.settlement.exportWithCheckDataHint')" placement="left">
+                  <span>{{ t('workOrderList.settlement.exportWithCheckData') }}</span>
+                </el-tooltip>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>{{ t('workOrderList.actions.create') }}</el-button>
       </div>
     </div>
@@ -69,6 +96,7 @@
           <!-- <el-button size="small" type="primary" @click="showBatchStatusDialog = true">批量修改状态</el-button> -->
           <el-button size="small" type="warning" @click="showBatchAssignDialog = true">{{ t('workOrderList.actions.batchAssign') }}</el-button>
           <el-button size="small" type="info" @click="showBatchPriorityDialog = true">{{ t('workOrderList.actions.batchPriority') }}</el-button>
+          <el-button v-if="canSettlePermission" size="small" type="success" @click="openSettlementDialog">{{ t('workOrderList.settlement.batchAction') }}</el-button>
           <el-button v-if="canVoidPermission" size="small" type="warning" @click="confirmBatchVoid">{{ t('workOrderList.actions.batchVoid') }}</el-button>
           <el-button size="small" type="danger" @click="confirmBatchDelete">{{ t('workOrderList.actions.batchDelete') }}</el-button>
         </div>
@@ -164,6 +192,18 @@
                   </div>
                 </div>
               </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="settlement_status" :label="t('workOrderList.settlement.column')" width="120">
+            <template #default="{ row }">
+              <el-tooltip
+                v-if="row.settlement_status === 'settled'"
+                :content="t('workOrderList.settlement.batchTooltip', { batch: row.settlement_batch_no || '-', date: formatSettlementDate(row.settled_at) })"
+                placement="top"
+              >
+                <el-tag type="success" size="small">{{ t('workOrderList.settlement.settled') }}</el-tag>
+              </el-tooltip>
+              <el-tag v-else type="info" size="small" effect="plain">{{ t('workOrderList.settlement.unsettled') }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="assigned_at" :label="t('workOrderList.table.assignedAt')" width="180">
@@ -481,6 +521,44 @@
   </el-dialog> -->
 
   <!-- 批量重新分配对话框 -->
+  <el-dialog v-model="showSettlementDialog" :title="t('workOrderList.settlement.dialogTitle')" width="460px">
+    <el-alert :title="t('workOrderList.settlement.hint')" type="info" :closable="false" show-icon style="margin-bottom: 12px" />
+    <div style="margin-bottom: 12px; color: #606266">{{ t('workOrderList.settlement.selected', { count: selectedWorkOrders.length }) }}</div>
+    <el-form label-width="110px">
+      <el-form-item :label="t('workOrderList.settlement.status')">
+        <el-radio-group v-model="settlementForm.settlement_status">
+          <el-radio-button label="settled">{{ t('workOrderList.settlement.settled') }}</el-radio-button>
+          <el-radio-button label="unsettled">{{ t('workOrderList.settlement.unsettled') }}</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+      <template v-if="settlementForm.settlement_status === 'settled'">
+        <el-form-item :label="t('workOrderList.settlement.batchNo')">
+          <el-input v-model="settlementForm.batch_no" maxlength="100" :placeholder="t('workOrderList.settlement.batchNoPlaceholder')" />
+        </el-form-item>
+        <el-form-item :label="t('workOrderList.settlement.settledAt')">
+          <el-date-picker v-model="settlementForm.settled_at" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+        </el-form-item>
+      </template>
+      <el-form-item :label="t('workOrderList.settlement.notes')">
+        <el-input v-model="settlementForm.notes" type="textarea" :rows="2" maxlength="500" :placeholder="t('workOrderList.settlement.notesPlaceholder')" />
+      </el-form-item>
+    </el-form>
+    <el-alert
+      v-if="settlementSkipped.length > 0"
+      :title="t('workOrderList.settlement.skippedTitle', { count: settlementSkipped.length })"
+      type="warning"
+      :closable="false"
+    >
+      <ul style="margin: 4px 0 0; padding-left: 18px">
+        <li v-for="item in settlementSkipped" :key="item.id">{{ item.title || item.id }}：{{ item.reason }}</li>
+      </ul>
+    </el-alert>
+    <template #footer>
+      <el-button @click="showSettlementDialog = false">{{ t('workOrderList.settlement.cancel') }}</el-button>
+      <el-button type="primary" :loading="batchLoading" @click="executeSettlement">{{ t('workOrderList.settlement.confirm') }}</el-button>
+    </template>
+  </el-dialog>
+
   <el-dialog v-model="showBatchAssignDialog" :title="t('workOrderList.dialogs.batchAssignTitle')" width="400px">
     <el-form label-width="80px">
       <el-form-item :label="t('workOrderList.form.assignee')">
@@ -585,6 +663,8 @@ const buildSearchParams = ({ includePagination = true, includeLocale = false } =
     params.status_in = statusInFilter.value.join(',')
   }
   if (typeFilter.value) params.type = typeFilter.value
+  if (settlementFilter.value) params.settlement_status = settlementFilter.value
+  if (templateFilter.value) params.template_id = templateFilter.value
   if (sortBy.value) params.sort_by = sortBy.value
   if (sortOrder.value) params.sort_order = sortOrder.value
   if (includeLocale) params.locale = locale.value
@@ -619,6 +699,51 @@ const statusValueSet = new Set(STATUS_VALUES)
 const INSTALLED_SITE_PRESET_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'ACTIVATED', 'COMPLETED']
 const VOIDABLE_STATUSES = ['PENDING', 'ACTIVE', 'SUBMITTED', 'UNDER_REVIEW', 'REJECTED']
 const canVoidPermission = computed(() => userStore.hasPermission('workorder:void:write'))
+// 与后端一致：管理员、经理角色或授予“工单结算标记”权限者可操作
+const canSettlePermission = computed(() => userStore.hasAnyRole(['admin', 'manager']) || userStore.hasPermission('workorder:settlement:write'))
+const settlementFilter = ref('')
+const templateFilter = ref('')
+const showSettlementDialog = ref(false)
+const settlementForm = ref({ settlement_status: 'settled', batch_no: '', settled_at: '', notes: '' })
+const settlementSkipped = ref([])
+
+const formatSettlementDate = (value) => (value ? String(value).slice(0, 10) : '-')
+
+const openSettlementDialog = () => {
+  const today = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  settlementForm.value = {
+    settlement_status: 'settled',
+    batch_no: '',
+    settled_at: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
+    notes: '',
+  }
+  settlementSkipped.value = []
+  showSettlementDialog.value = true
+}
+
+const executeSettlement = async () => {
+  if (batchLoading.value) return
+  try {
+    batchLoading.value = true
+    const form = settlementForm.value
+    const res = await workOrderAPI.updateSettlement({
+      work_order_ids: selectedWorkOrders.value.map((w) => w.id),
+      settlement_status: form.settlement_status,
+      batch_no: form.settlement_status === 'settled' ? (form.batch_no || '').trim() : null,
+      settled_at: form.settlement_status === 'settled' ? form.settled_at || null : null,
+      notes: (form.notes || '').trim() || null,
+    })
+    settlementSkipped.value = Array.isArray(res?.skipped) ? res.skipped : []
+    if (res?.updated_count) ElMessage.success(t('workOrderList.settlement.success', { count: res.updated_count }))
+    if (settlementSkipped.value.length === 0) showSettlementDialog.value = false
+    await load()
+  } catch (error) {
+    ElMessage.error(t('workOrderList.settlement.failed', { message: getApiErrorMessage(error) || error?.message || '' }))
+  } finally {
+    batchLoading.value = false
+  }
+}
 const WORK_ORDER_PROGRESS_DOT_COUNT = 5
 const WORK_ORDER_PROGRESS_META = {
   PENDING: { percent: 0, text: '0%', tone: 'pending', currentDot: 0 },
@@ -647,7 +772,7 @@ const normalizeStatusList = (list) => {
   }
   return out
 }
-const createTypeValues = ['site_survey', 'opening_inspection', 'equipment_replacement', 'cell_expansion', 'ssv']
+const createTypeValues = ['site_survey', 'opening_inspection', 'equipment_replacement', 'cell_expansion', 'ssv', 'other']
 const sortFieldOptions = computed(() => [
   { label: t('workOrderList.sort.fields.createdAt'), value: 'created_at' },
   { label: t('workOrderList.sort.fields.updatedAt'), value: 'updated_at' },
@@ -1890,7 +2015,7 @@ const extractErrorDetail = async (error) => {
   return error?.message || t('workOrderList.messages.exportFailed')
 }
 
-const exportCurrentFilters = async () => {
+const exportCurrentFilters = async (withCheckData = false) => {
   if (exporting.value) return
   if (!Number(total.value || 0)) {
     ElMessage.warning(t('workOrderList.messages.exportEmpty'))
@@ -1899,9 +2024,9 @@ const exportCurrentFilters = async () => {
 
   try {
     exporting.value = true
-    const response = await workOrderAPI.exportWorkOrders(
-      buildSearchParams({ includePagination: false, includeLocale: true }),
-    )
+    const exportParams = buildSearchParams({ includePagination: false, includeLocale: true })
+    if (withCheckData === true) exportParams.include_check_data = true
+    const response = await workOrderAPI.exportWorkOrders(exportParams)
     const filename = parseFilenameFromDisposition(response?.headers?.['content-disposition']) || buildFallbackExportFilename()
     downloadBlob(response?.data, filename)
     ElMessage.success(t('workOrderList.messages.exportSuccess'))
@@ -2183,7 +2308,7 @@ watch(createVisible, (visible) => {
 })
 
 // 动态筛选/排序：变化时回到第 1 页并刷新
-watch([searchKeyword, statusFilter, typeFilter, statusInFilter], () => {
+watch([searchKeyword, statusFilter, typeFilter, statusInFilter, settlementFilter, templateFilter], () => {
   currentPage.value = 1
   trackSearch()
   load()

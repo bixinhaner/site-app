@@ -2988,6 +2988,7 @@ const types = [
   { label: "信号问题", value: "signal_issue" },
   { label: "站点勘察", value: "site_survey" },
   { label: "SSV 验收", value: "ssv" },
+  { label: "其他", value: "other" },
 ];
 
 const isVoided = computed(() => order.value?.status === "VOIDED");
