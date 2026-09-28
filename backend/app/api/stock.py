@@ -2818,6 +2818,27 @@ _STOCK_OUT_SOURCE_LABELS = {
     "其他": ("其他", "Other", "Lainnya"),
 }
 
+# 计量单位（与 web-admin inventory.page.units 保持一致）
+_UNIT_LABELS = {
+    "台": ("台", "unit", "unit"),
+    "套": ("套", "set", "set"),
+    "个": ("个", "pcs", "buah"),
+    "副": ("副", "pair", "pasang"),
+    "米": ("米", "m", "m"),
+    "根": ("根", "pcs", "batang"),
+    "条": ("条", "pcs", "buah"),
+    "卷": ("卷", "roll", "gulung"),
+    "箱": ("箱", "box", "kotak"),
+    "批": ("批", "batch", "batch"),
+}
+
+
+def _unit_label(unit: Optional[str], locale: str) -> str:
+    raw = str(unit or "").strip()
+    label = _UNIT_LABELS.get(raw)
+    return localized_text(label[0], locale, label[1], label[2]) if label else raw
+
+
 _EXPORT_TEXT = {
     "quick_no_approval": ("快速出库（无审批）", "Quick stock-out (no approval)", "Keluar cepat (tanpa persetujuan)"),
     "deleted_user": ("已删除用户(原ID:{id})", "Deleted user (ID: {id})", "Pengguna dihapus (ID: {id})"),
@@ -3140,7 +3161,7 @@ async def export_stock_transactions(
                     "serial_number": serial_number,
                     "instance_is_voided": is_voided,
                     "quantity": qty,
-                    "unit": getattr(eq, "unit", "") if eq else "",
+                    "unit": _unit_label(getattr(eq, "unit", "") if eq else "", loc),
                     "batch_number": it.batch_number or "",
                     "actual_site": actual_site,
                     "actual_cell": (actual.get("cell_id") or "") if actual else "",
@@ -3207,7 +3228,7 @@ async def export_stock_transactions(
                             else "auxiliary",
                             loc,
                         ),
-                        "unit": getattr(eq, "unit", "") if eq else "",
+                        "unit": _unit_label(getattr(eq, "unit", "") if eq else "", loc),
                         "book_qty": book_qty,
                         "actual_qty": None,
                         "remark": "",

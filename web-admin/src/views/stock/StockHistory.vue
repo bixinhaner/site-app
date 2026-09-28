@@ -668,7 +668,25 @@ const route = useRoute()
 const router = useRouter()
 const { t, locale } = useI18n()
 const isEnglish = computed(() => locale.value === 'en-US')
-const tableI18n = computed(() => (isEnglish.value
+const isIndonesian = computed(() => locale.value === 'id-ID')
+const TABLE_I18N_ID = {
+  typeLabel: 'Jenis',
+  documentLabel: 'Dokumen / Berkas',
+  directionLabel: 'Arah',
+  warehouseLabel: 'Gudang',
+  quantityLabel: 'Jumlah',
+  operatorLabel: 'Operator',
+  receiverLabel: 'Penerima',
+  requestLabel: 'Permintaan material',
+  timeLabel: 'Waktu operasi',
+  notesLabel: 'Catatan',
+  actionsLabel: 'Aksi',
+  detailsLabel: 'Detail',
+  snDetailsLabel: 'Detail SN',
+  searchPlaceholder: 'Cari dokumen/permintaan/material/SN',
+  searchTip: 'Mendukung: no. dokumen, no. permintaan, no. draf pengambilan, berkas, gudang, operator, penerima, kode/nama material, SN',
+}
+const tableI18n = computed(() => (isIndonesian.value ? TABLE_I18N_ID : isEnglish.value
   ? {
       typeLabel: 'Type',
       documentLabel: 'Document / File',
@@ -838,11 +856,17 @@ const currentTransactionWarehouseName = computed(() => {
 })
 
 const recordTypeText = (recordType) => {
+  if (isIndonesian.value) return recordType === 'import' ? 'Impor SN' : 'Masuk/Keluar'
   if (!isEnglish.value) return recordType === 'import' ? 'SN导入' : '出入库'
   return recordType === 'import' ? 'SN import' : 'In/Out'
 }
 
 const directionText = (row) => {
+  if (isIndonesian.value) {
+    if (row.recordType === 'import') return 'Masuk'
+    const idMap = { stock_in: 'Masuk', stock_out: 'Keluar', transfer: 'Transfer', return: 'Retur', adjustment: 'Penyesuaian' }
+    return idMap[row.transactionType] || 'Tidak diketahui'
+  }
   if (row.recordType === 'import') return isEnglish.value ? 'Inbound' : '入库'
   const type = row.transactionType
   const map = isEnglish.value
