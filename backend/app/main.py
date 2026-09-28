@@ -1,4 +1,7 @@
 from fastapi import FastAPI, HTTPException
+from fastapi import Request
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
@@ -10,6 +13,7 @@ from app.core.database import engine, Base, SessionLocal
 from app.core.security import get_password_hash
 from app.services.authz_service import ensure_builtin_roles_and_permissions, set_user_roles_by_codes
 from app.utils.stock_schema import ensure_stock_schema
+from app.i18n.error_localization import get_request_locale, localize_detail
 from app.utils.authz_schema import ensure_authz_schema
 from app.utils.geocode_schema import ensure_geocode_schema
 from app.utils.site_schema import ensure_site_schema
@@ -91,6 +95,19 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+
+# 报错按客户端界面语言（X-App-Locale）翻译；未携带该请求头时保持原样
+@app.exception_handler(StarletteHTTPException)
+async def localized_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    locale = get_request_locale(request.headers)
+    if locale and locale != "zh-CN":
+        exc = StarletteHTTPException(
+            status_code=exc.status_code,
+            detail=localize_detail(exc.detail, locale),
+            headers=getattr(exc, "headers", None),
+        )
+    return await http_exception_handler(request, exc)
 
 # 操作日志（功能动作级）中间件：需尽早注册以覆盖所有 /api 请求
 app.add_middleware(OperationLogMiddleware)

@@ -9,7 +9,7 @@
         </el-button>
         <el-button type="primary" @click="openExportDialog">
           <el-icon><Download /></el-icon>
-          导出 Excel
+          {{ t('stockTrace.exportExcel') }}
         </el-button>
       </div>
     </div>
@@ -66,14 +66,14 @@
       </el-row>
       <el-row :gutter="16" class="filters-row-2">
         <el-col :xs="24" :sm="12" :md="6">
-          <el-select v-model="filters.warehouse_id" placeholder="仓库" clearable filterable @change="reloadTransactions">
+          <el-select v-model="filters.warehouse_id" :placeholder="t('stockTrace.filterWarehouse')" clearable filterable @change="reloadTransactions">
             <el-option v-for="w in warehouses" :key="w.id" :label="w.warehouse_name" :value="w.id" />
           </el-select>
         </el-col>
         <el-col :xs="24" :sm="12" :md="6">
           <el-select
             v-model="filters.issued_to"
-            placeholder="领料人（输入姓名搜索）"
+            :placeholder="t('stockTrace.filterReceiver')"
             filterable
             remote
             clearable
@@ -92,7 +92,7 @@
         <el-col :xs="24" :sm="12" :md="6">
           <StockSitePicker
             v-model="filters.site_id"
-            placeholder="站点（计划或实际安装）"
+            :placeholder="t('stockTrace.filterSite')"
             @change="onSiteFilterChange"
           />
         </el-col>
@@ -337,23 +337,23 @@
     </el-dialog>
 
     <!-- 导出 Excel -->
-    <el-dialog v-model="exportVisible" title="导出出入库记录" width="560px" :close-on-click-modal="!exporting">
+    <el-dialog v-model="exportVisible" :title="t('stockTrace.exportTitle')" width="560px" :close-on-click-modal="!exporting">
       <div class="export-dialog">
         <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="时间范围">
-            <span v-if="filters.start_date">{{ filters.start_date }} 至 {{ filters.end_date }}</span>
-            <el-text v-else type="warning">未选择（将导出全部历史记录）</el-text>
+          <el-descriptions-item :label="t('stockTrace.timeRange')">
+            <span v-if="filters.start_date">{{ t('stockTrace.rangeText', { start: filters.start_date, end: filters.end_date }) }}</span>
+            <el-text v-else type="warning">{{ t('stockTrace.noRange') }}</el-text>
           </el-descriptions-item>
-          <el-descriptions-item label="操作类型">{{ filters.transaction_type ? txTypeText(filters.transaction_type) : '全部' }}</el-descriptions-item>
-          <el-descriptions-item label="仓库">{{ filters.warehouse_id ? warehouseMap[filters.warehouse_id] || filters.warehouse_id : '全部' }}</el-descriptions-item>
-          <el-descriptions-item label="领料人">{{ receiverFilterLabel || '全部' }}</el-descriptions-item>
-          <el-descriptions-item label="站点">{{ siteFilterLabel || '全部' }}</el-descriptions-item>
-          <el-descriptions-item v-if="(keyword || '').trim()" label="关键字">{{ keyword.trim() }}</el-descriptions-item>
-          <el-descriptions-item label="数据量">
-            <span v-if="exportPreviewLoading">统计中…</span>
-            <span v-else-if="exportPreview">
-              单据 <b>{{ exportPreview.transaction_count }}</b> 张，明细 <b>{{ exportPreview.item_count }}</b> 行
-            </span>
+          <el-descriptions-item :label="t('stockTrace.operationType')">{{ exportTypeText(filters.transaction_type) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('stockTrace.warehouse')">{{ filters.warehouse_id ? warehouseMap[filters.warehouse_id] || filters.warehouse_id : t('stockTrace.all') }}</el-descriptions-item>
+          <el-descriptions-item :label="t('stockTrace.receiverLabel')">{{ receiverFilterLabel || t('stockTrace.all') }}</el-descriptions-item>
+          <el-descriptions-item :label="t('stockTrace.site')">{{ siteFilterLabel || t('stockTrace.all') }}</el-descriptions-item>
+          <el-descriptions-item v-if="(keyword || '').trim()" :label="t('stockTrace.keyword')">{{ keyword.trim() }}</el-descriptions-item>
+          <el-descriptions-item :label="t('stockTrace.dataVolume')">
+            <span v-if="exportPreviewLoading">{{ t('stockTrace.counting') }}</span>
+            <b v-else-if="exportPreview">
+              {{ t('stockTrace.volumeText', { tx: exportPreview.transaction_count, items: exportPreview.item_count }) }}
+            </b>
             <span v-else>-</span>
           </el-descriptions-item>
         </el-descriptions>
@@ -364,28 +364,28 @@
           :closable="false"
           show-icon
           class="export-alert"
-          :title="`数据量超出上限（单据 ${exportPreview.max_transactions} 张 / 明细 ${exportPreview.max_items} 行），请缩小时间范围或增加筛选条件`"
+          :title="t('stockTrace.tooLarge', { maxTx: exportPreview.max_transactions, maxItems: exportPreview.max_items })"
         />
         <el-alert
           v-else
           type="info"
           :closable="false"
           class="export-alert"
-          title="按当前筛选条件导出（不含 SN 导入记录）。文件包含：出入库明细（一行一台设备/一种辅料，含领料人、审批人、目标站点与实际安装站点）、单据汇总、物料进出汇总。"
+          :title="t('stockTrace.exportHint')"
         />
         <el-checkbox v-model="exportIncludeStocktake" class="export-check">
-          同时生成「盘点表」（当前账面库存 + 实盘数填写列 + 差异自动计算）
+          {{ t('stockTrace.includeStocktake') }}
         </el-checkbox>
       </div>
       <template #footer>
-        <el-button @click="exportVisible = false" :disabled="exporting">取消</el-button>
+        <el-button @click="exportVisible = false" :disabled="exporting">{{ t('stockTrace.cancel') }}</el-button>
         <el-button
           type="primary"
           :loading="exporting"
           :disabled="exportPreviewLoading || !exportPreview || exportPreview.too_large || exportPreview.transaction_count === 0"
           @click="doExport"
         >
-          {{ exportPreview && exportPreview.transaction_count === 0 ? '无可导出数据' : '导出' }}
+          {{ exportPreview && exportPreview.transaction_count === 0 ? t('stockTrace.noData') : t('stockTrace.export') }}
         </el-button>
       </template>
     </el-dialog>
@@ -453,12 +453,12 @@
             <span class="value">{{ currentTransactionRecord.issue_draft_no || '-' }}</span>
           </div>
           <div v-if="currentTransactionRecord.transaction_type === 'stock_out'" class="summary-item">
-            <span class="label">领取人</span>
+            <span class="label">{{ t('stockTrace.receiver') }}</span>
             <span class="value">{{ currentTransactionRecord.receiver_name || '-' }}</span>
           </div>
           <div v-if="currentTransactionRecord.transaction_type === 'stock_out'" class="summary-item">
-            <span class="label">目标站点</span>
-            <span class="value">{{ siteText(currentTransactionRecord) || '未指定' }}</span>
+            <span class="label">{{ t('stockTrace.targetSite') }}</span>
+            <span class="value">{{ siteText(currentTransactionRecord) || t('stockTrace.targetSiteNone') }}</span>
           </div>
           <div v-if="currentTransactionRecord.out_document_number" class="summary-item">
             <span class="label">关联出库单</span>
@@ -493,7 +493,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="batch_number" label="批次号" width="140" />
-          <el-table-column label="实际安装站点" min-width="180" show-overflow-tooltip>
+          <el-table-column :label="t('stockTrace.actualSite')" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">
               <span v-if="row.actual_site">
                 {{ siteText(row.actual_site) }}<span v-if="row.actual_site.cell_id" class="muted"> · {{ row.actual_site.cell_id }}</span>
@@ -666,7 +666,7 @@ import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { locale } = useI18n()
+const { t, locale } = useI18n()
 const isEnglish = computed(() => locale.value === 'en-US')
 const tableI18n = computed(() => (isEnglish.value
   ? {
@@ -732,7 +732,19 @@ const siteText = (obj) => {
   if (!obj) return ''
   const name = obj.site_name || ''
   const code = obj.site_code || ''
-  return name && code && name !== code ? `${name}（${code}）` : name || code
+  if (!(name && code && name !== code)) return name || code
+  return locale.value === 'zh-CN' ? `${name}（${code}）` : `${name} (${code})`
+}
+
+const exportTypeText = (type) => {
+  const keyMap = {
+    stock_in: 'typeStockIn',
+    stock_out: 'typeStockOut',
+    transfer: 'typeTransfer',
+    return: 'typeReturn',
+    adjustment: 'typeAdjustment',
+  }
+  return keyMap[type] ? t(`stockTrace.${keyMap[type]}`) : t('stockTrace.all')
 }
 
 const receiverFilterLabel = computed(() => {
@@ -1163,10 +1175,10 @@ const extractBlobErrorDetail = async (error) => {
       const text = await data.text()
       return JSON.parse(text)?.detail || text
     } catch {
-      return error?.message || '网络错误'
+      return error?.message || t('stockTrace.networkError')
     }
   }
-  return data?.detail || error?.message || '网络错误'
+  return data?.detail || error?.message || t('stockTrace.networkError')
 }
 
 const openExportDialog = async () => {
@@ -1176,7 +1188,9 @@ const openExportDialog = async () => {
   try {
     exportPreview.value = await stockApi.previewTransactionsExport(buildServerFilterParams())
   } catch (error) {
-    ElMessage.error('统计导出数据失败: ' + (error?.response?.data?.detail || error?.message || '网络错误'))
+    ElMessage.error(t('stockTrace.previewFailed', {
+      msg: error?.response?.data?.detail || error?.message || t('stockTrace.networkError'),
+    }))
   } finally {
     exportPreviewLoading.value = false
   }
@@ -1187,25 +1201,28 @@ const doExport = async () => {
   try {
     const blob = await stockApi.exportTransactions({
       ...buildServerFilterParams(),
-      include_stocktake: exportIncludeStocktake.value
+      include_stocktake: exportIncludeStocktake.value,
+      locale: locale.value
     })
-    const whName = filters.value.warehouse_id ? warehouseMap.value[filters.value.warehouse_id] || '' : '全部仓库'
+    const whName = filters.value.warehouse_id
+      ? warehouseMap.value[filters.value.warehouse_id] || ''
+      : t('stockTrace.allWarehouses')
     const range = filters.value.start_date
       ? `${filters.value.start_date.replaceAll('-', '')}-${filters.value.end_date.replaceAll('-', '')}`
-      : '全部时间'
+      : t('stockTrace.allTime')
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `出入库明细_${whName}_${range}.xlsx`
+    link.download = `${t('stockTrace.filePrefix')}_${whName}_${range}.xlsx`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
     window.URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
+    ElMessage.success(t('stockTrace.exportSuccess'))
     exportVisible.value = false
   } catch (error) {
-    console.error('导出失败:', error)
-    ElMessage.error('导出失败: ' + (await extractBlobErrorDetail(error)))
+    console.error('export stock transactions failed:', error)
+    ElMessage.error(t('stockTrace.exportFailed', { msg: await extractBlobErrorDetail(error) }))
   } finally {
     exporting.value = false
   }

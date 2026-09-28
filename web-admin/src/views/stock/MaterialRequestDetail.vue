@@ -17,7 +17,7 @@
             <span class="dot">·</span>
             <span>申请人：{{ requestData?.requester_name || '-' }}</span>
             <span class="dot">·</span>
-            <span>目标站点：{{ requestData?.site_name || '未指定' }}</span>
+            <span>{{ t('stockTrace.targetSite') }}：{{ requestData?.site_name || t('stockTrace.targetSiteNone') }}</span>
           </div>
         </div>
       </div>
@@ -212,7 +212,7 @@
             <el-select v-model="draftWarehouseId" filterable placeholder="选择仓库" class="warehouse-select">
               <el-option v-for="w in warehouses" :key="w.id" :label="w.warehouse_name" :value="w.id" />
             </el-select>
-            <div class="draft-label">目标站点</div>
+            <div class="draft-label">{{ t('stockTrace.targetSite') }}</div>
             <StockSitePicker
               v-model="draftSiteId"
               :initial-site="draftSiteOption"
@@ -384,6 +384,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { stockApi } from '../../api/stock'
 import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 import { equipmentApi } from '../../api/equipment'
 import { useUserStore } from '../../stores/user'
 

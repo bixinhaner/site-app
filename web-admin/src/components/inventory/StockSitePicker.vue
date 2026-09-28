@@ -6,7 +6,7 @@
     clearable
     :remote-method="search"
     :loading="loading"
-    :placeholder="placeholder"
+    :placeholder="placeholder || t('stockTrace.targetSitePlaceholder')"
     style="width: 100%"
     @update:model-value="onChange"
     @visible-change="onVisibleChange"
@@ -14,7 +14,7 @@
     <el-option v-for="s in options" :key="s.id" :label="siteLabel(s)" :value="s.id">
       <div class="site-option">
         <span class="name">{{ siteLabel(s) }}</span>
-        <el-tag v-if="s.recent" size="small" type="warning" effect="plain">最近使用</el-tag>
+        <el-tag v-if="s.recent" size="small" type="warning" effect="plain">{{ t('stockTrace.recent') }}</el-tag>
         <span v-else-if="s.city" class="city">{{ s.city }}</span>
       </div>
     </el-option>
@@ -23,17 +23,20 @@
 
 <script setup>
 import { onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { stockApi } from '../../api/stock'
 
 const props = defineProps({
   modelValue: { type: [Number, null], default: null },
   // 已选站点的展示信息（编辑/回显时传入，避免远程列表中不存在导致只显示 id）
   initialSite: { type: Object, default: null },
-  placeholder: { type: String, default: '选填：搜索站点名称/编码' },
+  // 为空时使用默认文案（stockTrace.targetSitePlaceholder）
+  placeholder: { type: String, default: '' },
   // 为空时自动带出最近一次使用的站点
   autofillLastUsed: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'change'])
+const { t, locale } = useI18n()
 
 const loading = ref(false)
 const options = ref([])
@@ -42,7 +45,8 @@ const siteLabel = (s) => {
   if (!s) return ''
   const name = s.site_name || ''
   const code = s.site_code || ''
-  return name && code && name !== code ? `${name}（${code}）` : name || code
+  if (!(name && code && name !== code)) return name || code
+  return locale.value === 'zh-CN' ? `${name}（${code}）` : `${name} (${code})`
 }
 
 const ensureInitialOption = () => {
@@ -60,7 +64,7 @@ const search = async (keyword = '') => {
     ensureInitialOption()
     return res
   } catch (error) {
-    console.error('加载站点失败:', error)
+    console.error('load site options failed:', error)
     return null
   } finally {
     loading.value = false

@@ -48,7 +48,7 @@
               </el-select>
             </div>
             <div class="field span2">
-              <div class="label">目标站点</div>
+              <div class="label">{{ t('stockTrace.targetSite') }}</div>
               <StockSitePicker v-model="form.site_id" />
             </div>
             <div class="field span2">
@@ -203,6 +203,9 @@ import { stockApi } from '../../api/stock'
 import { equipmentApi } from '../../api/equipment'
 import { userAPI } from '../../api/user'
 import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const warehouses = ref([])
 const equipmentOptions = ref([])

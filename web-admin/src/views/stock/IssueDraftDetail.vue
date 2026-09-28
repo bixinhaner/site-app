@@ -19,7 +19,7 @@
             <span class="dot">·</span>
             <span>申请单：{{ draft?.request?.request_no || draft?.request_id || '-' }}</span>
             <span class="dot">·</span>
-            <span>目标站点：{{ draft?.request?.site_name || '未指定' }}</span>
+            <span>{{ t('stockTrace.targetSite') }}：{{ draft?.request?.site_name || t('stockTrace.targetSiteNone') }}</span>
           </div>
         </div>
       </div>
@@ -225,6 +225,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { stockApi } from '../../api/stock'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()

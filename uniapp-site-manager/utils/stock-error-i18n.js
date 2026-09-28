@@ -16,6 +16,8 @@ const exactMessageKeyMap = {
 	'无权限操作该仓库': 'stock.stockErrorNoPermissionOperateWarehouse',
 	'申请人不存在或已禁用': 'stock.stockErrorRequesterNotFound',
 	'领取人不存在或已禁用': 'stock.stockErrorManualStockOutReceiverNotFound',
+	'目标站点不存在': 'stock.stockErrorTargetSiteNotFound',
+	'目标站点参数不合法': 'stock.stockErrorTargetSiteInvalid',
 	'物料不存在或已停用': 'stock.stockErrorEquipmentNotAvailable',
 	'审批明细不能为空': 'stock.stockErrorApprovalItemsRequired',
 	'入库明细不能为空': 'stock.stockErrorStockInItemsRequired',

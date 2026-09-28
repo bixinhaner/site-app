@@ -66,6 +66,7 @@ from app.services.warehouse_access_service import (
 )
 from app.utils.file_handler import save_uploaded_file, validate_image_on_disk, ImageValidationError
 from app.utils.timezone import to_utc_iso, LOCAL_TZ
+from app.utils.archive_pdf import localized_text, normalize_locale
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -2790,24 +2791,75 @@ async def get_stock_site_options(
 EXPORT_MAX_TRANSACTIONS = 20000
 EXPORT_MAX_ITEMS = 100000
 
+# 导出文案：(中文, English, Bahasa Indonesia)
 _TX_TYPE_LABELS = {
-    "stock_in": "入库",
-    "stock_out": "出库",
-    "transfer": "调拨",
-    "return": "退库",
-    "adjustment": "调整",
-    "damage": "报损",
+    "stock_in": ("入库", "Stock In", "Masuk"),
+    "stock_out": ("出库", "Stock Out", "Keluar"),
+    "transfer": ("调拨", "Transfer", "Transfer"),
+    "return": ("退库", "Return", "Retur"),
+    "adjustment": ("调整", "Adjustment", "Penyesuaian"),
+    "damage": ("报损", "Damage", "Rusak"),
 }
 
 _TX_STATUS_LABELS = {
-    "pending": "-",
-    "approved": "已通过",
-    "rejected": "已驳回",
-    "pending_receive": "退库待收货",
-    "partially_received": "部分收货",
-    "received": "已收货",
-    "canceled": "已取消",
+    "pending": ("-", "-", "-"),
+    "approved": ("已通过", "Approved", "Disetujui"),
+    "rejected": ("已驳回", "Rejected", "Ditolak"),
+    "pending_receive": ("退库待收货", "Return Pending Receipt", "Retur Menunggu Diterima"),
+    "partially_received": ("部分收货", "Partially Received", "Diterima Sebagian"),
+    "received": ("已收货", "Received", "Diterima"),
+    "canceled": ("已取消", "Canceled", "Dibatalkan"),
 }
+
+_STOCK_OUT_SOURCE_LABELS = {
+    "领料单": ("领料单", "Issue Draft", "Draf Pengambilan"),
+    "快速出库": ("快速出库", "Quick Stock-out", "Keluar Cepat"),
+    "扫码领料": ("扫码领料", "Scan Pickup", "Ambil via Scan"),
+    "其他": ("其他", "Other", "Lainnya"),
+}
+
+_EXPORT_TEXT = {
+    "quick_no_approval": ("快速出库（无审批）", "Quick stock-out (no approval)", "Keluar cepat (tanpa persetujuan)"),
+    "deleted_user": ("已删除用户(原ID:{id})", "Deleted user (ID: {id})", "Pengguna dihapus (ID: {id})"),
+    "main_device": ("主设备", "Main Device", "Perangkat Utama"),
+    "auxiliary": ("辅料", "Auxiliary", "Material Bantu"),
+    "check_not_installed": ("未安装", "Not Installed", "Belum Terpasang"),
+    "check_match": ("一致", "Match", "Sesuai"),
+    "check_mismatch": ("不一致", "Mismatch", "Tidak Sesuai"),
+    "all": ("全部", "All", "Semua"),
+    "none": ("无", "None", "Tidak ada"),
+    "unlimited": ("不限", "Any", "Bebas"),
+    "range": ("{start} 至 {end}", "{start} to {end}", "{start} s/d {end}"),
+    "stats": ("单据 {tx} 张，明细 {items} 行", "{tx} documents, {items} detail rows", "{tx} dokumen, {items} baris detail"),
+    "exported_at": ("导出时间", "Exported At", "Waktu Ekspor"),
+    "exported_by": ("导出人", "Exported By", "Diekspor Oleh"),
+    "time_range": ("时间范围", "Time Range", "Rentang Waktu"),
+    "operation_type": ("操作类型", "Operation Type", "Jenis Operasi"),
+    "warehouse": ("仓库", "Warehouse", "Gudang"),
+    "receiver": ("领料人", "Receiver", "Penerima"),
+    "site": ("站点", "Site", "Site"),
+    "keyword": ("关键字", "Keyword", "Kata Kunci"),
+    "statistics": ("统计", "Statistics", "Statistik"),
+    "all_warehouses": ("全部仓库", "All Warehouses", "Semua Gudang"),
+    "all_time": ("全部时间", "All Time", "Semua Waktu"),
+    "file_prefix": ("出入库明细", "Stock_Transactions", "Transaksi_Stok"),
+    "too_many_docs": (
+        "导出单据过多（{count} 张，上限 {limit}），请缩小时间范围或增加筛选条件",
+        "Too many documents to export ({count}, limit {limit}). Narrow the time range or add filters.",
+        "Terlalu banyak dokumen untuk diekspor ({count}, batas {limit}). Persempit rentang waktu atau tambahkan filter.",
+    ),
+    "too_many_items": (
+        "导出明细过多（{count} 行，上限 {limit}），请缩小时间范围或增加筛选条件",
+        "Too many detail rows to export ({count}, limit {limit}). Narrow the time range or add filters.",
+        "Terlalu banyak baris detail untuk diekspor ({count}, batas {limit}). Persempit rentang waktu atau tambahkan filter.",
+    ),
+}
+
+
+def _xt(key_or_label, locale: str, **kwargs) -> str:
+    label = _EXPORT_TEXT[key_or_label] if isinstance(key_or_label, str) else key_or_label
+    text = localized_text(label[0], locale, label[1], label[2])
+    return text.format(**kwargs) if kwargs else text
 
 
 def _format_local_datetime(dt: Optional[datetime], *, assume_local: bool = False) -> str:
@@ -2820,11 +2872,11 @@ def _format_local_datetime(dt: Optional[datetime], *, assume_local: bool = False
     return dt.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _site_label(site_name: Optional[str], site_code: Optional[str]) -> str:
+def _site_label(site_name: Optional[str], site_code: Optional[str], locale: str = "zh-CN") -> str:
     name = str(site_name or "").strip()
     code = str(site_code or "").strip()
     if name and code and name != code:
-        return f"{name}（{code}）"
+        return f"{name}（{code}）" if locale == "zh-CN" else f"{name} ({code})"
     return name or code
 
 
@@ -2891,10 +2943,11 @@ async def export_stock_transactions(
     issued_to: Optional[int] = None,
     site_id: Optional[int] = None,
     include_stocktake: bool = True,
+    locale: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """导出出入库记录（Excel，多 Sheet，按当前筛选条件）。"""
+    """导出出入库记录（Excel，多 Sheet，按当前筛选条件）。locale 支持 zh-CN / en-US / id-ID。"""
     from fastapi.responses import StreamingResponse
     from urllib.parse import quote
     import io
@@ -2903,6 +2956,7 @@ async def export_stock_transactions(
         summarize_material_flow,
     )
 
+    loc = normalize_locale(locale)
     filter_kwargs = _export_filter_kwargs(
         transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id
     )
@@ -2912,7 +2966,7 @@ async def export_stock_transactions(
     if tx_count > EXPORT_MAX_TRANSACTIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"导出单据过多（{tx_count} 张，上限 {EXPORT_MAX_TRANSACTIONS}），请缩小时间范围或增加筛选条件",
+            detail=_xt("too_many_docs", loc, count=tx_count, limit=EXPORT_MAX_TRANSACTIONS),
         )
 
     transactions = (
@@ -2933,7 +2987,7 @@ async def export_stock_transactions(
     if item_total > EXPORT_MAX_ITEMS:
         raise HTTPException(
             status_code=400,
-            detail=f"导出明细过多（{item_total} 行，上限 {EXPORT_MAX_ITEMS}），请缩小时间范围或增加筛选条件",
+            detail=_xt("too_many_items", loc, count=item_total, limit=EXPORT_MAX_ITEMS),
         )
 
     # 关联数据批量预加载：原出库单、物料申请单（审批人）、SN 实际安装站点
@@ -2977,9 +3031,10 @@ async def export_stock_transactions(
         source = _source_fields_payload(t, out_t)
         status_raw = str(getattr(t, "approval_status", "") or "")
 
-        source_label = ""
+        source_tag = ""
         if tx_type == TransactionTypeEnum.STOCK_OUT.value:
-            source_label = _stock_out_source_tag(t)
+            source_tag = _stock_out_source_tag(t)
+        source_label = _xt(_STOCK_OUT_SOURCE_LABELS[source_tag], loc) if source_tag in _STOCK_OUT_SOURCE_LABELS else source_tag
 
         approver_name = ""
         approved_at = ""
@@ -2987,29 +3042,29 @@ async def export_stock_transactions(
         if tx_type == TransactionTypeEnum.STOCK_OUT.value and req:
             approver_name = _display_user_name(req.approver) or ""
             approved_at = _format_local_datetime(req.approved_at, assume_local=True)
-        elif tx_type == TransactionTypeEnum.STOCK_OUT.value and source_label == "快速出库":
-            approver_name = "快速出库（无审批）"
+        elif tx_type == TransactionTypeEnum.STOCK_OUT.value and source_tag == "快速出库":
+            approver_name = _xt("quick_no_approval", loc)
         elif getattr(t, "approved_by", None):
-            approver_name = _display_user_name(t.approver) or f"已删除用户(原ID:{t.approved_by})"
+            approver_name = _display_user_name(t.approver) or _xt("deleted_user", loc, id=t.approved_by)
             approved_at = _format_local_datetime(t.approved_at, assume_local=True)
 
         receiver_name = _display_user_name(t.receiver) or (
-            f"已删除用户(原ID:{t.issued_to})" if getattr(t, "issued_to", None) else ""
+            _xt("deleted_user", loc, id=t.issued_to) if getattr(t, "issued_to", None) else ""
         )
         operator_name = _display_user_name(t.operator) or (
-            f"已删除用户(原ID:{t.operator_id})" if getattr(t, "operator_id", None) else ""
+            _xt("deleted_user", loc, id=t.operator_id) if getattr(t, "operator_id", None) else ""
         )
         if tx_type == TransactionTypeEnum.RETURN.value and not receiver_name:
             receiver_name = operator_name  # 退库单：退库人即原领料人
         planned_site_obj = getattr(t, "site", None)
         planned_site_id = getattr(t, "site_id", None)
         planned_site = _site_label(
-            getattr(planned_site_obj, "site_name", None), getattr(planned_site_obj, "site_code", None)
+            getattr(planned_site_obj, "site_name", None), getattr(planned_site_obj, "site_code", None), loc
         )
 
         base = {
             "document_number": t.document_number or "",
-            "type_label": _TX_TYPE_LABELS.get(tx_type, tx_type or ""),
+            "type_label": _xt(_TX_TYPE_LABELS[tx_type], loc) if tx_type in _TX_TYPE_LABELS else (tx_type or ""),
             "source_label": source_label,
             "operation_time": _format_local_datetime(t.operation_time),
             "warehouse_name": t.warehouse.warehouse_name if t.warehouse else "",
@@ -3021,7 +3076,7 @@ async def export_stock_transactions(
             "material_request_no": source.get("material_request_no") or "",
             "issue_draft_no": source.get("issue_draft_no") or "",
             "out_document_number": out_t.document_number if out_t else "",
-            "status_label": _TX_STATUS_LABELS.get(status_raw, status_raw),
+            "status_label": _xt(_TX_STATUS_LABELS[status_raw], loc) if status_raw in _TX_STATUS_LABELS else status_raw,
             "notes": t.notes or "",
         }
 
@@ -3048,17 +3103,17 @@ async def export_stock_transactions(
                 ) or ""
 
             actual = binding_map.get(serial_number) if serial_number else None
-            actual_site = _site_label(actual.get("site_name"), actual.get("site_code")) if actual else ""
+            actual_site = _site_label(actual.get("site_name"), actual.get("site_code"), loc) if actual else ""
 
             site_check = ""
             site_mismatch = False
             if tx_type == TransactionTypeEnum.STOCK_OUT.value and is_main and planned_site_id:
                 if not actual:
-                    site_check = "未安装"
+                    site_check = _xt("check_not_installed", loc)
                 elif int(actual.get("site_id") or 0) == int(planned_site_id):
-                    site_check = "一致"
+                    site_check = _xt("check_match", loc)
                 else:
-                    site_check = "不一致"
+                    site_check = _xt("check_mismatch", loc)
                     site_mismatch = True
 
             flow_key = None
@@ -3081,7 +3136,7 @@ async def export_stock_transactions(
                     **base,
                     "equipment_code": eq.equipment_code if eq else "",
                     "equipment_name": eq.equipment_name if eq else "",
-                    "category_label": "主设备" if is_main else "辅料",
+                    "category_label": _xt("main_device" if is_main else "auxiliary", loc),
                     "serial_number": serial_number,
                     "instance_is_voided": is_voided,
                     "quantity": qty,
@@ -3109,7 +3164,7 @@ async def export_stock_transactions(
 
     # 盘点表：当前账面库存（筛选仓库 或 当前账号可见仓库）
     stocktake_rows: Optional[List[dict]] = None
-    warehouse_name_for_file = "全部仓库"
+    warehouse_name_for_file = _xt("all_warehouses", loc)
     managed_ids = _get_managed_warehouse_ids(db, current_user)
     if warehouse_id:
         wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
@@ -3146,9 +3201,12 @@ async def export_stock_transactions(
                         "warehouse_name": inv.warehouse.warehouse_name if inv.warehouse else "",
                         "equipment_code": eq.equipment_code if eq else "",
                         "equipment_name": eq.equipment_name if eq else "",
-                        "category_label": "主设备"
-                        if eq and _enum_value(eq.category) == EquipmentCategoryEnum.MAIN_DEVICE.value
-                        else "辅料",
+                        "category_label": _xt(
+                            "main_device"
+                            if eq and _enum_value(eq.category) == EquipmentCategoryEnum.MAIN_DEVICE.value
+                            else "auxiliary",
+                            loc,
+                        ),
                         "unit": getattr(eq, "unit", "") if eq else "",
                         "book_qty": book_qty,
                         "actual_qty": None,
@@ -3163,23 +3221,31 @@ async def export_stock_transactions(
     site_filter = ""
     if site_id:
         st = db.query(Site).filter(Site.id == site_id).first()
-        site_filter = _site_label(getattr(st, "site_name", None), getattr(st, "site_code", None)) or str(site_id)
+        site_filter = _site_label(getattr(st, "site_name", None), getattr(st, "site_code", None), loc) or str(site_id)
 
     start_dt = _parse_history_filter_datetime(start_date, is_end=False)
     end_dt = _parse_history_filter_datetime(end_date, is_end=True)
-    range_text = (
-        f"{_format_local_datetime(start_dt) or '不限'} 至 {_format_local_datetime(end_dt) or '不限'}"
+    range_text = _xt(
+        "range",
+        loc,
+        start=_format_local_datetime(start_dt) or _xt("unlimited", loc),
+        end=_format_local_datetime(end_dt) or _xt("unlimited", loc),
     )
+    tx_type_key = str(transaction_type or "")
+    all_text = _xt("all", loc)
     filter_desc = [
-        ("导出时间", datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
-        ("导出人", _display_user_name(current_user) or ""),
-        ("时间范围", range_text),
-        ("操作类型", _TX_TYPE_LABELS.get(str(transaction_type or ""), "全部")),
-        ("仓库", warehouse_name_for_file),
-        ("领料人", receiver_filter or "全部"),
-        ("站点", site_filter or "全部"),
-        ("关键字", (keyword or search or "").strip() or "无"),
-        ("统计", f"单据 {len(document_rows)} 张，明细 {len(detail_rows)} 行"),
+        (_xt("exported_at", loc), datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
+        (_xt("exported_by", loc), _display_user_name(current_user) or ""),
+        (_xt("time_range", loc), range_text),
+        (
+            _xt("operation_type", loc),
+            _xt(_TX_TYPE_LABELS[tx_type_key], loc) if tx_type_key in _TX_TYPE_LABELS else all_text,
+        ),
+        (_xt("warehouse", loc), warehouse_name_for_file),
+        (_xt("receiver", loc), receiver_filter or all_text),
+        (_xt("site", loc), site_filter or all_text),
+        (_xt("keyword", loc), (keyword or search or "").strip() or _xt("none", loc)),
+        (_xt("statistics", loc), _xt("stats", loc, tx=len(document_rows), items=len(detail_rows))),
     ]
 
     content = build_stock_transactions_workbook(
@@ -3188,13 +3254,14 @@ async def export_stock_transactions(
         summary_rows=summary_rows,
         stocktake_rows=stocktake_rows,
         filter_desc=filter_desc,
+        locale=loc,
     )
 
     def _date_part(dt: Optional[datetime]) -> str:
         return _format_local_datetime(dt)[:10].replace("-", "") if dt else ""
 
-    date_part = "-".join([p for p in (_date_part(start_dt), _date_part(end_dt)) if p]) or "全部时间"
-    file_name = f"出入库明细_{warehouse_name_for_file}_{date_part}.xlsx"
+    date_part = "-".join([p for p in (_date_part(start_dt), _date_part(end_dt)) if p]) or _xt("all_time", loc)
+    file_name = f"{_xt('file_prefix', loc)}_{warehouse_name_for_file}_{date_part}.xlsx"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

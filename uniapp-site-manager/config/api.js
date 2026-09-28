@@ -417,11 +417,21 @@ export const buildImageUrl = (filePath) => {
  * @param {string} token - 访问令牌
  * @returns {Object} 认证头对象
  */
+const getAppLocale = () => {
+  try {
+    return (typeof uni !== 'undefined' && uni.getStorageSync('locale')) || 'zh'
+  } catch (error) {
+    return 'zh'
+  }
+}
+
 export const getAuthHeaders = (token) => {
   if (!token) return {}
 
   return {
-    'Authorization': `Bearer ${token}`
+    'Authorization': `Bearer ${token}`,
+    // 声明界面语言，后端据此翻译报错（未声明时保持中文原文）
+    'X-App-Locale': getAppLocale()
   }
 }
 

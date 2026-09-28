@@ -57,7 +57,7 @@
         <el-table-column prop="request_no" label="申请单号" :width="isCompactTable ? 210 : 230" />
         <el-table-column prop="warehouse_name" label="仓库" :width="isCompactTable ? 140 : 160" />
         <el-table-column v-if="!isCompactTable" prop="requester_name" label="申请人" width="140" />
-        <el-table-column v-if="!isCompactTable" prop="site_name" label="目标站点" min-width="160" show-overflow-tooltip>
+        <el-table-column v-if="!isCompactTable" prop="site_name" :label="t('stockTrace.targetSite')" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">{{ row.site_name || '-' }}</template>
         </el-table-column>
         <el-table-column v-if="!isCompactTable" prop="main_summary" label="主设备摘要" min-width="240" />
@@ -142,7 +142,7 @@
             </div>
 
             <div class="field span2">
-              <div class="label">目标站点</div>
+              <div class="label">{{ t('stockTrace.targetSite') }}</div>
               <StockSitePicker v-model="createForm.site_id" />
             </div>
 
@@ -265,6 +265,9 @@ import { stockApi } from '../../api/stock'
 import { equipmentApi } from '../../api/equipment'
 import { userAPI } from '../../api/user'
 import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const router = useRouter()
 const userStore = useUserStore()

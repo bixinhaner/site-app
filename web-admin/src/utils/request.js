@@ -2,6 +2,7 @@ import axios from 'axios'
 import config from '@/config/env.js'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
+import i18n from '@/i18n'
 
 // 创建axios实例
 const request = axios.create({
@@ -58,6 +59,8 @@ request.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token')
     if (token) config.headers.Authorization = `Bearer ${token}`
+    // 声明界面语言，后端据此翻译报错（未声明时保持中文原文）
+    config.headers['X-App-Locale'] = i18n.global.locale.value
     return config
   },
   (error) => {
