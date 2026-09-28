@@ -2,6 +2,7 @@
  * App升级状态管理
  * 管理版本检测、下载进度、安装状态
  */
+import { t } from '@/utils/app-t.js'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useUserStore } from '@/stores/user'
@@ -352,7 +353,7 @@ export const useUpgradeStore = defineStore('upgrade', () => {
         } catch (error) {
             console.error('下载过程出错:', error)
             downloadStatus.value = 'failed'
-            errorMessage.value = error.message || '下载失败'
+            errorMessage.value = error.message || t('apiErrors.downloadFailed')
             return false
         } finally {
             // 关闭屏幕常亮

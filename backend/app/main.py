@@ -58,6 +58,7 @@ from app.services.backup_scheduler import start_backup_scheduler
 from app.services.mobile_client_log_retention_scheduler import start_mobile_client_log_retention_scheduler
 from app.middleware.operation_log import OperationLogMiddleware
 from app.middleware.request_timing import RequestTimingMiddleware
+from app.middleware.response_localization import ResponseLocalizationMiddleware
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -134,6 +135,9 @@ app.add_middleware(
 
 # 通用请求耗时响应头与慢请求日志，覆盖 API、上传资源及健康检查。
 app.add_middleware(RequestTimingMiddleware)
+
+# 成功响应提示按客户端界面语言（X-App-Locale）翻译；未携带该请求头时原样透传
+app.add_middleware(ResponseLocalizationMiddleware)
 
 # 静态文件服务
 uploads_dir = "uploads"

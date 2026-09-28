@@ -1,3 +1,4 @@
+import { t } from '@/utils/app-t.js'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { buildApiUrl, API_ENDPOINTS, createRequestConfig, getAuthHeaders } from '@/config/api.js'
@@ -346,7 +347,7 @@ export const useOfflineStore = defineStore('offline', () => {
 	const syncAllData = async () => {
 		if (syncInProgress.value || !isOnline.value) {
 			console.log('同步已在进行中或网络不可用')
-			return { success: false, message: '同步条件不满足' }
+			return { success: false, message: t('apiErrors.syncConditionNotMet') }
 		}
 		
 		try {
@@ -447,10 +448,10 @@ export const useOfflineStore = defineStore('offline', () => {
 				
 				return { success: true, serverId: serverData.id }
 			} else {
-				throw new Error(`HTTP ${response.statusCode}: ${response.data.detail || '同步失败'}`)
+				throw new Error(`HTTP ${response.statusCode}: ${response.data.detail || t('apiErrors.syncFailed')}`)
 			}
 		} catch (error) {
-			throw new Error(`同步检查记录失败: ${error.message}`)
+			throw new Error(t('apiErrors.syncInspectionFailed', { error: error.message }))
 		}
 	}
 	
@@ -475,10 +476,10 @@ export const useOfflineStore = defineStore('offline', () => {
 				await updateLocalCheckItemId(localId, serverData.id)
 				return { success: true, serverId: serverData.id }
 			} else {
-				throw new Error(`HTTP ${response.statusCode}: ${response.data.detail || '同步失败'}`)
+				throw new Error(`HTTP ${response.statusCode}: ${response.data.detail || t('apiErrors.syncFailed')}`)
 			}
 		} catch (error) {
-			throw new Error(`同步检查项失败: ${error.message}`)
+			throw new Error(t('apiErrors.syncCheckItemFailed', { error: error.message }))
 		}
 	}
 	
@@ -507,10 +508,10 @@ export const useOfflineStore = defineStore('offline', () => {
 				await updateLocalPhotoId(localId, serverData.id)
 				return { success: true, serverId: serverData.id }
 			} else {
-				throw new Error(`HTTP ${uploadResponse.statusCode}: 照片上传失败`)
+				throw new Error(`HTTP ${uploadResponse.statusCode}: ${t('apiErrors.photoUploadFailed')}`)
 			}
 		} catch (error) {
-			throw new Error(`同步照片失败: ${error.message}`)
+			throw new Error(t('apiErrors.syncPhotoFailed', { error: error.message }))
 		}
 	}
 	

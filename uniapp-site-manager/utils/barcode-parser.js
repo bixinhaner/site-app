@@ -279,7 +279,7 @@ export function validateSerialNumber(sn) {
  */
 export function getParseResultSummary(parseResult) {
   if (!parseResult.success) {
-    return parseResult.error || '解析失败'
+    return parseResult.error || t('apiErrors.parseFailed')
   }
 
   const parts = []
@@ -304,7 +304,7 @@ export function getParseResultSummary(parseResult) {
     parts.push(`MAC4: ${formatMacAddress(parseResult.mac4)}`)
   }
 
-  return parts.join(' | ') || '无有效数据'
+  return parts.join(' | ') || t('apiErrors.noValidData')
 }
 
 /**

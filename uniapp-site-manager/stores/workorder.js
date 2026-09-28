@@ -1,3 +1,4 @@
+import { t } from '@/utils/app-t.js'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useUserStore } from './user'
@@ -61,7 +62,7 @@ export const useWorkOrderStore = defineStore('workorder', () => {
   }
 
   const getMyWorkOrders = async (status, keyword) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     loading.value = true
     try {
       const workOrderScope = userStore.getDataScope('work_orders')
@@ -85,7 +86,7 @@ export const useWorkOrderStore = defineStore('workorder', () => {
           baseParams: queryParams,
           pageSize: DEFAULT_PAGE_SIZE,
           parseItems: (payload) => Array.isArray(payload?.work_orders) ? payload.work_orders : [],
-          failureMessage: '搜索工单失败'
+          failureMessage: t('apiErrors.searchWorkOrdersFailed')
         })
         list.value = data
         return { success: true, data }
@@ -107,21 +108,21 @@ export const useWorkOrderStore = defineStore('workorder', () => {
           baseParams: queryParams,
           pageSize: DEFAULT_PAGE_SIZE,
           parseItems: (payload) => Array.isArray(payload) ? payload : [],
-          failureMessage: '获取工单失败'
+          failureMessage: t('apiErrors.loadWorkOrdersFailed')
         })
         list.value = data
         return { success: true, data }
       }
     } catch (e) {
       console.error('getMyWorkOrders error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     } finally {
       loading.value = false
     }
   }
 
   const getWorkOrder = async (id) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     try {
       const response = await uni.request({
         url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.DETAIL(id)),
@@ -131,15 +132,15 @@ export const useWorkOrderStore = defineStore('workorder', () => {
         current.value = response.data
         return { success: true, data: response.data }
       }
-      throw new Error(response.data?.detail || '获取工单详情失败')
+      throw new Error(response.data?.detail || t('apiErrors.loadWorkOrderDetailFailed'))
     } catch (e) {
       console.error('getWorkOrder error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     }
   }
 
   const getItems = async (id) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     try {
       const response = await uni.request({
         url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.ITEMS(id)),
@@ -149,15 +150,15 @@ export const useWorkOrderStore = defineStore('workorder', () => {
         items.value = response.data
         return { success: true, data: response.data }
       }
-      throw new Error(response.data?.detail || '获取检查项失败')
+      throw new Error(response.data?.detail || t('apiErrors.loadCheckItemsFailed'))
     } catch (e) {
       console.error('getItems error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     }
   }
 
   const acceptWorkOrder = async (id) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     try {
       const response = await uni.request({
         url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.ACCEPT(id)),
@@ -167,15 +168,15 @@ export const useWorkOrderStore = defineStore('workorder', () => {
         current.value = response.data.work_order
         return { success: true, data: response.data }
       }
-      throw new Error(response.data?.detail || '接受工单失败')
+      throw new Error(response.data?.detail || t('apiErrors.acceptWorkOrderFailed'))
     } catch (e) {
       console.error('acceptWorkOrder error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     }
   }
 
   const getInspection = async (id) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     try {
       const response = await uni.request({
         url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.INSPECTION(id)),
@@ -184,15 +185,15 @@ export const useWorkOrderStore = defineStore('workorder', () => {
       if (response.statusCode === 200) {
         return { success: true, data: response.data }
       }
-      throw new Error(response.data?.detail || '获取关联检查失败')
+      throw new Error(response.data?.detail || t('apiErrors.loadRelatedInspectionFailed'))
     } catch (e) {
       console.error('getInspection error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     }
   }
 
   const completeWorkOrder = async (id) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     try {
       const response = await uni.request({
         url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.COMPLETE(id)),
@@ -201,15 +202,15 @@ export const useWorkOrderStore = defineStore('workorder', () => {
       if ([200, 201].includes(response.statusCode)) {
         return { success: true, data: response.data }
       }
-      throw new Error(response.data?.detail || '完成工单失败')
+      throw new Error(response.data?.detail || t('apiErrors.completeWorkOrderFailed'))
     } catch (e) {
       console.error('completeWorkOrder error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     }
   }
 
   const recallWorkOrder = async (id) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     try {
       const response = await uni.request({
         url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.RECALL(id)),
@@ -222,15 +223,15 @@ export const useWorkOrderStore = defineStore('workorder', () => {
         }
         return { success: true, data: response.data }
       }
-      throw new Error(response.data?.detail || '撤回失败')
+      throw new Error(response.data?.detail || t('apiErrors.withdrawFailed'))
     } catch (e) {
       console.error('recallWorkOrder error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     }
   }
 
   const updateItem = async (id, itemId, payload) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     try {
       const response = await uni.request({
         url: buildApiUrl(API_ENDPOINTS.WORK_ORDERS.ITEM_UPDATE(id, itemId)),
@@ -239,15 +240,15 @@ export const useWorkOrderStore = defineStore('workorder', () => {
       if ([200, 201].includes(response.statusCode)) {
         return { success: true, data: response.data }
       }
-      throw new Error(response.data?.detail || '更新检查项失败')
+      throw new Error(response.data?.detail || t('apiErrors.updateCheckItemFailed'))
     } catch (e) {
       console.error('updateItem error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     }
   }
 
   const getItemFieldSchema = async (id) => {
-    if (!userStore.token) return { success: false, error: '未登录' }
+    if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
     try {
       const response = await uni.request({
         url: buildApiUrl(`${API_ENDPOINTS.WORK_ORDERS.DETAIL(id)}/items/field-schema`),
@@ -256,10 +257,10 @@ export const useWorkOrderStore = defineStore('workorder', () => {
       if (response.statusCode === 200) {
         return { success: true, data: response.data }
       }
-      throw new Error(response.data?.detail || '获取字段定义失败')
+      throw new Error(response.data?.detail || t('apiErrors.loadFieldDefinitionsFailed'))
     } catch (e) {
       console.error('getItemFieldSchema error:', e)
-      return { success: false, error: e.message || '网络错误' }
+      return { success: false, error: e.message || t('messages.networkError') }
     }
   }
 

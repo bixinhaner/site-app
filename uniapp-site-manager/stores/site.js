@@ -1,3 +1,4 @@
+import { t } from '@/utils/app-t.js'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useUserStore } from './user'
@@ -61,12 +62,12 @@ export const useSiteStore = defineStore('site', () => {
 		if (response.statusCode === 401) {
 			throw new Error('__TOKEN_EXPIRED__')
 		}
-		throw new Error(response.data?.detail || '获取站点列表失败')
+		throw new Error(response.data?.detail || t('apiErrors.loadSitesFailed'))
 	}
 	
 	// 获取站点列表
 	const getSites = async (filters = {}) => {
-		if (!userStore.token) return { success: false, error: '未登录' }
+		if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
 		
 		loading.value = true
 		try {
@@ -124,9 +125,9 @@ export const useSiteStore = defineStore('site', () => {
 				// 清除用户登录状态
 				const userStore = useUserStore()
 				userStore.logout()
-				return { success: false, error: 'Token已过期，请重新登录' }
+				return { success: false, error: t('apiErrors.tokenExpired') }
 			}
-			return { success: false, error: error.message || '网络错误' }
+			return { success: false, error: error.message || t('messages.networkError') }
 		} finally {
 			loading.value = false
 		}
@@ -134,7 +135,7 @@ export const useSiteStore = defineStore('site', () => {
 	
 	// 获取站点详情
 	const getSite = async (siteId) => {
-		if (!userStore.token) return { success: false, error: '未登录' }
+		if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
 		
 		try {
 			const response = await uni.request({
@@ -149,17 +150,17 @@ export const useSiteStore = defineStore('site', () => {
 				currentSite.value = response.data
 				return { success: true, data: response.data }
 			} else {
-				throw new Error(response.data.detail || '获取站点详情失败')
+				throw new Error(response.data.detail || t('apiErrors.loadSiteDetailFailed'))
 			}
 		} catch (error) {
 			console.error('Get site error:', error)
-			return { success: false, error: error.message || '网络错误' }
+			return { success: false, error: error.message || t('messages.networkError') }
 		}
 	}
 	
 	// 创建站点
 	const createSite = async (siteData) => {
-		if (!userStore.token) return { success: false, error: '未登录' }
+		if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
 		
 		try {
 			const response = await uni.request({
@@ -176,17 +177,17 @@ export const useSiteStore = defineStore('site', () => {
 				await getSites()
 				return { success: true, data: response.data }
 			} else {
-				throw new Error(response.data.detail || '创建站点失败')
+				throw new Error(response.data.detail || t('apiErrors.createSiteFailed'))
 			}
 		} catch (error) {
 			console.error('Create site error:', error)
-			return { success: false, error: error.message || '网络错误' }
+			return { success: false, error: error.message || t('messages.networkError') }
 		}
 	}
 	
 	// 更新站点
 	const updateSite = async (siteId, updateData) => {
-		if (!userStore.token) return { success: false, error: '未登录' }
+		if (!userStore.token) return { success: false, error: t('apiErrors.notLoggedIn') }
 		
 		try {
 			const response = await uni.request({
@@ -207,11 +208,11 @@ export const useSiteStore = defineStore('site', () => {
 				await getSites()
 				return { success: true, data: response.data }
 			} else {
-				throw new Error(response.data.detail || '更新站点失败')
+				throw new Error(response.data.detail || t('apiErrors.updateSiteFailed'))
 			}
 		} catch (error) {
 			console.error('Update site error:', error)
-			return { success: false, error: error.message || '网络错误' }
+			return { success: false, error: error.message || t('messages.networkError') }
 		}
 	}
 	

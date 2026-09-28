@@ -4,7 +4,7 @@
 			<text class="empty-icon">{{ icon }}</text>
 		</view>
 		
-		<text class="empty-title">{{ title }}</text>
+		<text class="empty-title">{{ title || $t('messages.noData') }}</text>
 		
 		<text class="empty-description" v-if="description">{{ description }}</text>
 		
@@ -39,7 +39,8 @@ const props = defineProps({
 	},
 	title: {
 		type: String,
-		default: '暂无数据'
+		// 为空时显示 messages.noData（随界面语言）
+		default: ''
 	},
 	description: {
 		type: String,

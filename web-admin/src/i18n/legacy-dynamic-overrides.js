@@ -12,7 +12,21 @@ const toYesNo = (value) => yesNoMap[value] || value
 const resultMap = { 成功: 'Success', 失败: 'Failed' }
 const toResult = (value) => resultMap[value] || value
 
+
+// ---- 出入库/模板同步/站点分组等页面的动态文字（与 legacy-dynamic-overrides-id.js 保持对应）----
+const stockTraceOverridesEn = [
+  { pattern: /^(⚠️\s*)?当前共有 (\d+) 个工单关联此模板$/, replace: (_, icon, n) => `${icon || ''}${n} work orders currently use this template` },
+  { pattern: /^立即同步：(\d+) 个进行中\/驳回工单$/, replace: (_, n) => `Sync now: ${n} in-progress/rejected work orders` },
+  { pattern: /^待重提生效：(\d+) 个已提交\/审核中工单$/, replace: (_, n) => `Applies on resubmit: ${n} submitted/under-review work orders` },
+  { pattern: /^冻结不影响：(\d+) 个已完成\/已归档工单$/, replace: (_, n) => `Frozen (unaffected): ${n} completed/archived work orders` },
+  { pattern: /^立即同步 (\d+) 个，待重提生效 (\d+) 个，冻结不影响 (\d+) 个$/, replace: (_, a, b, c) => `${a} sync now, ${b} apply on resubmit, ${c} frozen` },
+  { pattern: /^(\d+) 项$/, replace: (_, n) => `${n} items` },
+  { pattern: /^(\d+)\/(\d+) 启用$/, replace: (_, a, b) => `${a}/${b} enabled` },
+  { pattern: /^已按覆盖、冲突、跳过、写入优先展示；当前样例显示 (\d+)\/(\d+) 条$/, replace: (_, a, b) => `Sorted by overwrite, conflict, skip, write; showing ${a}/${b} samples` },
+]
+
 const legacyDynamicOverrides = [
+  ...stockTraceOverridesEn,
   {
     pattern: /^确定要(删除|启用|禁用)设备 "(.*?)" 吗？$/,
     replace: (_, action, name) => `Are you sure you want to ${toAction(action)} the device "${name}"?`,

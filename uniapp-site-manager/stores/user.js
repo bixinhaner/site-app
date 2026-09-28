@@ -1,3 +1,4 @@
+import { t } from '@/utils/app-t.js'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { buildApiUrl, API_ENDPOINTS, createRequestConfig } from '@/config/api.js'
@@ -309,7 +310,7 @@ export const useUserStore = defineStore('user', () => {
 				}
 			} else {
 				console.error('登录失败:', response)
-				const errorMsg = response.data?.detail || `服务器错误 (${response.statusCode})`
+				const errorMsg = response.data?.detail || t('apiErrors.serverErrorStatus', { status: response.statusCode })
 				return { success: false, error: errorMsg, errorCode: 'SERVER_ERROR' }
 			}
 		} catch (error) {

@@ -2,6 +2,7 @@ import i18n from './index'
 import dynamicPatternsEn from './legacy-dynamic-patterns'
 import dynamicPatternsId from './legacy-dynamic-patterns-id'
 import dynamicOverrides from './legacy-dynamic-overrides'
+import dynamicOverridesId from './legacy-dynamic-overrides-id'
 import { DEFAULT_LOCALE, persistLocale, SUPPORTED_LOCALES, normalizeLocale } from './locale'
 
 export const containsCJK = (value) => /[\u4e00-\u9fff]/.test(String(value || ''))
@@ -75,7 +76,7 @@ const highPriorityLiteralOverridesByLocale = {
 
 const dynamicRuleSourceByLocale = {
   'en-US': [...dynamicOverrides, ...dynamicPatternsEn],
-  'id-ID': [...dynamicPatternsId],
+  'id-ID': [...dynamicOverridesId, ...dynamicPatternsId],
 }
 
 const compileDynamicRules = (rules = []) => {
@@ -194,6 +195,28 @@ export const setAppLocale = async (locale) => {
   }
 }
 
+const lookupExact = (text, locale) => {
+  const normalized = normalizeText(text)
+  const literal = (highPriorityLiteralOverridesByLocale[locale] || {})[normalized]
+  if (literal) return literal
+  const exact = (legacyMapByLocale[locale] || {})[normalized]
+  return exact ? polishByLocale(exact, locale) : ''
+}
+
+// 兜底：“中文标签：值” 形式（如 “仓库：Nikko”、“申请人：-”），整句查不到时只翻译标签，值保持原样
+const LABEL_VALUE_RE = /^([^：:]{1,40}?)\s*([：:])\s*([\s\S]*)$/
+const translateLabelValue = (normalized, locale) => {
+  const match = normalized.match(LABEL_VALUE_RE)
+  if (!match || !containsCJK(match[1])) return ''
+  const label = lookupExact(match[1], locale)
+  if (!label) return ''
+  let value = match[3]
+  if (value && containsCJK(value)) {
+    value = lookupExact(value, locale) || translateByDynamicRules(normalizeText(value), locale)
+  }
+  return value ? `${label}: ${value}` : `${label}:`
+}
+
 export const translateLegacyText = (text) => {
   if (typeof text !== 'string' || !text) return text
   if (!containsCJK(text)) return text
@@ -219,6 +242,9 @@ export const translateLegacyText = (text) => {
       return polishByLocale(restorePadding(text, normalizedDynamic), locale)
     }
   }
+
+  const labelValue = translateLabelValue(normalized, locale)
+  if (labelValue) return restorePadding(text, labelValue)
 
   return text
 }

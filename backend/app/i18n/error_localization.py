@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Pattern, Tuple
 
 from app.i18n import (
     inspection_messages,
+    response_messages,
     site_messages,
     stock_messages,
     system_messages,
@@ -35,7 +36,7 @@ _TEXT_FIELDS = ("message", "title", "reason", "suggestion", "msg")
 _CJK = re.compile(r"[一-鿿]")
 _PLACEHOLDER = re.compile(r"\{(\d+)\}")
 
-_ENTRY_MODULES = (work_order_messages, inspection_messages, site_messages, system_messages)
+_ENTRY_MODULES = (work_order_messages, inspection_messages, site_messages, system_messages, response_messages)
 
 
 def _compile_template(template: str) -> Pattern[str]:
@@ -141,3 +142,34 @@ def localize_detail(detail: Any, locale: Optional[str]) -> Any:
     if isinstance(detail, list):
         return [localize_detail(item, locale) for item in detail]
     return detail
+
+
+# 成功响应中需要翻译的位置：顶层 message，以下列表中各项的 message，以及顶层字典值（下一层）的 message。
+# 不做深层递归，避免误改日志等业务数据中的 message 字段。
+_RESPONSE_LIST_KEYS = ("errors", "warnings", "issues", "failures")
+
+
+def localize_response_payload(payload: Any, locale: Optional[str]) -> Any:
+    if not locale or not isinstance(payload, dict):
+        return payload
+    changed = False
+    result = dict(payload)
+    for key in ("message", "msg"):
+        value = result.get(key)
+        if isinstance(value, str):
+            translated = localize_text(value, locale)
+            if translated != value:
+                result[key] = translated
+                changed = True
+    for key, value in payload.items():
+        if key in _RESPONSE_LIST_KEYS and isinstance(value, list):
+            new_list = [localize_detail(item, locale) if isinstance(item, (dict, str)) else item for item in value]
+            if new_list != value:
+                result[key] = new_list
+                changed = True
+        elif isinstance(value, dict) and isinstance(value.get("message"), str):
+            translated = localize_text(value["message"], locale)
+            if translated != value["message"]:
+                result[key] = {**value, "message": translated}
+                changed = True
+    return result if changed else payload

@@ -3,6 +3,7 @@
  * 提供版本检测、下载、安装等功能
  */
 
+import { t } from '@/utils/app-t.js'
 import { buildApiUrl, API_ENDPOINTS } from '@/config/api.js'
 
 /**
@@ -128,7 +129,7 @@ export const downloadApk = (url, onProgress) => {
                 } else {
                     resolve({
                         success: false,
-                        error: `下载失败，状态码: ${status}`
+                        error: t('apiErrors.downloadFailedStatus', { status })
                     })
                 }
             }
@@ -165,7 +166,7 @@ export const downloadApk = (url, onProgress) => {
         // 非App环境，返回不支持
         resolve({
             success: false,
-            error: '当前环境不支持下载安装'
+            error: t('apiErrors.downloadNotSupported')
         })
         // #endif
     })
@@ -192,7 +193,7 @@ export const installApk = (filePath) => {
                 console.error('安装失败:', error)
                 resolve({
                     success: false,
-                    error: error.message || '安装失败'
+                    error: error.message || t('apiErrors.installFailed')
                 })
             }
         )
@@ -201,7 +202,7 @@ export const installApk = (filePath) => {
         // #ifndef APP-PLUS
         resolve({
             success: false,
-            error: '当前环境不支持安装'
+            error: t('apiErrors.installNotSupported')
         })
         // #endif
     })

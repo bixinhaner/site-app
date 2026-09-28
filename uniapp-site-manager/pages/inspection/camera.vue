@@ -759,7 +759,7 @@ export default {
 			})
 			
 		} catch (error) {
-			throw new Error('离线保存失败: ' + error.message)
+			throw new Error(t('apiErrors.offlineSaveFailed', { error: error.message }))
 		}
 	}
 	
