@@ -48,6 +48,10 @@
               </el-select>
             </div>
             <div class="field span2">
+              <div class="label">目标站点</div>
+              <StockSitePicker v-model="form.site_id" />
+            </div>
+            <div class="field span2">
               <div class="label">备注</div>
               <el-input v-model="form.notes" placeholder="可选：原因/项目/紧急程度" clearable />
             </div>
@@ -198,6 +202,7 @@ import { ElMessage } from 'element-plus'
 import { stockApi } from '../../api/stock'
 import { equipmentApi } from '../../api/equipment'
 import { userAPI } from '../../api/user'
+import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
 
 const warehouses = ref([])
 const equipmentOptions = ref([])
@@ -205,6 +210,7 @@ const equipmentOptions = ref([])
 const form = ref({
   warehouse_id: undefined,
   issued_to_user: null,
+  site_id: null,
   notes: '',
 })
 
@@ -312,7 +318,7 @@ const clearAux = () => {
 }
 
 const reset = () => {
-  form.value = { warehouse_id: undefined, issued_to_user: null, notes: '' }
+  form.value = { warehouse_id: undefined, issued_to_user: null, site_id: null, notes: '' }
   clearSns()
   clearAux()
   shortagesVisible.value = false
@@ -340,6 +346,7 @@ const buildPayload = () => {
     main_sns,
     aux_items: Array.from(aux_map.entries()).map(([equipment_id, quantity]) => ({ equipment_id, quantity })),
     issued_to,
+    site_id: form.value.site_id || null,
     notes: (form.value.notes || '').trim(),
   }
 }

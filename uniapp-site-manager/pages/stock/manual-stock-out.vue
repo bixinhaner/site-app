@@ -48,6 +48,11 @@
 					</view>
 
 					<view class="u-form-item">
+						<text class="u-form-label">{{ $t('stock.targetSite') }}（{{ $t('stock.targetSiteOptional') }}）</text>
+						<StockSitePicker v-model="targetSite" />
+					</view>
+
+					<view class="u-form-item">
 						<text class="u-form-label">{{ $t('stock.materialRequestNotes') }}</text>
 						<textarea class="u-textarea" v-model="notes" :placeholder="$t('stock.manualStockOutNotesPlaceholder')" maxlength="200" />
 					</view>
@@ -280,6 +285,7 @@
 	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import { getLocalizedStockUnit } from '@/utils/unit-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
+	import StockSitePicker from '@/components/StockSitePicker.vue'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
@@ -300,6 +306,7 @@
 
 	const issuedToUser = ref(null)
 	const notes = ref('')
+	const targetSite = ref(null)
 	const offlineDocumentId = ref(null)
 
 	const snInput = ref('')
@@ -511,6 +518,7 @@
 
 	const reset = () => {
 		notes.value = ''
+		targetSite.value = null
 		snInput.value = ''
 		snList.value = []
 		auxRows.value = []
@@ -606,6 +614,7 @@
 					const payload = {
 						warehouse_id: Number(selectedWarehouse.value.id),
 						issued_to: Number(issuedToUser.value.id),
+						site_id: targetSite.value?.id || null,
 						main_sns: snList.value.slice(),
 						aux_items: (auxRows.value || []).map(a => ({
 							equipment_id: Number(a.equipment_id),

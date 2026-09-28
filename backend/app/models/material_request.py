@@ -28,6 +28,7 @@ class MaterialRequest(Base):
 
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
     requester_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    site_id = Column(Integer, ForeignKey("sites.id"))  # 目标站点（选填）
 
     status = Column(
         Enum(
@@ -52,6 +53,7 @@ class MaterialRequest(Base):
 
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
     requester = relationship("User", foreign_keys=[requester_id])
+    site = relationship("Site", foreign_keys=[site_id])
     approver = relationship("User", foreign_keys=[approved_by])
     items = relationship("MaterialRequestItem", back_populates="request", cascade="all, delete-orphan")
     issue_drafts = relationship("IssueDraft", back_populates="request")

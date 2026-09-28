@@ -18,6 +18,8 @@
             <span>申请人：{{ draft?.request?.requester_name || '-' }}</span>
             <span class="dot">·</span>
             <span>申请单：{{ draft?.request?.request_no || draft?.request_id || '-' }}</span>
+            <span class="dot">·</span>
+            <span>目标站点：{{ draft?.request?.site_name || '未指定' }}</span>
           </div>
         </div>
       </div>

@@ -263,6 +263,7 @@ export const API_ENDPOINTS = {
     ISSUE_DRAFT_REJECT: (id) => `/api/stock/issue-drafts/${id}/reject`,
     ISSUE_DRAFT_REJECT_REMAINING: (id) => `/api/stock/issue-drafts/${id}/reject-remaining`,
     MANUAL_STOCK_OUT: '/api/stock/manual-stock-out',
+    SITE_OPTIONS: '/api/stock/site-options',
     MY_STOCK_OUTS: '/api/stock/my-stock-outs',
     CREATE_RETURN: '/api/stock/returns',
     CREATE_RETURN_BY_ACTUAL: '/api/stock/returns/by-actual',

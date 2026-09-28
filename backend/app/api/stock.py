@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel
 import uuid
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from sqlalchemy.exc import IntegrityError, OperationalError
 
@@ -34,6 +34,7 @@ from app.models.equipment import (
     EquipmentStatusEnum
 )
 from app.models.system_config import SystemConfig
+from app.models.site import Site
 from app.models.material_request import (
     MaterialRequest,
     MaterialRequestItem,
@@ -64,7 +65,7 @@ from app.services.warehouse_access_service import (
     has_global_inventory_scope,
 )
 from app.utils.file_handler import save_uploaded_file, validate_image_on_disk, ImageValidationError
-from app.utils.timezone import to_utc_iso
+from app.utils.timezone import to_utc_iso, LOCAL_TZ
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -220,6 +221,29 @@ def _source_fields_payload(trans: Optional[StockTransaction], out_trans: Optiona
         "material_request_no": _source_value(trans, out_trans, "material_request_no"),
         "issue_draft_id": _source_value(trans, out_trans, "issue_draft_id"),
         "issue_draft_no": _source_value(trans, out_trans, "issue_draft_no"),
+    }
+
+
+def _resolve_optional_site_id(db: Session, raw_value: Any) -> Optional[int]:
+    """解析选填的目标站点：空值返回 None；非空则校验站点存在。"""
+    if raw_value is None or str(raw_value).strip() == "":
+        return None
+    try:
+        site_id = int(raw_value)
+    except Exception:
+        raise HTTPException(status_code=400, detail="目标站点参数不合法")
+    if site_id <= 0:
+        return None
+    if not db.query(Site.id).filter(Site.id == site_id).first():
+        raise HTTPException(status_code=400, detail="目标站点不存在")
+    return site_id
+
+
+def _site_payload(site: Optional[Site], site_id: Optional[int] = None) -> dict:
+    return {
+        "site_id": getattr(site, "id", None) or site_id,
+        "site_name": getattr(site, "site_name", None) if site else None,
+        "site_code": getattr(site, "site_code", None) if site else None,
     }
 
 
@@ -2368,20 +2392,82 @@ async def create_stock_in(
 
 # ===== 出入库记录查询 =====
 
-@router.get("/transactions")
-async def get_stock_transactions(
+def _parse_history_filter_datetime(value: Optional[str], *, is_end: bool) -> Optional[datetime]:
+    """
+    解析出入库记录的时间筛选，返回 naive UTC（operation_time 约定以 UTC 存储）。
+    - 仅日期（YYYY-MM-DD）：按服务器本地时区的整天处理，结束日期包含当天
+    - 带时区的 ISO 时间：换算为 UTC
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        if len(raw) == 10:
+            day = datetime.strptime(raw, "%Y-%m-%d")
+            local_dt = day.replace(hour=23, minute=59, second=59, microsecond=999999) if is_end else day
+            return local_dt.replace(tzinfo=LOCAL_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="日期参数不合法")
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _latest_binding_site_map(db: Session, serial_numbers: List[str]) -> Dict[str, dict]:
+    """按 SN 批量查询最新绑定记录，返回当前实际安装站点（已解绑则不返回）。"""
+    sns = sorted({str(x).strip() for x in serial_numbers if x and str(x).strip()})
+    if not sns:
+        return {}
+    try:
+        from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+    except Exception:
+        return {}
+
+    latest: Dict[str, Any] = {}
+    chunk_size = 500
+    for i in range(0, len(sns), chunk_size):
+        chunk = sns[i:i + chunk_size]
+        rows = (
+            db.query(EquipmentBindingHistory)
+            .options(joinedload(EquipmentBindingHistory.site))
+            .filter(EquipmentBindingHistory.equipment_sn.in_(chunk))
+            .order_by(EquipmentBindingHistory.operated_at.desc(), EquipmentBindingHistory.id.desc())
+            .all()
+        )
+        for row in rows:
+            if row.equipment_sn not in latest:
+                latest[row.equipment_sn] = row
+
+    result: Dict[str, dict] = {}
+    for sn, row in latest.items():
+        if getattr(row, "action", None) == BindingActionEnum.UNBIND:
+            continue
+        site = getattr(row, "site", None)
+        result[sn] = {
+            "site_id": row.site_id,
+            "site_name": getattr(site, "site_name", None) if site else None,
+            "site_code": getattr(site, "site_code", None) if site else None,
+            "cell_id": row.cell_id,
+            "bound_at": row.operated_at,
+        }
+    return result
+
+
+def _build_stock_transactions_query(
+    db: Session,
+    current_user: User,
+    *,
     transaction_type: Optional[str] = None,
     warehouse_id: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     keyword: Optional[str] = None,
     search: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 50,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    issued_to: Optional[int] = None,
+    site_id: Optional[int] = None,
 ):
-    """获取出入库记录"""
+    """出入库记录查询条件（列表与导出共用，保证导出结果与页面筛选一致）。"""
     if not _can_view_inventory_history(db, current_user):
         raise HTTPException(status_code=403, detail="无权限查看出入库记录")
 
@@ -2398,14 +2484,38 @@ async def get_stock_transactions(
         query = query.filter(StockTransaction.transaction_type == tx_type)
     if warehouse_id:
         query = query.filter(StockTransaction.warehouse_id == warehouse_id)
-    if start_date:
-        query = query.filter(
-            StockTransaction.operation_time >= datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+    if issued_to:
+        query = query.filter(StockTransaction.issued_to == issued_to)
+    if site_id:
+        # 目标站点（计划） 或 明细中设备曾被绑定到该站点（实际）
+        from app.models.equipment_binding_history import EquipmentBindingHistory, BindingActionEnum
+
+        bound_sns = (
+            db.query(EquipmentBindingHistory.equipment_sn)
+            .filter(
+                EquipmentBindingHistory.site_id == site_id,
+                EquipmentBindingHistory.action != BindingActionEnum.UNBIND,
+            )
         )
-    if end_date:
-        query = query.filter(
-            StockTransaction.operation_time <= datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        actual_match = (
+            db.query(StockTransactionItem.id)
+            .join(EquipmentInstance, EquipmentInstance.id == StockTransactionItem.equipment_instance_id)
+            .filter(StockTransactionItem.transaction_id == StockTransaction.id)
+            .filter(
+                or_(
+                    EquipmentInstance.serial_number.in_(bound_sns),
+                    EquipmentInstance.original_serial_number.in_(bound_sns),
+                )
+            )
+            .exists()
         )
+        query = query.filter(or_(StockTransaction.site_id == site_id, actual_match))
+    start_dt = _parse_history_filter_datetime(start_date, is_end=False)
+    end_dt = _parse_history_filter_datetime(end_date, is_end=True)
+    if start_dt:
+        query = query.filter(StockTransaction.operation_time >= start_dt)
+    if end_dt:
+        query = query.filter(StockTransaction.operation_time <= end_dt)
 
     kw = (keyword or search or "").strip()
     if kw:
@@ -2432,6 +2542,7 @@ async def get_stock_transactions(
         )
         query = (
             query.outerjoin(Warehouse, Warehouse.id == StockTransaction.warehouse_id)
+            .outerjoin(Site, Site.id == StockTransaction.site_id)
             .outerjoin(User, User.id == StockTransaction.operator_id)
             .outerjoin(receiver_alias, receiver_alias.id == StockTransaction.issued_to)
             .outerjoin(related_out, related_out.id == StockTransaction.related_transaction_id)
@@ -2444,6 +2555,8 @@ async def get_stock_transactions(
                     StockTransaction.notes.like(like),
                     StockTransaction.approval_comments.like(like),
                     Warehouse.warehouse_name.like(like),
+                    Site.site_name.like(like),
+                    Site.site_code.like(like),
                     User.full_name.like(like),
                     User.username.like(like),
                     receiver_alias.full_name.like(like),
@@ -2470,6 +2583,39 @@ async def get_stock_transactions(
         else:
             query = query.filter(StockTransaction.operator_id == current_user.id)
 
+
+    return query
+
+
+@router.get("/transactions")
+async def get_stock_transactions(
+    transaction_type: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    keyword: Optional[str] = None,
+    search: Optional[str] = None,
+    issued_to: Optional[int] = None,
+    site_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取出入库记录"""
+    query = _build_stock_transactions_query(
+        db,
+        current_user,
+        transaction_type=transaction_type,
+        warehouse_id=warehouse_id,
+        start_date=start_date,
+        end_date=end_date,
+        keyword=keyword,
+        search=search,
+        issued_to=issued_to,
+        site_id=site_id,
+    )
+
     total = query.count()
     transactions = query.order_by(desc(StockTransaction.operation_time)).offset(skip).limit(limit).all()
     related_ids = [getattr(t, "related_transaction_id", None) for t in transactions if getattr(t, "related_transaction_id", None)]
@@ -2477,7 +2623,17 @@ async def get_stock_transactions(
     if related_ids:
         related_rows = db.query(StockTransaction).filter(StockTransaction.id.in_(list(set(related_ids)))).all()
         related_map = {str(t.id): t for t in related_rows}
-    
+
+    page_sns: List[str] = []
+    for t in transactions:
+        for it in t.transaction_items or []:
+            inst = it.equipment_instance
+            if inst:
+                page_sns.append(inst.serial_number)
+                if getattr(inst, "original_serial_number", None):
+                    page_sns.append(inst.original_serial_number)
+    binding_map = _latest_binding_site_map(db, page_sns)
+
     result = []
     for trans in transactions:
         out_trans = related_map.get(str(getattr(trans, "related_transaction_id", "") or ""))
@@ -2524,6 +2680,7 @@ async def get_stock_transactions(
                 "batch_number": item.batch_number,
                 "vendor": item.vendor,
                 "item_notes": item.item_notes,
+                "actual_site": binding_map.get(serial_number) if serial_number else None,
             })
         
         source_payload = _source_fields_payload(trans, out_trans)
@@ -2533,6 +2690,7 @@ async def get_stock_transactions(
             "transaction_type": trans.transaction_type,
             "warehouse_id": trans.warehouse_id,
             "warehouse_name": trans.warehouse.warehouse_name if trans.warehouse else None,
+            **_site_payload(getattr(trans, "site", None), getattr(trans, "site_id", None)),
             "operator_name": operator_name,
             "issued_to": issued_to,
             "receiver_name": receiver_name,
@@ -2554,6 +2712,495 @@ async def get_stock_transactions(
         })
     
     return {"transactions": result, "total": total}
+
+@router.get("/site-options")
+async def get_stock_site_options(
+    keyword: Optional[str] = None,
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """领料/快速出库“目标站点”下拉：仓库侧可搜全部站点，其他用户按站点可见范围；最近使用的站点排在最前。"""
+    _ensure_not_surveyor(current_user)
+    from app.api.sites import _apply_site_visibility_filter
+
+    limit = max(1, min(int(limit or 30), 100))
+    query = db.query(Site)
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if not (managed_ids is None or managed_ids):
+        query = _apply_site_visibility_filter(query, db, current_user)
+
+    kw = str(keyword or "").strip()
+    if kw:
+        like = f"%{kw}%"
+        query = query.filter(or_(Site.site_name.like(like), Site.site_code.like(like), Site.city.like(like)))
+
+    # 最近使用：本人最近的申请单 / 本人经办或领取的出库单
+    recent_ids: List[int] = []
+    recent_rows = (
+        db.query(MaterialRequest.site_id)
+        .filter(MaterialRequest.requester_id == current_user.id, MaterialRequest.site_id.isnot(None))
+        .order_by(desc(MaterialRequest.created_at))
+        .limit(20)
+        .all()
+    ) + (
+        db.query(StockTransaction.site_id)
+        .filter(
+            or_(StockTransaction.operator_id == current_user.id, StockTransaction.issued_to == current_user.id),
+            StockTransaction.site_id.isnot(None),
+        )
+        .order_by(desc(StockTransaction.operation_time))
+        .limit(20)
+        .all()
+    )
+    for (sid,) in recent_rows:
+        if sid and int(sid) not in recent_ids:
+            recent_ids.append(int(sid))
+    recent_ids = recent_ids[:5]
+
+    sites: List[Site] = []
+    if recent_ids:
+        recent_sites = {x.id: x for x in query.filter(Site.id.in_(recent_ids)).all()}
+        sites.extend(recent_sites[i] for i in recent_ids if i in recent_sites)
+    remaining = limit - len(sites)
+    if remaining > 0:
+        others = query
+        if recent_ids:
+            others = others.filter(~Site.id.in_(recent_ids))
+        sites.extend(others.order_by(desc(Site.updated_at), desc(Site.id)).limit(remaining).all())
+
+    recent_set = set(recent_ids)
+    return {
+        "sites": [
+            {
+                "id": x.id,
+                "site_name": x.site_name,
+                "site_code": x.site_code,
+                "city": getattr(x, "city", None),
+                "recent": x.id in recent_set,
+            }
+            for x in sites
+        ],
+        "last_used_site_id": recent_ids[0] if recent_ids else None,
+    }
+
+
+# ===== 出入库记录导出（盘库） =====
+
+EXPORT_MAX_TRANSACTIONS = 20000
+EXPORT_MAX_ITEMS = 100000
+
+_TX_TYPE_LABELS = {
+    "stock_in": "入库",
+    "stock_out": "出库",
+    "transfer": "调拨",
+    "return": "退库",
+    "adjustment": "调整",
+    "damage": "报损",
+}
+
+_TX_STATUS_LABELS = {
+    "pending": "-",
+    "approved": "已通过",
+    "rejected": "已驳回",
+    "pending_receive": "退库待收货",
+    "partially_received": "部分收货",
+    "received": "已收货",
+    "canceled": "已取消",
+}
+
+
+def _format_local_datetime(dt: Optional[datetime], *, assume_local: bool = False) -> str:
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        if assume_local:
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _site_label(site_name: Optional[str], site_code: Optional[str]) -> str:
+    name = str(site_name or "").strip()
+    code = str(site_code or "").strip()
+    if name and code and name != code:
+        return f"{name}（{code}）"
+    return name or code
+
+
+def _export_filter_kwargs(
+    transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id
+) -> dict:
+    return {
+        "transaction_type": transaction_type,
+        "warehouse_id": warehouse_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "keyword": keyword,
+        "search": search,
+        "issued_to": issued_to,
+        "site_id": site_id,
+    }
+
+
+@router.get("/transactions/export/preview")
+async def preview_stock_transactions_export(
+    transaction_type: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    keyword: Optional[str] = None,
+    search: Optional[str] = None,
+    issued_to: Optional[int] = None,
+    site_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """导出前预估：返回单据数、明细行数，供前端确认弹窗展示。"""
+    query = _build_stock_transactions_query(
+        db,
+        current_user,
+        **_export_filter_kwargs(transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id),
+    )
+    tx_ids = query.with_entities(StockTransaction.id).subquery()
+    tx_count = db.query(func.count()).select_from(tx_ids).scalar() or 0
+    item_count = (
+        db.query(func.count(StockTransactionItem.id))
+        .filter(StockTransactionItem.transaction_id.in_(db.query(tx_ids.c.id)))
+        .scalar()
+        or 0
+    )
+    too_large = tx_count > EXPORT_MAX_TRANSACTIONS or item_count > EXPORT_MAX_ITEMS
+    return {
+        "transaction_count": int(tx_count),
+        "item_count": int(item_count),
+        "too_large": too_large,
+        "max_transactions": EXPORT_MAX_TRANSACTIONS,
+        "max_items": EXPORT_MAX_ITEMS,
+    }
+
+
+@router.get("/transactions/export")
+async def export_stock_transactions(
+    transaction_type: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    keyword: Optional[str] = None,
+    search: Optional[str] = None,
+    issued_to: Optional[int] = None,
+    site_id: Optional[int] = None,
+    include_stocktake: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """导出出入库记录（Excel，多 Sheet，按当前筛选条件）。"""
+    from fastapi.responses import StreamingResponse
+    from urllib.parse import quote
+    import io
+    from app.services.stock_transaction_export_service import (
+        build_stock_transactions_workbook,
+        summarize_material_flow,
+    )
+
+    filter_kwargs = _export_filter_kwargs(
+        transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id
+    )
+    query = _build_stock_transactions_query(db, current_user, **filter_kwargs)
+
+    tx_count = query.count()
+    if tx_count > EXPORT_MAX_TRANSACTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"导出单据过多（{tx_count} 张，上限 {EXPORT_MAX_TRANSACTIONS}），请缩小时间范围或增加筛选条件",
+        )
+
+    transactions = (
+        query.options(
+            joinedload(StockTransaction.warehouse),
+            joinedload(StockTransaction.operator),
+            joinedload(StockTransaction.receiver),
+            joinedload(StockTransaction.approver),
+            joinedload(StockTransaction.site),
+            joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment),
+            joinedload(StockTransaction.transaction_items).joinedload(StockTransactionItem.equipment_instance),
+        )
+        .order_by(desc(StockTransaction.operation_time))
+        .all()
+    )
+
+    item_total = sum(len(t.transaction_items or []) for t in transactions)
+    if item_total > EXPORT_MAX_ITEMS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"导出明细过多（{item_total} 行，上限 {EXPORT_MAX_ITEMS}），请缩小时间范围或增加筛选条件",
+        )
+
+    # 关联数据批量预加载：原出库单、物料申请单（审批人）、SN 实际安装站点
+    related_ids = {str(t.related_transaction_id) for t in transactions if getattr(t, "related_transaction_id", None)}
+    related_map: Dict[str, StockTransaction] = {}
+    if related_ids:
+        rows = db.query(StockTransaction).filter(StockTransaction.id.in_(list(related_ids))).all()
+        related_map = {str(t.id): t for t in rows}
+
+    request_ids = set()
+    for t in transactions:
+        out_t = related_map.get(str(getattr(t, "related_transaction_id", "") or ""))
+        rid = _source_value(t, out_t, "material_request_id")
+        if rid:
+            request_ids.add(str(rid))
+    request_map: Dict[str, MaterialRequest] = {}
+    if request_ids:
+        rows = (
+            db.query(MaterialRequest)
+            .options(joinedload(MaterialRequest.approver))
+            .filter(MaterialRequest.id.in_(list(request_ids)))
+            .all()
+        )
+        request_map = {str(r.id): r for r in rows}
+
+    all_sns: List[str] = []
+    for t in transactions:
+        for it in t.transaction_items or []:
+            inst = it.equipment_instance
+            if inst:
+                all_sns.append(inst.serial_number)
+                if getattr(inst, "original_serial_number", None):
+                    all_sns.append(inst.original_serial_number)
+    binding_map = _latest_binding_site_map(db, all_sns)
+
+    detail_rows: List[dict] = []
+    document_rows: List[dict] = []
+    for t in transactions:
+        tx_type = _enum_value(t.transaction_type)
+        out_t = related_map.get(str(getattr(t, "related_transaction_id", "") or ""))
+        source = _source_fields_payload(t, out_t)
+        status_raw = str(getattr(t, "approval_status", "") or "")
+
+        source_label = ""
+        if tx_type == TransactionTypeEnum.STOCK_OUT.value:
+            source_label = _stock_out_source_tag(t)
+
+        approver_name = ""
+        approved_at = ""
+        req = request_map.get(str(source.get("material_request_id") or ""))
+        if tx_type == TransactionTypeEnum.STOCK_OUT.value and req:
+            approver_name = _display_user_name(req.approver) or ""
+            approved_at = _format_local_datetime(req.approved_at, assume_local=True)
+        elif tx_type == TransactionTypeEnum.STOCK_OUT.value and source_label == "快速出库":
+            approver_name = "快速出库（无审批）"
+        elif getattr(t, "approved_by", None):
+            approver_name = _display_user_name(t.approver) or f"已删除用户(原ID:{t.approved_by})"
+            approved_at = _format_local_datetime(t.approved_at, assume_local=True)
+
+        receiver_name = _display_user_name(t.receiver) or (
+            f"已删除用户(原ID:{t.issued_to})" if getattr(t, "issued_to", None) else ""
+        )
+        operator_name = _display_user_name(t.operator) or (
+            f"已删除用户(原ID:{t.operator_id})" if getattr(t, "operator_id", None) else ""
+        )
+        if tx_type == TransactionTypeEnum.RETURN.value and not receiver_name:
+            receiver_name = operator_name  # 退库单：退库人即原领料人
+        planned_site_obj = getattr(t, "site", None)
+        planned_site_id = getattr(t, "site_id", None)
+        planned_site = _site_label(
+            getattr(planned_site_obj, "site_name", None), getattr(planned_site_obj, "site_code", None)
+        )
+
+        base = {
+            "document_number": t.document_number or "",
+            "type_label": _TX_TYPE_LABELS.get(tx_type, tx_type or ""),
+            "source_label": source_label,
+            "operation_time": _format_local_datetime(t.operation_time),
+            "warehouse_name": t.warehouse.warehouse_name if t.warehouse else "",
+            "receiver_name": receiver_name,
+            "approver_name": approver_name,
+            "approved_at": approved_at,
+            "operator_name": operator_name,
+            "planned_site": planned_site,
+            "material_request_no": source.get("material_request_no") or "",
+            "issue_draft_no": source.get("issue_draft_no") or "",
+            "out_document_number": out_t.document_number if out_t else "",
+            "status_label": _TX_STATUS_LABELS.get(status_raw, status_raw),
+            "notes": t.notes or "",
+        }
+
+        main_count = 0
+        aux_count = 0
+        for it in t.transaction_items or []:
+            eq = it.equipment
+            inst = it.equipment_instance
+            category = _enum_value(eq.category) if eq else None
+            is_main = category == EquipmentCategoryEnum.MAIN_DEVICE.value
+            qty = int(it.quantity or 0)
+            if is_main:
+                main_count += qty
+            else:
+                aux_count += qty
+
+            is_voided = bool(getattr(inst, "is_voided", False)) if inst else False
+            serial_number = ""
+            if inst:
+                serial_number = (
+                    inst.original_serial_number
+                    if is_voided and getattr(inst, "original_serial_number", None)
+                    else inst.serial_number
+                ) or ""
+
+            actual = binding_map.get(serial_number) if serial_number else None
+            actual_site = _site_label(actual.get("site_name"), actual.get("site_code")) if actual else ""
+
+            site_check = ""
+            site_mismatch = False
+            if tx_type == TransactionTypeEnum.STOCK_OUT.value and is_main and planned_site_id:
+                if not actual:
+                    site_check = "未安装"
+                elif int(actual.get("site_id") or 0) == int(planned_site_id):
+                    site_check = "一致"
+                else:
+                    site_check = "不一致"
+                    site_mismatch = True
+
+            flow_key = None
+            flow_qty = qty
+            if tx_type == TransactionTypeEnum.STOCK_IN.value:
+                flow_key = "stock_in"
+            elif tx_type == TransactionTypeEnum.STOCK_OUT.value:
+                flow_key = "stock_out"
+            elif tx_type == TransactionTypeEnum.RETURN.value:
+                flow_key = "return_in"
+                flow_qty = int(getattr(it, "received_qty", 0) or 0)
+            elif tx_type == TransactionTypeEnum.ADJUSTMENT.value:
+                flow_key = "adjustment"
+            elif tx_type == TransactionTypeEnum.DAMAGE.value:
+                flow_key = "damage"
+                flow_qty = abs(qty)
+
+            detail_rows.append(
+                {
+                    **base,
+                    "equipment_code": eq.equipment_code if eq else "",
+                    "equipment_name": eq.equipment_name if eq else "",
+                    "category_label": "主设备" if is_main else "辅料",
+                    "serial_number": serial_number,
+                    "instance_is_voided": is_voided,
+                    "quantity": qty,
+                    "unit": getattr(eq, "unit", "") if eq else "",
+                    "batch_number": it.batch_number or "",
+                    "actual_site": actual_site,
+                    "actual_cell": (actual.get("cell_id") or "") if actual else "",
+                    "site_check": site_check,
+                    "site_mismatch": site_mismatch,
+                    "flow_key": flow_key,
+                    "flow_qty": flow_qty,
+                }
+            )
+
+        document_rows.append(
+            {
+                **base,
+                "total_quantity": int(t.total_quantity or 0),
+                "main_count": main_count,
+                "aux_count": aux_count,
+            }
+        )
+
+    summary_rows = summarize_material_flow(detail_rows)
+
+    # 盘点表：当前账面库存（筛选仓库 或 当前账号可见仓库）
+    stocktake_rows: Optional[List[dict]] = None
+    warehouse_name_for_file = "全部仓库"
+    managed_ids = _get_managed_warehouse_ids(db, current_user)
+    if warehouse_id:
+        wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+        if wh:
+            warehouse_name_for_file = wh.warehouse_name
+    if include_stocktake:
+        inv_query = (
+            db.query(Inventory)
+            .join(Equipment, Equipment.id == Inventory.equipment_id)
+            .join(Warehouse, Warehouse.id == Inventory.warehouse_id)
+            .options(joinedload(Inventory.equipment), joinedload(Inventory.warehouse))
+            .filter(Warehouse.status == EquipmentStatusEnum.ACTIVE)
+        )
+        visible = True
+        if warehouse_id:
+            if managed_ids is not None and int(warehouse_id) not in managed_ids:
+                visible = False
+            inv_query = inv_query.filter(Inventory.warehouse_id == warehouse_id)
+        elif managed_ids is not None:
+            if managed_ids:
+                inv_query = inv_query.filter(Inventory.warehouse_id.in_(list(managed_ids)))
+            else:
+                visible = False
+        if visible:
+            stocktake_rows = []
+            inv_rows = inv_query.order_by(Warehouse.warehouse_name, Equipment.equipment_code).all()
+            for inv in inv_rows:
+                eq = inv.equipment
+                book_qty = int(inv.current_stock or 0)
+                if book_qty == 0:
+                    continue
+                stocktake_rows.append(
+                    {
+                        "warehouse_name": inv.warehouse.warehouse_name if inv.warehouse else "",
+                        "equipment_code": eq.equipment_code if eq else "",
+                        "equipment_name": eq.equipment_name if eq else "",
+                        "category_label": "主设备"
+                        if eq and _enum_value(eq.category) == EquipmentCategoryEnum.MAIN_DEVICE.value
+                        else "辅料",
+                        "unit": getattr(eq, "unit", "") if eq else "",
+                        "book_qty": book_qty,
+                        "actual_qty": None,
+                        "remark": "",
+                    }
+                )
+
+    receiver_filter = ""
+    if issued_to:
+        u = db.query(User).filter(User.id == issued_to).first()
+        receiver_filter = _display_user_name(u) or str(issued_to)
+    site_filter = ""
+    if site_id:
+        st = db.query(Site).filter(Site.id == site_id).first()
+        site_filter = _site_label(getattr(st, "site_name", None), getattr(st, "site_code", None)) or str(site_id)
+
+    start_dt = _parse_history_filter_datetime(start_date, is_end=False)
+    end_dt = _parse_history_filter_datetime(end_date, is_end=True)
+    range_text = (
+        f"{_format_local_datetime(start_dt) or '不限'} 至 {_format_local_datetime(end_dt) or '不限'}"
+    )
+    filter_desc = [
+        ("导出时间", datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
+        ("导出人", _display_user_name(current_user) or ""),
+        ("时间范围", range_text),
+        ("操作类型", _TX_TYPE_LABELS.get(str(transaction_type or ""), "全部")),
+        ("仓库", warehouse_name_for_file),
+        ("领料人", receiver_filter or "全部"),
+        ("站点", site_filter or "全部"),
+        ("关键字", (keyword or search or "").strip() or "无"),
+        ("统计", f"单据 {len(document_rows)} 张，明细 {len(detail_rows)} 行"),
+    ]
+
+    content = build_stock_transactions_workbook(
+        detail_rows=detail_rows,
+        document_rows=document_rows,
+        summary_rows=summary_rows,
+        stocktake_rows=stocktake_rows,
+        filter_desc=filter_desc,
+    )
+
+    def _date_part(dt: Optional[datetime]) -> str:
+        return _format_local_datetime(dt)[:10].replace("-", "") if dt else ""
+
+    date_part = "-".join([p for p in (_date_part(start_dt), _date_part(end_dt)) if p]) or "全部时间"
+    file_name = f"出入库明细_{warehouse_name_for_file}_{date_part}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_name)}"},
+    )
+
 
 # ===== 线下票据（可复用） =====
 
@@ -4621,6 +5268,7 @@ def _serialize_material_request(db: Session, req: MaterialRequest, *, include_tr
         "warehouse_name": req.warehouse.warehouse_name if req.warehouse else None,
         "requester_id": req.requester_id,
         "requester_name": req.requester.full_name if req.requester and req.requester.full_name else (req.requester.username if req.requester else None),
+        **_site_payload(getattr(req, "site", None), getattr(req, "site_id", None)),
         "status": _enum_value(req.status),
         "notes": req.notes,
         "submitted_at": to_utc_iso(req.submitted_at, assume_local=True) if req.submitted_at else None,
@@ -4665,6 +5313,7 @@ async def list_material_requests(
         joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
         joinedload(MaterialRequest.warehouse),
         joinedload(MaterialRequest.requester),
+        joinedload(MaterialRequest.site),
     )
 
     managed_ids = _get_managed_warehouse_ids(db, current_user)
@@ -4717,6 +5366,7 @@ async def create_material_request(
     requester_id = payload.get("requester_id") if isinstance(payload, dict) else None
     items = payload.get("items") if isinstance(payload, dict) else []
     notes = (payload.get("notes") or "").strip() if isinstance(payload, dict) else ""
+    site_id = _resolve_optional_site_id(db, payload.get("site_id") if isinstance(payload, dict) else None)
 
     try:
         warehouse_id = int(warehouse_id)
@@ -4763,6 +5413,7 @@ async def create_material_request(
         request_no=_build_request_no("REQ", current_user.id),
         warehouse_id=warehouse_id,
         requester_id=requester_id,
+        site_id=site_id,
         status=MaterialRequestStatusEnum.DRAFT,
         notes=notes or None,
     )
@@ -4788,6 +5439,7 @@ async def create_material_request(
             joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
             joinedload(MaterialRequest.warehouse),
             joinedload(MaterialRequest.requester),
+            joinedload(MaterialRequest.site),
         )
         .filter(MaterialRequest.id == req.id)
         .first()
@@ -4810,6 +5462,7 @@ async def get_material_request_detail(
             joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
             joinedload(MaterialRequest.warehouse),
             joinedload(MaterialRequest.requester),
+            joinedload(MaterialRequest.site),
         )
         .filter(MaterialRequest.id == request_id)
         .first()
@@ -4870,6 +5523,8 @@ async def update_material_request(
 
     req.warehouse_id = warehouse_id
     req.notes = notes or None
+    if isinstance(payload, dict) and "site_id" in payload:
+        req.site_id = _resolve_optional_site_id(db, payload.get("site_id"))
 
     # 直接重建明细（草稿态不会产生已批准/已发放）
     db.query(MaterialRequestItem).filter(MaterialRequestItem.request_id == req.id).delete()
@@ -4893,6 +5548,7 @@ async def update_material_request(
             joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
             joinedload(MaterialRequest.warehouse),
             joinedload(MaterialRequest.requester),
+            joinedload(MaterialRequest.site),
         )
         .filter(MaterialRequest.id == req.id)
         .first()
@@ -4941,6 +5597,7 @@ async def submit_material_request(
             joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
             joinedload(MaterialRequest.warehouse),
             joinedload(MaterialRequest.requester),
+            joinedload(MaterialRequest.site),
         )
         .filter(MaterialRequest.id == req.id)
         .first()
@@ -5146,6 +5803,7 @@ async def approve_material_request(
             joinedload(MaterialRequest.items).joinedload(MaterialRequestItem.equipment),
             joinedload(MaterialRequest.warehouse),
             joinedload(MaterialRequest.requester),
+            joinedload(MaterialRequest.site),
         )
         .filter(MaterialRequest.id == req.id)
         .first()
@@ -6067,6 +6725,7 @@ async def _confirm_issue_draft_impl(
         material_request_no=req.request_no if req else None,
         issue_draft_id=draft.id,
         issue_draft_no=draft.draft_no,
+        site_id=getattr(req, "site_id", None) if req else None,
     )
     db.add(transaction)
 
@@ -6352,6 +7011,7 @@ async def manual_stock_out(
     notes = (payload.get("notes") or "").strip() if isinstance(payload, dict) else ""
     offline_document_id = payload.get("offline_document_id") if isinstance(payload, dict) else None
     offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
+    site_id = _resolve_optional_site_id(db, payload.get("site_id") if isinstance(payload, dict) else None)
 
     try:
         warehouse_id = int(warehouse_id)
@@ -6464,6 +7124,7 @@ async def manual_stock_out(
         operator_id=current_user.id,
         issued_to=issued_to,
         offline_document_id=offline_doc.id if offline_doc else None,
+        site_id=site_id,
         scan_location=loc,
         document_number=doc_no,
         total_quantity=sum(int(v) for v in requirements.values()),
@@ -6593,6 +7254,7 @@ def _serialize_stock_out_for_return(db: Session, out_trans: StockTransaction) ->
         "document_number": out_trans.document_number,
         "warehouse_id": out_trans.warehouse_id,
         "warehouse_name": out_trans.warehouse.warehouse_name if out_trans.warehouse else None,
+        **_site_payload(getattr(out_trans, "site", None), getattr(out_trans, "site_id", None)),
         "operation_time": to_utc_iso(out_trans.operation_time) if out_trans.operation_time else None,
         "items": items,
     }

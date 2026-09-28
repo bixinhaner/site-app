@@ -2,10 +2,16 @@
   <div class="page-container">
     <div class="page-header">
       <h2>出入库 / SN 导入记录</h2>
-      <el-button @click="loadAll" :loading="loading">
-        <el-icon><Refresh /></el-icon>
-        刷新
-      </el-button>
+      <div class="header-actions">
+        <el-button @click="loadAll" :loading="loading">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+        <el-button type="primary" @click="openExportDialog">
+          <el-icon><Download /></el-icon>
+          导出 Excel
+        </el-button>
+      </div>
     </div>
 
     <!-- 筛选条件 -->
@@ -19,7 +25,7 @@
           </el-select>
         </el-col>
         <el-col :xs="24" :sm="12" :md="4">
-          <el-select v-model="filters.transaction_type" placeholder="操作类型" clearable>
+          <el-select v-model="filters.transaction_type" placeholder="操作类型" clearable @change="reloadTransactions">
             <el-option label="入库" value="stock_in" />
             <el-option label="出库" value="stock_out" />
             <el-option label="调拨" value="transfer" />
@@ -56,6 +62,39 @@
               <span class="keyword-help" aria-label="搜索提示">?</span>
             </el-tooltip>
           </div>
+        </el-col>
+      </el-row>
+      <el-row :gutter="16" class="filters-row-2">
+        <el-col :xs="24" :sm="12" :md="6">
+          <el-select v-model="filters.warehouse_id" placeholder="仓库" clearable filterable @change="reloadTransactions">
+            <el-option v-for="w in warehouses" :key="w.id" :label="w.warehouse_name" :value="w.id" />
+          </el-select>
+        </el-col>
+        <el-col :xs="24" :sm="12" :md="6">
+          <el-select
+            v-model="filters.issued_to"
+            placeholder="领料人（输入姓名搜索）"
+            filterable
+            remote
+            clearable
+            :remote-method="searchReceivers"
+            :loading="receiverSearching"
+            @change="reloadTransactions"
+          >
+            <el-option
+              v-for="u in receiverOptions"
+              :key="u.id"
+              :label="`${u.full_name || u.username}（${u.username}）`"
+              :value="u.id"
+            />
+          </el-select>
+        </el-col>
+        <el-col :xs="24" :sm="12" :md="6">
+          <StockSitePicker
+            v-model="filters.site_id"
+            placeholder="站点（计划或实际安装）"
+            @change="onSiteFilterChange"
+          />
         </el-col>
       </el-row>
     </div>
@@ -297,6 +336,60 @@
       </template>
     </el-dialog>
 
+    <!-- 导出 Excel -->
+    <el-dialog v-model="exportVisible" title="导出出入库记录" width="560px" :close-on-click-modal="!exporting">
+      <div class="export-dialog">
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="时间范围">
+            <span v-if="filters.start_date">{{ filters.start_date }} 至 {{ filters.end_date }}</span>
+            <el-text v-else type="warning">未选择（将导出全部历史记录）</el-text>
+          </el-descriptions-item>
+          <el-descriptions-item label="操作类型">{{ filters.transaction_type ? txTypeText(filters.transaction_type) : '全部' }}</el-descriptions-item>
+          <el-descriptions-item label="仓库">{{ filters.warehouse_id ? warehouseMap[filters.warehouse_id] || filters.warehouse_id : '全部' }}</el-descriptions-item>
+          <el-descriptions-item label="领料人">{{ receiverFilterLabel || '全部' }}</el-descriptions-item>
+          <el-descriptions-item label="站点">{{ siteFilterLabel || '全部' }}</el-descriptions-item>
+          <el-descriptions-item v-if="(keyword || '').trim()" label="关键字">{{ keyword.trim() }}</el-descriptions-item>
+          <el-descriptions-item label="数据量">
+            <span v-if="exportPreviewLoading">统计中…</span>
+            <span v-else-if="exportPreview">
+              单据 <b>{{ exportPreview.transaction_count }}</b> 张，明细 <b>{{ exportPreview.item_count }}</b> 行
+            </span>
+            <span v-else>-</span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-alert
+          v-if="exportPreview?.too_large"
+          type="error"
+          :closable="false"
+          show-icon
+          class="export-alert"
+          :title="`数据量超出上限（单据 ${exportPreview.max_transactions} 张 / 明细 ${exportPreview.max_items} 行），请缩小时间范围或增加筛选条件`"
+        />
+        <el-alert
+          v-else
+          type="info"
+          :closable="false"
+          class="export-alert"
+          title="按当前筛选条件导出（不含 SN 导入记录）。文件包含：出入库明细（一行一台设备/一种辅料，含领料人、审批人、目标站点与实际安装站点）、单据汇总、物料进出汇总。"
+        />
+        <el-checkbox v-model="exportIncludeStocktake" class="export-check">
+          同时生成「盘点表」（当前账面库存 + 实盘数填写列 + 差异自动计算）
+        </el-checkbox>
+      </div>
+      <template #footer>
+        <el-button @click="exportVisible = false" :disabled="exporting">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="exporting"
+          :disabled="exportPreviewLoading || !exportPreview || exportPreview.too_large || exportPreview.transaction_count === 0"
+          @click="doExport"
+        >
+          {{ exportPreview && exportPreview.transaction_count === 0 ? '无可导出数据' : '导出' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 出入库记录详情抽屉 -->
     <el-drawer v-model="transactionDetailsVisible" size="60%" :with-header="false">
       <div class="drawer-header">
@@ -359,6 +452,14 @@
             <span class="label">来源领料单</span>
             <span class="value">{{ currentTransactionRecord.issue_draft_no || '-' }}</span>
           </div>
+          <div v-if="currentTransactionRecord.transaction_type === 'stock_out'" class="summary-item">
+            <span class="label">领取人</span>
+            <span class="value">{{ currentTransactionRecord.receiver_name || '-' }}</span>
+          </div>
+          <div v-if="currentTransactionRecord.transaction_type === 'stock_out'" class="summary-item">
+            <span class="label">目标站点</span>
+            <span class="value">{{ siteText(currentTransactionRecord) || '未指定' }}</span>
+          </div>
           <div v-if="currentTransactionRecord.out_document_number" class="summary-item">
             <span class="label">关联出库单</span>
             <span class="value">{{ currentTransactionRecord.out_document_number }}</span>
@@ -392,6 +493,14 @@
             </template>
           </el-table-column>
           <el-table-column prop="batch_number" label="批次号" width="140" />
+          <el-table-column label="实际安装站点" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.actual_site">
+                {{ siteText(row.actual_site) }}<span v-if="row.actual_site.cell_id" class="muted"> · {{ row.actual_site.cell_id }}</span>
+              </span>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="vendor" label="供应商" width="120" />
           <el-table-column prop="item_notes" label="行备注" min-width="160" show-overflow-tooltip />
           <el-table-column prop="quantity" label="数量" width="80" />
@@ -548,10 +657,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Search, Close } from '@element-plus/icons-vue'
+import { Refresh, Search, Close, Download } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi } from '../../api/stock'
+import { userAPI } from '../../api/user'
+import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -607,8 +718,46 @@ const filters = ref({
   transaction_type: '',
   start_date: '',
   end_date: '',
+  warehouse_id: null,
+  issued_to: null,
+  site_id: null,
   search: ''
 })
+
+const receiverOptions = ref([])
+const receiverSearching = ref(false)
+const siteFilterLabel = ref('')
+
+const siteText = (obj) => {
+  if (!obj) return ''
+  const name = obj.site_name || ''
+  const code = obj.site_code || ''
+  return name && code && name !== code ? `${name}（${code}）` : name || code
+}
+
+const receiverFilterLabel = computed(() => {
+  const u = receiverOptions.value.find((x) => x.id === filters.value.issued_to)
+  return u ? u.full_name || u.username : ''
+})
+
+const searchReceivers = async (query) => {
+  const kw = String(query || '').trim()
+  if (!kw) return
+  try {
+    receiverSearching.value = true
+    const res = await userAPI.searchUsers({ keyword: kw, limit: 20 })
+    receiverOptions.value = res?.users || []
+  } catch (error) {
+    receiverOptions.value = []
+  } finally {
+    receiverSearching.value = false
+  }
+}
+
+const onSiteFilterChange = (site) => {
+  siteFilterLabel.value = siteText(site)
+  reloadTransactions()
+}
 
 const syncCompactTable = () => {
   if (typeof window === 'undefined') return
@@ -775,6 +924,7 @@ const onDateRangeChange = (dates) => {
     filters.value.start_date = ''
     filters.value.end_date = ''
   }
+  reloadTransactions()
 }
 
 const buildRecords = computed(() => {
@@ -845,6 +995,14 @@ const filteredRecords = computed(() => {
     data = data.filter((r) => r.recordType === 'import')
   }
 
+  if (filters.value.issued_to || filters.value.site_id) {
+    data = data.filter((r) => r.recordType === 'transaction')
+  }
+  if (filters.value.warehouse_id) {
+    const wname = warehouseMap.value[filters.value.warehouse_id] || ''
+    data = data.filter((r) => r.recordType === 'transaction' || r.warehouseName === wname)
+  }
+
   if (filters.value.transaction_type) {
     data = data.filter(
       (r) =>
@@ -880,8 +1038,8 @@ const filteredRecords = computed(() => {
 
   // 日期范围过滤：针对 operationTime
   if (filters.value.start_date && filters.value.end_date) {
-    const start = new Date(filters.value.start_date)
-    const end = new Date(filters.value.end_date)
+    const start = new Date(`${filters.value.start_date}T00:00:00`)
+    const end = new Date(`${filters.value.end_date}T23:59:59.999`)
     data = data.filter((r) => {
       if (!r.operationTime) return false
       const d = new Date(r.operationTime)
@@ -929,8 +1087,7 @@ const onImportSelectionChange = (rows) => {
 const loadTransactions = async () => {
   try {
     const params = {
-      ...filters.value,
-      search: (keyword.value || '').trim(),
+      ...buildServerFilterParams(),
       limit: 500
     }
     const res = await stockApi.getStockTransactions(params)
@@ -971,6 +1128,86 @@ const loadWarehouses = async () => {
     warehouseMap.value = map
   } catch (error) {
     console.error('加载仓库列表失败:', error)
+  }
+}
+
+const buildServerFilterParams = () => {
+  const params = { ...filters.value, search: (keyword.value || '').trim() }
+  Object.keys(params).forEach((k) => {
+    if (params[k] === '' || params[k] === null || params[k] === undefined) delete params[k]
+  })
+  return params
+}
+
+const reloadTransactions = async () => {
+  currentPage.value = 1
+  try {
+    loading.value = true
+    await loadTransactions()
+  } finally {
+    loading.value = false
+  }
+}
+
+// ===== 导出 Excel =====
+const exportVisible = ref(false)
+const exporting = ref(false)
+const exportPreview = ref(null)
+const exportPreviewLoading = ref(false)
+const exportIncludeStocktake = ref(true)
+
+const extractBlobErrorDetail = async (error) => {
+  const data = error?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      return JSON.parse(text)?.detail || text
+    } catch {
+      return error?.message || '网络错误'
+    }
+  }
+  return data?.detail || error?.message || '网络错误'
+}
+
+const openExportDialog = async () => {
+  exportVisible.value = true
+  exportPreview.value = null
+  exportPreviewLoading.value = true
+  try {
+    exportPreview.value = await stockApi.previewTransactionsExport(buildServerFilterParams())
+  } catch (error) {
+    ElMessage.error('统计导出数据失败: ' + (error?.response?.data?.detail || error?.message || '网络错误'))
+  } finally {
+    exportPreviewLoading.value = false
+  }
+}
+
+const doExport = async () => {
+  exporting.value = true
+  try {
+    const blob = await stockApi.exportTransactions({
+      ...buildServerFilterParams(),
+      include_stocktake: exportIncludeStocktake.value
+    })
+    const whName = filters.value.warehouse_id ? warehouseMap.value[filters.value.warehouse_id] || '' : '全部仓库'
+    const range = filters.value.start_date
+      ? `${filters.value.start_date.replaceAll('-', '')}-${filters.value.end_date.replaceAll('-', '')}`
+      : '全部时间'
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `出入库明细_${whName}_${range}.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+    exportVisible.value = false
+  } catch (error) {
+    console.error('导出失败:', error)
+    ElMessage.error('导出失败: ' + (await extractBlobErrorDetail(error)))
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -1266,6 +1503,27 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.filters-row-2 {
+  margin-top: 12px;
+}
+
+.export-alert {
+  margin-top: 12px;
+}
+
+.export-check {
+  margin-top: 12px;
+}
+
+.muted {
+  color: var(--el-text-color-secondary);
 }
 
 .filters-card {

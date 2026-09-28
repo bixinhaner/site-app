@@ -57,6 +57,9 @@
         <el-table-column prop="request_no" label="申请单号" :width="isCompactTable ? 210 : 230" />
         <el-table-column prop="warehouse_name" label="仓库" :width="isCompactTable ? 140 : 160" />
         <el-table-column v-if="!isCompactTable" prop="requester_name" label="申请人" width="140" />
+        <el-table-column v-if="!isCompactTable" prop="site_name" label="目标站点" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.site_name || '-' }}</template>
+        </el-table-column>
         <el-table-column v-if="!isCompactTable" prop="main_summary" label="主设备摘要" min-width="240" />
         <el-table-column prop="status" label="状态" :width="isCompactTable ? 120 : 130">
           <template #default="{ row }">
@@ -136,6 +139,11 @@
               <el-select v-model="createForm.warehouse_id" filterable clearable placeholder="选择仓库">
                 <el-option v-for="w in warehouses" :key="w.id" :label="w.warehouse_name" :value="w.id" />
               </el-select>
+            </div>
+
+            <div class="field span2">
+              <div class="label">目标站点</div>
+              <StockSitePicker v-model="createForm.site_id" />
             </div>
 
             <div class="field span2">
@@ -256,6 +264,7 @@ import { useUserStore } from '../../stores/user'
 import { stockApi } from '../../api/stock'
 import { equipmentApi } from '../../api/equipment'
 import { userAPI } from '../../api/user'
+import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -286,6 +295,7 @@ const syncCompactTable = () => {
 const createForm = ref({
   requester: null,
   warehouse_id: undefined,
+  site_id: null,
   notes: '',
   items: [],
 })
@@ -427,6 +437,7 @@ const openCreate = () => {
   createForm.value = {
     requester: null,
     warehouse_id: undefined,
+    site_id: null,
     notes: '',
     items: [],
   }
@@ -545,6 +556,7 @@ const _buildCreatePayload = () => {
   return {
     warehouse_id,
     requester_id: requester.id,
+    site_id: createForm.value.site_id || null,
     notes: (createForm.value.notes || '').trim(),
     items: Array.from(merged.entries()).map(([equipment_id, quantity]) => ({ equipment_id, quantity })),
   }

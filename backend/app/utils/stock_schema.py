@@ -245,6 +245,10 @@ def ensure_stock_schema(engine: Engine) -> None:
             "material_request_no": "material_request_no VARCHAR(50)",
             "issue_draft_id": "issue_draft_id VARCHAR(32)",
             "issue_draft_no": "issue_draft_no VARCHAR(50)",
+            "site_id": "site_id INTEGER",
+        },
+        "material_requests": {
+            "site_id": "site_id INTEGER",
         },
         "stock_transaction_items": {
             "vendor": "vendor VARCHAR(100)",
@@ -279,6 +283,7 @@ def ensure_stock_schema(engine: Engine) -> None:
             "ix_stock_transactions_material_request_no": "material_request_no",
             "ix_stock_transactions_issue_draft_id": "issue_draft_id",
             "ix_stock_transactions_issue_draft_no": "issue_draft_no",
+            "ix_stock_transactions_site_id": "site_id",
         }
         for index_name, column_name in stock_indexes.items():
             try:

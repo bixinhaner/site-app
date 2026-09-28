@@ -52,6 +52,17 @@ export const stockApi = {
   // 获取出入库记录
   getStockTransactions: (params = {}) => 
     request.get('/api/stock/transactions', { params }),
+
+  // 出入库记录导出（盘库）
+  previewTransactionsExport: (params = {}) =>
+    request.get('/api/stock/transactions/export/preview', { params }),
+
+  exportTransactions: (params = {}) =>
+    request.get('/api/stock/transactions/export', { params, responseType: 'blob', timeout: 300000 }),
+
+  // 目标站点下拉（领料/快速出库）
+  getSiteOptions: (params = {}) =>
+    request.get('/api/stock/site-options', { params }),
   
   // 获取仓库列表
   getWarehouses: () => 

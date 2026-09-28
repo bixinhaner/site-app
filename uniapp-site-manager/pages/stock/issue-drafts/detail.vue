@@ -18,6 +18,10 @@
 							<view class="u-tag" :class="statusTagClass(draft.status)">{{ statusLabel(draft.status) }}</view>
 							<text class="dot">·</text>
 							<text class="meta-item">{{ draft.request?.warehouse_name || '-' }}</text>
+							<template v-if="draft.request?.site_name">
+								<text class="dot">·</text>
+								<text class="meta-item">{{ $t('stock.targetSite') }}：{{ draft.request?.site_name }}</text>
+							</template>
 						</view>
 					</view>
 					<view class="right">

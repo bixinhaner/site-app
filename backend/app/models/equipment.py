@@ -269,6 +269,7 @@ class StockTransaction(Base):
     material_request_no = Column(String(50), index=True)  # 来源物料申请单号（冗余便于检索与审计）
     issue_draft_id = Column(String(32), index=True)  # 来源领料单ID
     issue_draft_no = Column(String(50), index=True)  # 来源领料单号（冗余便于检索与审计）
+    site_id = Column(Integer, ForeignKey("sites.id"), index=True)  # 目标站点（出库计划去向，选填）
     
     # 操作信息
     operator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -302,6 +303,7 @@ class StockTransaction(Base):
     operator = relationship("User", foreign_keys=[operator_id])
     receiver = relationship("User", foreign_keys=[issued_to])
     approver = relationship("User", foreign_keys=[approved_by])
+    site = relationship("Site", foreign_keys=[site_id])
     transaction_items = relationship("StockTransactionItem", back_populates="transaction", cascade="all, delete-orphan")
     documents = relationship("StockTransactionDocument", back_populates="transaction", cascade="all, delete-orphan")
     offline_document = relationship("OfflineDocument", back_populates="transactions")

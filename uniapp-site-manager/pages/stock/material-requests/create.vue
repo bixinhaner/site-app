@@ -34,6 +34,12 @@
 					</view>
 
 					<view class="u-form-item">
+						<text class="u-form-label">{{ $t('stock.targetSite') }}（{{ $t('stock.targetSiteOptional') }}）</text>
+						<StockSitePicker v-model="targetSite" :autofill-last-used="!requestId" />
+						<text class="u-form-help">{{ $t('stock.targetSiteHelp') }}</text>
+					</view>
+
+					<view class="u-form-item">
 						<text class="u-form-label">{{ $t('stock.materialRequestNotes') }}</text>
 						<textarea
 							class="u-textarea notes-textarea"
@@ -211,6 +217,7 @@
 	import { guardRouteAccess } from '@/utils/feature-access.js'
 	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
+	import StockSitePicker from '@/components/StockSitePicker.vue'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
@@ -230,6 +237,7 @@
 	const selectedWarehouse = computed(() => warehouses.value?.[warehouseIndex.value] || null)
 
 	const notes = ref('')
+	const targetSite = ref(null)
 
 		const packages = ref([])
 		const packageIndex = ref(0)
@@ -364,6 +372,7 @@
 			requestId.value = r.id
 			requestNo.value = r.request_no
 			notes.value = r.notes || ''
+			targetSite.value = r.site_id ? { id: r.site_id, site_name: r.site_name, site_code: r.site_code } : null
 
 			// 选中仓库
 			const idx = (warehouses.value || []).findIndex(w => w.id === r.warehouse_id)
@@ -568,6 +577,7 @@
 		try {
 			const payload = {
 				warehouse_id: Number(selectedWarehouse.value.id),
+				site_id: targetSite.value?.id || null,
 				notes: String(notes.value || '').trim(),
 				items: buildPayloadItems(),
 			}

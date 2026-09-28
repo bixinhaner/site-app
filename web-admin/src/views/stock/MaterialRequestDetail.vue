@@ -16,6 +16,8 @@
             <span>仓库：{{ requestData?.warehouse_name || '-' }}</span>
             <span class="dot">·</span>
             <span>申请人：{{ requestData?.requester_name || '-' }}</span>
+            <span class="dot">·</span>
+            <span>目标站点：{{ requestData?.site_name || '未指定' }}</span>
           </div>
         </div>
       </div>
@@ -210,6 +212,12 @@
             <el-select v-model="draftWarehouseId" filterable placeholder="选择仓库" class="warehouse-select">
               <el-option v-for="w in warehouses" :key="w.id" :label="w.warehouse_name" :value="w.id" />
             </el-select>
+            <div class="draft-label">目标站点</div>
+            <StockSitePicker
+              v-model="draftSiteId"
+              :initial-site="draftSiteOption"
+              class="warehouse-select"
+            />
             <div class="draft-label">备注</div>
             <el-input v-model="draftNotes" placeholder="可选：用途/项目/紧急程度" class="notes-input" />
           </div>
@@ -375,6 +383,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { stockApi } from '../../api/stock'
+import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
 import { equipmentApi } from '../../api/equipment'
 import { useUserStore } from '../../stores/user'
 
@@ -403,6 +412,12 @@ const abandonReason = ref('')
 
 const draftWarehouseId = ref(undefined)
 const draftNotes = ref('')
+const draftSiteId = ref(null)
+const draftSiteOption = computed(() =>
+  requestData.value?.site_id
+    ? { id: requestData.value.site_id, site_name: requestData.value.site_name, site_code: requestData.value.site_code }
+    : null
+)
 const draftRows = ref([])
 
 const approveRows = ref([])
@@ -524,6 +539,7 @@ const load = async () => {
 
     draftWarehouseId.value = requestData.value?.warehouse_id
     draftNotes.value = requestData.value?.notes || ''
+    draftSiteId.value = requestData.value?.site_id || null
 
     const eqMap = new Map(equipmentOptions.value.map(e => [e.id, e]))
     draftRows.value = (requestData.value?.items || []).map((it) => ({
@@ -610,6 +626,7 @@ const saveDraft = async () => {
 
     await stockApi.updateMaterialRequest(requestId.value, {
       warehouse_id,
+      site_id: draftSiteId.value || null,
       notes: (draftNotes.value || '').trim(),
       items: Array.from(merged.entries()).map(([equipment_id, quantity]) => ({ equipment_id, quantity })),
     })
