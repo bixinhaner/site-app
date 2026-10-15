@@ -368,7 +368,8 @@ const lifecycleStages = computed(() => {
         operator: record.operator?.name,
         details: {
           站点: `${siteName} (ID: ${record?.site?.id || '-'})`,
-          小区: `扇区${record?.cell_info?.sector_id || '-'} ${record?.cell_info?.band || ''}`
+          小区: `扇区${record?.cell_info?.sector_id || '-'} ${record?.cell_info?.band || ''}`,
+          ...(record.notes ? { 备注: record.notes } : {}),
         }
       })
       return

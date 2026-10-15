@@ -8,6 +8,12 @@ const legacyDynamicOverridesId = [
   { pattern: /^(\d+) 项$/, replace: (_, n) => `${n} item` },
   { pattern: /^(\d+)\/(\d+) 启用$/, replace: (_, a, b) => `${a}/${b} aktif` },
   { pattern: /^已按覆盖、冲突、跳过、写入优先展示；当前样例显示 (\d+)\/(\d+) 条$/, replace: (_, a, b) => `Diurutkan: timpa, konflik, lewati, tulis; menampilkan ${a}/${b} contoh` },
+  // 设备拆除/移机
+  { pattern: /^拆除\/移机：(.+)$/, replace: (_, r) => `Bongkar/pindah: ${r}` },
+  { pattern: /^共 (\d+) 台，可拆除 (\d+) 台$/, replace: (_, a, b) => `Total ${a} perangkat, ${b} dapat dibongkar` },
+  { pattern: /^将拆除 (\d+) 台设备，另有 (\d+) 台不满足条件将跳过。确认继续？$/, replace: (_, a, b) => `${a} perangkat akan dibongkar; ${b} perangkat yang tidak memenuhi syarat akan dilewati. Lanjutkan?` },
+  { pattern: /^将拆除 (\d+) 台设备，确认继续？$/, replace: (_, a) => `${a} perangkat akan dibongkar. Lanjutkan?` },
+  { pattern: /^已拆除 (\d+) 台设备$/, replace: (_, a) => `${a} perangkat telah dibongkar` },
 ]
 
 export default legacyDynamicOverridesId

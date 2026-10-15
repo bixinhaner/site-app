@@ -17,6 +17,7 @@
         <el-checkbox v-model="includeVoided">显示已撤销</el-checkbox>
         <el-input v-model="keyword" placeholder="搜索SN/条码/供应商（未选设备类型时按SN查）" clearable style="width: 320px" />
         <el-button type="primary" @click="load"><el-icon><Search /></el-icon>查询</el-button>
+        <el-button v-if="canDismantle" type="danger" plain @click="openDismantle()">拆除/移机</el-button>
       </div>
     </div>
     <el-card>
@@ -61,8 +62,17 @@
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" :width="canDismantle ? 250 : 200">
           <template #default="{ row }">
+            <el-button
+              v-if="canDismantle && row.binding_info"
+              size="small"
+              type="danger"
+              text
+              @click="openDismantle(row)"
+            >
+              拆除
+            </el-button>
             <el-button
               size="small"
               type="primary"
@@ -152,6 +162,12 @@
       </template>
     </el-dialog>
     
+    <EquipmentDismantleDialog
+      v-model="dismantleVisible"
+      :initial-sns="dismantleSns"
+      @done="load"
+    />
+
     <!-- 绑定历史弹窗（改为生命周期视图） -->
     <el-dialog
       v-model="historyDialogVisible"
@@ -181,8 +197,19 @@ import { copyTextToClipboard } from '@/utils/clipboard'
 import { equipmentApi } from '../../api/equipment'
 import { Document } from '@element-plus/icons-vue'
 import EquipmentLifecycleTimeline from '@/components/equipment/EquipmentLifecycleTimeline.vue'
+import EquipmentDismantleDialog from '@/components/equipment/EquipmentDismantleDialog.vue'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+const canDismantle = computed(() => userStore.hasPermission('inventory:dismantle:write'))
+const dismantleVisible = ref(false)
+const dismantleSns = ref([])
+
+const openDismantle = (row) => {
+  dismantleSns.value = row?.serial_number ? [row.serial_number] : []
+  dismantleVisible.value = true
+}
 
 const loading = ref(false)
 const selectedEquipmentId = ref('')

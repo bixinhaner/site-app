@@ -4493,10 +4493,16 @@ def _serialize_equipment_instances(db: Session, instances: List[EquipmentInstanc
                 "warehouse_name": warehouse_name,
             }
 
+    # 当前绑定站点：以绑定历史最新动作为准（已解绑/拆除的不返回）
+    binding_map = _latest_binding_site_map(
+        db, [inst.serial_number for inst in instances if not getattr(inst, "is_voided", False)]
+    )
+
     result = []
     for instance in instances:
         current_warehouse_id = instance.warehouse_id
         current_warehouse_name = instance.warehouse.warehouse_name if instance.warehouse else None
+        binding = binding_map.get(instance.serial_number)
 
         last_warehouse_id = current_warehouse_id
         last_warehouse_name = current_warehouse_name
@@ -4534,6 +4540,13 @@ def _serialize_equipment_instances(db: Session, instances: List[EquipmentInstanc
             "warehouse_name": current_warehouse_name,
             "last_warehouse_id": last_warehouse_id,
             "last_warehouse_name": last_warehouse_name,
+            "binding_info": {
+                "site_id": binding["site_id"],
+                "site_name": binding["site_name"],
+                "site_code": binding["site_code"],
+                "cell_id": binding["cell_id"],
+                "bound_at": to_utc_iso(binding["bound_at"]) if binding["bound_at"] else None,
+            } if binding else None,
             "created_at": to_utc_iso(instance.created_at) if instance.created_at else None
         })
     return result

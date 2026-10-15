@@ -82,6 +82,7 @@ BUILTIN_PERMISSION_DEFINITIONS = [
     {"code": "inventory:return:read", "name": "退库查看", "module": "inventory"},
     {"code": "inventory:return:write", "name": "退库申请/处理", "module": "inventory"},
     {"code": "inventory:user-ownership:read", "name": "人员领用台账查看", "module": "inventory"},
+    {"code": "inventory:dismantle:write", "name": "设备拆除/移机", "module": "inventory"},
     {"code": "system:mobile-settings:read", "name": "移动端配置查看", "module": "system"},
     {"code": "system:mobile-settings:write", "name": "移动端配置管理", "module": "system"},
     {"code": "system:geocode-cache:read", "name": "逆地理缓存查看", "module": "system"},

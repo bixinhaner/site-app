@@ -121,6 +121,13 @@ export const stockApi = {
   voidInstances: (data) =>
     request.post('/api/stock/instances/void', data),
 
+  // 设备拆除/移机：预览当前绑定站点，确认后解绑
+  previewDismantle: (data) =>
+    request.post('/api/stock/dismantle/preview', data),
+
+  dismantleEquipment: (data) =>
+    request.post('/api/stock/dismantle', data),
+
   updateEquipmentInstance: (instanceId, data) =>
     request.patch(`/api/stock/instances/${instanceId}`, data),
 

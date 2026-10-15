@@ -19,6 +19,7 @@ from app.models.equipment import (
     TransactionTypeEnum,
     Warehouse,
 )
+from app.models.equipment_binding_history import BindingActionEnum, EquipmentBindingHistory
 from app.models.inspection import InspectionCheckItem, SiteInspection
 from app.models.site import Site
 from app.models.user import User
@@ -503,6 +504,27 @@ def _latest_binding_map(db: Session, serial_numbers: Iterable[str]) -> Dict[str,
                     "cell_id": row.cell_id,
                     "binding_at": to_utc_iso(row.binding_at) if row.binding_at else None,
                 }
+
+    # 拆除/移机只写解绑历史、保留原检查项 SN 作档案；以绑定历史最新动作为准剔除已解绑设备
+    unbound = set()
+    bound_serials = list(result)
+    for offset in range(0, len(bound_serials), 500):
+        chunk = bound_serials[offset : offset + 500]
+        seen = set()
+        history_rows = (
+            db.query(EquipmentBindingHistory.equipment_sn, EquipmentBindingHistory.action)
+            .filter(EquipmentBindingHistory.equipment_sn.in_(chunk))
+            .order_by(EquipmentBindingHistory.operated_at.desc(), EquipmentBindingHistory.id.desc())
+            .all()
+        )
+        for history in history_rows:
+            if history.equipment_sn in seen:
+                continue
+            seen.add(history.equipment_sn)
+            if history.action == BindingActionEnum.UNBIND:
+                unbound.add(history.equipment_sn)
+    for sn in unbound:
+        result.pop(sn, None)
     return result
 
 

@@ -53,6 +53,7 @@ from app.api import mock_omc_proxy
 from app.api import work_order_execution_settings
 from app.api import work_order_assignment_settings
 from app.api import site_payment_settings
+from app.api import equipment_dismantle
 from app.services.omc_monitor import start_background_omc_monitor
 from app.services.backup_scheduler import start_backup_scheduler
 from app.services.mobile_client_log_retention_scheduler import start_mobile_client_log_retention_scheduler
@@ -155,6 +156,7 @@ app.include_router(site_groups.router, prefix="/api/site-groups", tags=["站点�
 app.include_router(inspections.router, prefix="/api/inspections", tags=["检查管理"])
 app.include_router(template_binding.router, prefix="/api/inspections", tags=["模板绑定"])
 app.include_router(equipment.router, prefix="/api/equipment", tags=["设备管理"])
+app.include_router(equipment_dismantle.router, prefix="/api/stock/dismantle", tags=["库存管理"])
 app.include_router(stock.router, prefix="/api/stock", tags=["库存管理"])
 app.include_router(ai.router, prefix="/api/ai", tags=["AI"])
 app.include_router(geocode.router, prefix="/api", tags=["地理编码"])
