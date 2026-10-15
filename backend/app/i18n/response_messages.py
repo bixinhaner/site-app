@@ -28,7 +28,8 @@ ENTRIES = [
     ("解绑成功", "Unbound", "Berhasil dilepas"),
     # ---- 档案批量导出 ----
     ("不支持的档案类型", "Unsupported archive type", "Jenis arsip tidak didukung"),
-    ("请选择要导出的档案", "Select archives to export", "Pilih arsip yang akan diekspor"),
+    ("没有可导出的档案", "No archives to export", "Tidak ada arsip untuk diekspor"),
+    ("日期格式不正确", "Invalid date format", "Format tanggal tidak valid"),
     ("单次最多导出 {0} 个档案", "Up to {0} archives per export", "Maksimal {0} arsip per ekspor"),
     ("已有批量导出任务进行中，请完成后再试", "A batch export is already in progress; try again after it finishes", "Ekspor massal sedang berjalan; coba lagi setelah selesai"),
     ("导出任务不存在或已过期", "Export task not found or expired", "Tugas ekspor tidak ditemukan atau kedaluwarsa"),

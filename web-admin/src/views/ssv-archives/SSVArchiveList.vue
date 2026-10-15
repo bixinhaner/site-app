@@ -11,7 +11,13 @@
         <el-icon><Search /></el-icon>
         筛选
       </el-button>
-      <ArchiveBatchExport archive-type="ssv" :rows="selectedRows" @done="clearSelection" />
+      <ArchiveBatchExport
+        archive-type="ssv"
+        :rows="selectedRows"
+        :filters="{ keyword, dateRange }"
+        :total="total"
+        @done="clearSelection"
+      />
     </div>
 
     <el-card>

@@ -1034,14 +1034,28 @@ def export_archive_pdf(
     a = _load_archive_for_export(db, archive_id)
     if not a:
         raise HTTPException(status_code=404, detail="档案不存在")
-    buf, ascii_base, human_base = _render_archive_pdf(
-        a, with_thumbs=with_thumbs, locale_code=normalize_locale(locale)
-    )
     from urllib.parse import quote
+    if not with_thumbs:
+        buf, ascii_base, human_base = _render_archive_pdf(
+            a, with_thumbs=False, locale_code=normalize_locale(locale)
+        )
+        headers = {
+            "Content-Disposition": f"attachment; filename={ascii_base}.pdf; filename*=UTF-8''{quote(human_base + '.pdf')}"
+        }
+        return StreamingResponse(buf, media_type="application/pdf", headers=headers)
+
+    # 与批量导出共用压缩照片版 PDF 缓存：档案未变化时直接返回已生成的文件
+    from fastapi.responses import FileResponse
+    from app.services.archive_pdf_cache import DiskSpaceError, get_or_render
+
+    try:
+        entry = get_or_render("survey", a, normalize_locale(locale))
+    except DiskSpaceError as exc:
+        raise HTTPException(status_code=507, detail=str(exc))
     headers = {
-        "Content-Disposition": f"attachment; filename={ascii_base}.pdf; filename*=UTF-8''{quote(human_base + '.pdf')}"
+        "Content-Disposition": f"attachment; filename=archive.pdf; filename*=UTF-8''{quote(entry['human_base'] + '.pdf')}"
     }
-    return StreamingResponse(buf, media_type="application/pdf", headers=headers)
+    return FileResponse(entry["path"], media_type="application/pdf", headers=headers)
 
 
 @router.get("/{archive_id}/diff")

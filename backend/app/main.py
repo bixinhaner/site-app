@@ -303,6 +303,17 @@ def _startup_backup_scheduler():
 
 
 @app.on_event("startup")
+def _startup_archive_pdf_prewarm():
+  """
+  启动档案 PDF 预生成调度：启动约 10 分钟后补跑一轮，之后每天凌晨生成新增/变化档案的英文 PDF。
+  """
+  from app.core.database import SessionLocal
+  from app.services.archive_batch_export import start_prewarm_scheduler
+
+  start_prewarm_scheduler(SessionLocal)
+
+
+@app.on_event("startup")
 def _startup_mobile_log_retention_scheduler():
   """
   启动移动端日志保留清理线程（按配置 retention_days 定期删除过期数据）。
