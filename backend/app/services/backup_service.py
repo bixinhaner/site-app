@@ -1,6 +1,10 @@
 import os
+import logging
+import shutil
+import threading
 import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 from sqlalchemy.orm import Session
@@ -13,6 +17,9 @@ from app.models.backup_meta import BackupMetaRecord
 
 
 BACKUP_CONFIG_KEY = "data_backup"
+BACKUP_MIN_FREE_RESERVE_BYTES = 512 * 1024 * 1024
+_BACKUP_RUN_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def get_default_backup_config() -> Dict[str, Any]:
@@ -27,6 +34,13 @@ def get_default_backup_config() -> Dict[str, Any]:
         "interval": 1,
         "last_run_at": None,
         "last_success_at": None,
+        "last_attempt_at": None,
+        "last_attempt_status": None,
+        "last_error": None,
+        "failure_retry_minutes": 60,
+        "retention_latest_scheduled": 7,
+        "retention_monthly_checkpoints": True,
+        "retention_keep_manual": True,
     }
 
 
@@ -84,6 +98,126 @@ def _collect_db_files() -> list[str]:
         db_files.append(full_path)
 
     return db_files
+
+
+def _ensure_backup_capacity(db_files: list[str], backup_dir: str) -> None:
+    """备份开始前保留一个完整数据库副本和固定安全余量。"""
+    source_bytes = sum(os.path.getsize(path) for path in db_files)
+    free_bytes = shutil.disk_usage(backup_dir).free
+    required_bytes = source_bytes + BACKUP_MIN_FREE_RESERVE_BYTES
+    if free_bytes < required_bytes:
+        raise RuntimeError(
+            "磁盘空间不足，无法安全备份："
+            f"可用 {free_bytes / (1024 ** 3):.2f} GiB，"
+            f"至少需要 {required_bytes / (1024 ** 3):.2f} GiB"
+        )
+
+
+def _select_retained_backup_ids(
+    records: list[BackupMetaRecord],
+    restore_referenced_ids: set[int],
+    *,
+    latest_scheduled: int,
+    keep_monthly_checkpoints: bool,
+    keep_manual: bool,
+) -> set[int]:
+    """计算保留集合：最近定时备份、月度快照、手动备份和恢复引用。"""
+    scheduled = sorted(
+        [record for record in records if record.trigger_type == "scheduled"],
+        key=lambda record: record.created_at or datetime.min,
+        reverse=True,
+    )
+    keep_ids = set(restore_referenced_ids)
+    keep_ids.update(record.id for record in scheduled[:max(1, latest_scheduled)])
+
+    if keep_manual:
+        keep_ids.update(record.id for record in records if record.trigger_type == "manual")
+
+    if keep_monthly_checkpoints:
+        monthly: dict[str, BackupMetaRecord] = {}
+        for record in scheduled:
+            if record.created_at:
+                monthly.setdefault(record.created_at.strftime("%Y-%m"), record)
+        keep_ids.update(record.id for record in monthly.values())
+
+    return keep_ids
+
+
+def _apply_backup_retention(config: Dict[str, Any]) -> Dict[str, Any]:
+    """按保留策略删除旧备份文件及对应元数据，避免历史记录指向不存在文件。"""
+    backend_root = Path(_get_backend_root_dir()).resolve()
+    backup_dir = (backend_root / "db-backups").resolve()
+    latest_scheduled = max(int(config.get("retention_latest_scheduled") or 7), 1)
+    keep_monthly = bool(config.get("retention_monthly_checkpoints", True))
+    keep_manual = bool(config.get("retention_keep_manual", True))
+
+    meta_db = MetaSessionLocal()
+    moved: list[tuple[Path, Path]] = []
+    trash_dir = backup_dir / ".retention-trash"
+    try:
+        records = (
+            meta_db.query(BackupMetaRecord)
+            .filter(
+                BackupMetaRecord.kind == "backup",
+                BackupMetaRecord.status == "success",
+                BackupMetaRecord.backup_file.isnot(None),
+            )
+            .all()
+        )
+        restore_referenced_ids = {
+            int(row[0])
+            for row in meta_db.query(BackupMetaRecord.backup_record_id)
+            .filter(
+                BackupMetaRecord.kind == "restore",
+                BackupMetaRecord.backup_record_id.isnot(None),
+            )
+            .all()
+        }
+        keep_ids = _select_retained_backup_ids(
+            records,
+            restore_referenced_ids,
+            latest_scheduled=latest_scheduled,
+            keep_monthly_checkpoints=keep_monthly,
+            keep_manual=keep_manual,
+        )
+        delete_records = [record for record in records if record.id not in keep_ids]
+
+        trash_dir.mkdir(exist_ok=True)
+        deleted_bytes = 0
+        for record in delete_records:
+            raw_path = str(record.backup_file or "").strip()
+            source = Path(raw_path)
+            if not source.is_absolute():
+                source = backend_root / source
+            source = source.resolve()
+            if source.parent != backup_dir or source.suffix.lower() != ".zip":
+                logger.warning("跳过备份保留清理中的非法路径：%s", source)
+                continue
+            if source.exists():
+                deleted_bytes += source.stat().st_size
+                target = trash_dir / f"{record.id}_{source.name}"
+                os.replace(source, target)
+                moved.append((source, target))
+            meta_db.delete(record)
+
+        meta_db.commit()
+        for _, target in moved:
+            target.unlink(missing_ok=True)
+        if trash_dir.exists() and not any(trash_dir.iterdir()):
+            trash_dir.rmdir()
+        return {
+            "deleted_records": len(delete_records),
+            "deleted_files": len(moved),
+            "deleted_bytes": deleted_bytes,
+        }
+    except Exception:
+        meta_db.rollback()
+        for source, target in reversed(moved):
+            if target.exists() and not source.exists():
+                os.replace(target, source)
+        raise
+    finally:
+        meta_db.close()
 
 
 def restore_backup(
@@ -255,7 +389,7 @@ def restore_backup(
         raise exc
 
 
-def perform_backup(
+def _perform_backup_unlocked(
     db: Session,
     trigger_type: str,
     trigger_user: Optional[User] = None,
@@ -278,26 +412,38 @@ def perform_backup(
     finished_at: Optional[datetime] = None
     error: Optional[Exception] = None
     backup_rel_path: Optional[str] = None
+    partial_path: Optional[str] = None
 
     try:
         db_files = _collect_db_files()
         if not db_files:
             raise RuntimeError("未找到任何可备份的数据库文件 (*.db)")
+        _ensure_backup_capacity(db_files, backup_dir)
 
         ts = started_at.strftime("%Y%m%d_%H%M%S")
         zip_name = f"db_backup_{ts}.zip"
         zip_path = os.path.join(backup_dir, zip_name)
+        partial_path = f"{zip_path}.part"
+        if os.path.exists(partial_path):
+            os.remove(partial_path)
 
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(partial_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for path in db_files:
                 arcname = os.path.basename(path)
                 zf.write(path, arcname=arcname)
+        os.replace(partial_path, zip_path)
+        partial_path = None
 
         # 记录备份文件相对路径（相对 backend 根目录，便于展示）
         backup_rel_path = os.path.relpath(zip_path, backend_root)
 
     except Exception as exc:
         error = exc
+        if partial_path and os.path.exists(partial_path):
+            try:
+                os.remove(partial_path)
+            except OSError:
+                logger.exception("清理失败的备份残片失败：%s", partial_path)
 
         # 写入系统日志（UserLog），方便在日志中心排查
         try:
@@ -376,6 +522,13 @@ def perform_backup(
         # 元数据记录失败不影响主流程
         pass
 
+    if not error and meta_id is not None:
+        try:
+            retention_result = _apply_backup_retention(config_snapshot)
+            logger.info("备份保留策略执行完成：%s", retention_result)
+        except Exception:
+            logger.exception("备份成功，但执行历史备份保留策略失败")
+
     if error:
         # 将异常抛出给调用方，便于前端提示
         raise error
@@ -389,3 +542,17 @@ def perform_backup(
         "finished_at": finished_at,
         "config_snapshot": config_snapshot,
     }
+
+
+def perform_backup(
+    db: Session,
+    trigger_type: str,
+    trigger_user: Optional[User] = None,
+) -> Dict[str, Any]:
+    """串行执行备份，避免手动备份与定时备份同时写入大文件。"""
+    if not _BACKUP_RUN_LOCK.acquire(blocking=False):
+        raise RuntimeError("已有备份任务正在执行，请稍后重试")
+    try:
+        return _perform_backup_unlocked(db, trigger_type, trigger_user)
+    finally:
+        _BACKUP_RUN_LOCK.release()

@@ -34,12 +34,17 @@ def _parse_iso(dt_str: Optional[str]) -> Optional[datetime]:
 
 
 def _get_next_run_time(config: Dict[str, Any], now_utc: datetime) -> Optional[datetime]:
-    """根据配置和 last_run_at 计算下一次应运行的时间。"""
+    """根据成功时间或失败尝试时间计算下一次应运行的时间。"""
     if not config.get("enabled"):
         return None
 
     interval = max(int(config.get("interval") or 1), 1)
     mode = config.get("mode") or "days"
+
+    last_attempt_at = _parse_iso(config.get("last_attempt_at"))
+    if config.get("last_attempt_status") in {"failed", "running"} and last_attempt_at:
+        retry_minutes = max(int(config.get("failure_retry_minutes") or 60), 1)
+        return last_attempt_at + timedelta(minutes=retry_minutes)
 
     last_run_at = _parse_iso(config.get("last_run_at"))
     if not last_run_at:
@@ -67,35 +72,39 @@ def _backup_scheduler_loop():
                 now_utc = datetime.now(timezone.utc)
                 next_run_at = _get_next_run_time(config, now_utc)
 
-                if not config.get("enabled") or not next_run_at:
-                    # 未启用或无法计算下次运行时间，休眠一会儿
-                    time.sleep(60)
-                    continue
-
-                # 尚未到达下次运行时间
-                if now_utc < next_run_at:
-                    time.sleep(60)
-                    continue
-
-                # 到达或超过下次运行时间，执行一次定时备份
-                try:
+                if config.get("enabled") and next_run_at and now_utc >= next_run_at:
+                    # 先记录尝试时间；即使备份失败，也按失败重试间隔控制下一次执行。
+                    config["last_attempt_at"] = to_utc_iso(now_utc)
+                    config["last_attempt_status"] = "running"
+                    config["last_error"] = None
+                    save_backup_config(db, config)
+                    db.commit()
                     logger.info(
                         "触发定时备份：now=%s next_run_at=%s",
                         to_utc_iso(now_utc),
                         to_utc_iso(next_run_at),
                     )
-                    result = perform_backup(db, trigger_type="scheduled", trigger_user=None)
-                    if result.get("status") == "success":
+                    try:
+                        result = perform_backup(db, trigger_type="scheduled", trigger_user=None)
                         # 仅在成功时记录 last_run_at / last_success_at
                         finished_at = result.get("finished_at") or result.get("started_at") or now_utc
                         config["last_run_at"] = to_utc_iso(finished_at)
                         config["last_success_at"] = config["last_run_at"]
+                        config["last_attempt_at"] = config["last_run_at"]
+                        config["last_attempt_status"] = "success"
+                        config["last_error"] = None
                         save_backup_config(db, config)
                         db.commit()
                         logger.info("定时备份成功：backup_file=%s", result.get("backup_file"))
-                except Exception:
-                    # 定时任务失败在 perform_backup 内部已写入日志，这里仅忽略
-                    logger.exception("定时备份执行失败")
+                    except Exception as exc:
+                        db.rollback()
+                        config = load_backup_config(db)
+                        config["last_attempt_at"] = to_utc_iso(now_utc)
+                        config["last_attempt_status"] = "failed"
+                        config["last_error"] = str(exc)[:500]
+                        save_backup_config(db, config)
+                        db.commit()
+                        logger.exception("定时备份执行失败")
 
             finally:
                 db.close()
@@ -103,6 +112,8 @@ def _backup_scheduler_loop():
         except Exception:
             # 调度器自身异常不应终止循环
             logger.exception("数据备份调度器循环异常")
+        finally:
+            # 无论成功、失败还是配置未启用，每轮最多执行一次并固定退避。
             time.sleep(60)
 
 
