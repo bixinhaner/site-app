@@ -307,6 +307,11 @@ EXACT: Dict[str, Tuple[str, str]] = {
 
 _RAW_PATTERNS: List[Tuple[str, str, str]] = [
     (r"^SN不是主设备：(?P<sn>.+)$", "SN is not a main device: {sn}", "SN bukan perangkat utama: {sn}"),
+    (
+        r"^站点 (?P<site>.+) 暂无 LLD 规划，请联系规划人员导入 LLD 后再申请或出库$",
+        "Site {site} has no LLD plan yet. Please ask the planner to import the LLD before requesting or issuing materials.",
+        "Site {site} belum memiliki rencana LLD. Minta perencana mengimpor LLD sebelum mengajukan atau mengeluarkan material.",
+    ),
     (r"^SN已在领料单待确认，无法快速出库：(?P<sn>.+)$", "SN is pending in an issue draft; quick stock-out not allowed: {sn}", "SN tertunda di draf pengambilan; keluar cepat tidak diizinkan: {sn}"),
     (r"^SN已在领料单待确认，无法扫码出库：(?P<sn>.+)$", "SN is pending in an issue draft; scan stock-out not allowed: {sn}", "SN tertunda di draf pengambilan; keluar via scan tidak diizinkan: {sn}"),
     (r"^SN已撤销：(?P<sn>.+)$", "SN has been revoked: {sn}", "SN telah dibatalkan: {sn}"),

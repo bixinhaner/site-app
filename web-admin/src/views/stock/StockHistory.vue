@@ -93,6 +93,7 @@
           <StockSitePicker
             v-model="filters.site_id"
             :placeholder="t('stockTrace.filterSite')"
+            include-unplanned
             @change="onSiteFilterChange"
           />
         </el-col>

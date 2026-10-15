@@ -62,6 +62,19 @@
           <el-switch v-model="settings.quick_stock_out_requires_site" :disabled="!settings.allow_quick_stock_out" />
           <div class="help">开启后：快速出库必须选择目标站点。若快速出库还用于备件、耗材等非站点用途，请保持关闭</div>
         </el-form-item>
+
+        <el-divider />
+
+        <el-form-item
+          label="目标站点必须有 LLD 规划"
+          :disabled="!settings.material_request_requires_site && !settings.quick_stock_out_requires_site"
+        >
+          <el-switch
+            v-model="settings.target_site_requires_lld"
+            :disabled="!settings.material_request_requires_site && !settings.quick_stock_out_requires_site"
+          />
+          <div class="help">开启后：只能选择已导入 LLD 规划的站点；申请提交、快速出库、仓库确认出库时都会校验，站点无 LLD 时拒绝出库。需先开启上面任一“必须填写目标站点”</div>
+        </el-form-item>
       </el-form>
     </el-card>
   </div>
@@ -82,6 +95,7 @@ const settings = reactive({
   issue_requires_warehouse_confirm: true,
   material_request_requires_site: false,
   quick_stock_out_requires_site: false,
+  target_site_requires_lld: false,
 })
 
 const applySettings = (s) => {

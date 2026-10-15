@@ -3632,6 +3632,8 @@ const legacyIdMap = {
   "快速出库必须填写目标站点": "Keluar cepat wajib mengisi situs tujuan",
   "开启后：快速出库必须选择目标站点。若快速出库还用于备件、耗材等非站点用途，请保持关闭": "Jika aktif: keluar cepat wajib memilih situs tujuan. Biarkan nonaktif jika keluar cepat juga dipakai untuk keperluan non-situs seperti suku cadang atau bahan habis pakai",
   "请选择目标站点": "Silakan pilih situs tujuan",
+  "目标站点必须有 LLD 规划": "Situs tujuan wajib memiliki rencana LLD",
+  "开启后：只能选择已导入 LLD 规划的站点；申请提交、快速出库、仓库确认出库时都会校验，站点无 LLD 时拒绝出库。需先开启上面任一“必须填写目标站点”": "Jika aktif: hanya situs dengan rencana LLD yang sudah diimpor yang dapat dipilih; pengajuan permintaan, keluar cepat, dan konfirmasi keluar gudang semuanya memeriksa dan menolak situs tanpa LLD. Memerlukan salah satu sakelar \"wajib mengisi situs tujuan\" di atas",
 };
 
 export default legacyIdMap;

@@ -38,6 +38,7 @@
 						<view class="pick-left">
 							<text class="pick-name">{{ s.site_name || s.site_code }}</text>
 							<text class="pick-sub mono">{{ [s.site_code !== s.site_name ? s.site_code : '', s.city].filter(Boolean).join(' · ') }}</text>
+							<text v-if="s.lld_cell_count" class="pick-sub">{{ lldText(s) }}</text>
 						</view>
 						<text v-if="s.recent" class="recent-tag">{{ $t('stock.targetSiteRecent') }}</text>
 						<text v-else class="pick-arrow">›</text>
@@ -45,8 +46,11 @@
 					<view v-if="loading" class="modal-empty">
 						<text class="modal-empty-text">{{ $t('common.loading') }}</text>
 					</view>
-					<view v-else-if="options.length === 0" class="modal-empty">
+					<view v-else-if="options.length === 0 && !noLldMatches.length" class="modal-empty">
 						<text class="modal-empty-text">{{ $t('messages.noSearchResults') }}</text>
+					</view>
+					<view v-if="!loading && noLldMatches.length" class="no-lld">
+						<text class="no-lld-text">{{ $t('stock.targetSiteNoLld', { codes: noLldMatches.map(x => x.site_code).join(', ') }) }}</text>
 					</view>
 				</scroll-view>
 			</view>
@@ -55,7 +59,7 @@
 </template>
 
 <script setup>
-	import { ref, watch } from 'vue'
+	import { getCurrentInstance, ref, watch } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 
@@ -70,9 +74,12 @@
 	const emit = defineEmits(['update:modelValue'])
 
 	const userStore = useUserStore()
+	const { $t } = getCurrentInstance().appContext.config.globalProperties
 	const visible = ref(false)
 	const keyword = ref('')
 	const options = ref([])
+	// 搜到但暂无 LLD 规划、不可选择的站点（项目开启“目标站点必须有 LLD 规划”时由后端返回）
+	const noLldMatches = ref([])
 	const loading = ref(false)
 	let timer = null
 
@@ -82,6 +89,11 @@
 		const code = s.site_code || ''
 		return name && code && name !== code ? `${name}（${code}）` : name || code
 	}
+
+	const lldText = (s) => [
+		(s.lld_bands || []).join('/'),
+		$t('stock.targetSiteLldCells', { count: s.lld_cell_count }),
+	].filter(Boolean).join(' · ')
 
 	const fetchOptions = async (kw = '') => {
 		const params = ['limit=30']
@@ -101,9 +113,11 @@
 		try {
 			const data = await fetchOptions(String(keyword.value || '').trim())
 			options.value = data?.sites || []
+			noLldMatches.value = data?.no_lld_matches || []
 		} catch (e) {
 			console.error('加载站点失败:', e)
 			options.value = []
+			noLldMatches.value = []
 		} finally {
 			loading.value = false
 		}
@@ -170,6 +184,8 @@
 	.picker-input.placeholder { color: #9ca3af; }
 	.picker-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.picker-arrow { color: #9ca3af; font-size: 12px; }
+	.no-lld { padding: 10px 14px; }
+	.no-lld-text { color: #b45309; font-size: 12px; line-height: 1.5; }
 	.modal-mask {
 		position: fixed;
 		left: 0;

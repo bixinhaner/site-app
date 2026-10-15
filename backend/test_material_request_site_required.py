@@ -1,4 +1,4 @@
-"""物料申请 / 快速出库“目标站点必填”开关 + 历史备注回填脚本。"""
+"""物料申请 / 快速出库“目标站点必填”与“必须有 LLD 规划”开关 + 历史备注回填脚本。"""
 import asyncio
 import csv
 import sqlite3
@@ -17,7 +17,9 @@ import app.api.stock as stock
 from app.core.database import Base
 from app.i18n.stock_messages import EXACT as STOCK_MESSAGES
 from app.models.equipment import Equipment, EquipmentCategoryEnum, Warehouse
+from app.models.issue_draft import IssueDraft, IssueDraftStatusEnum
 from app.models.material_request import MaterialRequest, MaterialRequestItem, MaterialRequestStatusEnum
+from app.models.planning import SitePlanning, SitePlanningCell
 from app.models.site import Site
 from app.models.user import User
 from app.models.work_order import WorkOrder, WorkOrderTypeEnum
@@ -189,3 +191,123 @@ def test_backfill_preview_then_apply(tmp_path):
     tx = dict(con.execute("SELECT id, site_id FROM stock_transactions").fetchall())
     assert tx == {"t1": 10, "t2": 10, "t3": None, "t4": 11}
     con.close()
+
+
+# ===== 目标站点必须有 LLD 规划 =====
+
+
+def _add_lld(db, site_id, bands=("B40",), current=True, version=1):
+    planning = SitePlanning(site_id=site_id, version=version, is_current=current)
+    db.add(planning)
+    db.flush()
+    for idx, band in enumerate(bands):
+        db.add(SitePlanningCell(planning_id=planning.id, site_id=site_id, band_code=band, local_cell_id=idx))
+    db.commit()
+
+
+def _detail_message(exc):
+    detail = exc.value.detail
+    return detail.get("message") if isinstance(detail, dict) else detail
+
+
+def test_lld_required_blocks_submit_for_site_without_lld(db):
+    _set_flow(db, material_request_requires_site=True, target_site_requires_lld=True)
+    with pytest.raises(HTTPException) as exc:
+        _submit(db, _draft(db, site_id=10))
+    assert exc.value.detail["code"] == "SITE_NO_LLD"
+    assert "33SMG_0192" in _detail_message(exc)
+
+
+def test_lld_required_allows_site_with_current_lld(db):
+    _add_lld(db, 10)
+    _set_flow(db, material_request_requires_site=True, target_site_requires_lld=True)
+    assert _submit(db, _draft(db, site_id=10))["request"]["status"] == "submitted"
+
+
+def test_non_current_lld_does_not_count(db):
+    _add_lld(db, 10, current=False)
+    _set_flow(db, material_request_requires_site=True, target_site_requires_lld=True)
+    with pytest.raises(HTTPException) as exc:
+        _submit(db, _draft(db, site_id=10))
+    assert exc.value.detail["code"] == "SITE_NO_LLD"
+
+
+def test_lld_switch_needs_site_required_switch(db):
+    _set_flow(db, target_site_requires_lld=True)  # 站点必填未开启 → LLD 开关不生效
+    assert _submit(db, _draft(db))["request"]["status"] == "submitted"
+    assert _site_option_ids(db) == set()  # 也不放开站点可见范围、不按 LLD 过滤
+
+
+def test_quick_stock_out_blocks_site_without_lld(db, monkeypatch):
+    monkeypatch.setattr(stock, "_ensure_inventory_operator", lambda *a, **k: None)
+    _set_flow(db, quick_stock_out_requires_site=True, target_site_requires_lld=True)
+    payload = {"warehouse_id": 1, "issued_to": 2, "site_id": 11, "aux_items": [{"equipment_id": 1, "quantity": 1}]}
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(stock.manual_stock_out(payload, db=db, current_user=ENGINEER))
+    assert exc.value.detail["code"] == "SITE_NO_LLD"
+
+
+def test_site_options_only_lld_sites_with_summary_and_hint(db):
+    _add_lld(db, 10, bands=("B40", "B40", "B3"))
+    _set_flow(db, material_request_requires_site=True, target_site_requires_lld=True)
+    res = asyncio.run(stock.get_stock_site_options(keyword=None, limit=30, db=db, current_user=ENGINEER))
+    assert [s["id"] for s in res["sites"]] == [10]
+    assert res["sites"][0]["lld_cell_count"] == 3 and res["sites"][0]["lld_bands"] == ["B3", "B40"]
+
+    res = asyncio.run(stock.get_stock_site_options(keyword="34YYK", limit=30, db=db, current_user=ENGINEER))
+    assert res["sites"] == [] and res["no_lld_matches"] == [{"site_code": "34YYK_0076", "site_name": "DMT_BLPT_KYAI_MODJO_TEGALREJO"}]
+
+    # 出入库记录筛选等场景需要全部站点
+    res = asyncio.run(
+        stock.get_stock_site_options(keyword=None, limit=30, include_unplanned=True, db=db, current_user=ENGINEER)
+    )
+    assert {s["id"] for s in res["sites"]} == {10, 11}
+
+
+def _issue_draft(db, request_id):
+    db.add(
+        IssueDraft(
+            id=f"d-{request_id}",
+            draft_no=f"ID-{request_id}",
+            request_id=request_id,
+            warehouse_id=1,
+            requester_id=ENGINEER.id,
+            status=IssueDraftStatusEnum.PENDING_CONFIRM,
+        )
+    )
+    db.commit()
+    return f"d-{request_id}"
+
+
+def _confirm(db, draft_id):
+    return asyncio.run(stock._confirm_issue_draft_impl(draft_id, {}, db, ENGINEER, skip_role_check=True))
+
+
+def test_confirm_stock_out_blocks_when_site_lld_missing(db):
+    request_id = _draft(db, site_id=10)
+    db.get(MaterialRequest, request_id).status = MaterialRequestStatusEnum.APPROVED
+    db.commit()
+    draft_id = _issue_draft(db, request_id)
+    _set_flow(db, material_request_requires_site=True, target_site_requires_lld=True)
+    with pytest.raises(HTTPException) as exc:
+        _confirm(db, draft_id)
+    assert isinstance(exc.value.detail, dict) and exc.value.detail.get("code") == "SITE_NO_LLD"
+
+
+def test_confirm_stock_out_not_blocked_for_legacy_request_without_site(db):
+    request_id = _draft(db)
+    draft_id = _issue_draft(db, request_id)
+    _set_flow(db, material_request_requires_site=True, target_site_requires_lld=True)
+    try:
+        _confirm(db, draft_id)
+    except HTTPException as exc:  # 可能因无出库明细等原因失败，但不应是站点/LLD 拦截
+        assert not (isinstance(exc.detail, dict) and exc.detail.get("code") == "SITE_NO_LLD")
+        assert exc.detail != stock.SITE_REQUIRED_DETAIL
+
+
+def test_no_lld_message_translated_by_pattern():
+    from app.i18n.stock_messages import PATTERNS
+
+    text = stock.SITE_NO_LLD_DETAIL.format(site="31JKU_0157")
+    hits = [(p, en, idn) for p, en, idn in PATTERNS if p.match(text)]
+    assert hits and "31JKU_0157" in hits[0][1].format(**hits[0][0].match(text).groupdict())

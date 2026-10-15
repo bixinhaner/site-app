@@ -3600,6 +3600,8 @@ const legacyEnMap = {
   "快速出库必须填写目标站点": "Quick stock-out must specify a target site",
   "开启后：快速出库必须选择目标站点。若快速出库还用于备件、耗材等非站点用途，请保持关闭": "When on: quick stock-out requires a target site. Keep this off if quick stock-out is also used for non-site purposes such as spares or consumables",
   "请选择目标站点": "Please select a target site",
+  "目标站点必须有 LLD 规划": "Target site must have an LLD plan",
+  "开启后：只能选择已导入 LLD 规划的站点；申请提交、快速出库、仓库确认出库时都会校验，站点无 LLD 时拒绝出库。需先开启上面任一“必须填写目标站点”": "When on: only sites with an imported LLD plan can be selected; request submission, quick stock-out and warehouse stock-out confirmation all check it and reject sites without LLD. Requires one of the \"must specify a target site\" switches above",
 };
 
 export default legacyEnMap;

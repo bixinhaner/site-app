@@ -35,6 +35,7 @@ from app.models.equipment import (
 )
 from app.models.system_config import SystemConfig
 from app.models.site import Site
+from app.models.planning import SitePlanning, SitePlanningCell
 from app.models.material_request import (
     MaterialRequest,
     MaterialRequestItem,
@@ -2718,6 +2719,7 @@ async def get_stock_transactions(
 async def get_stock_site_options(
     keyword: Optional[str] = None,
     limit: int = 30,
+    include_unplanned: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2725,6 +2727,7 @@ async def get_stock_site_options(
 
     项目开启“目标站点必填”后所有人都可搜全部站点（仅返回编码/名称/城市），
     否则领料人在工单派发前或替他人领料时选不到站点、无法提交。
+    开启“目标站点必须有 LLD 规划”后只返回有 LLD 的站点；出入库记录等筛选场景传 include_unplanned=true 返回全部。
     """
     _ensure_not_surveyor(current_user)
     from app.api.sites import _apply_site_visibility_filter
@@ -2741,6 +2744,17 @@ async def get_stock_site_options(
     if kw:
         like = f"%{kw}%"
         query = query.filter(or_(Site.site_name.like(like), Site.site_code.like(like), Site.city.like(like)))
+
+    # 搜到但因无 LLD 被排除的站点，供前端提示“该站点暂无 LLD 规划”
+    no_lld_matches: List[dict] = []
+    if _lld_filter_active(flow) and not include_unplanned:
+        lld_ids = _lld_site_ids_query(db)
+        if kw:
+            no_lld_matches = [
+                {"site_code": x.site_code, "site_name": x.site_name}
+                for x in query.filter(~Site.id.in_(lld_ids)).order_by(Site.site_code).limit(5).all()
+            ]
+        query = query.filter(Site.id.in_(lld_ids))
 
     # 最近使用：本人最近的申请单 / 本人经办或领取的出库单
     recent_ids: List[int] = []
@@ -2777,6 +2791,7 @@ async def get_stock_site_options(
         sites.extend(others.order_by(desc(Site.updated_at), desc(Site.id)).limit(remaining).all())
 
     recent_set = set(recent_ids)
+    lld = _lld_summaries(db, [x.id for x in sites])
     return {
         "sites": [
             {
@@ -2785,11 +2800,35 @@ async def get_stock_site_options(
                 "site_code": x.site_code,
                 "city": getattr(x, "city", None),
                 "recent": x.id in recent_set,
+                "lld_cell_count": lld.get(x.id, {}).get("cell_count", 0),
+                "lld_bands": lld.get(x.id, {}).get("bands", []),
             }
             for x in sites
         ],
         "last_used_site_id": recent_ids[0] if recent_ids else None,
+        "no_lld_matches": no_lld_matches,
     }
+
+
+def _lld_summaries(db: Session, site_ids: List[int]) -> Dict[int, dict]:
+    """站点当前 LLD 规划的小区数与频段（选站点时帮助确认，如 Savanna 同号 FDD/TDD 两个站点）。"""
+    if not site_ids:
+        return {}
+    rows = (
+        db.query(SitePlanningCell.site_id, SitePlanningCell.band_code)
+        .join(SitePlanning, SitePlanning.id == SitePlanningCell.planning_id)
+        .filter(SitePlanning.is_current.is_(True), SitePlanningCell.site_id.in_(site_ids))
+        .all()
+    )
+    out: Dict[int, dict] = {}
+    for site_id, band in rows:
+        item = out.setdefault(site_id, {"cell_count": 0, "bands": set()})
+        item["cell_count"] += 1
+        if band:
+            item["bands"].add(str(band))
+    for item in out.values():
+        item["bands"] = sorted(item["bands"])
+    return out
 
 
 # ===== 出入库记录导出（盘库） =====
@@ -5089,9 +5128,12 @@ DEFAULT_STOCK_FLOW_SETTINGS = {
     # 目标站点必填（盘库按站点追踪物料去向；各项目环境按需开启，默认选填）
     "material_request_requires_site": False,
     "quick_stock_out_requires_site": False,
+    # 目标站点必须有 LLD 规划（仅在对应“目标站点必填”开启时生效）：申请提交、快速出库、出库确认都校验
+    "target_site_requires_lld": False,
 }
 
 SITE_REQUIRED_DETAIL = "当前项目要求填写目标站点，请选择目标站点；如果页面上没有目标站点，请升级 APP 到最新版本"
+SITE_NO_LLD_DETAIL = "站点 {site} 暂无 LLD 规划，请联系规划人员导入 LLD 后再申请或出库"
 
 
 def _enum_value(value):
@@ -5144,9 +5186,42 @@ def _ensure_quick_stock_out_enabled(db: Session) -> None:
         raise HTTPException(status_code=400, detail="快捷出库已关闭")
 
 
+def _lld_site_ids_query(db: Session):
+    """有 LLD 规划的站点：当前规划版本下至少有一个小区。"""
+    return (
+        db.query(SitePlanningCell.site_id)
+        .join(SitePlanning, SitePlanning.id == SitePlanningCell.planning_id)
+        .filter(SitePlanning.is_current.is_(True))
+        .distinct()
+    )
+
+
+def _lld_filter_active(settings: dict) -> bool:
+    return bool(settings.get("target_site_requires_lld")) and bool(
+        settings.get("material_request_requires_site") or settings.get("quick_stock_out_requires_site")
+    )
+
+
+def _ensure_site_has_lld(db: Session, site_id: int) -> None:
+    if db.query(_lld_site_ids_query(db).filter(SitePlanningCell.site_id == site_id).exists()).scalar():
+        return
+    site = db.query(Site).filter(Site.id == site_id).first()
+    label = getattr(site, "site_code", None) or str(site_id)
+    raise HTTPException(
+        status_code=400,
+        detail={"message": SITE_NO_LLD_DETAIL.format(site=label), "code": "SITE_NO_LLD", "site_code": label},
+    )
+
+
 def _ensure_site_if_required(db: Session, setting_key: str, site_id: Optional[int]) -> None:
-    if not site_id and _get_flow_settings(db).get(setting_key, False):
+    """按项目设置校验目标站点：必填 + （开启时）必须有 LLD 规划。"""
+    settings = _get_flow_settings(db)
+    if not settings.get(setting_key, False):
+        return
+    if not site_id:
         raise HTTPException(status_code=400, detail=SITE_REQUIRED_DETAIL)
+    if settings.get("target_site_requires_lld"):
+        _ensure_site_has_lld(db, site_id)
 
 
 @router.get("/flow-settings")
@@ -6748,6 +6823,10 @@ async def _confirm_issue_draft_impl(
     req = draft.request
     if not skip_role_check and not _warehouse_in_scope(db, current_user, draft.warehouse_id):
         raise HTTPException(status_code=403, detail="无权限处理该仓库的领料单")
+    # 出库时再校验 LLD：申请提交后规划可能被删除/回退；开关前已提交且未选站点的在途单据不拦截
+    flow = _get_flow_settings(db)
+    if req and req.site_id and flow.get("material_request_requires_site") and flow.get("target_site_requires_lld"):
+        _ensure_site_has_lld(db, req.site_id)
 
     serial_ids = payload.get("serial_ids") if isinstance(payload, dict) else []
     aux_items_payload = payload.get("aux_items") if isinstance(payload, dict) else []
