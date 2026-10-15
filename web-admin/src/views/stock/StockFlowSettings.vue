@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="title-block">
         <h2>库存流程设置</h2>
-        <div class="subtitle">控制“申请→领料→确认出库”与“快速出库”等开关（默认全开）</div>
+        <div class="subtitle">控制“申请→领料→确认出库”与“快速出库”等开关（流程开关默认全开，目标站点必填默认关闭）</div>
       </div>
       <div class="header-actions">
         <el-button @click="load" :loading="loading">
@@ -46,11 +46,21 @@
           <div class="help">本项目默认应为开启：库存以仓库“确认出库”时扣减为准</div>
         </el-form-item>
 
+        <el-form-item label="物料申请必须填写目标站点" :disabled="!settings.enable_material_request">
+          <el-switch v-model="settings.material_request_requires_site" :disabled="!settings.enable_material_request" />
+          <div class="help">开启后：申请单提交时必须选择目标站点（草稿可暂不选），出入库记录可按站点盘库；所有人可搜索全部站点。请先确认一线人员已升级到最新 APP，旧版 APP 没有目标站点选项，将无法提交</div>
+        </el-form-item>
+
         <el-divider />
 
         <el-form-item label="允许快速出库（无申请）">
           <el-switch v-model="settings.allow_quick_stock_out" />
           <div class="help">关闭后：快速出库（无申请）接口将返回“快捷出库已关闭”（旧流程扫码领货请到“系统配置 → 移动端配置”单独控制）</div>
+        </el-form-item>
+
+        <el-form-item label="快速出库必须填写目标站点" :disabled="!settings.allow_quick_stock_out">
+          <el-switch v-model="settings.quick_stock_out_requires_site" :disabled="!settings.allow_quick_stock_out" />
+          <div class="help">开启后：快速出库必须选择目标站点。若快速出库还用于备件、耗材等非站点用途，请保持关闭</div>
         </el-form-item>
       </el-form>
     </el-card>
@@ -70,7 +80,13 @@ const settings = reactive({
   request_requires_approval: true,
   allow_quick_stock_out: true,
   issue_requires_warehouse_confirm: true,
+  material_request_requires_site: false,
+  quick_stock_out_requires_site: false,
 })
+
+const applySettings = (s) => {
+  for (const key of Object.keys(settings)) settings[key] = !!s?.[key]
+}
 
 const extractError = (error) => {
   const detail = error?.response?.data?.detail
@@ -83,11 +99,7 @@ const load = async () => {
   try {
     loading.value = true
     const res = await stockApi.getFlowSettings()
-    const s = res?.settings || {}
-    settings.enable_material_request = !!s.enable_material_request
-    settings.request_requires_approval = !!s.request_requires_approval
-    settings.allow_quick_stock_out = !!s.allow_quick_stock_out
-    settings.issue_requires_warehouse_confirm = !!s.issue_requires_warehouse_confirm
+    applySettings(res?.settings)
   } catch (error) {
     console.error('加载设置失败:', error)
     ElMessage.error(extractError(error))
@@ -100,11 +112,7 @@ const save = async () => {
   try {
     saving.value = true
     const res = await stockApi.updateFlowSettings({ settings: { ...settings } })
-    const saved = res?.settings || {}
-    settings.enable_material_request = !!saved.enable_material_request
-    settings.request_requires_approval = !!saved.request_requires_approval
-    settings.allow_quick_stock_out = !!saved.allow_quick_stock_out
-    settings.issue_requires_warehouse_confirm = !!saved.issue_requires_warehouse_confirm
+    applySettings(res?.settings)
     ElMessage.success('保存成功')
   } catch (error) {
     console.error('保存设置失败:', error)

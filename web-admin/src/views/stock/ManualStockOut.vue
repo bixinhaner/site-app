@@ -48,7 +48,9 @@
               </el-select>
             </div>
             <div class="field span2">
-              <div class="label">{{ t('stockTrace.targetSite') }}</div>
+              <div class="label">
+                <span v-if="flowSettings.quick_stock_out_requires_site" class="required-mark">*</span>{{ t('stockTrace.targetSite') }}
+              </div>
               <StockSitePicker v-model="form.site_id" />
             </div>
             <div class="field span2">
@@ -203,6 +205,7 @@ import { stockApi } from '../../api/stock'
 import { equipmentApi } from '../../api/equipment'
 import { userAPI } from '../../api/user'
 import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
+import { loadStockFlowSettings, useStockFlowSettings } from '../../utils/stockFlowSettings'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -224,6 +227,7 @@ const snList = ref([])
 const auxRows = ref([])
 
 const submitting = ref(false)
+const flowSettings = useStockFlowSettings()
 
 const userSearching = ref(false)
 const userOptions = ref([])
@@ -333,6 +337,7 @@ const buildPayload = () => {
   if (!warehouse_id) throw new Error('请选择出库仓库')
   const issued_to = Number(form.value.issued_to_user?.id || 0)
   if (!issued_to) throw new Error('请选择领取人')
+  if (flowSettings.quick_stock_out_requires_site && !form.value.site_id) throw new Error('请选择目标站点')
   const main_sns = snList.value.slice()
   const aux_map = new Map()
   for (const row of auxRows.value) {
@@ -375,6 +380,7 @@ const submit = async () => {
 }
 
 onMounted(async () => {
+  loadStockFlowSettings()
   await loadBaseOptions()
 })
 </script>
@@ -417,6 +423,11 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--text-secondary);
   margin-bottom: 6px;
+}
+
+.required-mark {
+  color: var(--el-color-danger);
+  margin-right: 4px;
 }
 
 .field.span2 {

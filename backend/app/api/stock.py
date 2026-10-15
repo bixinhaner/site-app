@@ -2721,14 +2721,20 @@ async def get_stock_site_options(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """领料/快速出库“目标站点”下拉：仓库侧可搜全部站点，其他用户按站点可见范围；最近使用的站点排在最前。"""
+    """领料/快速出库“目标站点”下拉：仓库侧可搜全部站点，其他用户按站点可见范围；最近使用的站点排在最前。
+
+    项目开启“目标站点必填”后所有人都可搜全部站点（仅返回编码/名称/城市），
+    否则领料人在工单派发前或替他人领料时选不到站点、无法提交。
+    """
     _ensure_not_surveyor(current_user)
     from app.api.sites import _apply_site_visibility_filter
 
     limit = max(1, min(int(limit or 30), 100))
     query = db.query(Site)
     managed_ids = _get_managed_warehouse_ids(db, current_user)
-    if not (managed_ids is None or managed_ids):
+    flow = _get_flow_settings(db)
+    site_required = flow.get("material_request_requires_site") or flow.get("quick_stock_out_requires_site")
+    if not (site_required or managed_ids is None or managed_ids):
         query = _apply_site_visibility_filter(query, db, current_user)
 
     kw = str(keyword or "").strip()
@@ -5080,7 +5086,12 @@ DEFAULT_STOCK_FLOW_SETTINGS = {
     "issue_requires_warehouse_confirm": True,
     # 无申请直接出库（兜底）
     "allow_quick_stock_out": True,
+    # 目标站点必填（盘库按站点追踪物料去向；各项目环境按需开启，默认选填）
+    "material_request_requires_site": False,
+    "quick_stock_out_requires_site": False,
 }
+
+SITE_REQUIRED_DETAIL = "当前项目要求填写目标站点，请选择目标站点；如果页面上没有目标站点，请升级 APP 到最新版本"
 
 
 def _enum_value(value):
@@ -5131,6 +5142,11 @@ def _ensure_quick_stock_out_enabled(db: Session) -> None:
     settings = _get_flow_settings(db)
     if not settings.get("allow_quick_stock_out", True):
         raise HTTPException(status_code=400, detail="快捷出库已关闭")
+
+
+def _ensure_site_if_required(db: Session, setting_key: str, site_id: Optional[int]) -> None:
+    if not site_id and _get_flow_settings(db).get(setting_key, False):
+        raise HTTPException(status_code=400, detail=SITE_REQUIRED_DETAIL)
 
 
 @router.get("/flow-settings")
@@ -5676,6 +5692,8 @@ async def submit_material_request(
         _ensure_inventory_workbench_scope(db, current_user, detail="无权限提交该申请单")
         if not _warehouse_in_scope(db, current_user, req.warehouse_id):
             raise HTTPException(status_code=403, detail="无权限提交该仓库的申请单")
+    # 草稿可不选站点，提交时按项目设置校验
+    _ensure_site_if_required(db, "material_request_requires_site", req.site_id)
 
     req.submitted_at = datetime.now()
     req.status = MaterialRequestStatusEnum.SUBMITTED
@@ -7113,6 +7131,7 @@ async def manual_stock_out(
     offline_document_id = payload.get("offline_document_id") if isinstance(payload, dict) else None
     offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
     site_id = _resolve_optional_site_id(db, payload.get("site_id") if isinstance(payload, dict) else None)
+    _ensure_site_if_required(db, "quick_stock_out_requires_site", site_id)
 
     try:
         warehouse_id = int(warehouse_id)

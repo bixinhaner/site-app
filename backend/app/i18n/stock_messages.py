@@ -96,6 +96,10 @@ EXACT: Dict[str, Tuple[str, str]] = {
     "无权限驳回该仓库的申请单": ("No permission to reject requests of this warehouse", "Tidak ada izin menolak permintaan gudang ini"),
     # ---- 流程开关 ----
     "快捷出库已关闭": ("Quick stock-out is disabled", "Keluar cepat dinonaktifkan"),
+    "当前项目要求填写目标站点，请选择目标站点；如果页面上没有目标站点，请升级 APP 到最新版本": (
+        "This project requires a target site. Please select a target site; if the page has no Target Site field, please update the APP to the latest version.",
+        "Proyek ini mewajibkan situs tujuan. Silakan pilih situs tujuan; jika halaman tidak memiliki kolom Situs Tujuan, perbarui APP ke versi terbaru.",
+    ),
     "物料申请流程已关闭": ("Material request flow is disabled", "Alur permintaan material dinonaktifkan"),
     "旧流程扫码领货已关闭，请使用“物料申请”流程领料": (
         "Legacy scan pickup is disabled. Please use the Material Request flow.",

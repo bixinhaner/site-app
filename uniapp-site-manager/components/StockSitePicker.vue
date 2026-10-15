@@ -1,8 +1,8 @@
 <template>
 	<view>
 		<view class="picker-input u-pressable" :class="{ placeholder: !modelValue }" @click="open">
-			<text class="picker-text">{{ modelValue ? siteLabel(modelValue) : $t('stock.targetSitePlaceholder') }}</text>
-			<uni-icons v-if="modelValue" type="clear" size="18" color="#9ca3af" @click.stop="select(null)" />
+			<text class="picker-text">{{ modelValue ? siteLabel(modelValue) : $t(required ? 'stock.targetSitePlaceholderRequired' : 'stock.targetSitePlaceholder') }}</text>
+			<uni-icons v-if="modelValue && !required" type="clear" size="18" color="#9ca3af" @click.stop="select(null)" />
 			<text v-else class="picker-arrow">▼</text>
 		</view>
 
@@ -29,7 +29,7 @@
 				</view>
 
 				<scroll-view class="modal-list" scroll-y>
-					<view v-if="modelValue" class="pick-row u-pressable-subtle" @click="select(null)">
+					<view v-if="modelValue && !required" class="pick-row u-pressable-subtle" @click="select(null)">
 						<view class="pick-left">
 							<text class="pick-name muted">{{ $t('stock.targetSiteClear') }}</text>
 						</view>
@@ -55,7 +55,7 @@
 </template>
 
 <script setup>
-	import { onMounted, ref } from 'vue'
+	import { ref, watch } from 'vue'
 	import { useUserStore } from '@/stores/user'
 	import { buildApiUrl, API_ENDPOINTS, getAuthHeaders } from '@/config/api.js'
 
@@ -64,6 +64,8 @@
 		modelValue: { type: Object, default: null },
 		// 为空时自动带出最近一次使用的站点（新建单据时使用）
 		autofillLastUsed: { type: Boolean, default: false },
+		// 项目要求目标站点必填：不提供“不指定站点”，占位提示改为必选
+		required: { type: Boolean, default: false },
 	})
 	const emit = defineEmits(['update:modelValue'])
 
@@ -132,17 +134,24 @@
 		close()
 	}
 
-	onMounted(async () => {
-		if (!props.autofillLastUsed || props.modelValue) return
-		try {
-			const data = await fetchOptions('')
-			const lastId = data?.last_used_site_id
-			const last = (data?.sites || []).find((x) => x.id === lastId)
-			if (last && !props.modelValue) select(last)
-		} catch (e) {
-			// 自动带出失败不影响填单
-		}
-	})
+	// 页面可能在流程设置加载完成后才决定是否自动带出，故用 watch 而非 onMounted；只带出一次
+	let autofilled = false
+	watch(
+		() => props.autofillLastUsed,
+		async (enabled) => {
+			if (!enabled || autofilled || props.modelValue) return
+			autofilled = true
+			try {
+				const data = await fetchOptions('')
+				const lastId = data?.last_used_site_id
+				const last = (data?.sites || []).find((x) => x.id === lastId)
+				if (last && !props.modelValue) select(last)
+			} catch (e) {
+				// 自动带出失败不影响填单
+			}
+		},
+		{ immediate: true }
+	)
 </script>
 
 <style scoped>

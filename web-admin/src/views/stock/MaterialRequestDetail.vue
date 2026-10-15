@@ -212,7 +212,9 @@
             <el-select v-model="draftWarehouseId" filterable placeholder="选择仓库" class="warehouse-select">
               <el-option v-for="w in warehouses" :key="w.id" :label="w.warehouse_name" :value="w.id" />
             </el-select>
-            <div class="draft-label">{{ t('stockTrace.targetSite') }}</div>
+            <div class="draft-label">
+              <span v-if="flowSettings.material_request_requires_site" class="required-mark">*</span>{{ t('stockTrace.targetSite') }}
+            </div>
             <StockSitePicker
               v-model="draftSiteId"
               :initial-site="draftSiteOption"
@@ -384,6 +386,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { stockApi } from '../../api/stock'
 import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
+import { loadStockFlowSettings, useStockFlowSettings } from '../../utils/stockFlowSettings'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -416,6 +419,7 @@ const abandonReason = ref('')
 const draftWarehouseId = ref(undefined)
 const draftNotes = ref('')
 const draftSiteId = ref(null)
+const flowSettings = useStockFlowSettings()
 const draftSiteOption = computed(() =>
   requestData.value?.site_id
     ? { id: requestData.value.site_id, site_name: requestData.value.site_name, site_code: requestData.value.site_code }
@@ -644,6 +648,10 @@ const saveDraft = async () => {
 }
 
 const submitDraft = async () => {
+  if (flowSettings.material_request_requires_site && !draftSiteId.value) {
+    ElMessage.error('请选择目标站点')
+    return
+  }
   try {
     await saveDraft()
     saving.value = true
@@ -757,6 +765,7 @@ watch(
 )
 
 onMounted(async () => {
+  loadStockFlowSettings()
   await loadBaseOptions()
   await load()
 })
@@ -985,6 +994,11 @@ onMounted(async () => {
   color: var(--text-secondary);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.required-mark {
+  color: var(--el-color-danger);
+  margin-right: 4px;
 }
 
 .warehouse-select {

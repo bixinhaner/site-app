@@ -1450,8 +1450,6 @@ const legacyEnMap = {
   "客户: {{ row.customer }}": "Customer: {{ row.customer }}",
   "控制 Web 管理端的登录、菜单可见性、页面进入和后台操作按钮。":
     "Control the login, menu visibility, page entry and background operation buttons of the web management terminal.",
-  "控制“申请→领料→确认出库”与“快速出库”等开关（默认全开）":
-    'Control switches such as "Application→Pickup→Confirm Outbound" and "Quick Outbound" (all on by default)',
   "控制移动端 App 的登录、首页入口、底部导航、页面访问和关键按钮。":
     "Control the login, home page entrance, bottom navigation, page access and key buttons of the mobile app.",
   库存: "in stock",
@@ -3596,6 +3594,12 @@ const legacyEnMap = {
   "服务器磁盘空间不足，已停止导出": "Server disk space is low; export stopped",
   "PDF 生成失败": "PDF generation failed",
   "档案不存在": "Archive not found",
+  "控制“申请→领料→确认出库”与“快速出库”等开关（流程开关默认全开，目标站点必填默认关闭）": "Control switches such as \"Application→Pickup→Confirm Outbound\" and \"Quick Outbound\" (flow switches on by default, target site requirement off by default)",
+  "物料申请必须填写目标站点": "Material requests must specify a target site",
+  "开启后：申请单提交时必须选择目标站点（草稿可暂不选），出入库记录可按站点盘库；所有人可搜索全部站点。请先确认一线人员已升级到最新 APP，旧版 APP 没有目标站点选项，将无法提交": "When on: a target site must be selected when submitting a request (drafts may leave it empty), so stock records can be counted by site; everyone can search all sites. Make sure field staff have updated to the latest APP first — older APP versions have no target site field and will not be able to submit",
+  "快速出库必须填写目标站点": "Quick stock-out must specify a target site",
+  "开启后：快速出库必须选择目标站点。若快速出库还用于备件、耗材等非站点用途，请保持关闭": "When on: quick stock-out requires a target site. Keep this off if quick stock-out is also used for non-site purposes such as spares or consumables",
+  "请选择目标站点": "Please select a target site",
 };
 
 export default legacyEnMap;

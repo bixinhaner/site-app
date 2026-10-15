@@ -34,9 +34,15 @@
 					</view>
 
 					<view class="u-form-item">
-						<text class="u-form-label">{{ $t('stock.targetSite') }}（{{ $t('stock.targetSiteOptional') }}）</text>
-						<StockSitePicker v-model="targetSite" :autofill-last-used="!requestId" />
-						<text class="u-form-help">{{ $t('stock.targetSiteHelp') }}</text>
+						<text v-if="siteRequired" class="u-form-label">{{ $t('stock.targetSite') }}<text class="required-mark">*</text></text>
+						<text v-else class="u-form-label">{{ $t('stock.targetSite') }}（{{ $t('stock.targetSiteOptional') }}）</text>
+						<!-- 必填时不自动带出上次站点，避免沿用错误站点导致盘库数据失真 -->
+						<StockSitePicker
+							v-model="targetSite"
+							:required="siteRequired"
+							:autofill-last-used="flowLoaded && !siteRequired && !requestId"
+						/>
+						<text class="u-form-help">{{ siteRequired ? $t('stock.targetSiteRequiredHelp') : $t('stock.targetSiteHelp') }}</text>
 					</view>
 
 					<view class="u-form-item">
@@ -218,6 +224,7 @@
 	import { extractStockErrorMessage } from '@/utils/stock-error-i18n.js'
 	import CustomNavbar from '@/components/CustomNavbar.vue'
 	import StockSitePicker from '@/components/StockSitePicker.vue'
+	import { loadSiteRequiredSettings } from '@/utils/stock-flow-settings.js'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
@@ -238,6 +245,14 @@
 
 	const notes = ref('')
 	const targetSite = ref(null)
+	const siteRequired = ref(false)
+	const flowLoaded = ref(false)
+
+	const loadFlowSettings = async () => {
+		const s = await loadSiteRequiredSettings(userStore.token)
+		siteRequired.value = s.material_request_requires_site
+		flowLoaded.value = true
+	}
 
 		const packages = ref([])
 		const packageIndex = ref(0)
@@ -408,7 +423,7 @@
 		if (!ensureLoggedIn()) return
 		refreshing.value = true
 		try {
-			await Promise.all([loadWarehouses(), loadPackages(), loadEquipments()])
+			await Promise.all([loadFlowSettings(), loadWarehouses(), loadPackages(), loadEquipments()])
 			if (requestId.value) await loadRequest(requestId.value)
 		} finally {
 			refreshing.value = false
@@ -623,6 +638,11 @@
 	const submitRequest = async () => {
 		if (!ensureLoggedIn()) return
 		if (!validateForm()) return
+		// 草稿可不选站点；提交时按项目设置要求必填
+		if (siteRequired.value && !targetSite.value?.id) {
+			uni.showToast({ title: $t('stock.targetSiteRequired'), icon: 'none' })
+			return
+		}
 
 		uni.showModal({
 			title: $t('common.confirm'),
@@ -670,7 +690,7 @@
 
 	onMounted(async () => {
 		if (!ensureLoggedIn()) return
-		await Promise.all([loadWarehouses(), loadPackages(), loadEquipments()])
+		await Promise.all([loadFlowSettings(), loadWarehouses(), loadPackages(), loadEquipments()])
 		if (requestId.value) await loadRequest(requestId.value)
 	})
 </script>
@@ -679,6 +699,11 @@
 	.page {
 		min-height: 100vh;
 		background: var(--bg-page);
+	}
+	.required-mark {
+		color: #ff4757;
+		margin-left: 4rpx;
+		font-weight: bold;
 	}
 	.content {
 		height: calc(100vh - 88rpx - var(--status-bar-height, 0px));

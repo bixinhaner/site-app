@@ -1463,8 +1463,6 @@ const legacyIdMap = {
   "客户: {{ row.customer }}": "Pelanggan: {{ baris.pelanggan }}",
   "控制 Web 管理端的登录、菜单可见性、页面进入和后台操作按钮。":
     "Kontrol login, visibilitas menu, entri halaman, dan tombol operasi latar belakang terminal manajemen web.",
-  "控制“申请→领料→确认出库”与“快速出库”等开关（默认全开）":
-    'Sakelar kontrol seperti "Aplikasi→Penjemputan→Konfirmasi Keluar" dan "Keluar Cepat" (semuanya aktif secara default)',
   "控制移动端 App 的登录、首页入口、底部导航、页面访问和关键按钮。":
     "Kontrol login, pintu masuk halaman beranda, navigasi bawah, akses halaman, dan tombol kunci aplikasi seluler.",
   库存: "dalam stok",
@@ -3628,6 +3626,12 @@ const legacyIdMap = {
   "服务器磁盘空间不足，已停止导出": "Ruang disk server tidak cukup; ekspor dihentikan",
   "PDF 生成失败": "Gagal membuat PDF",
   "档案不存在": "Arsip tidak ditemukan",
+  "控制“申请→领料→确认出库”与“快速出库”等开关（流程开关默认全开，目标站点必填默认关闭）": "Sakelar kontrol seperti \"Aplikasi→Penjemputan→Konfirmasi Keluar\" dan \"Keluar Cepat\" (sakelar alur aktif secara default, wajib situs tujuan nonaktif secara default)",
+  "物料申请必须填写目标站点": "Permintaan material wajib mengisi situs tujuan",
+  "开启后：申请单提交时必须选择目标站点（草稿可暂不选），出入库记录可按站点盘库；所有人可搜索全部站点。请先确认一线人员已升级到最新 APP，旧版 APP 没有目标站点选项，将无法提交": "Jika aktif: situs tujuan wajib dipilih saat mengajukan permintaan (draf boleh dikosongkan), sehingga catatan stok dapat dihitung per situs; semua orang dapat mencari semua situs. Pastikan petugas lapangan sudah memperbarui ke APP terbaru — APP versi lama tidak memiliki kolom situs tujuan dan tidak akan bisa mengajukan",
+  "快速出库必须填写目标站点": "Keluar cepat wajib mengisi situs tujuan",
+  "开启后：快速出库必须选择目标站点。若快速出库还用于备件、耗材等非站点用途，请保持关闭": "Jika aktif: keluar cepat wajib memilih situs tujuan. Biarkan nonaktif jika keluar cepat juga dipakai untuk keperluan non-situs seperti suku cadang atau bahan habis pakai",
+  "请选择目标站点": "Silakan pilih situs tujuan",
 };
 
 export default legacyIdMap;

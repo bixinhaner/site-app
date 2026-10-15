@@ -20,7 +20,7 @@
 							<text class="meta-item">{{ request.warehouse_name || '-' }}</text>
 							<template v-if="request.site_name">
 								<text class="dot">·</text>
-								<text class="meta-item">{{ $t('stock.targetSiteWithValue', { value: request.site_name }) }}</text>
+								<text class="meta-item">{{ $t('stock.targetSiteWithValue', { value: request.site_code && request.site_code !== request.site_name ? `${request.site_name}（${request.site_code}）` : request.site_name }) }}</text>
 							</template>
 						</view>
 					</view>
@@ -238,6 +238,7 @@
 	import ReasonInputDialog from '@/components/ReasonInputDialog.vue'
 	import SkeletonCard from '@/components/SkeletonCard.vue'
 	import { reportMobileLog } from '@/utils/mobileLogReporter.js'
+	import { loadSiteRequiredSettings } from '@/utils/stock-flow-settings.js'
 
 	const userStore = useUserStore()
 	const languageStore = useLanguageStore()
@@ -445,6 +446,14 @@
 
 	const submitDraft = async () => {
 		if (!request.value) return
+		if (!request.value.site_id) {
+			const s = await loadSiteRequiredSettings(userStore.token)
+			if (s.material_request_requires_site) {
+				uni.showToast({ title: $t('stock.targetSiteRequired'), icon: 'none' })
+				setTimeout(goEdit, 700)
+				return
+			}
+		}
 		uni.showModal({
 			title: $t('common.confirm'),
 			content: $t('stock.materialRequestSubmitConfirm'),

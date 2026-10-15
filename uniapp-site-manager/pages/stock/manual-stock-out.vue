@@ -48,8 +48,9 @@
 					</view>
 
 					<view class="u-form-item">
-						<text class="u-form-label">{{ $t('stock.targetSite') }}（{{ $t('stock.targetSiteOptional') }}）</text>
-						<StockSitePicker v-model="targetSite" />
+						<text v-if="flowSettings.quick_stock_out_requires_site" class="u-form-label">{{ $t('stock.targetSite') }}<text class="required-mark">*</text></text>
+						<text v-else class="u-form-label">{{ $t('stock.targetSite') }}（{{ $t('stock.targetSiteOptional') }}）</text>
+						<StockSitePicker v-model="targetSite" :required="flowSettings.quick_stock_out_requires_site" />
 					</view>
 
 					<view class="u-form-item">
@@ -297,6 +298,7 @@
 
 	const flowSettings = reactive({
 		allow_quick_stock_out: true,
+		quick_stock_out_requires_site: false,
 	})
 
 	const warehouses = ref([])
@@ -365,6 +367,7 @@
 			})
 			if (flowRes.statusCode === 200 && flowRes.data?.settings) {
 				flowSettings.allow_quick_stock_out = flowRes.data.settings.allow_quick_stock_out !== false
+				flowSettings.quick_stock_out_requires_site = flowRes.data.settings.quick_stock_out_requires_site === true
 			}
 		} catch (e) {
 			// ignore
@@ -590,6 +593,10 @@
 			uni.showToast({ title: $t('stock.manualStockOutIssuedToRequired'), icon: 'none' })
 			return false
 		}
+		if (flowSettings.quick_stock_out_requires_site && !targetSite.value?.id) {
+			uni.showToast({ title: $t('stock.targetSiteRequired'), icon: 'none' })
+			return false
+		}
 		if (snList.value.length === 0 && auxRows.value.length === 0) {
 			uni.showToast({ title: $t('stock.manualStockOutItemsRequired'), icon: 'none' })
 			return false
@@ -683,6 +690,7 @@
 
 <style scoped lang="scss">
 	.page { min-height: 100vh; background: var(--bg-page); }
+	.required-mark { color: #ff4757; margin-left: 4rpx; font-weight: bold; }
 	.content { height: calc(100vh - 88rpx - var(--status-bar-height, 0px)); }
 
 	.hero {

@@ -142,7 +142,9 @@
             </div>
 
             <div class="field span2">
-              <div class="label">{{ t('stockTrace.targetSite') }}</div>
+              <div class="label">
+                <span v-if="flowSettings.material_request_requires_site" class="required-mark">*</span>{{ t('stockTrace.targetSite') }}
+              </div>
               <StockSitePicker v-model="createForm.site_id" />
             </div>
 
@@ -265,6 +267,7 @@ import { stockApi } from '../../api/stock'
 import { equipmentApi } from '../../api/equipment'
 import { userAPI } from '../../api/user'
 import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
+import { loadStockFlowSettings, useStockFlowSettings } from '../../utils/stockFlowSettings'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -289,6 +292,7 @@ const packages = ref([])
 
 const createVisible = ref(false)
 const creating = ref(false)
+const flowSettings = useStockFlowSettings()
 
 const isCompactTable = ref(typeof window !== 'undefined' ? window.innerWidth <= 980 : false)
 const syncCompactTable = () => {
@@ -540,11 +544,14 @@ const applyPackage = () => {
   ElMessage.success('已应用套装到明细')
 }
 
-const _buildCreatePayload = () => {
+const _buildCreatePayload = (submitAfterCreate) => {
   const requester = createForm.value.requester
   const warehouse_id = createForm.value.warehouse_id
   if (!requester?.id) throw new Error('请选择申请人')
   if (!warehouse_id) throw new Error('请选择发料仓库')
+  if (submitAfterCreate && flowSettings.material_request_requires_site && !createForm.value.site_id) {
+    throw new Error('请选择目标站点')
+  }
 
   const merged = new Map()
   for (const row of createForm.value.items) {
@@ -568,7 +575,7 @@ const _buildCreatePayload = () => {
 const create = async (submitAfterCreate) => {
   try {
     creating.value = true
-    const payload = _buildCreatePayload()
+    const payload = _buildCreatePayload(submitAfterCreate)
     const res = await stockApi.createMaterialRequest(payload)
     const requestId = res?.request?.id
 
@@ -595,6 +602,7 @@ onMounted(async () => {
     window.addEventListener('resize', syncCompactTable, { passive: true })
     syncCompactTable()
   }
+  loadStockFlowSettings()
   await loadBaseOptions()
   await load()
 })
@@ -712,6 +720,11 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--text-secondary);
   margin-bottom: 6px;
+}
+
+.required-mark {
+  color: var(--el-color-danger);
+  margin-right: 4px;
 }
 
 .field.span2 {
