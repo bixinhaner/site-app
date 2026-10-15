@@ -3610,6 +3610,18 @@ const legacyIdMap = {
   "检查状态不支持拆除": "Status inspeksi tidak mendukung pembongkaran",
   "设备库存状态不支持拆除": "Status inventaris perangkat tidak mendukung pembongkaran",
   "设备已发起退库申请（待仓库收货）": "Perangkat memiliki permintaan retur yang menunggu penerimaan gudang",
+  // 档案批量导出
+  "档案": "Arsip",
+  "排队中，请稍候…": "Dalam antrean, harap tunggu…",
+  "导出完成": "Ekspor selesai",
+  "批量导出PDF": "Ekspor PDF massal",
+  "照片已压缩以控制文件大小，可关闭此窗口，完成后会自动下载。": "Foto dikompres agar ukuran file tetap kecil. Anda dapat menutup jendela ini; unduhan dimulai otomatis setelah selesai.",
+  "获取导出进度失败": "Gagal mengambil progres ekspor",
+  "批量导出失败，请稍后重试": "Ekspor massal gagal; coba lagi nanti",
+  "所选档案均导出失败": "Semua arsip yang dipilih gagal diekspor",
+  "服务器磁盘空间不足，已停止导出": "Ruang disk server tidak cukup; ekspor dihentikan",
+  "PDF 生成失败": "Gagal membuat PDF",
+  "档案不存在": "Arsip tidak ditemukan",
 };
 
 export default legacyIdMap;

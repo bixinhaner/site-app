@@ -8,6 +8,12 @@ const legacyDynamicOverridesId = [
   { pattern: /^(\d+) 项$/, replace: (_, n) => `${n} item` },
   { pattern: /^(\d+)\/(\d+) 启用$/, replace: (_, a, b) => `${a}/${b} aktif` },
   { pattern: /^已按覆盖、冲突、跳过、写入优先展示；当前样例显示 (\d+)\/(\d+) 条$/, replace: (_, a, b) => `Diurutkan: timpa, konflik, lewati, tulis; menampilkan ${a}/${b} contoh` },
+  // 档案批量导出
+  { pattern: /^批量导出PDF（(\d+)）$/, replace: (_, n) => `Ekspor PDF massal (${n})` },
+  { pattern: /^正在导出：(.+)$/, replace: (_, name) => `Mengekspor: ${name}` },
+  { pattern: /^已完成 (\d+)\/(\d+)$/, replace: (_, a, b) => `Selesai ${a}/${b}` },
+  { pattern: /^成功 (\d+) 个，失败 (\d+) 个$/, replace: (_, a, b) => `${a} berhasil, ${b} gagal` },
+  { pattern: /^单次最多导出 (\d+) 个档案，当前已选 (\d+) 个$/, replace: (_, a, b) => `Maksimal ${a} arsip per ekspor; ${b} dipilih` },
   // 设备拆除/移机
   { pattern: /^拆除\/移机：(.+)$/, replace: (_, r) => `Bongkar/pindah: ${r}` },
   { pattern: /^共 (\d+) 台，可拆除 (\d+) 台$/, replace: (_, a, b) => `Total ${a} perangkat, ${b} dapat dibongkar` },

@@ -11,10 +11,19 @@
         <el-icon><Search /></el-icon>
         筛选
       </el-button>
+      <ArchiveBatchExport archive-type="survey" :rows="selectedRows" @done="clearSelection" />
     </div>
 
     <el-card>
-      <el-table :data="items" v-loading="loading" stripe>
+      <el-table
+        ref="tableRef"
+        :data="items"
+        v-loading="loading"
+        stripe
+        row-key="id"
+        @selection-change="rows => { selectedRows = rows }"
+      >
+        <el-table-column type="selection" width="44" reserve-selection />
         <el-table-column prop="site_code" label="站点编码" width="140">
           <template #default="{ row }">{{ row.site_code || '-' }}</template>
         </el-table-column>
@@ -69,6 +78,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
+import ArchiveBatchExport from '@/components/archives/ArchiveBatchExport.vue'
 import { surveyArchivesApi } from '@/api/surveyArchives'
 
 const router = useRouter()
@@ -81,6 +91,9 @@ const page = ref(1)
 const pageSize = ref(20)
 const keyword = ref('')
 const dateRange = ref(null)
+const tableRef = ref(null)
+const selectedRows = ref([])
+const clearSelection = () => tableRef.value?.clearSelection()
 
 const reload = async () => {
   try {

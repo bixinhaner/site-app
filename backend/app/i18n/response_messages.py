@@ -26,6 +26,17 @@ ENTRIES = [
     ("没有变更", "No changes", "Tidak ada perubahan"),
     ("确认出库成功", "Stock-out confirmed", "Barang keluar dikonfirmasi"),
     ("解绑成功", "Unbound", "Berhasil dilepas"),
+    # ---- 档案批量导出 ----
+    ("不支持的档案类型", "Unsupported archive type", "Jenis arsip tidak didukung"),
+    ("请选择要导出的档案", "Select archives to export", "Pilih arsip yang akan diekspor"),
+    ("单次最多导出 {0} 个档案", "Up to {0} archives per export", "Maksimal {0} arsip per ekspor"),
+    ("已有批量导出任务进行中，请完成后再试", "A batch export is already in progress; try again after it finishes", "Ekspor massal sedang berjalan; coba lagi setelah selesai"),
+    ("导出任务不存在或已过期", "Export task not found or expired", "Tugas ekspor tidak ditemukan atau kedaluwarsa"),
+    ("导出任务尚未完成", "Export task is not finished yet", "Tugas ekspor belum selesai"),
+    ("服务器磁盘空间不足，已停止导出", "Server disk space is low; export stopped", "Ruang disk server tidak cukup; ekspor dihentikan"),
+    ("所选档案均导出失败", "All selected archives failed to export", "Semua arsip yang dipilih gagal diekspor"),
+    ("批量导出失败，请稍后重试", "Batch export failed; please try again later", "Ekspor massal gagal; coba lagi nanti"),
+    ("PDF 生成失败", "PDF generation failed", "Gagal membuat PDF"),
     # ---- 设备拆除/移机 ----
     ("拆除成功", "Dismantled", "Berhasil dibongkar"),
     ("请填写设备SN", "Please enter device SNs", "Masukkan SN perangkat"),

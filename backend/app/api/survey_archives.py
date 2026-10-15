@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, Form, Query
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable, Tuple
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -461,14 +461,17 @@ async def export_archive_zip(
     return StreamingResponse(mem_zip, media_type="application/zip", headers=headers)
 
 
-@router.get("/{archive_id}/export-pdf")
-async def export_archive_pdf(
-    archive_id: str,
+def _render_archive_pdf(
+    a: SiteSurveyArchive,
+    *,
     with_thumbs: bool = True,
-    locale: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+    locale_code: str = "zh-CN",
+    image_source: Optional[Callable[[str], str]] = None,
+) -> Tuple[io.BytesIO, str, str]:
+    """渲染单个档案的 PDF，返回 (PDF 内容, ASCII 文件名, 本地化文件名)，供单个导出与批量导出共用。
+
+    image_source 可把原图路径映射为压缩后的图片路径（批量导出用于控制体积），默认直接使用原图。
+    """
     try:
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
         from reportlab.lib.pagesizes import A4
@@ -481,15 +484,6 @@ async def export_archive_pdf(
     except Exception:
         raise HTTPException(status_code=500, detail="后端缺少 reportlab 依赖，请先安装")
 
-    a = db.query(SiteSurveyArchive).options(
-        joinedload(SiteSurveyArchive.site),
-        joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.inspector),
-        joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.reviewer),
-    ).filter(SiteSurveyArchive.id == archive_id).first()
-    if not a:
-        raise HTTPException(status_code=404, detail="档案不存在")
-
-    locale_code = normalize_locale(locale)
 
     # 字体：统一走公共字体注册策略，减少不同档案/不同机器的渲染差异
     def register_cn_fonts() -> tuple[str, str]:
@@ -726,19 +720,20 @@ async def export_archive_pdf(
             fp = p.get('file_path')
             if not fp or not os.path.exists(fp):
                 continue
+            src = image_source(fp) if image_source else fp
             try:
                 max_w = 7.2*cm if cols == 2 else 5.0*cm
                 max_h = 5.4*cm if cols == 2 else 3.8*cm
                 if ImageReader:
-                    ir = ImageReader(fp)
+                    ir = ImageReader(src)
                     iw, ih = ir.getSize()
                     if iw and ih:
                         scale = min(max_w / float(iw), max_h / float(ih), 1.0)
-                        im = Image(fp, width=float(iw) * scale, height=float(ih) * scale)
+                        im = Image(src, width=float(iw) * scale, height=float(ih) * scale)
                     else:
-                        im = Image(fp, width=max_w, height=max_h)
+                        im = Image(src, width=max_w, height=max_h)
                 else:
-                    im = Image(fp, width=max_w, height=max_h)
+                    im = Image(src, width=max_w, height=max_h)
                 caption = Paragraph(os.path.basename(fp), styles['CaptionCN'])
                 row.append([im, caption])
                 if len(row) == cols:
@@ -1016,6 +1011,32 @@ async def export_archive_pdf(
         return re.sub(r'[^A-Za-z0-9_\-]+', '', s) or 'NA'
     ascii_base = f"Archive_{slugify(site_code)}_{slugify(site_name)}_v{ver}_{ts}"
     human_base = f"{localized_text('勘察档案', locale_code, 'Survey Archive', 'Arsip Survei')}_{site_code or ''}_{site_name or ''}_v{ver}_{ts}".strip('_')
+    return buf, ascii_base, human_base
+
+
+def _load_archive_for_export(db: Session, archive_id: str) -> Optional[SiteSurveyArchive]:
+    return db.query(SiteSurveyArchive).options(
+        joinedload(SiteSurveyArchive.site),
+        joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.inspector),
+        joinedload(SiteSurveyArchive.inspection).joinedload(SiteInspection.reviewer),
+    ).filter(SiteSurveyArchive.id == archive_id).first()
+
+
+@router.get("/{archive_id}/export-pdf")
+def export_archive_pdf(
+    archive_id: str,
+    with_thumbs: bool = True,
+    locale: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # 同步路由：PDF 渲染较慢，放在线程池执行，避免阻塞其他请求
+    a = _load_archive_for_export(db, archive_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="档案不存在")
+    buf, ascii_base, human_base = _render_archive_pdf(
+        a, with_thumbs=with_thumbs, locale_code=normalize_locale(locale)
+    )
     from urllib.parse import quote
     headers = {
         "Content-Disposition": f"attachment; filename={ascii_base}.pdf; filename*=UTF-8''{quote(human_base + '.pdf')}"

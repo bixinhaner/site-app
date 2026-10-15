@@ -3578,6 +3578,18 @@ const legacyEnMap = {
   "检查状态不支持拆除": "Inspection status does not support dismantling",
   "设备库存状态不支持拆除": "Device inventory status does not support dismantling",
   "设备已发起退库申请（待仓库收货）": "A return request is pending warehouse receipt for this device",
+  // 档案批量导出
+  "档案": "Archive",
+  "排队中，请稍候…": "Queued, please wait…",
+  "导出完成": "Export completed",
+  "批量导出PDF": "Batch export PDF",
+  "照片已压缩以控制文件大小，可关闭此窗口，完成后会自动下载。": "Photos are compressed to keep the file size down. You can close this window; the download starts automatically when it finishes.",
+  "获取导出进度失败": "Failed to get export progress",
+  "批量导出失败，请稍后重试": "Batch export failed; please try again later",
+  "所选档案均导出失败": "All selected archives failed to export",
+  "服务器磁盘空间不足，已停止导出": "Server disk space is low; export stopped",
+  "PDF 生成失败": "PDF generation failed",
+  "档案不存在": "Archive not found",
 };
 
 export default legacyEnMap;

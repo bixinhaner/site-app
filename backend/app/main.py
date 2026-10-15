@@ -45,7 +45,7 @@ from app.models import site_group as _site_group_models  # noqa: F401
 from app.models import user_subcontractor as _user_subcontractor_models  # noqa: F401
 from app.models.user import User
 from app.api import auth, authz, users, sites, inspections, equipment, stock, template_binding, work_orders, geocode, ai, ai_management
-from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, omc, omc_push, system_backup, mobile_settings, geocode_cache
+from app.api import site_planning, logs, site_surveys, dashboard, survey_archives, opening_archives, ssv_archives, archive_exports, omc, omc_push, system_backup, mobile_settings, geocode_cache
 from app.api import site_groups
 from app.api import operation_logs, app_version
 from app.api import mobile_client_logs
@@ -175,6 +175,7 @@ app.include_router(site_surveys.router, prefix="/api/site-surveys", tags=["站�
 app.include_router(survey_archives.router, prefix="/api/survey-archives", tags=["勘察档案"])
 app.include_router(opening_archives.router, prefix="/api/opening-archives", tags=["开站档案"])
 app.include_router(ssv_archives.router, prefix="/api/ssv-archives", tags=["SSV档案"])
+app.include_router(archive_exports.router, prefix="/api/archive-exports", tags=["档案批量导出"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表盘"])
 app.include_router(omc.router, prefix="/api/omc", tags=["OMC配置"])
 app.include_router(omc_push.router, prefix="/api/omc", tags=["OMC状态上报告"])

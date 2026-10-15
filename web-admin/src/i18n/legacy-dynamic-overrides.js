@@ -23,6 +23,12 @@ const stockTraceOverridesEn = [
   { pattern: /^(\d+) 项$/, replace: (_, n) => `${n} items` },
   { pattern: /^(\d+)\/(\d+) 启用$/, replace: (_, a, b) => `${a}/${b} enabled` },
   { pattern: /^已按覆盖、冲突、跳过、写入优先展示；当前样例显示 (\d+)\/(\d+) 条$/, replace: (_, a, b) => `Sorted by overwrite, conflict, skip, write; showing ${a}/${b} samples` },
+  // 档案批量导出
+  { pattern: /^批量导出PDF（(\d+)）$/, replace: (_, n) => `Batch export PDF (${n})` },
+  { pattern: /^正在导出：(.+)$/, replace: (_, name) => `Exporting: ${name}` },
+  { pattern: /^已完成 (\d+)\/(\d+)$/, replace: (_, a, b) => `Completed ${a}/${b}` },
+  { pattern: /^成功 (\d+) 个，失败 (\d+) 个$/, replace: (_, a, b) => `${a} succeeded, ${b} failed` },
+  { pattern: /^单次最多导出 (\d+) 个档案，当前已选 (\d+) 个$/, replace: (_, a, b) => `Up to ${a} archives per export; ${b} selected` },
   // 设备拆除/移机
   { pattern: /^拆除\/移机：(.+)$/, replace: (_, r) => `Dismantle/relocation: ${r}` },
   { pattern: /^共 (\d+) 台，可拆除 (\d+) 台$/, replace: (_, a, b) => `${a} devices in total, ${b} can be dismantled` },
