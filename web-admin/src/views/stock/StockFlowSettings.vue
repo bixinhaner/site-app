@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="title-block">
         <h2>库存流程设置</h2>
-        <div class="subtitle">控制“申请→领料→确认出库”与“快速出库”等开关（流程开关默认全开，目标站点必填默认关闭）</div>
+        <div class="subtitle">控制“申请→领料→确认出库”与“快速出库”等开关（流程开关默认全开，目标站点、出库凭证必填默认关闭）</div>
       </div>
       <div class="header-actions">
         <el-button @click="load" :loading="loading">
@@ -63,6 +63,11 @@
           <div class="help">开启后：快速出库必须选择目标站点。若快速出库还用于备件、耗材等非站点用途，请保持关闭</div>
         </el-form-item>
 
+        <el-form-item label="快速出库必须上传出库凭证" :disabled="!settings.allow_quick_stock_out">
+          <el-switch v-model="settings.quick_stock_out_requires_voucher" :disabled="!settings.allow_quick_stock_out" />
+          <div class="help">开启后：快速出库必须上传三签单照片或 PDF 才能出库；关闭时可选上传，事后也可在出入库记录补传。APP 需升级到支持出库凭证的版本</div>
+        </el-form-item>
+
         <el-divider />
 
         <el-form-item
@@ -96,6 +101,7 @@ const settings = reactive({
   material_request_requires_site: false,
   quick_stock_out_requires_site: false,
   target_site_requires_lld: false,
+  quick_stock_out_requires_voucher: false,
 })
 
 const applySettings = (s) => {

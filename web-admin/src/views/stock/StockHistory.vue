@@ -97,6 +97,12 @@
             @change="onSiteFilterChange"
           />
         </el-col>
+        <el-col :xs="24" :sm="12" :md="4">
+          <el-select v-model="filters.voucher" :placeholder="t('quickOut.voucherFilter')" clearable @change="reloadTransactions">
+            <el-option :label="t('quickOut.voucherMissingQuick')" value="missing" />
+            <el-option :label="t('quickOut.voucherPresent')" value="present" />
+          </el-select>
+        </el-col>
       </el-row>
     </div>
 
@@ -172,6 +178,28 @@
 	          <template #default="{ row }">
 	            {{ formatDateTime(row.operationTime) }}
 	          </template>
+        </el-table-column>
+
+        <el-table-column v-if="!isCompactTable" :label="t('quickOut.voucher')" width="110">
+          <template #default="{ row }">
+            <template v-if="row.recordType === 'transaction'">
+              <el-button v-if="row.raw?.offline_document" type="primary" link size="small" @click="openVoucherView(row.raw)">
+                <el-icon><Paperclip /></el-icon>{{ row.raw.offline_document.file_count }}
+              </el-button>
+              <el-tag
+                v-else-if="row.raw?.is_quick_stock_out"
+                class="voucher-missing"
+                type="warning"
+                size="small"
+                effect="plain"
+                @click="openVoucherUpload(row.raw)"
+              >
+                {{ t('quickOut.voucherMissing') }}
+              </el-tag>
+              <span v-else class="muted">-</span>
+            </template>
+            <span v-else class="muted">-</span>
+          </template>
         </el-table-column>
 
         <el-table-column prop="notes" :label="tableI18n.notesLabel" min-width="220" v-if="showNotesColumn" show-overflow-tooltip>
@@ -465,6 +493,19 @@
             <span class="label">关联出库单</span>
             <span class="value">{{ currentTransactionRecord.out_document_number }}</span>
           </div>
+          <div
+            v-if="currentTransactionRecord.offline_document || currentTransactionRecord.is_quick_stock_out"
+            class="summary-item voucher-item"
+          >
+            <span class="label">{{ t('quickOut.voucher') }}</span>
+            <span class="value">
+              <VoucherGallery v-if="currentTransactionRecord.offline_document" :voucher="currentTransactionRecord.offline_document" />
+              <el-tag v-else type="warning" size="small" effect="plain">{{ t('quickOut.voucherMissing') }}</el-tag>
+              <el-button link type="primary" size="small" @click="openVoucherUpload(currentTransactionRecord)">
+                {{ currentTransactionRecord.offline_document ? t('quickOut.voucherReplace') : t('quickOut.voucherUploadLater') }}
+              </el-button>
+            </span>
+          </div>
           <div class="summary-item">
             <span class="label">备注</span>
             <span class="value notes-value">
@@ -633,6 +674,43 @@
     </el-dialog>
 
     <!-- 撤销入库（主设备） -->
+    <el-dialog v-model="voucherViewVisible" :title="t('quickOut.voucherTitleWithDoc', { doc: voucherTx?.document_number || '' })" width="640px">
+      <VoucherGallery :voucher="voucherTx?.offline_document" />
+      <template #footer>
+        <el-button @click="openVoucherUpload(voucherTx)">{{ t('quickOut.voucherReplace') }}</el-button>
+        <el-button type="primary" @click="voucherViewVisible = false">{{ t('quickOut.close') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="voucherUploadVisible"
+      :title="t('quickOut.voucherUploadTitle', { doc: voucherTx?.document_number || '' })"
+      width="640px"
+      destroy-on-close
+      :close-on-click-modal="false"
+    >
+      <el-alert
+        v-if="voucherTx?.offline_document"
+        type="info"
+        :closable="false"
+        show-icon
+        :title="t('quickOut.voucherReplaceHint')"
+        class="voucher-alert"
+      />
+      <VoucherUploader v-model="voucherDraftId" @change="voucherDraftState = $event" />
+      <template #footer>
+        <el-button @click="voucherUploadVisible = false">{{ t('quickOut.cancel') }}</el-button>
+        <el-button
+          type="primary"
+          :loading="voucherSaving"
+          :disabled="!voucherDraftId || voucherDraftState.uploading"
+          @click="saveVoucher"
+        >
+          {{ t('quickOut.save') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="voidVisible" title="撤销入库" width="520px">
       <el-form label-width="90px">
         <el-form-item label="SN">
@@ -658,12 +736,14 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Search, Close, Download } from '@element-plus/icons-vue'
+import { Refresh, Search, Close, Download, Paperclip } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi } from '../../api/stock'
 import { userAPI } from '../../api/user'
 import StockSitePicker from '../../components/inventory/StockSitePicker.vue'
+import VoucherGallery from '../../components/inventory/VoucherGallery.vue'
+import VoucherUploader from '../../components/inventory/VoucherUploader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -740,6 +820,7 @@ const filters = ref({
   warehouse_id: null,
   issued_to: null,
   site_id: null,
+  voucher: '',
   search: ''
 })
 
@@ -1032,7 +1113,7 @@ const filteredRecords = computed(() => {
     data = data.filter((r) => r.recordType === 'import')
   }
 
-  if (filters.value.issued_to || filters.value.site_id) {
+  if (filters.value.issued_to || filters.value.site_id || filters.value.voucher) {
     data = data.filter((r) => r.recordType === 'transaction')
   }
   if (filters.value.warehouse_id) {
@@ -1343,6 +1424,43 @@ const viewTransaction = (row) => {
     return
   }
   transactionDetailsVisible.value = true
+}
+
+// ===== 出库凭证：查看 / 补传 / 更换 =====
+const voucherTx = ref(null)
+const voucherViewVisible = ref(false)
+const voucherUploadVisible = ref(false)
+const voucherDraftId = ref(null)
+const voucherDraftState = ref({ count: 0, uploading: false })
+const voucherSaving = ref(false)
+
+const openVoucherView = (tx) => {
+  voucherTx.value = tx
+  voucherViewVisible.value = true
+}
+
+const openVoucherUpload = (tx) => {
+  voucherTx.value = tx
+  voucherDraftId.value = null
+  voucherDraftState.value = { count: 0, uploading: false }
+  voucherViewVisible.value = false
+  voucherUploadVisible.value = true
+}
+
+const saveVoucher = async () => {
+  if (!voucherTx.value || !voucherDraftId.value) return
+  try {
+    voucherSaving.value = true
+    await stockApi.attachTransactionVoucher(voucherTx.value.id, voucherDraftId.value)
+    ElMessage.success(t('quickOut.voucherSaved'))
+    voucherUploadVisible.value = false
+    await reloadTransactionsAndKeepDrawer()
+  } catch (error) {
+    const detail = error?.response?.data?.detail
+    ElMessage.error((typeof detail === 'string' ? detail : detail?.message) || t('quickOut.voucherUploadFailed'))
+  } finally {
+    voucherSaving.value = false
+  }
 }
 
 const goMaterialRequest = (row) => {
@@ -1669,6 +1787,25 @@ onBeforeUnmount(() => {
 .summary-item .value {
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.summary-item.voucher-item {
+  grid-column: 1 / -1;
+}
+
+.summary-item.voucher-item .value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.voucher-missing {
+  cursor: pointer;
+}
+
+.voucher-alert {
+  margin-bottom: 12px;
 }
 
 .mono {

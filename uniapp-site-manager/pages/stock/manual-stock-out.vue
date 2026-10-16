@@ -156,11 +156,22 @@
 
 			<view class="section u-card">
 				<view class="u-card-header">
-					<text class="u-card-title">{{ $t('stock.offlineDocTitle') }}</text>
-					<text class="hint">{{ $t('common.optional') }}</text>
+					<text class="u-card-title">
+						{{ $t('stock.voucherTitle') }}<text v-if="flowSettings.quick_stock_out_requires_voucher" class="required-mark">*</text>
+					</text>
+					<text v-if="!flowSettings.quick_stock_out_requires_voucher" class="hint">{{ $t('common.optional') }}</text>
 				</view>
 				<view class="u-card-content">
-					<OfflineDocumentSection v-model="offlineDocumentId" :disabled="submitting" :showHeader="false" />
+					<!-- 三签单每单一份：不复用上一次的线下票据 -->
+					<DocumentPhotoPicker v-model="voucherPhotos" :max="10" :disabled="submitting" :showHeader="false" />
+					<input
+						class="voucher-no"
+						v-model="voucherNo"
+						:placeholder="$t('stock.voucherNoPlaceholder')"
+						:disabled="submitting"
+						maxlength="100"
+					/>
+					<text class="voucher-tip">{{ $t('stock.voucherTip') }}</text>
 				</view>
 			</view>
 
@@ -299,6 +310,7 @@
 	const flowSettings = reactive({
 		allow_quick_stock_out: true,
 		quick_stock_out_requires_site: false,
+		quick_stock_out_requires_voucher: false,
 	})
 
 	const warehouses = ref([])
@@ -309,7 +321,9 @@
 	const issuedToUser = ref(null)
 	const notes = ref('')
 	const targetSite = ref(null)
-	const offlineDocumentId = ref(null)
+	const voucherPhotos = ref([]) // 本地照片路径，提交时再上传
+	const voucherNo = ref('')
+	let uploadedVoucher = null
 
 	const snInput = ref('')
 	const snList = ref([])
@@ -368,6 +382,7 @@
 			if (flowRes.statusCode === 200 && flowRes.data?.settings) {
 				flowSettings.allow_quick_stock_out = flowRes.data.settings.allow_quick_stock_out !== false
 				flowSettings.quick_stock_out_requires_site = flowRes.data.settings.quick_stock_out_requires_site === true
+				flowSettings.quick_stock_out_requires_voucher = flowRes.data.settings.quick_stock_out_requires_voucher === true
 			}
 		} catch (e) {
 			// ignore
@@ -526,6 +541,9 @@
 		snList.value = []
 		auxRows.value = []
 		issuedToUser.value = null
+		voucherPhotos.value = []
+		voucherNo.value = ''
+		uploadedVoucher = null
 	}
 
 	const openUserPicker = async () => {
@@ -597,6 +615,10 @@
 			uni.showToast({ title: $t('stock.targetSiteRequired'), icon: 'none' })
 			return false
 		}
+		if (flowSettings.quick_stock_out_requires_voucher && voucherPhotos.value.length === 0) {
+			uni.showToast({ title: $t('stock.voucherRequired'), icon: 'none' })
+			return false
+		}
 		if (snList.value.length === 0 && auxRows.value.length === 0) {
 			uni.showToast({ title: $t('stock.manualStockOutItemsRequired'), icon: 'none' })
 			return false
@@ -618,6 +640,18 @@
 				shortagesVisible.value = false
 
 				try {
+					// 先上传出库凭证：任一照片失败就不出库，避免库存已扣减但凭证缺失
+					let offlineDocumentId = null
+					if (voucherPhotos.value.length) {
+						// 出库失败（如库存不足）后重试时，照片和编号没变就复用已上传的凭证
+						const key = `${voucherPhotos.value.join('|')}#${String(voucherNo.value || '').trim()}`
+						if (uploadedVoucher?.key !== key) {
+							const id = await uploadVoucher()
+							if (!id) return
+							uploadedVoucher = { key, id }
+						}
+						offlineDocumentId = uploadedVoucher.id
+					}
 					const payload = {
 						warehouse_id: Number(selectedWarehouse.value.id),
 						issued_to: Number(issuedToUser.value.id),
@@ -627,7 +661,7 @@
 							equipment_id: Number(a.equipment_id),
 							quantity: Number(a.quantity || 0),
 						})),
-						offline_document_id: offlineDocumentId.value || undefined,
+						offline_document_id: offlineDocumentId || undefined,
 						notes: String(notes.value || '').trim(),
 					}
 
@@ -667,6 +701,55 @@
 		})
 	}
 
+	const parseJson = (raw) => {
+		if (raw && typeof raw === 'object') return raw
+		try {
+			return JSON.parse(String(raw || ''))
+		} catch (e) {
+			return null
+		}
+	}
+
+	// 创建线下票据并逐张上传；返回票据 id，失败返回 null（已提示）
+	const uploadVoucher = async () => {
+		const createRes = await uni.request({
+			url: buildApiUrl('/api/stock/offline-documents'),
+			...createRequestConfig({
+				method: 'POST',
+				headers: getAuthHeaders(userStore.token),
+				data: { remark: String(voucherNo.value || '').trim() },
+			}),
+		})
+		if (createRes.statusCode === 401) {
+			userStore.logout()
+			return null
+		}
+		const docId = createRes.statusCode === 200 ? String(createRes.data?.id || '') : ''
+		if (!docId) {
+			uni.showToast({ title: extractErrorMessage(createRes.data), icon: 'none' })
+			return null
+		}
+		uni.showLoading({ title: $t('messages.uploadingPhoto'), mask: true })
+		try {
+			for (const filePath of voucherPhotos.value) {
+				const up = await uni.uploadFile({
+					url: buildApiUrl(`/api/stock/offline-documents/${encodeURIComponent(docId)}/photos`),
+					filePath,
+					name: 'file',
+					header: getAuthHeaders(userStore.token),
+				})
+				if (up.statusCode !== 200) {
+					uni.hideLoading()
+					uni.showToast({ title: extractErrorMessage(parseJson(up.data)) || $t('messages.photoUploadFailed'), icon: 'none' })
+					return null
+				}
+			}
+		} finally {
+			uni.hideLoading()
+		}
+		return docId
+	}
+
 	const handleRefresh = async () => {
 		if (!(await ensureAccess())) return
 		refreshing.value = true
@@ -691,6 +774,16 @@
 <style scoped lang="scss">
 	.page { min-height: 100vh; background: var(--bg-page); }
 	.required-mark { color: #ff4757; margin-left: 4rpx; font-weight: bold; }
+	.voucher-no {
+		margin-top: 12px;
+		height: 40px;
+		padding: 0 12px;
+		border-radius: var(--radius-md, 8px);
+		border: 1px solid var(--border-color, #e5e7eb);
+		background: var(--bg-card, #fff);
+		font-size: 14px;
+	}
+	.voucher-tip { display: block; margin-top: 6px; font-size: 12px; color: var(--text-secondary, #6b7280); }
 	.content { height: calc(100vh - 88rpx - var(--status-bar-height, 0px)); }
 
 	.hero {

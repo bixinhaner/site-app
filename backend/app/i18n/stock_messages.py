@@ -33,6 +33,17 @@ EXACT: Dict[str, Tuple[str, str]] = {
     "不支持的查看方式": ("Unsupported view mode", "Mode tampilan tidak didukung"),
     "不支持的辅材明细方式": ("Unsupported auxiliary detail mode", "Mode detail material bantu tidak didukung"),
     "仅支持 jpg/jpeg/png 图片": ("Only jpg/jpeg/png images are supported", "Hanya gambar jpg/jpeg/png yang didukung"),
+    "仅支持 jpg/jpeg/png 图片或 PDF 文件": (
+        "Only jpg/jpeg/png images or PDF files are supported",
+        "Hanya gambar jpg/jpeg/png atau file PDF yang didukung",
+    ),
+    "文件不是有效的 PDF": ("The file is not a valid PDF", "File bukan PDF yang valid"),
+    "PDF 文件读取失败": ("Failed to read the PDF file", "Gagal membaca file PDF"),
+    "请先上传凭证照片或 PDF": ("Please upload a voucher photo or PDF first", "Unggah foto atau PDF bukti terlebih dahulu"),
+    "当前项目要求快速出库上传出库凭证（三签单），请上传凭证照片或 PDF 后再出库": (
+        "This project requires a signed stock-out voucher for quick stock-out. Please upload a photo or PDF of the voucher first.",
+        "Proyek ini mewajibkan bukti pengeluaran bertanda tangan untuk pengeluaran cepat. Unggah foto atau PDF bukti terlebih dahulu.",
+    ),
     "仅支持图片文件": ("Only image files are supported", "Hanya file gambar yang didukung"),
     "当前账号未绑定可管理仓库": (
         "This account is not bound to any warehouse it can manage",

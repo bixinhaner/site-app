@@ -40,6 +40,15 @@ export const stockApi = {
 
   deleteOfflineDocumentPhoto: (documentId, photoId) =>
     request.delete(`/api/stock/offline-documents/${documentId}/photos/${photoId}`),
+
+  updateOfflineDocument: (documentId, data) =>
+    request.patch(`/api/stock/offline-documents/${documentId}`, data),
+
+  // 出入库单补传/更换出库凭证
+  attachTransactionVoucher: (transactionId, offlineDocumentId) =>
+    request.put(`/api/stock/transactions/${transactionId}/offline-document`, {
+      offline_document_id: offlineDocumentId,
+    }),
   
   // 扫码出库
   scanCheckout: (data) => 

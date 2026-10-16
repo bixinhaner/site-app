@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload, aliased
-from sqlalchemy import and_, or_, desc, func, case, text
+from sqlalchemy import String, and_, or_, desc, func, case, text, cast
 from typing import List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel
 import uuid
@@ -2468,8 +2468,12 @@ def _build_stock_transactions_query(
     search: Optional[str] = None,
     issued_to: Optional[int] = None,
     site_id: Optional[int] = None,
+    voucher: Optional[str] = None,
 ):
-    """出入库记录查询条件（列表与导出共用，保证导出结果与页面筛选一致）。"""
+    """出入库记录查询条件（列表与导出共用，保证导出结果与页面筛选一致）。
+
+    voucher: missing=快速出库缺出库凭证；present=已关联凭证。
+    """
     if not _can_view_inventory_history(db, current_user):
         raise HTTPException(status_code=403, detail="无权限查看出入库记录")
 
@@ -2512,6 +2516,14 @@ def _build_stock_transactions_query(
             .exists()
         )
         query = query.filter(or_(StockTransaction.site_id == site_id, actual_match))
+    if voucher == "missing":
+        query = query.filter(
+            StockTransaction.offline_document_id.is_(None),
+            StockTransaction.transaction_type == TransactionTypeEnum.STOCK_OUT,
+            cast(StockTransaction.scan_location, String).like("%manual_stock_out%"),
+        )
+    elif voucher == "present":
+        query = query.filter(StockTransaction.offline_document_id.isnot(None))
     start_dt = _parse_history_filter_datetime(start_date, is_end=False)
     end_dt = _parse_history_filter_datetime(end_date, is_end=True)
     if start_dt:
@@ -2599,12 +2611,13 @@ async def get_stock_transactions(
     search: Optional[str] = None,
     issued_to: Optional[int] = None,
     site_id: Optional[int] = None,
+    voucher: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取出入库记录"""
+    """获取出入库记录（voucher=missing 只看缺出库凭证的快速出库）"""
     query = _build_stock_transactions_query(
         db,
         current_user,
@@ -2616,6 +2629,7 @@ async def get_stock_transactions(
         search=search,
         issued_to=issued_to,
         site_id=site_id,
+        voucher=voucher,
     )
 
     total = query.count()
@@ -2635,6 +2649,16 @@ async def get_stock_transactions(
                 if getattr(inst, "original_serial_number", None):
                     page_sns.append(inst.original_serial_number)
     binding_map = _latest_binding_site_map(db, page_sns)
+    doc_ids = {t.offline_document_id for t in transactions if getattr(t, "offline_document_id", None)}
+    doc_map = {}
+    if doc_ids:
+        doc_rows = (
+            db.query(OfflineDocument)
+            .options(joinedload(OfflineDocument.photos))
+            .filter(OfflineDocument.id.in_(list(doc_ids)))
+            .all()
+        )
+        doc_map = {d.id: _offline_document_brief(d) for d in doc_rows}
 
     result = []
     for trans in transactions:
@@ -2708,6 +2732,9 @@ async def get_stock_transactions(
             "out_document_number": out_trans.document_number if out_trans else None,
             **source_payload,
             "offline_document_id": getattr(trans, "offline_document_id", None),
+            "offline_document": doc_map.get(getattr(trans, "offline_document_id", None)),
+            "is_quick_stock_out": isinstance(trans.scan_location, dict)
+            and trans.scan_location.get("_source") == "manual_stock_out",
             "items": items,
             "task_id": None,
             "package_name": trans.package.package_name if trans.package else None
@@ -2947,7 +2974,7 @@ def _site_label(site_name: Optional[str], site_code: Optional[str], locale: str 
 
 
 def _export_filter_kwargs(
-    transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id
+    transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id, voucher=None
 ) -> dict:
     return {
         "transaction_type": transaction_type,
@@ -2958,6 +2985,7 @@ def _export_filter_kwargs(
         "search": search,
         "issued_to": issued_to,
         "site_id": site_id,
+        "voucher": voucher,
     }
 
 
@@ -2971,6 +2999,7 @@ async def preview_stock_transactions_export(
     search: Optional[str] = None,
     issued_to: Optional[int] = None,
     site_id: Optional[int] = None,
+    voucher: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2978,7 +3007,9 @@ async def preview_stock_transactions_export(
     query = _build_stock_transactions_query(
         db,
         current_user,
-        **_export_filter_kwargs(transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id),
+        **_export_filter_kwargs(
+            transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id, voucher
+        ),
     )
     tx_ids = query.with_entities(StockTransaction.id).subquery()
     tx_count = db.query(func.count()).select_from(tx_ids).scalar() or 0
@@ -3008,6 +3039,7 @@ async def export_stock_transactions(
     search: Optional[str] = None,
     issued_to: Optional[int] = None,
     site_id: Optional[int] = None,
+    voucher: Optional[str] = None,
     include_stocktake: bool = True,
     locale: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -3024,7 +3056,7 @@ async def export_stock_transactions(
 
     loc = normalize_locale(locale)
     filter_kwargs = _export_filter_kwargs(
-        transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id
+        transaction_type, warehouse_id, start_date, end_date, keyword, search, issued_to, site_id, voucher
     )
     query = _build_stock_transactions_query(db, current_user, **filter_kwargs)
 
@@ -3338,6 +3370,18 @@ async def export_stock_transactions(
 # ===== 线下票据（可复用） =====
 
 MAX_OFFLINE_DOCUMENT_PHOTOS = 10
+ALLOWED_OFFLINE_DOCUMENT_EXTS = {".jpg", ".jpeg", ".png", ".pdf"}
+
+
+def _validate_pdf_on_disk(path: str) -> None:
+    """PDF 只校验文件头与非空，避免把任意文件伪装成 .pdf 上传。"""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(1024)
+    except OSError:
+        raise ImageValidationError("PDF 文件读取失败")
+    if b"%PDF-" not in head:
+        raise ImageValidationError("文件不是有效的 PDF")
 
 
 def _ensure_can_manage_offline_document(current_user: User, doc: OfflineDocument) -> None:
@@ -3382,6 +3426,27 @@ def _serialize_offline_document_photo(p: OfflineDocumentPhoto) -> dict:
     }
 
 
+def _offline_document_brief(doc: Optional[OfflineDocument]) -> Optional[dict]:
+    """出入库记录列表里展示的凭证摘要（按上传先后排序）。"""
+    if not doc:
+        return None
+    photos = sorted(doc.photos or [], key=lambda p: (p.created_at or datetime.min, p.id))
+    return {
+        "id": doc.id,
+        "remark": doc.remark,
+        "file_count": len(photos),
+        "files": [
+            {
+                "id": p.id,
+                "file_path": p.file_path,
+                "original_name": p.original_name,
+                "mime_type": p.mime_type,
+            }
+            for p in photos
+        ],
+    }
+
+
 def _serialize_offline_document(doc: OfflineDocument) -> dict:
     photos = [_serialize_offline_document_photo(p) for p in (doc.photos or [])]
     photos.sort(key=lambda x: x.get("created_at") or "", reverse=True)
@@ -3421,6 +3486,49 @@ async def create_offline_document(
     return _serialize_offline_document(doc)
 
 
+@router.patch("/offline-documents/{document_id}")
+async def update_offline_document(
+    document_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """修改线下票据备注（如出库凭证编号）。"""
+    _ensure_not_surveyor(current_user)
+    doc = db.query(OfflineDocument).filter(OfflineDocument.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="线下票据不存在")
+    _ensure_can_manage_offline_document(current_user, doc)
+    remark = str((payload or {}).get("remark") or "").strip()[:500]
+    doc.remark = remark or None
+    db.commit()
+    db.refresh(doc)
+    return _serialize_offline_document(doc)
+
+
+@router.put("/transactions/{transaction_id}/offline-document")
+async def attach_transaction_offline_document(
+    transaction_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """出入库单补传/更换出库凭证：把线下票据关联到已完成的出入库单（签字晚于出库时使用）。"""
+    _ensure_not_surveyor(current_user)
+    tx = db.query(StockTransaction).filter(StockTransaction.id == transaction_id).first()
+    if not tx:
+        raise HTTPException(status_code=404, detail="出入库单不存在")
+    _ensure_can_manage_transaction_docs(current_user, tx)
+    doc = _get_offline_document_for_use(
+        db, current_user=current_user, offline_document_id=(payload or {}).get("offline_document_id")
+    )
+    if not doc or not doc.photos:
+        raise HTTPException(status_code=400, detail="请先上传凭证照片或 PDF")
+    tx.offline_document_id = doc.id
+    db.commit()
+    return {"transaction_id": tx.id, "offline_document": _offline_document_brief(doc)}
+
+
 @router.get("/offline-documents/{document_id}")
 async def get_offline_document(
     document_id: str,
@@ -3449,7 +3557,7 @@ async def upload_offline_document_photo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """上传线下票据照片：单张上传，最多 10 张（jpg/jpeg/png）。"""
+    """上传线下票据文件：单个上传，最多 10 个（jpg/jpeg/png 图片或 PDF）。"""
     _ensure_not_surveyor(current_user)
 
     doc = db.query(OfflineDocument).filter(OfflineDocument.id == document_id).first()
@@ -3468,15 +3576,23 @@ async def upload_offline_document_photo(
 
     filename = (file.filename or "").strip()
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in ALLOWED_STOCK_DOCUMENT_EXTS:
-        raise HTTPException(status_code=400, detail="仅支持 jpg/jpeg/png 图片")
-    if not (file.content_type or "").startswith("image/"):
+    is_pdf = ext == ".pdf"
+    if ext not in ALLOWED_OFFLINE_DOCUMENT_EXTS:
+        raise HTTPException(status_code=400, detail="仅支持 jpg/jpeg/png 图片或 PDF 文件")
+    content_type = (file.content_type or "").lower()
+    if is_pdf:
+        if content_type not in ("application/pdf", "application/x-pdf", "application/octet-stream", ""):
+            raise HTTPException(status_code=400, detail="仅支持 jpg/jpeg/png 图片或 PDF 文件")
+    elif not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="仅支持图片文件")
 
     stored_path = await save_uploaded_file(file, category="stock_offline_documents", sub_folder=document_id)
 
     try:
-        validate_image_on_disk(stored_path, detect_blank_bottom=False)
+        if is_pdf:
+            _validate_pdf_on_disk(stored_path)
+        else:
+            validate_image_on_disk(stored_path, detect_blank_bottom=False)
     except ImageValidationError as e:
         try:
             if stored_path and os.path.exists(stored_path):
@@ -3510,7 +3626,7 @@ async def upload_offline_document_photo(
         original_name=filename or None,
         file_path=stored_path,
         file_size=file_size,
-        mime_type=file.content_type,
+        mime_type="application/pdf" if is_pdf else file.content_type,
         uploaded_by=current_user.id,
     )
     db.add(photo)
@@ -5130,10 +5246,13 @@ DEFAULT_STOCK_FLOW_SETTINGS = {
     "quick_stock_out_requires_site": False,
     # 目标站点必须有 LLD 规划（仅在对应“目标站点必填”开启时生效）：申请提交、快速出库、出库确认都校验
     "target_site_requires_lld": False,
+    # 快速出库必须上传出库凭证（三签单照片/PDF），各项目环境按需开启
+    "quick_stock_out_requires_voucher": False,
 }
 
 SITE_REQUIRED_DETAIL = "当前项目要求填写目标站点，请选择目标站点；如果页面上没有目标站点，请升级 APP 到最新版本"
 SITE_NO_LLD_DETAIL = "站点 {site} 暂无 LLD 规划，请联系规划人员导入 LLD 后再申请或出库"
+VOUCHER_REQUIRED_DETAIL = "当前项目要求快速出库上传出库凭证（三签单），请上传凭证照片或 PDF 后再出库"
 
 
 def _enum_value(value):
@@ -7211,6 +7330,8 @@ async def manual_stock_out(
     offline_doc = _get_offline_document_for_use(db, current_user=current_user, offline_document_id=offline_document_id)
     site_id = _resolve_optional_site_id(db, payload.get("site_id") if isinstance(payload, dict) else None)
     _ensure_site_if_required(db, "quick_stock_out_requires_site", site_id)
+    if _get_flow_settings(db).get("quick_stock_out_requires_voucher") and not (offline_doc and offline_doc.photos):
+        raise HTTPException(status_code=400, detail={"message": VOUCHER_REQUIRED_DETAIL, "code": "VOUCHER_REQUIRED"})
 
     try:
         warehouse_id = int(warehouse_id)
