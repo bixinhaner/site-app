@@ -2126,7 +2126,7 @@ const legacyEnMap = {
   生成后自动保存: "Automatically save after generation",
   生成中: "Generating",
   生命周期加载失败: "Lifecycle loading failed",
-  生命周期追踪: "lifecycle tracking",
+  生命周期追踪: "Lifecycle tracking",
   生效时间: "Effective time",
   省: "Province",
   省份: "Province",
@@ -3605,6 +3605,11 @@ const legacyEnMap = {
   "加载库存失败": "Failed to load inventory",
   "目标站点必须有 LLD 规划": "Target site must have an LLD plan",
   "开启后：只能选择已导入 LLD 规划的站点；申请提交、快速出库、仓库确认出库时都会校验，站点无 LLD 时拒绝出库。需先开启上面任一“必须填写目标站点”": "When on: only sites with an imported LLD plan can be selected; request submission, quick stock-out and warehouse stock-out confirmation all check it and reject sites without LLD. Requires one of the \"must specify a target site\" switches above",
+  检查ID: "Inspection ID",
+  原设备: "Previous device",
+  新站点: "New site",
+  新小区: "New cell",
+  记录来源: "Record source",
 };
 
 export default legacyEnMap;

@@ -11,7 +11,7 @@
     />
     <!-- 设备信息概览 -->
     <div v-if="equipmentInfo" class="equipment-overview">
-      <el-descriptions :column="3" border>
+      <el-descriptions :column="3" border label-class-name="nowrap-label">
         <el-descriptions-item label="设备SN">
           <el-text tag="b" type="success" style="font-family: 'Courier New', monospace; font-size: 16px">
             {{ equipmentInfo.serial_number }}
@@ -84,40 +84,46 @@
 
     <!-- 生命周期时间轴 -->
     <div v-if="lifecycleStages.length > 0" class="lifecycle-container">
-      <h3 style="margin-bottom: 24px">
+      <h3 class="lifecycle-title">
         <el-icon><TrendCharts /></el-icon>
-        生命周期追踪
+        <span>生命周期追踪</span>
+        <el-tag size="small" type="info" round>{{ lifecycleStages.length }}</el-tag>
       </h3>
 
       <el-timeline>
         <el-timeline-item
           v-for="(stage, index) in lifecycleStages"
           :key="index"
-          :timestamp="stage.timestamp"
+          :timestamp="formatTime(stage.timestamp)"
           placement="top"
           :type="stage.type"
           :color="stage.color"
           :icon="stage.icon"
           :size="stage.size"
         >
-          <el-card>
-            <template #header>
-              <div class="stage-header">
-                <el-tag :type="stage.tagType" size="large">
-                  {{ stage.title }}
-                </el-tag>
-                <span v-if="stage.operator" class="operator-info">
-                  操作人: {{ stage.operator }}
-                </span>
-              </div>
-            </template>
+          <el-card shadow="never" class="stage-card" :style="{ '--stage-color': stage.color }">
+            <div class="stage-header">
+              <el-tag :type="stage.tagType" effect="light">
+                {{ stage.title }}
+              </el-tag>
+              <span v-if="stage.operator" class="operator-info">
+                <el-icon><User /></el-icon>
+                <span>操作人: {{ stage.operator }}</span>
+              </span>
+            </div>
 
             <div class="stage-content">
               <p v-if="stage.description" class="stage-description">
                 {{ stage.description }}
               </p>
 
-              <el-descriptions v-if="stage.details" :column="2" border size="small">
+              <el-descriptions
+                v-if="stage.details && Object.keys(stage.details).length"
+                :column="2"
+                border
+                size="small"
+                label-class-name="nowrap-label"
+              >
                 <el-descriptions-item
                   v-for="(detail, key) in stage.details"
                   :key="key"
@@ -154,7 +160,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { TrendCharts, Location, Box, Aim, CircleCheck, Tools, Checked, WarningFilled } from '@element-plus/icons-vue'
+import { TrendCharts, Location, User, Box, Aim, CircleCheck, Tools, Checked, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 
@@ -345,7 +351,7 @@ const lifecycleStages = computed(() => {
         operator: record.operator?.name,
         details: {
           站点: `${siteName} (ID: ${record?.site?.id || '-'})`,
-          小区: `扇区${record?.cell_info?.sector_id || '-'} ${record?.cell_info?.band || ''}`,
+          小区: formatCell(record?.cell_info),
           检查ID: record.inspection_id || '-'
         },
         location: record.latitude && record.longitude ? `${record.latitude}, ${record.longitude}` : null
@@ -368,7 +374,7 @@ const lifecycleStages = computed(() => {
         operator: record.operator?.name,
         details: {
           站点: `${siteName} (ID: ${record?.site?.id || '-'})`,
-          小区: `扇区${record?.cell_info?.sector_id || '-'} ${record?.cell_info?.band || ''}`,
+          小区: formatCell(record?.cell_info),
           ...(record.notes ? { 备注: record.notes } : {}),
         }
       })
@@ -391,7 +397,7 @@ const lifecycleStages = computed(() => {
         details: {
           原设备: record.previous_equipment_sn || '-',
           新站点: `${siteName} (ID: ${record?.site?.id || '-'})`,
-          新小区: `扇区${record?.cell_info?.sector_id || '-'} ${record?.cell_info?.band || ''}`
+          新小区: formatCell(record?.cell_info)
         }
       })
       return
@@ -551,6 +557,9 @@ const lifecycleStages = computed(() => {
   return stages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
 })
 
+// 与翻译 pattern「扇区 X / Band Y」对齐，band 为空时只显示扇区
+const formatCell = (cell) => (cell?.band ? `扇区 ${cell.sector_id || '-'} / Band ${cell.band}` : `扇区 ${cell?.sector_id || '-'}`)
+
 const getStatusType = (status) => {
   const typeMap = {
     in_stock: 'info',
@@ -585,6 +594,7 @@ const formatTime = (isoString) => {
   if (!isoString) return ''
 
   const date = new Date(isoString)
+  if (Number.isNaN(date.getTime())) return String(isoString)
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -628,21 +638,47 @@ const formatTime = (isoString) => {
   padding: 16px 0;
 }
 
+.lifecycle-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 20px;
+}
+
+.stage-card {
+  border-left: 3px solid var(--stage-color, var(--el-border-color));
+}
+
+.stage-card :deep(.el-card__body) {
+  padding: 14px 16px;
+}
+
 .stage-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .operator-info {
-  color: #909399;
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .stage-content .stage-description {
-  margin: 0 0 16px 0;
-  color: #606266;
+  margin: 0 0 12px 0;
+  color: var(--el-text-color-regular);
   font-size: 14px;
+  line-height: 1.6;
+}
+
+:deep(.nowrap-label) {
+  white-space: nowrap;
 }
 
 .stage-content .location-info {

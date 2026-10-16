@@ -2149,7 +2149,7 @@ const legacyIdMap = {
   生成后自动保存: "Secara otomatis menyimpan setelah generasi",
   生成中: "Membuat",
   生命周期加载失败: "Pemuatan siklus hidup gagal",
-  生命周期追踪: "pelacakan siklus hidup",
+  生命周期追踪: "Pelacakan siklus hidup",
   生效时间: "Waktu yang efektif",
   省: "Provinsi",
   省份: "Provinsi",
@@ -3637,6 +3637,11 @@ const legacyIdMap = {
   "加载库存失败": "Gagal memuat stok",
   "目标站点必须有 LLD 规划": "Situs tujuan wajib memiliki rencana LLD",
   "开启后：只能选择已导入 LLD 规划的站点；申请提交、快速出库、仓库确认出库时都会校验，站点无 LLD 时拒绝出库。需先开启上面任一“必须填写目标站点”": "Jika aktif: hanya situs dengan rencana LLD yang sudah diimpor yang dapat dipilih; pengajuan permintaan, keluar cepat, dan konfirmasi keluar gudang semuanya memeriksa dan menolak situs tanpa LLD. Memerlukan salah satu sakelar \"wajib mengisi situs tujuan\" di atas",
+  检查ID: "ID Inspeksi",
+  原设备: "Perangkat sebelumnya",
+  新站点: "Situs baru",
+  新小区: "Sel baru",
+  记录来源: "Sumber catatan",
 };
 
 export default legacyIdMap;
