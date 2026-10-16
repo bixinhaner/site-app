@@ -11924,7 +11924,8 @@ async def list_return_workbench_batches(
         except Exception:
             split_hint = None
 
-        out_meta = out_meta_map.get(str(t.related_transaction_id)) if t.related_transaction_id else {}
+        # 关联出库单可能已被物理删除（如清理测试数据），缺失时按空信息展示，避免整个工作台 500
+        out_meta = out_meta_map.get(str(t.related_transaction_id)) or {} if t.related_transaction_id else {}
 
         main_count = 0
         aux_qty = 0
